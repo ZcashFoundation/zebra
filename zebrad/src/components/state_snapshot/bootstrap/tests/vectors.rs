@@ -2,9 +2,16 @@
 //! §2 and §6), with the network steps driven by mock peers.
 
 use std::{
-    sync::Arc,
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
+
+use tokio::{sync::mpsc, task::JoinSet};
 
 use zebra_chain::{
     block::{
@@ -17,11 +24,15 @@ use zebra_chain::{
     },
     serialization::ZcashDeserializeInto,
     state_snapshot::{ObjectHash, StateSnapshotCommitment},
+    transparent,
 };
 use zebra_network::{self as zn, InventoryResponse, PeerSocketAddr};
 use zebra_state::{
     state_snapshot::{
-        format::{ComponentId, ComponentManifest, Manifest, MAX_MANIFEST_BYTES},
+        format::{
+            ComponentId, ComponentManifest, Manifest, PieceManifest, MAX_MANIFEST_BYTES,
+            MAX_PIECE_BYTES,
+        },
         import::ImportCheck,
         SnapshotError,
     },
@@ -29,11 +40,16 @@ use zebra_state::{
 };
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
-use crate::components::state_snapshot::bootstrap::{
-    check_chain, check_header_chain, check_manifest, check_successor_block,
-    check_successor_commitment, fetch_header_chain, fetch_manifest, fetch_object,
-    fetch_successor_copies, snapshot_fault, window_start, BootstrapError, ChainCheckError,
-    FetchError, Peers,
+use crate::components::state_snapshot::{
+    bootstrap::{
+        check_chain, check_header_chain, check_manifest, check_successor_block,
+        check_successor_commitment, create_import_workspace, download_and_build_with,
+        fetch_header_chain, fetch_manifest, fetch_object, fetch_piece, fetch_successor_copies,
+        finish_install, install_staged_snapshot, quiesce_download_tasks, snapshot_fault,
+        window_start, BootstrapError, ChainCheckError, FetchError, Peers, SstBuilder,
+        VERIFIED_PIECE_CHANNEL_BOUND,
+    },
+    scheduler::{PieceDescriptor, SchedulerError, VerifiedPiece},
 };
 
 type MockPeer = MockService<zn::Request, zn::Response, PanicAssertion>;
@@ -763,11 +779,10 @@ async fn chain_checks_pass_with_a_committing_successor() {
     assert_eq!(peers.addrs(), vec![addr_a]);
 }
 
-/// An authentic block `H + 1` whose commitments do not match the snapshot's
-/// history tree rejects the snapshot: its hash is pinned by the checkpoint
-/// chain and covers the commitment field.
+/// When every served successor copy fails the commitment check, the bootstrap
+/// aborts without rejecting the snapshot on those peers' word.
 #[tokio::test]
-async fn chain_checks_reject_a_history_tree_the_successor_does_not_commit_to() {
+async fn chain_checks_abort_when_no_successor_copy_commits() {
     let _init_guard = zebra_test::init();
 
     let successor = mainnet_block(6);
@@ -798,9 +813,10 @@ async fn chain_checks_reject_a_history_tree_the_successor_does_not_commit_to() {
     );
 
     assert!(
-        matches!(result, Err(BootstrapError::Rejected(_))),
+        matches!(result, Err(BootstrapError::Aborted(_))),
         "{result:?}"
     );
+    assert!(peers.is_empty(), "the invalid copy blamed only its peer");
 }
 
 /// Without headers from any peer, both checks are deferred when `H` is not a
@@ -875,4 +891,562 @@ async fn chain_checks_defer_what_no_peer_serves() {
         result.expect("deferred checks are not failures"),
         SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS
     );
+}
+
+/// Regtest and custom-testnet manifests must carry the exact consensus
+/// parameters hash, not merely a field of the right presence.
+#[test]
+fn manifest_check_requires_the_network_parameters_hash() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Default::default());
+    let height = Height(5000);
+    let mut good = manifest(height);
+    good.genesis_hash = network.genesis_hash();
+    good.parameters_hash = network.state_snapshot_parameters_hash();
+    let commitment = StateSnapshotCommitment {
+        height,
+        block_hash: good.block_hash,
+        manifest: ObjectHash([0x01; 32]),
+    };
+
+    assert!(check_manifest(&good, &commitment, &network).is_ok());
+    good.parameters_hash = Some([0xA5; 32]);
+    assert!(matches!(
+        check_manifest(&good, &commitment, &network),
+        Err(BootstrapError::Rejected(_))
+    ));
+}
+
+fn refusal() -> zn::SharedPeerError {
+    zn::PeerError::RequestStreamFailed(
+        "stream I/O error: stream reset by peer: error 8".to_string(),
+    )
+    .into()
+}
+
+/// A refused manifest request is retried after backoff within the original
+/// deadline, without excluding the refusing peer.
+#[tokio::test(start_paused = true)]
+async fn manifest_refusals_are_retried_with_backoff() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let manifest = manifest(Height(5000));
+    let bytes = manifest.encode().expect("the test manifest is valid");
+    let commitment = StateSnapshotCommitment {
+        height: manifest.height,
+        block_hash: manifest.block_hash,
+        manifest: ObjectHash::of(&bytes),
+    };
+    let size = u64::try_from(bytes.len()).expect("the test manifest length fits in u64");
+    let request = zn::Request::Object {
+        hash: commitment.manifest,
+        offset: 0,
+        length: u32::try_from(MAX_MANIFEST_BYTES).expect("the manifest limit fits in u32"),
+    };
+    let (addr, mut peer) = peer(1);
+    let mut peers = Peers::new(vec![(addr, peer.clone())]);
+
+    let drive = async {
+        peer.expect_request(request.clone())
+            .await
+            .respond_error(refusal().into());
+        peer.expect_request(request)
+            .await
+            .respond(zn::Response::Object { size, data: bytes });
+    };
+    let started = Instant::now();
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(70), async {
+        tokio::join!(
+            fetch_manifest(
+                &mut peers,
+                commitment,
+                &network,
+                Instant::now() + STEP_DEADLINE,
+            ),
+            drive
+        )
+    })
+    .await
+    .expect("a refusal does not end manifest fetching after one pass");
+
+    assert!(result.is_ok(), "{result:?}");
+    let elapsed = started.elapsed();
+    assert!(
+        (Duration::from_secs(1)..Duration::from_secs(2)).contains(&elapsed),
+        "the retry waits for backoff, not a tight loop: {elapsed:?}"
+    );
+    assert_eq!(peers.addrs(), vec![addr]);
+}
+
+/// The direct history-tree fetch uses the same refusal retry policy as the
+/// manifest fetch.
+#[tokio::test(start_paused = true)]
+async fn history_refusals_are_retried_with_backoff() {
+    let _init_guard = zebra_test::init();
+
+    let bytes = b"tree".to_vec();
+    let descriptor = PieceDescriptor {
+        component: ComponentId::HistoryTree,
+        index: 0,
+        size: u32::try_from(bytes.len()).expect("the test object is small"),
+        hash: ObjectHash::of(&bytes),
+    };
+    let request = zn::Request::Object {
+        hash: descriptor.hash,
+        offset: 0,
+        length: u32::try_from(MAX_PIECE_BYTES).expect("the piece limit fits in u32"),
+    };
+    let size = u64::from(descriptor.size);
+    let (addr, mut peer) = peer(1);
+    let mut peers = Peers::new(vec![(addr, peer.clone())]);
+
+    let drive = async {
+        peer.expect_request(request.clone())
+            .await
+            .respond_error(refusal().into());
+        peer.expect_request(request)
+            .await
+            .respond(zn::Response::Object {
+                size,
+                data: bytes.clone(),
+            });
+    };
+    let started = Instant::now();
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(70), async {
+        tokio::join!(
+            fetch_piece(&mut peers, &descriptor, Instant::now() + STEP_DEADLINE,),
+            drive
+        )
+    })
+    .await
+    .expect("a refusal does not end history fetching after one pass");
+
+    assert_eq!(result.expect("the retry succeeds"), bytes);
+    let elapsed = started.elapsed();
+    assert!(
+        (Duration::from_secs(1)..Duration::from_secs(2)).contains(&elapsed),
+        "the retry waits for backoff, not a tight loop: {elapsed:?}"
+    );
+    assert_eq!(peers.addrs(), vec![addr]);
+}
+
+/// Once the object's hash authenticates its bytes, a disagreement with the
+/// manifest's size rejects the snapshot without blaming the honest peer.
+#[tokio::test]
+async fn authenticated_piece_size_mismatch_rejects_without_peer_blame() {
+    let _init_guard = zebra_test::init();
+
+    let bytes = b"tree".to_vec();
+    let descriptor = PieceDescriptor {
+        component: ComponentId::HistoryTree,
+        index: 0,
+        size: 5,
+        hash: ObjectHash::of(&bytes),
+    };
+    let request = zn::Request::Object {
+        hash: descriptor.hash,
+        offset: 0,
+        length: u32::try_from(MAX_PIECE_BYTES).expect("the piece limit fits in u32"),
+    };
+    let (addr, mut peer) = peer(1);
+    let mut peers = Peers::new(vec![(addr, peer.clone())]);
+    let drive = async {
+        peer.expect_request(request)
+            .await
+            .respond(zn::Response::Object {
+                size: 4,
+                data: bytes,
+            });
+    };
+    let (result, ()) = tokio::join!(
+        fetch_piece(&mut peers, &descriptor, Instant::now() + STEP_DEADLINE,),
+        drive
+    );
+
+    assert!(
+        matches!(result, Err(BootstrapError::Rejected(_))),
+        "{result:?}"
+    );
+    assert_eq!(peers.addrs(), vec![addr], "the honest peer is retained");
+}
+
+/// Creating or cleaning one bootstrap attempt's workspace never removes an
+/// active sibling workspace.
+#[tokio::test]
+async fn import_workspaces_preserve_active_siblings() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let root = temp.path().join("import");
+    let active = create_import_workspace(&root)
+        .await
+        .expect("the first workspace is created");
+    let marker = active.path.join("active");
+    std::fs::write(&marker, b"active").expect("the active marker is written");
+
+    let other = create_import_workspace(&root)
+        .await
+        .expect("a concurrent workspace is created");
+    assert_ne!(active.path, other.path);
+    assert!(
+        marker.exists(),
+        "creating a sibling preserves the active one"
+    );
+
+    super::super::remove_dir(&other.path)
+        .await
+        .expect("the finished sibling is cleaned");
+    other.release().await;
+    assert!(
+        marker.exists(),
+        "cleaning a sibling preserves the active one"
+    );
+}
+
+/// A new attempt deletes the workspaces that interrupted attempts left behind, whether or not
+/// their lock file is still there, and keeps the workspace a running attempt holds.
+#[tokio::test]
+async fn import_workspaces_sweep_stale_siblings() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let root = temp.path().join("import");
+    let active = create_import_workspace(&root)
+        .await
+        .expect("the first workspace is created");
+    let active_marker = active.path.join("active");
+    std::fs::write(&active_marker, b"active").expect("the active marker is written");
+
+    // A killed process leaves its workspace and an unlocked lock file, and a workspace whose
+    // lock file is gone is stale too.
+    let killed = root.join("killed");
+    std::fs::create_dir_all(killed.join("staged")).expect("the killed workspace is created");
+    std::fs::write(root.join("killed.lock"), b"").expect("the killed lock file is created");
+    let unlocked = root.join("unlocked");
+    std::fs::create_dir_all(&unlocked).expect("the unlocked workspace is created");
+
+    let next = create_import_workspace(&root)
+        .await
+        .expect("the next workspace is created");
+    assert!(!killed.exists(), "a killed attempt's workspace is swept");
+    assert!(
+        !root.join("killed.lock").exists(),
+        "a killed attempt's lock file is swept"
+    );
+    assert!(!unlocked.exists(), "a workspace without a lock is swept");
+    assert!(active_marker.exists(), "a held workspace is kept");
+
+    next.release().await;
+    active.release().await;
+}
+
+/// A cleanup error after installation is logged but cannot turn the installed
+/// database back into a bootstrap failure and genesis fallback.
+#[tokio::test]
+async fn post_install_cleanup_errors_do_not_fail_the_bootstrap() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let not_a_directory = temp.path().join("workspace");
+    std::fs::write(&not_a_directory, b"installed elsewhere")
+        .expect("the cleanup obstacle is created");
+
+    let result = finish_install(HashMap::new(), &not_a_directory, false).await;
+    assert!(result.is_ok(), "{result:?}");
+    assert!(not_a_directory.exists());
+}
+
+/// Shutdown before the final install leaves the staged database in place and
+/// never renames it into the node's real state path.
+#[tokio::test]
+async fn shutdown_prevents_the_final_import_rename() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let staged = temp.path().join("staged");
+    std::fs::create_dir(&staged).expect("the staged database is created");
+    let target = temp.path().join("state");
+
+    zebra_chain::shutdown::set_shutting_down();
+    let result = install_staged_snapshot(staged.clone(), target.clone(), None).await;
+    zebra_chain::shutdown::IS_SHUTTING_DOWN.store(false, Ordering::SeqCst);
+
+    assert!(
+        matches!(result, Err(BootstrapError::Aborted(_))),
+        "{result:?}"
+    );
+    assert!(!target.exists(), "shutdown prevented the rename");
+    assert!(staged.exists(), "the staged database was not moved");
+}
+
+fn successor_at_committing_to(height: u32, history_root: &ChainHistoryMmrRootHash) -> Arc<Block> {
+    let block = mainnet_block(height);
+    let auth_data_root: AuthDataRoot = block.transactions.iter().collect();
+    let expected =
+        ChainHistoryBlockTxAuthCommitmentHash::from_commitments(history_root, &auth_data_root);
+    let mut header = *block.header;
+    header.commitment_bytes = <[u8; 32]>::from(expected).into();
+    Arc::new(Block {
+        header: Arc::new(header),
+        transactions: block.transactions.clone(),
+    })
+}
+
+/// Changes a v5 input's unlocking script, which leaves its txid and the block's
+/// Merkle root unchanged but changes its authorizing-data commitment.
+fn successor_with_bad_auth_data(successor: &Arc<Block>) -> Arc<Block> {
+    let mut transactions = successor.transactions.clone();
+    let mut changed = false;
+    for transaction in &mut transactions {
+        if transaction.version() < 5 {
+            continue;
+        }
+        let mut inputs = transaction.inputs();
+        let mut changed_transaction = false;
+        for input in &mut inputs {
+            if let transparent::Input::PrevOut { unlock_script, .. } = input {
+                let mut script = unlock_script.as_raw_bytes().to_vec();
+                if let Some(first) = script.first_mut() {
+                    *first ^= 1;
+                } else {
+                    script.push(1);
+                }
+                *unlock_script = transparent::Script::new(&script);
+                changed_transaction = true;
+                changed = true;
+                break;
+            }
+        }
+        if changed_transaction {
+            *transaction = Arc::new(transaction.as_ref().clone().with_transparent_inputs(inputs));
+            break;
+        }
+    }
+    assert!(changed, "the test block has a v5 transparent input");
+
+    Arc::new(Block {
+        header: successor.header.clone(),
+        transactions,
+    })
+}
+
+/// One valid H+1 copy authenticates the snapshot. Copies with altered
+/// authorizing data blame only their peers, including copies after the valid
+/// one, and never cause a good snapshot to be rejected.
+#[tokio::test]
+async fn chain_checks_try_every_successor_copy_and_accept_one_commitment() {
+    let _init_guard = zebra_test::init();
+
+    let history_root = ChainHistoryMmrRootHash::from([0x42; 32]);
+    let successor = successor_at_committing_to(1_687_108, &history_root);
+    let bad = successor_with_bad_auth_data(&successor);
+    let parent = mainnet_block(1_687_107);
+    let commitment = StateSnapshotCommitment {
+        height: Height(1_687_107),
+        block_hash: parent.hash(),
+        manifest: ObjectHash([0x02; 32]),
+    };
+    assert!(
+        check_successor_block(parent.hash(), successor.hash(), Height(1_687_108), &bad,).is_ok()
+    );
+    assert!(!check_successor_commitment(&history_root, &bad));
+
+    let network = regtest_with_checkpoints(&[(Height(1_687_108), successor.hash())]);
+    let (addr_a, mut a) = peer(1);
+    let (addr_b, mut b) = peer(2);
+    let (addr_c, mut c) = peer(3);
+    let mut peers = Peers::new(vec![
+        (addr_a, a.clone()),
+        (addr_b, b.clone()),
+        (addr_c, c.clone()),
+    ]);
+    let block_request = zn::Request::BlocksByHash([successor.hash()].into_iter().collect());
+    let response = |block: &Arc<Block>| {
+        zn::Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))])
+    };
+    let drive = async {
+        a.expect_request(zn::Request::FindHeaders {
+            known_blocks: vec![parent.hash()],
+            stop: Some(successor.hash()),
+        })
+        .await
+        .respond(headers_response(std::slice::from_ref(&successor.header)));
+        a.expect_request(block_request.clone())
+            .await
+            .respond(response(&bad));
+        b.expect_request(block_request.clone())
+            .await
+            .respond(response(&successor));
+        c.expect_request(block_request)
+            .await
+            .respond(response(&bad));
+    };
+    let (result, ()) = tokio::join!(
+        check_chain(&mut peers, &network, commitment, &history_root),
+        drive
+    );
+
+    assert_eq!(result.expect("one valid copy is enough"), 0);
+    assert_eq!(
+        peers.addrs(),
+        vec![addr_b],
+        "only the two bad-copy peers are excluded"
+    );
+}
+
+#[derive(Clone)]
+struct GatedBuilder {
+    release: Arc<AtomicBool>,
+    queued: mpsc::UnboundedSender<usize>,
+}
+
+impl SstBuilder for GatedBuilder {
+    fn queued(&self, pending: usize) {
+        let _ = self.queued.send(pending);
+    }
+
+    fn build(
+        self,
+        _piece_path: PathBuf,
+        _component: ComponentId,
+        _piece: PieceManifest,
+        _sst_path: PathBuf,
+    ) -> Result<u64, SnapshotError> {
+        while !self.release.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(0)
+    }
+}
+
+/// The 65th piece is not drained into an unbounded task queue while all 64
+/// build slots are occupied. Releasing the builds lets it through and finishes.
+#[tokio::test]
+async fn verified_piece_backpressure_bounds_the_sst_build_queue() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let store = zebra_state::state_snapshot::store::ArtifactStore::at(temp.path().join("objects"));
+    let history_bytes = vec![0];
+    let history_hash = ObjectHash::of(&history_bytes);
+    let history_path = store
+        .put(history_hash, &history_bytes)
+        .expect("the history object is stored");
+    let objects: Vec<Vec<u8>> = (0u32..u32::try_from(VERIFIED_PIECE_CHANNEL_BOUND)
+        .expect("the build queue bound fits in u32"))
+        .map(|index| vec![index.to_le_bytes()[0], 1])
+        .collect();
+
+    let mut manifest = manifest(Height(5000));
+    for component in &mut manifest.components {
+        match component.id {
+            ComponentId::HistoryTree => {
+                component.pieces.push(PieceManifest {
+                    size: 1,
+                    hash: history_hash,
+                });
+            }
+            ComponentId::HashByHeight => {
+                component.pieces = objects
+                    .iter()
+                    .map(|object| PieceManifest {
+                        size: 2,
+                        hash: ObjectHash::of(object),
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    let tree_piece = VerifiedPiece {
+        descriptor: PieceDescriptor {
+            component: ComponentId::HistoryTree,
+            index: 0,
+            size: 1,
+            hash: history_hash,
+        },
+        path: history_path,
+    };
+
+    let (addr, mut peer) = peer(1);
+    let peers = Peers::new(vec![(addr, peer.clone())]);
+    let driver_objects = objects.clone();
+    let driver = tokio::spawn(async move {
+        for object in driver_objects {
+            peer.expect_request(zn::Request::Object {
+                hash: ObjectHash::of(&object),
+                offset: 0,
+                length: 2,
+            })
+            .await
+            .respond(zn::Response::Object {
+                size: 2,
+                data: object,
+            });
+        }
+    });
+
+    let release = Arc::new(AtomicBool::new(false));
+    let (queued_tx, mut queued_rx) = mpsc::unbounded_channel();
+    let builder = GatedBuilder {
+        release: release.clone(),
+        queued: queued_tx,
+    };
+    let import_root = temp.path().join("workspace");
+    let build = tokio::spawn(async move {
+        download_and_build_with(peers, &manifest, store, &import_root, tree_piece, builder).await
+    });
+
+    for pending in 1..=VERIFIED_PIECE_CHANNEL_BOUND {
+        let actual = tokio::time::timeout(Duration::from_secs(5), queued_rx.recv())
+            .await
+            .expect("each build is queued")
+            .expect("the queue observer stays open");
+        assert_eq!(actual, pending);
+    }
+    let extra = tokio::time::timeout(Duration::from_millis(100), queued_rx.recv()).await;
+    release.store(true, Ordering::SeqCst);
+    assert!(
+        extra.is_err(),
+        "the 65th piece waits for a completed SST build"
+    );
+
+    let paths = tokio::time::timeout(Duration::from_secs(10), build)
+        .await
+        .expect("the released builds finish")
+        .expect("the download task does not panic")
+        .expect("every piece verifies");
+    driver.await.expect("every object was requested");
+    assert_eq!(paths.len(), VERIFIED_PIECE_CHANNEL_BOUND + 1);
+}
+
+/// Error teardown waits for blocking SST work instead of returning while a
+/// detached blocking task can still write into the workspace being removed.
+#[tokio::test]
+async fn sst_error_teardown_waits_for_blocking_builds() {
+    let _init_guard = zebra_test::init();
+    let (verified_sender, mut verified) = mpsc::channel::<VerifiedPiece>(1);
+    let mut scheduler = Some(tokio::spawn(async move {
+        verified_sender.closed().await;
+        Ok::<(), SchedulerError>(())
+    }));
+    let mut blame_logger = tokio::spawn(std::future::pending::<()>());
+    let mut builds = JoinSet::new();
+    let finished = Arc::new(AtomicBool::new(false));
+    let blocking_finished = finished.clone();
+    builds.spawn(async move {
+        tokio::task::spawn_blocking(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            blocking_finished.store(true, Ordering::SeqCst);
+            Ok::<u64, BootstrapError>(0)
+        })
+        .await
+        .expect("the blocking build finishes")
+    });
+
+    quiesce_download_tasks(
+        &mut verified,
+        &mut scheduler,
+        &mut blame_logger,
+        &mut builds,
+    )
+    .await;
+    assert!(finished.load(Ordering::SeqCst));
 }
