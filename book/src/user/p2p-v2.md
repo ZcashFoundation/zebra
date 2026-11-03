@@ -123,6 +123,18 @@ version 2 peers are recorded in a separate version 2 address book.
   not-found results. A syncing node does not keep version 2 peers it dials
   unless they advertise `NODE_NETWORK`, as on the legacy protocol. The
   `getnetworkinfo` RPC reports the services sent to legacy peers.
+- [State snapshots for pruned nodes](state-snapshot-sync.md) (experimental).
+  A node with `sync.serve_state_snapshots` advertises the draft's
+  `NODE_SYNC_ARTIFACTS` service and answers `get-object` requests for the
+  manifest and pieces of the snapshots it holds, by hash, with at most two
+  transfers per peer and eight in total. An empty pruned node with
+  `sync.state_snapshot_sync` dials its snapshot peers over a short-lived
+  version 2 connection before its network starts, downloads and verifies the
+  snapshot, and then syncs the blocks above it. That connection advertises no
+  services, so the serving node sees a peer that serves nothing, and it counts
+  towards `max_connections_per_ip` with the node's normal connections. Both
+  services are version 2 only: legacy peers are not told about
+  `NODE_SYNC_ARTIFACTS`, and `getnetworkinfo` does not report it.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
   inbound and outbound limits of half the legacy ones. Protocol violations
   close the connection with the draft's error codes.
@@ -354,6 +366,9 @@ go in these metrics, and its progress in the usual `state.*` and
   have yet. Version 2 peers learn of new blocks from their other peers, or by
   requesting headers. Early block relay and compact blocks
   (`experimental_early_block_relay`) also use legacy connections only.
+- **Snapshot peers are not discovered.** A node that bootstraps from a
+  [state snapshot](state-snapshot-sync.md) downloads it only from
+  `sync.state_snapshot_peers`, or from `initial_v2_peers` when that is empty.
 - **Host names are resolved once.** A host name in `initial_v2_peers` that does
   not resolve at startup is retried, but once it resolves Zebra keeps using
   that address. Restart Zebra to pick up a changed address.
@@ -398,6 +413,16 @@ of, set `v2_peer_discovery = false` on both nodes.
 Node B logs `connected to initial v2 peer` at the default `info` level. Node A
 logs the version 2 handshake at the `debug` level, for example with
 `RUST_LOG=zebra_network=debug`. `getpeerinfo` does not list version 2 peers yet.
+
+Give the two protocols different port numbers when both nodes run on one
+machine and one of them bootstraps from a [state snapshot](state-snapshot-sync.md)
+served by the other: peers are keyed by address and port across both protocols,
+so a node that has a legacy connection to `127.0.0.1:18344` does not keep a
+version 2 connection to the same address. The serving node also needs
+`max_connections_per_ip` of at least 4: the other node's bootstrap, version 2,
+and legacy connections all come from `127.0.0.1`, the limit counts the attempts
+from one address within about two minutes, and a restart of the other node adds
+more.
 
 ## Spentness hints
 
