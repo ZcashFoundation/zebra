@@ -510,18 +510,18 @@ fn readded_failed_initial_peer_is_retried_after_reconnection_delay() {
         + chrono::Duration::from_std(CONCURRENT_ADDRESS_CHANGE_PERIOD * 3)
             .expect("constant is valid");
 
-    let readded = MetaAddr::new_initial_peer(address)
+    let re_added = MetaAddr::new_initial_peer(address)
         .apply_to_meta_addr(peer.clone(), instant_later, chrono_later)
         .expect("re-adding a failed initial peer is applied");
 
     assert_eq!(
-        readded.last_connection_state,
+        re_added.last_connection_state,
         PeerAddrState::NeverAttemptedGossiped
     );
-    assert_eq!(readded.last_attempt, peer.last_attempt);
-    assert_eq!(readded.last_failure, peer.last_failure);
+    assert_eq!(re_added.last_attempt, peer.last_attempt);
+    assert_eq!(re_added.last_failure, peer.last_failure);
     assert!(
-        !readded.is_ready_for_connection_attempt(instant_later, chrono_later, &Mainnet),
+        !re_added.is_ready_for_connection_attempt(instant_later, chrono_later, &Mainnet),
         "a re-added peer waits for the reconnection delay after its last failure",
     );
 
@@ -530,15 +530,15 @@ fn readded_failed_initial_peer_is_retried_after_reconnection_delay() {
         + chrono::Duration::from_std(MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1))
             .expect("constant is valid");
     assert!(
-        readded.is_ready_for_connection_attempt(instant_after_delay, chrono_after_delay, &Mainnet),
+        re_added.is_ready_for_connection_attempt(instant_after_delay, chrono_after_delay, &Mainnet),
         "a re-added peer is ready after the reconnection delay",
     );
 
     // A gossiped change for the re-added peer keeps its connection history.
     let gossiped = gossiped_change(address, chrono_later)
-        .apply_to_meta_addr(readded.clone(), instant_later, chrono_later)
+        .apply_to_meta_addr(re_added.clone(), instant_later, chrono_later)
         .expect("a gossiped change is merged into a never attempted peer");
-    assert_eq!(gossiped.last_failure, readded.last_failure);
+    assert_eq!(gossiped.last_failure, re_added.last_failure);
     assert!(!gossiped.is_ready_for_connection_attempt(instant_later, chrono_later, &Mainnet));
 }
 
@@ -581,11 +581,11 @@ fn concurrent_readd_of_failed_initial_peer_keeps_reconnection_delay() {
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
     let peer = failed_initial_peer(address, instant_now, chrono_now);
 
-    let readded = MetaAddr::new_initial_peer(address)
+    let re_added = MetaAddr::new_initial_peer(address)
         .apply_to_meta_addr(peer, instant_now, chrono_now)
         .expect("re-adding a failed initial peer is applied, even right after it failed");
 
-    assert!(!readded.is_ready_for_connection_attempt(instant_now, chrono_now, &Mainnet));
+    assert!(!re_added.is_ready_for_connection_attempt(instant_now, chrono_now, &Mainnet));
 }
 
 /// Proof-of-concept for GHSA-63wg-wjjj-7cp8:

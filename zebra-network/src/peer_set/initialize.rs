@@ -1266,12 +1266,12 @@ where
                         async move {
                             // Resolving DNS retries until it finds a peer when there are no
                             // cached peers, so stop it before the next re-add.
-                            let readd = tokio::time::timeout(
+                            let re_add = tokio::time::timeout(
                                 constants::INITIAL_PEER_RECOVERY_TIMEOUT,
                                 limit_initial_peers(&config, &address_book_service),
                             )
                             .await;
-                            if readd.is_err() {
+                            if re_add.is_err() {
                                 info!(
                                     timeout = ?constants::INITIAL_PEER_RECOVERY_TIMEOUT,
                                     "timed out resolving the initial peers, \
