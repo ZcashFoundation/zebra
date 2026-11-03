@@ -432,9 +432,9 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // do not have that service requirement, and B uses them to download blocks above H.
         config_a.network.initial_testnet_peers = [p2p_b.to_string()].into();
         config_a.network.initial_v2_peers = [quic_b.to_string()].into();
-        config_a.tracing.filter = Some("warn".to_owned());
+        config_a.tracing.filter = Some("info".to_owned());
         let mut node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
-        let dir_a = node_a
+        let mut dir_a = node_a
             .dir
             .take()
             .expect("retain the state directory for the restart");
@@ -493,6 +493,20 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // The stage lines appear in order, from the decision to the last checkpoint.
         for stage in EXPECTED_STAGES {
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
+            if stage == Stage::StateInitialized {
+                // A has served the snapshot and B has imported and opened it while A was pruned.
+                // Regtest's fixed old block times make every node count as syncing, so a pruned
+                // peer cannot satisfy the required NODE_NETWORK service in either direction.
+                // Restart A as an archive for the ordinary block-sync and genesis-sync phases.
+                stop_node(node_a)?;
+                config_a.state.prune_blocks_older_than = None;
+                node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
+                dir_a = node_a
+                    .dir
+                    .take()
+                    .expect("retain the state directory for the rest of the test");
+                wait_for_mempool_activation(&a).await?;
+            }
         }
         wait_for_height(&b, tip_a, SYNC_TIMEOUT, "node B").await?;
         let info = blockchain_info(&b).await?;
