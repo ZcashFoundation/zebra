@@ -7,6 +7,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
+        mpsc::RecvTimeoutError,
         Arc,
     },
     task::{Context, Poll},
@@ -34,6 +35,10 @@ use crate::{
 
 const KIB: u32 = 1 << 10;
 const MIB: u32 = 1 << 20;
+
+/// How long a scenario may run on the wall clock, in paused time, before it
+/// counts as spinning: the scenarios take a few seconds, most of it hashing.
+const WALL_CLOCK_LIMIT: Duration = Duration::from_secs(120);
 
 /// Returns `millis` milliseconds.
 fn ms(millis: u64) -> Duration {
@@ -664,6 +669,19 @@ impl Scenario {
             verified_tx,
             blame_tx,
         );
+        // Paused time only advances while every task waits, so a scheduler that spins never lets
+        // the timeout below fire, and the test would hang until nextest kills it: a thread on the
+        // wall clock ends the process instead, since a panic on another thread fails no test.
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            if finished_rx.recv_timeout(WALL_CLOCK_LIMIT) == Err(RecvTimeoutError::Timeout) {
+                tracing::error!(
+                    ?WALL_CLOCK_LIMIT,
+                    "the scheduler ran for the wall-clock limit without finishing: it is spinning"
+                );
+                std::process::abort();
+            }
+        });
         let result = tokio::time::timeout(
             Duration::from_secs(24 * 60 * 60),
             scheduler.run_storing_in(store),
@@ -671,6 +689,7 @@ impl Scenario {
         .await
         .expect("the scheduler finishes within a day of paused time");
         let elapsed = epoch.elapsed();
+        drop(finished_tx);
 
         let mut verified = Vec::new();
         if let Some(receiver) = verified_rx.as_mut() {
