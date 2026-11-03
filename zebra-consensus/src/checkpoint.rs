@@ -24,10 +24,7 @@ use std::{
     collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc, Arc,
-    },
+    sync::{mpsc, Arc},
     task::{Context, Poll},
 };
 
@@ -58,6 +55,7 @@ use crate::{
         TargetHeight::{self, *},
     },
     error::BlockError,
+    loom::sync::atomic::{AtomicUsize, Ordering},
     BoxError,
 };
 
