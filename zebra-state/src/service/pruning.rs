@@ -129,6 +129,19 @@ fn prune_batch(
         return Ok(None);
     };
     db.write_batch(batch)?;
+    // `run` repeats a batch that reports progress at once, and only waits for a finalized block
+    // after `None`. A deletion that leaves the derived floor where it was would therefore spin,
+    // writing an empty range tombstone per iteration (R4 #5): stop and wait instead.
+    let floor = db.history_capabilities()?.lowest_retained_height;
+    if floor <= previous {
+        tracing::warn!(
+            ?previous,
+            ?end,
+            ?floor,
+            "pruning batch did not advance the retained-body floor; waiting for the next block"
+        );
+        return Ok(None);
+    }
     metrics::gauge!("state.pruning.retained.height").set(f64::from(end.0));
     metrics::counter!("state.pruning.deleted.height.count")
         .increment(u64::from(end.0 - previous.0));

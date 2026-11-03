@@ -204,6 +204,38 @@ fn snapshot_base_is_the_restart_witness_of_a_branchless_window() {
 }
 
 #[test]
+fn pruning_stops_when_a_batch_does_not_advance_the_floor() {
+    use crate::{TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&config(cache.path().to_path_buf()));
+    state.db.mark_ready_for_pruning();
+
+    // A body prefix deleted without its index anchor: the derived floor stays at genesis, so
+    // the first batch deletes an already empty range and cannot move it.
+    let mut damage = DiskWriteBatch::new();
+    damage.zs_delete(
+        &state.db.cf_handle("hash_by_tx_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+    );
+    damage.zs_delete_range(
+        &state.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(1)),
+        TransactionLocation::min_for_height(Height(1 + MAX_PRUNING_BATCH_HEIGHTS)),
+    );
+    state.db.write_batch(damage).unwrap();
+    assert_eq!(floor(&state.db), Height(0));
+
+    assert_eq!(
+        prune_batch(&state.db, RETENTION, &mut Default::default()).unwrap(),
+        None,
+        "a batch that deletes nothing must not report progress"
+    );
+    assert_eq!(floor(&state.db), Height(0));
+}
+
+#[test]
 fn archive_conversion_is_bounded_and_retention_never_restores_bodies() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
