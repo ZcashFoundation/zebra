@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Changed the version 2 QUIC endpoint of a node that advertises `NODE_SYNC_ARTIFACTS`, which every node with a `Config::object_source` does, to use an 8 MiB send window, so that its concurrent `get-object` streams can each keep a 1 MiB chunk in flight beside its other responses.
+time: 2026-11-06T04:36:12.341385852Z
