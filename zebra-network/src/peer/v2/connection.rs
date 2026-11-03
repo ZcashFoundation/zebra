@@ -258,6 +258,14 @@ impl Overloads {
     }
 }
 
+/// The inbound service, with the connection's record of the overloads the
+/// peer's requests cause.
+#[derive(Clone)]
+struct Inbound<'a, S> {
+    service: S,
+    overloads: &'a Overloads,
+}
+
 /// The error slot entry for a connection closed with `code`.
 ///
 /// `INTERNAL_ERROR` is only ever this node's own failure (a value it could

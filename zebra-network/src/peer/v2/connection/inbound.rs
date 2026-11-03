@@ -47,7 +47,7 @@ use crate::{
     BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
-use super::{refuse_stream, Event, Events, Overloads};
+use super::{refuse_stream, Event, Events, Inbound, Overloads};
 
 /// How many of one peer's request streams may be served at once.
 ///
@@ -292,14 +292,6 @@ where
     // `finish` only fails if the stream was already closed, which the peer may do at will.
     let _ = send.finish();
     Ok(())
-}
-
-/// The inbound service, with the connection's record of the overloads the
-/// peer's requests cause.
-#[derive(Clone)]
-struct Inbound<'a, S> {
-    service: S,
-    overloads: &'a Overloads,
 }
 
 /// Calls the inbound service, mapping its failures to stream refusals, or,

@@ -31,7 +31,7 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::{refuse_stream, Event, Events, Overloads};
+use super::{refuse_stream, Event, Events, Inbound, Overloads};
 
 /// How many announcement batches may wait to be written before new ones are
 /// dropped (draft: announcements are best-effort under backpressure).
@@ -362,13 +362,6 @@ fn close_code(error: WireError) -> Handled {
         Some(Violation::Close(code)) => code,
         _ => ErrorCode::ProtocolError,
     })
-}
-
-/// The inbound service, with the connection's record of the overloads the
-/// peer's announcements cause.
-struct Inbound<'a, S> {
-    service: S,
-    overloads: &'a Overloads,
 }
 
 /// Acts on a batch of block announcement records.
