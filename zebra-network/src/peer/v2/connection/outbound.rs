@@ -560,7 +560,10 @@ fn matches_reference(transaction: &UnminedTx, requested: UnminedTxId) -> bool {
 /// transaction IDs.
 ///
 /// `genesis_hash` is the network's genesis block hash: a peer that knows none
-/// of the locator hashes answers from height 1, after the genesis block.
+/// of the locator hashes answers from height 1, after the genesis block. If
+/// the locator does not include the genesis block, such a response is
+/// discarded without a penalty, and this returns no headers (see
+/// [`HeadersCheck::NotAfterLocator`]).
 async fn fetch_headers(
     connection: &Connection,
     known_blocks: Vec<block::Hash>,
@@ -579,25 +582,80 @@ async fn fetch_headers(
     let mut recv = open_request(connection, &wire_request).await?;
     let headers = read_headers(&mut recv.reader()).await?;
 
-    check_headers_response(&request, &headers, genesis_hash).map_err(Failure::Misbehavior)?;
-    Ok(headers)
+    match check_headers_response(&request, &headers, genesis_hash) {
+        HeadersCheck::Selectable => Ok(headers),
+        HeadersCheck::NotAfterLocator => {
+            tracing::debug!(
+                headers = headers.len(),
+                "discarding a get-headers response that starts after the genesis block, which \
+                 the locator does not include",
+            );
+            Ok(Vec::new())
+        }
+        HeadersCheck::Unselectable(reason) => Err(Failure::Misbehavior(reason)),
+    }
+}
+
+/// Whether a `get-headers` response is one its request could have selected.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HeadersCheck {
+    /// The response follows from the request.
+    Selectable,
+
+    /// The response starts after the genesis block, which the locator does
+    /// not include.
+    ///
+    /// A peer that knows none of the locator hashes answers this way (draft,
+    /// "`get-headers`"), so the response is not misbehavior. But it does not
+    /// connect to anything this node asked about: Zebra's locator always
+    /// includes the genesis block while its tip is within
+    /// `MAX_BLOCK_REORG_HEIGHT` of it, so a peer that shares none of the
+    /// locator's blocks is either behind this node, or on a fork deeper than
+    /// Zebra can reorganize to. Its headers are discarded without a penalty,
+    /// so a peer cannot use this answer to inject an unrelated chain into
+    /// this node's sync.
+    NotAfterLocator,
+
+    /// The response is misbehavior, for this reason.
+    Unselectable(String),
 }
 
 /// Checks that `headers` is a response `request` could have selected (draft,
-/// "`get-headers`"), returning why it is not.
+/// "`get-headers`").
 ///
 /// Every check depends only on the request and the response, never on this
 /// node's chain, so a peer on a different best chain passes them all: it
 /// starts after the first locator hash in its best chain, or after the genesis
-/// block if it has none of them.
+/// block if it has none of them. A response after a genesis block that the
+/// locator does not include is valid but is not used: see
+/// [`HeadersCheck::NotAfterLocator`].
 fn check_headers_response(
     request: &GetHeaders,
     headers: &[Arc<block::Header>],
     genesis_hash: block::Hash,
-) -> Result<(), String> {
-    let Some(first) = headers.first() else {
-        return Ok(());
-    };
+) -> HeadersCheck {
+    match unselectable_reason(request, headers, genesis_hash) {
+        Some(reason) => HeadersCheck::Unselectable(reason),
+        None if headers.first().is_some_and(|first| {
+            !request.locator_hashes.is_empty()
+                && !request.locator_hashes.contains(&first.previous_block_hash)
+        }) =>
+        {
+            // The only other start `unselectable_reason` accepts is after the genesis block.
+            HeadersCheck::NotAfterLocator
+        }
+        None => HeadersCheck::Selectable,
+    }
+}
+
+/// Returns why `request` could not have selected `headers`, or `None` if it
+/// could have.
+fn unselectable_reason(
+    request: &GetHeaders,
+    headers: &[Arc<block::Header>],
+    genesis_hash: block::Hash,
+) -> Option<String> {
+    let first = headers.first()?;
     let hashes: Vec<block::Hash> = headers.iter().map(|header| header.hash()).collect();
 
     // The headers must form a contiguous chain.
@@ -607,25 +665,25 @@ fn check_headers_response(
         .zip(&hashes)
         .any(|(header, previous_hash)| header.previous_block_hash != *previous_hash)
     {
-        return Err("get-headers response is not a contiguous chain".to_string());
+        return Some("get-headers response is not a contiguous chain".to_string());
     }
 
     if request.locator_hashes.is_empty() {
         // An empty locator selects only the header `hash_stop` names.
         if hashes != [request.hash_stop] {
-            return Err(format!(
+            return Some(format!(
                 "get-headers response to an empty locator is not the single header {}",
                 request.hash_stop,
             ));
         }
-        return Ok(());
+        return None;
     }
 
     // The response starts after one of the locator hashes, or after the genesis block.
     if first.previous_block_hash != genesis_hash
         && !request.locator_hashes.contains(&first.previous_block_hash)
     {
-        return Err(format!(
+        return Some(format!(
             "get-headers response starts after {}, which is not a locator hash or the genesis \
              block",
             first.previous_block_hash,
@@ -636,12 +694,12 @@ fn check_headers_response(
     // hash of any header, so it never matches.
     if let Some(index) = hashes.iter().position(|hash| *hash == request.hash_stop) {
         if index + 1 != hashes.len() {
-            return Err(format!(
+            return Some(format!(
                 "get-headers response continues past hash_stop {}",
                 request.hash_stop,
             ));
         }
     }
 
-    Ok(())
+    None
 }

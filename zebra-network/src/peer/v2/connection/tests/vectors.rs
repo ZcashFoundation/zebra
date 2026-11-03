@@ -1460,10 +1460,26 @@ async fn outbound_responses_are_verified() {
 /// genesis block for a peer that knows none of them; it ends at `hash_stop` if
 /// it reaches it; and an empty locator selects only the header `hash_stop`
 /// names. Any other response is misbehavior, for headers and hashes alike.
+///
+/// A response after the genesis block is used only if the locator includes
+/// the genesis block; otherwise it is discarded, and the client gets no
+/// headers.
 #[tokio::test]
 async fn header_responses_are_bound_to_the_request() {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
+
+    /// What the client gets.
+    #[derive(Debug)]
+    enum Outcome {
+        /// The raw peer's headers.
+        Accepted,
+        /// No headers.
+        Discarded,
+        /// A misbehavior error containing this text.
+        Rejected(&'static str),
+    }
+    use Outcome::*;
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let fixture = Fixture::new();
@@ -1473,84 +1489,119 @@ async fn header_responses_are_bound_to_the_request() {
         let unknown = block::Hash([0xAB; 32]);
 
         // The locator, the stop hash, whether to ask for hashes rather than headers, the headers
-        // the raw peer answers with, and the error the client gets, if any.
+        // the raw peer answers with, and what the client gets.
         let cases: [(
             Vec<block::Hash>,
             Option<block::Hash>,
             bool,
             Vec<&Arc<Block>>,
-            Option<&str>,
-        ); 11] = [
-            (vec![genesis], None, false, vec![&block_1, &block_2], None),
+            Outcome,
+        ); 15] = [
+            (
+                vec![genesis],
+                None,
+                false,
+                vec![&block_1, &block_2],
+                Accepted,
+            ),
             (
                 vec![block_1.hash(), genesis],
                 None,
                 false,
                 vec![&block_2],
-                None,
+                Accepted,
             ),
-            (vec![unknown], None, false, vec![&block_1, &block_2], None),
+            (
+                vec![unknown, genesis],
+                None,
+                false,
+                vec![&block_1, &block_2],
+                Accepted,
+            ),
+            // A peer that knows none of the locator hashes answers after the genesis block, which
+            // a locator without the genesis block does not connect to.
+            (
+                vec![unknown],
+                None,
+                false,
+                vec![&block_1, &block_2],
+                Discarded,
+            ),
+            (
+                vec![unknown],
+                None,
+                true,
+                vec![&block_1, &block_2],
+                Discarded,
+            ),
+            // Being discarded does not excuse a response that is misbehavior.
+            (
+                vec![unknown],
+                Some(block_1.hash()),
+                true,
+                vec![&block_1, &block_2],
+                Rejected("past hash_stop"),
+            ),
             (
                 vec![genesis],
                 None,
                 false,
                 vec![&block_2],
-                Some("not a locator hash"),
+                Rejected("not a locator hash"),
             ),
             (
                 vec![genesis],
                 None,
                 true,
                 vec![&block_2],
-                Some("not a locator hash"),
+                Rejected("not a locator hash"),
             ),
             (
                 vec![genesis],
                 Some(block_1.hash()),
                 false,
                 vec![&block_1],
-                None,
+                Accepted,
             ),
             (
                 vec![genesis],
                 Some(block_1.hash()),
                 false,
                 vec![&block_1, &block_2],
-                Some("past hash_stop"),
+                Rejected("past hash_stop"),
             ),
             (
                 vec![genesis],
                 Some(block_1.hash()),
                 true,
                 vec![&block_1, &block_2],
-                Some("past hash_stop"),
+                Rejected("past hash_stop"),
             ),
             (
                 Vec::new(),
                 Some(block_1.hash()),
                 false,
                 vec![&block_1],
-                None,
+                Accepted,
             ),
             (
                 Vec::new(),
                 Some(block_1.hash()),
                 false,
                 vec![&block_1, &block_2],
-                Some("empty locator"),
+                Rejected("empty locator"),
             ),
             (
                 Vec::new(),
                 None,
                 false,
                 vec![&block_1],
-                Some("empty locator"),
+                Rejected("empty locator"),
             ),
+            (Vec::new(), None, false, Vec::new(), Accepted),
         ];
 
-        for (case, (known_blocks, stop, hashes, reply, expected_error)) in
-            cases.into_iter().enumerate()
-        {
+        for (case, (known_blocks, stop, hashes, reply, outcome)) in cases.into_iter().enumerate() {
             let mut raw = raw_peer_node(&network).await;
             let reply_headers: Vec<_> = reply.iter().map(|block| block.header.clone()).collect();
             let request = if hashes {
@@ -1567,23 +1618,10 @@ async fn header_responses_are_bound_to_the_request() {
                 let _ = send.finish();
             });
 
-            match expected_error {
-                None => {
-                    let response = result.unwrap_or_else(|error| {
-                        panic!("case {case}: a valid response is accepted: {error}")
-                    });
-                    let expected: Vec<_> = reply.iter().map(|block| block.hash()).collect();
-                    let got: Vec<_> = match response {
-                        Response::BlockHeaders(headers) => headers
-                            .iter()
-                            .map(|counted| counted.header.hash())
-                            .collect(),
-                        Response::BlockHashes(hashes) => hashes,
-                        response => panic!("case {case}: unexpected response {response:?}"),
-                    };
-                    assert_eq!(got, expected, "case {case}");
-                }
-                Some(expected_error) => {
+            let expected: Vec<_> = match outcome {
+                Accepted => reply.iter().map(|block| block.hash()).collect(),
+                Discarded => Vec::new(),
+                Rejected(expected_error) => {
                     let inner = result
                         .expect_err("an unselectable response is rejected")
                         .inner_debug();
@@ -1591,9 +1629,77 @@ async fn header_responses_are_bound_to_the_request() {
                         inner.contains("ProtocolViolation") && inner.contains(expected_error),
                         "case {case}: expected {expected_error}, got {inner}"
                     );
+                    continue;
                 }
-            }
+            };
+            let response = result.unwrap_or_else(|error| {
+                panic!("case {case}: a valid response is not an error: {error}")
+            });
+            let got: Vec<_> = match response {
+                Response::BlockHeaders(headers) => headers
+                    .iter()
+                    .map(|counted| counted.header.hash())
+                    .collect(),
+                Response::BlockHashes(hashes) => hashes,
+                response => panic!("case {case}: unexpected response {response:?}"),
+            };
+            assert_eq!(got, expected, "case {case}: {outcome:?}");
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A response after a genesis block that the locator does not include is
+/// discarded without a penalty: as many of them as it takes misbehaving
+/// responses to ban a peer leave the connection open and report nothing.
+#[tokio::test]
+async fn discarded_header_responses_are_not_penalized() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let mut after_genesis = Vec::new();
+        write_headers_response(
+            &mut after_genesis,
+            &[
+                fixture.blocks[1].header.clone(),
+                fixture.blocks[2].header.clone(),
+            ],
+            false,
+        )
+        .expect("writes to a Vec");
+        let mut raw = raw_peer_node(&network).await;
+
+        let penalties_to_ban = crate::constants::MAX_PEER_MISBEHAVIOR_SCORE
+            .div_ceil(crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY);
+        for index in 0..penalties_to_ban {
+            let request = Request::FindBlocks {
+                known_blocks: vec![block::Hash([0xAB; 32])],
+                stop: None,
+            };
+            let (result, ()) = tokio::join!(call(&mut raw.node.client, request), async {
+                let (_, mut send, _recv) = accept_request(&raw.connection).await;
+                let _ = send.write_all(&after_genesis).await;
+                let _ = send.finish();
+            });
+            let response =
+                result.unwrap_or_else(|error| panic!("reply {index}: the client fails: {error}"));
+            assert!(
+                matches!(&response, Response::BlockHashes(hashes) if hashes.is_empty()),
+                "reply {index}: the headers are discarded, got {response:?}"
+            );
+        }
+
+        call(&mut raw.node.client, Request::Ping(Default::default()))
+            .await
+            .expect("the connection stays open");
+        assert!(raw.connection.close_reason().is_none());
+        assert!(
+            raw.node.misbehavior_rx.try_recv().is_err(),
+            "nothing is reported"
+        );
     })
     .await
     .expect("the test completes well within the timeout");
