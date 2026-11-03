@@ -251,6 +251,16 @@ impl ZebraDb {
             return None;
         }
 
+        self.sapling_tree_at_known_height(height)
+    }
+
+    /// Returns the Sapling note commitment tree matching the given block height, which must be at
+    /// or below the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn sapling_tree_at_known_height(
+        &self,
+        height: &Height,
+    ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
         let sapling_trees = self.db.cf_handle("sapling_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
@@ -377,6 +387,16 @@ impl ZebraDb {
             return None;
         }
 
+        self.orchard_tree_at_known_height(height)
+    }
+
+    /// Returns the Orchard note commitment tree matching the given block height, which must be at
+    /// or below the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn orchard_tree_at_known_height(
+        &self,
+        height: &Height,
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let orchard_trees = self.db.cf_handle("orchard_note_commitment_tree").unwrap();
 
         // If we know there must be a tree, search backwards for it.
@@ -526,6 +546,16 @@ impl ZebraDb {
             return None;
         }
 
+        self.ironwood_tree_at_known_height(height)
+    }
+
+    /// Returns the Ironwood note commitment tree matching the given block height, which must be
+    /// at or below the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn ironwood_tree_at_known_height(
+        &self,
+        height: &Height,
+    ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
         let ironwood_trees = self.db.cf_handle("ironwood_note_commitment_tree").unwrap();
 
         // The genesis Ironwood tree is seeded with the empty tree by the `add_ironwood_tree` format
