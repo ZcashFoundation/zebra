@@ -5,7 +5,7 @@
 
 use std::{fmt, sync::Arc};
 
-use tokio::sync::mpsc;
+use crate::loom::sync::mpsc;
 
 /// A signal sent by a [`Connection`][1] when it opens or closes.
 ///
