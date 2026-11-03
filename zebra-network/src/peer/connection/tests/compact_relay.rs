@@ -601,16 +601,81 @@ async fn failed_compact_advert_releases_fanout_before_stalled_close() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn compact_receive_demotion_releases_slot_before_write() {
+async fn compact_receive_demotion_holds_slot_until_write() {
     let _init_guard = zebra_test::init();
-    let (mut connection, _client, _inbound, _outbound, _errors) =
+    let (mut connection, _client, _inbound, mut outbound, _errors) =
         new_test_connection::<PanicAssertion>();
-    let slots = Arc::new(tokio::sync::Semaphore::new(1));
+    let slots = Arc::new(tokio::sync::Semaphore::new(3));
+    let _other_sources = slots.clone().try_acquire_many_owned(2).unwrap();
     connection.compact_receive_permit = Some(slots.clone().try_acquire_owned().unwrap());
     let demote = connection.set_compact_receive(None);
     tokio::pin!(demote);
     assert!(futures::poll!(&mut demote).is_pending());
+    assert!(
+        slots.clone().try_acquire_owned().is_err(),
+        "a fourth source must wait for the disabling write",
+    );
+    let ((), message) = tokio::join!(demote, outbound.next());
+    assert_eq!(
+        message,
+        Some(Message::SendCompact {
+            high_bandwidth: false,
+            version: 1,
+        }),
+    );
     assert_eq!(slots.available_permits(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_compact_receive_write_releases_slot_before_stalled_close() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        for high_bandwidth in [false, true] {
+            let (started, mut writes) = tokio::sync::mpsc::unbounded_channel();
+            let sink = Box::pin(futures::sink::unfold((), move |(), message: Message| {
+                assert_eq!(
+                    message,
+                    Message::SendCompact {
+                        high_bandwidth,
+                        version: 1,
+                    },
+                );
+                started.send(()).unwrap();
+                futures::future::pending::<
+                    Result<(), zebra_chain::serialization::SerializationError>,
+                >()
+            }));
+            let (mut connection, _client, _inbound, _errors) =
+                new_test_connection_with_sink::<PanicAssertion, _>(sink);
+            let slots = Arc::new(tokio::sync::Semaphore::new(3));
+            let _other_sources = slots.clone().try_acquire_many_owned(2).unwrap();
+            let permit = Some(slots.clone().try_acquire_owned().unwrap());
+            let permit = if high_bandwidth {
+                permit
+            } else {
+                connection.compact_receive_permit = permit;
+                None
+            };
+            let update = connection.set_compact_receive(permit);
+            tokio::pin!(update);
+            tokio::select! {
+                _ = &mut update => panic!("the transport never flushes"),
+                _ = writes.recv() => {}
+            }
+            assert!(slots.clone().try_acquire_owned().is_err());
+            tokio::time::advance(crate::constants::REQUEST_TIMEOUT).await;
+            assert!(
+                futures::poll!(&mut update).is_pending(),
+                "close remains blocked"
+            );
+            let _replacement = slots
+                .clone()
+                .try_acquire_owned()
+                .expect("failed sources release their slots before closing");
+        }
+    })
+    .await
+    .expect("failed receive negotiation cannot withhold replacement source slots");
 }
 
 #[tokio::test]
