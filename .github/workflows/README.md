@@ -155,13 +155,17 @@ default, so a job opts _out_ with `cache: false` rather than opting in.
 GitHub gives each repository 10 GB of cache storage by default; administrators can configure a
 higher paid limit. Least-recently-used entries are evicted when the configured limit is exceeded.
 Caches are also branch-scoped: a branch can read its own caches and the default branch's,
-caches written by PRs can never be read by anyone else, but they still evict main's caches, which
-are the only ones every PR does restore from.
+and a pull request can also read the caches of its base branch. Caches written by PRs can never be
+read by anyone else, but they still evict main's caches, which are the only ones every PR does
+restore from.
 
 Three rules keep the quota usable:
 
 1. **Only main writes.** The main building jobs set
    `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing. (There are some minor exceptions to this rule.)
+   `run-loom-tests` in `tests-unit.yml` also writes from `next`: it builds with its own
+   `RUSTFLAGS`, so no other job's cache serves it, and PRs to `next` restore from their base
+   branch. A push to `next` runs only that job of the workflow.
 2. **Wide matrices share one key.** The `test-crates.yml` matrices use
    `cache-shared-key` and seed the shared cache from a single build (`zebrad`
    which has the widest dependency closure; `zebra-rpc` for the MSRV build since
