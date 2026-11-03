@@ -170,7 +170,7 @@ OpenRPC 1.3.2 document with machine-readable method and type schemas.
 | `getbestblockheightandhash` | Returns the best-chain tip height and hash together. |
 | `getblockcount` | Returns the best-chain tip height. |
 | `getblockhash` | Returns the block hash at a height; negative indices count back from the tip. |
-| `getblock` | Returns a block by hash or height as hexadecimal data or a structured response with verbosity 1, 2, or 3. |
+| `getblock` | Returns a block by hash or height as hexadecimal data, a structured response with verbosity 1, 2, or 3, or an object with only the requested fields; see [field queries](#getblock-field-queries). |
 | `getblockheader` | Returns a block header by hash or height as hexadecimal data or a structured response. |
 | `getdifficulty` | Returns proof-of-work difficulty relative to the minimum difficulty. |
 | `gettxout` | Returns an unspent transparent output, optionally accounting for the mempool. |
@@ -236,3 +236,134 @@ receiver with a restriction on the source of its funds.
 | `z_validateaddress` | Validates a supported Zcash address and reports its address type and metadata. |
 | `z_converttex` | Converts a transparent P2PKH address to a TEX address. |
 | `z_listunifiedreceivers` | Extracts supported payment receivers from a Unified Address. |
+
+## `getblock` field queries
+
+The second `getblock` argument selects what the call returns. It keeps the
+parameter name `verbosity` in named-parameter requests.
+
+| Argument | Result |
+| --- | --- |
+| Omitted, `null`, or `1` | The block object with transaction IDs |
+| `0` | The serialized block as hexadecimal data |
+| `2` | The block object with transaction objects |
+| `3` | Verbosity 2 plus transparent-input `prevout` data and non-coinbase `fee` where spent outputs are available |
+| `true` or `false` | Verbosity 1 or 0, as in `zcashd` |
+| An array of field names | An object with `hash` and only the named fields |
+
+Field queries are a Zebra extension: `zcashd` rejects an array argument.
+Field names are case-sensitive. Their order and duplicates in the array are
+ignored, and the response lists its keys in the order of the field table below.
+`hash` is always returned, so `["hash"]` is the cheapest query.
+
+For example, using the cookie variable from [Authentication](#authentication),
+this requests only the fields that lightwalletd reads from verbosity 1:
+
+```sh
+curl --user "$(cat "$cookie")" \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getblock","params":["1",["hash","tx","trees"]]}' \
+  http://127.0.0.1:8232/
+```
+
+On Mainnet, the `result` is:
+
+```json
+{
+  "hash": "0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283",
+  "tx": ["851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609"],
+  "trees": {}
+}
+```
+
+Named parameters work the same way:
+
+```sh
+curl --user "$(cat "$cookie")" \
+  --header 'Content-Type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"getblock","params":{"hash_or_height":"1","verbosity":["height","nTx","size"]}}' \
+  http://127.0.0.1:8232/
+```
+
+```json
+{
+  "hash": "0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283",
+  "size": 1617,
+  "height": 1,
+  "nTx": 1
+}
+```
+
+`zcash-cli` parses the second `getblock` argument as JSON. With `zcash-cli`
+configured for Zebra's RPC address and credentials, quote an array as one
+shell word:
+
+```sh
+zcash-cli getblock 1 true
+zcash-cli getblock 1 '["hash","tx","trees"]'
+zcash-cli getblock 1 '["hex","tx","trees"]'
+zcash-cli getblock 0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283 '["authdataroot","height"]'
+```
+
+A bare word such as `hash` is not JSON, so `zcash-cli` rejects it before
+sending the request.
+
+### Fields
+
+Fields that need the block body read the whole serialized block, up to 2 MB.
+The other fields come from indexes that pruning keeps, so they stay available
+on [pruned nodes](pruning.md).
+
+| Field | Value | Needs the body |
+| --- | --- | --- |
+| `hash` | Block hash; always returned | No |
+| `confirmations` | Best-chain confirmations; `1` at the tip | No |
+| `size` | Serialized block size in bytes | No |
+| `height` | Block height | No |
+| `version` | Block header version | No |
+| `merkleroot` | Transaction Merkle root | No |
+| `blockcommitments` | Header block commitments, as at verbosity 1 | No |
+| `authdataroot` | [ZIP 244](https://zips.z.cash/zip-0244) authorizing data root, in `zcashd`'s byte order; no verbosity level returns it | Yes |
+| `finalsaplingroot` | Sapling note commitment tree root after the block | No |
+| `finalorchardroot` | Orchard note commitment tree root after the block; omitted before NU5 | No |
+| `nTx` | Number of transactions | No |
+| `tx`, or its alias `txids` | `tx` as transaction IDs, as at verbosity 1 | No |
+| `txdetails` | `tx` as transaction objects, as at verbosity 2 | Yes |
+| `txprevouts` | `tx` as transaction objects with `prevout` and `fee`, as at verbosity 3 | Yes, and the transactions whose outputs the block spends |
+| `time` | Block header time | No |
+| `nonce` | Equihash nonce | No |
+| `solution` | Equihash solution | No |
+| `bits` | Difficulty threshold in compact form | No |
+| `difficulty` | Difficulty relative to the network's minimum difficulty | No |
+| `chainSupply` | Chain supply after the block | No |
+| `valuePools` | Value pool balances after the block and their changes in it | No |
+| `trees` | Note commitment tree sizes after the block; empty pools are omitted | No |
+| `previousblockhash` | Previous block hash | No |
+| `nextblockhash` | Next best-chain block hash; omitted at the tip | No |
+| `hex` | The serialized block, as verbosity 0 returns it | Yes |
+
+`tx`, `txdetails`, and `txprevouts` select the shape of the single `tx` key, so
+a query can name at most one of them. `chainhistoryroot`, `chainwork`, and
+`anchor` are not available; a query naming them is rejected like any unknown
+field name.
+
+### Errors
+
+| Condition | Code and message |
+| --- | --- |
+| An unknown field name, or an array element that is not a string | `-1` `"Invalid params"`, with `data` naming the problem, such as ``unknown variant `merkelroot` `` |
+| An empty array | `-8` `"empty field list"` |
+| More than one of `tx`, `txdetails`, and `txprevouts` | `-8` `"conflicting fields: tx, txdetails"`, naming the conflicting fields |
+| A block hash that is not on the best chain | `-5` `"Block not found"` |
+| A height above the best-chain tip | `-8` `"Block not found"` |
+| A field that needs a pruned body, including a spent output's transaction for `txprevouts` | `-32603` `"Block not available (pruned data)"` |
+| `size` (unless `hex`, `authdataroot`, `txdetails`, or `txprevouts` is also requested), `chainSupply`, or `valuePools` when the node has no stored block info for the block | `-1` `"missing block info"` |
+| A field that needs a note commitment tree the state does not have for the block | `-1` `"missing Sapling tree"`, `"missing Orchard tree"`, or `"missing Ironwood tree"` |
+| Another state read failure | `-32603` with the error text |
+
+A body that is unavailable fails the whole call; Zebra never returns a partial
+object. Verbosity levels keep their own errors: an unknown block returns
+`"block height not in best chain"` at verbosity 1, 2, or 3 (`-5` for a hash,
+`-8` for a height) and `-8` `"Block not found"` at verbosity 0. Other state
+read failures return `-32603` with the error text at verbosity 1, 2, or 3 and
+from `getblockheader`, and `-1` at verbosity 0.

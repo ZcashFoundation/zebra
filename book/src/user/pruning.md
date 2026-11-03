@@ -78,6 +78,10 @@ For historical queries:
 - Requests using `getblock` verbosity 0, 2, or 3 fail with code `-32603` and
   `"Block not available (pruned data)"` when a needed body is missing. Verbosity 3 can fail
   even for a retained block if a spent output's parent transaction was pruned.
+- Requests using a `getblock` [field query](rpc.md#getblock-field-queries) work on pruned
+  history when they request only index-backed fields. Queries that request `txdetails`,
+  `txprevouts`, `authdataroot`, or `hex` fail with the same code and message when a needed body is
+  missing, including a pruned parent transaction for `txprevouts`.
 - Requests using `getrawtransaction` for a known pruned transaction fail with code `-32603` and
   `"Transaction not available (pruned data)"`. Unknown transactions still return `-5`; mempool and
   retained transactions remain available.
