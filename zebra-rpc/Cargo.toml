@@ -150,5 +150,11 @@ zebra-state = { path = "../zebra-state", features = [
 
 zebra-test = { path = "../zebra-test" }
 
+criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
+
+[[bench]]
+name = "mining_round_trip"
+harness = false
+
 [lints]
 workspace = true
