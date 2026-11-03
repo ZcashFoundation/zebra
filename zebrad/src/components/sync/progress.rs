@@ -19,7 +19,10 @@ use zebra_chain::{
 };
 use zebra_state::{ChainTipChange, TipAction, MAX_BLOCK_REORG_HEIGHT};
 
-use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
+use crate::components::{
+    health::ChainTipMetrics,
+    sync::{RestartReason, SyncStatus},
+};
 
 /// The tracing target of the sync progress logs.
 #[cfg_attr(not(feature = "sentry"), allow(dead_code))]
@@ -140,6 +143,13 @@ pub async fn show_block_chain_progress(
         let instant_now = Instant::now();
 
         let is_syncer_stopped = sync_status.is_close_to_tip();
+
+        // Measured before the tip is known too, so a stalled genesis block download shows up, and
+        // measured here, so the age keeps growing while the syncer waits on that block.
+        let diagnostics = sync_status.diagnostics();
+        let oldest_in_flight_age = diagnostics.oldest_in_flight_age(instant_now);
+        metrics::gauge!("sync.downloads.oldest_age_seconds")
+            .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
 
         if let Some(estimated_height) =
             latest_chain_tip.estimate_network_chain_tip_height(&network, now)
@@ -279,6 +289,10 @@ pub async fn show_block_chain_progress(
                     %target_block_spacing,
                     %max_block_spacing,
                     ?is_syncer_stopped,
+                    last_restart = diagnostics.last_restart.map(RestartReason::as_str),
+                    restarts_without_progress = diagnostics.restarts_without_progress,
+                    in_flight = diagnostics.in_flight,
+                    oldest_in_flight_secs = oldest_in_flight_age.map(|age| age.as_secs()),
                     "chain updates have stalled, \
                      state height has not increased for {} minutes. \
                      Hint: check your network connection, \

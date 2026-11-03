@@ -166,7 +166,12 @@ With Sentry enabled, Zebra sends:
   Sessions share a random identifier per run, so crash-free users measures
   runs, not people. A process killed before shutdown handling cannot send its
   final session update.
-- The [block timing histograms](metrics.md#block-timing) as Sentry metrics.
+- The [block timing](metrics.md#block-timing) and
+  [sync stall](metrics.md#sync-stall-metrics) metrics as Sentry metrics, along
+  with these metrics once a minute, which help compare nodes:
+  `sync.verified.block.count`, `gossip.verified.block.count`,
+  `zcash.mempool.size.transactions`, and
+  `zebra.state.rocksdb.total_disk_size_bytes`.
 
 Events carry `chain.network` and, once the progress task observes a chain tip,
 `chain.height` and `chain.network_upgrade`. Logs carry the same information
