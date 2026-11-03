@@ -1593,18 +1593,12 @@ impl DiskDb {
     /// Returns the database options for the finalized state database.
     pub(crate) fn options() -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
-        let mut block_based_opts = rocksdb::BlockBasedOptions::default();
+        let block_based_opts = Self::block_based_options();
 
         const ONE_MEGABYTE: usize = 1024 * 1024;
 
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
-
-        // Use the recommended Ribbon filter setting for all column families.
-        //
-        // Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.
-        // (They aren't needed for single-valued column families, but they don't hurt either.)
-        block_based_opts.set_ribbon_filter(9.9);
 
         // Use the recommended LZ4 compression type.
         //
@@ -1636,6 +1630,19 @@ impl DiskDb {
         opts.set_block_based_table_factory(&block_based_opts);
 
         opts
+    }
+
+    /// Returns the block-based table options for the finalized state database.
+    fn block_based_options() -> rocksdb::BlockBasedOptions {
+        let mut block_based_opts = rocksdb::BlockBasedOptions::default();
+
+        // Use the recommended Ribbon filter setting for all column families.
+        //
+        // Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.
+        // (They aren't needed for single-valued column families, but they don't hurt either.)
+        block_based_opts.set_ribbon_filter(9.9);
+
+        block_based_opts
     }
 
     /// Calculate the database's share of `open_file_limit`
