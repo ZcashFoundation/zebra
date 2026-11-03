@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Mining templates that contain mempool transactions are served only after they pass background proposal validation; miners receive coinbase-only work for the tip until then. A solved block built from an unmodified template reuses that verdict, so `submitblock` only checks proof of work before committing it. Without a live template updater, `getblocktemplate` validates a transaction-bearing fallback template before returning it, and reports a rejected template as an error.'
+time: 2026-11-03T00:00:00Z

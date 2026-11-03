@@ -6,6 +6,12 @@
 //! component. So [`run()`] keeps current work ready in a [`TemplateCache`], and the RPC checks
 //! that its parent is still the tip or the current proof-of-work checked candidate.
 //!
+//! Every served template is either coinbase-only or a build that passed proposal validation. A
+//! transaction-bearing build is staged until [`validate_templates()`] accepts it, and miners keep
+//! the coinbase-only work for that parent in the meantime. So a solved block that changes only the
+//! nonce and Equihash solution reuses the cached verdict in `submitblock`, instead of waiting for
+//! transaction and contextual verification.
+//!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
 //! only serves the current tip or a proof-of-work checked parent under verification. Early work
 //! is coinbase-only and withdrawn on rejection or timeout. Commitment preserves that work while a
@@ -102,10 +108,19 @@ const BUILD_STARTED: u8 = 2;
 /// A block template for the current mining parent, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
 ///
+/// Served work is either coinbase-only or a build that passed proposal validation, so a solved
+/// block that changes only the nonce and Equihash solution reuses that verdict in `submitblock`.
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
-pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
+pub(crate) struct TemplateCache {
+    /// The work `getblocktemplate` serves.
+    served: Arc<watch::Sender<Option<TemplateState>>>,
+    /// The latest transaction-bearing build, awaiting [`validate_templates()`].
+    staged: Arc<watch::Sender<Option<Arc<BlockTemplateResponse>>>>,
+    /// Whether [`run()`] owns template construction.
+    updater: Arc<AtomicBool>,
+}
 
 struct TemplateState {
     template: Option<Arc<BlockTemplateResponse>>,
@@ -115,7 +130,11 @@ struct TemplateState {
 
 impl Default for TemplateCache {
     fn default() -> Self {
-        Self(Arc::new(watch::Sender::new(None)), Arc::default())
+        Self {
+            served: Arc::new(watch::Sender::new(None)),
+            staged: Arc::new(watch::Sender::new(None)),
+            updater: Arc::default(),
+        }
     }
 }
 
@@ -124,8 +143,8 @@ struct UpdaterGuard(TemplateCache);
 
 impl Drop for UpdaterGuard {
     fn drop(&mut self) {
-        self.0 .1.store(false, Ordering::Release);
-        self.0 .0.send_modify(|_| {});
+        self.0.updater.store(false, Ordering::Release);
+        self.0.served.send_modify(|_| {});
     }
 }
 
@@ -160,11 +179,11 @@ impl TemplateChanges {
 impl TemplateCache {
     /// Whether the updater, rather than an individual request, owns template construction.
     pub(crate) fn updater_is_running(&self) -> bool {
-        self.1.load(Ordering::Acquire)
+        self.updater.load(Ordering::Acquire)
     }
 
     fn claim_updater(&self) -> Option<UpdaterGuard> {
-        self.1
+        self.updater
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| UpdaterGuard(self.clone()))
@@ -172,7 +191,7 @@ impl TemplateCache {
 
     /// Returns `true` if the precomputed template extends `tip_hash`.
     fn holds_tip(&self, tip_hash: block::Hash) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.template.as_ref())
@@ -181,13 +200,13 @@ impl TemplateCache {
 
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
-        self.0.borrow().is_none()
+        self.served.borrow().is_none()
     }
 
     /// Returns `true` if no template is currently available.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .is_none_or(|state| state.template.is_none())
@@ -198,7 +217,7 @@ impl TemplateCache {
         if self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .map(|state| state.published_at + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL))
@@ -209,14 +228,14 @@ impl TemplateCache {
         if !self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.error.clone())
     }
 
     fn record_error(&self, error: (Option<block::Hash>, ErrorObjectOwned)) {
-        self.0.send_modify(|state| {
+        self.served.send_modify(|state| {
             let state = state.get_or_insert_with(|| TemplateState {
                 template: None,
                 published_at: Instant::now(),
@@ -233,32 +252,75 @@ impl TemplateCache {
     /// after it as unseen, so a template published while the caller decides what to do with the
     /// one it just read still wakes it.
     pub(crate) fn subscribe(&self) -> TemplateChanges {
-        TemplateChanges(self.0.subscribe())
+        TemplateChanges(self.served.subscribe())
+    }
+
+    /// Subscribes to the builds staged for validation, including one staged before this call.
+    fn subscribe_staged(&self) -> watch::Receiver<Option<Arc<BlockTemplateResponse>>> {
+        let mut staged = self.staged.subscribe();
+        staged.mark_changed();
+        staged
+    }
+
+    /// Stages a transaction-bearing build for validation.
+    ///
+    /// The build is served once [`validate_templates()`] accepts it; the previously served work
+    /// for its parent remains available until then. Coinbase-only work uses [`Self::publish()`].
+    fn stage(&self, template: BlockTemplateResponse) {
+        debug_assert!(
+            !template.transactions.is_empty(),
+            "coinbase-only work needs no validation and is published directly"
+        );
+        self.staged.send_replace(Some(Arc::new(template)));
+    }
+
+    /// Serves a validated build, unless work for another parent is served.
+    ///
+    /// A tip change publishes coinbase-only work for the new parent while a build for the old
+    /// parent can still be in validation, so a build only replaces work for its own parent, or
+    /// fills a cache without work. Returns whether the build was published.
+    fn promote(&self, template: Arc<BlockTemplateResponse>) -> bool {
+        self.served.send_if_modified(|state| {
+            let previous = state.as_ref().and_then(|state| state.template.as_ref());
+            if previous.is_some_and(|previous| {
+                previous.previous_block_hash != template.previous_block_hash
+            }) {
+                return false;
+            }
+            let template =
+                match previous.and_then(|previous| preserved_max_timestamp(previous, &template)) {
+                    Some(max_timestamp) if max_timestamp != template.long_poll_id.max_timestamp => {
+                        let mut template = (*template).clone();
+                        template.long_poll_id.max_timestamp = max_timestamp;
+                        Arc::new(template)
+                    }
+                    _ => template,
+                };
+            *state = Some(TemplateState {
+                template: Some(template),
+                published_at: Instant::now(),
+                error: None,
+            });
+            true
+        })
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
-    ///
-    /// An unchanged parent, difficulty and lower bound makes the previous timestamp range a
-    /// subset of the new one. A Testnet difficulty transition changes difficulty or the lower
-    /// bound, so it must retain the new identity instead.
     pub(crate) fn preserve_work_identity(&self, template: &mut BlockTemplateResponse) {
-        let cached = self.0.borrow();
-        if let Some(previous) = cached.as_ref().and_then(|state| state.template.as_ref()) {
-            if previous.previous_block_hash == template.previous_block_hash
-                && previous.height == template.height
-                && previous.bits == template.bits
-                && previous.min_time == template.min_time
-                && previous.max_time <= template.max_time
-            {
-                template.long_poll_id.max_timestamp = previous.long_poll_id.max_timestamp;
-            }
+        let cached = self.served.borrow();
+        if let Some(max_timestamp) = cached
+            .as_ref()
+            .and_then(|state| state.template.as_ref())
+            .and_then(|previous| preserved_max_timestamp(previous, template))
+        {
+            template.long_poll_id.max_timestamp = max_timestamp;
         }
     }
 
     /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
     pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
         self.preserve_work_identity(&mut template);
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: Some(Arc::new(template)),
             published_at: Instant::now(),
             error: None,
@@ -267,7 +329,7 @@ impl TemplateCache {
 
     /// Withdraws cached work and wakes long polls.
     pub(crate) fn clear(&self) {
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: None,
             published_at: Instant::now(),
             error: None,
@@ -282,7 +344,7 @@ impl TemplateCache {
         network: &Network,
         now: DateTime32,
     ) -> Option<Arc<BlockTemplateResponse>> {
-        let cached = self.0.borrow();
+        let cached = self.served.borrow();
         let template = cached.as_ref()?.template.as_ref()?;
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
@@ -307,10 +369,28 @@ impl TemplateCache {
     }
 }
 
+/// Returns the long poll timestamp `previous` work keeps when `template` replaces it.
+///
+/// An unchanged parent, difficulty and lower bound makes the previous timestamp range a
+/// subset of the new one. A Testnet difficulty transition changes difficulty or the lower
+/// bound, so it must retain the new identity instead.
+fn preserved_max_timestamp(
+    previous: &BlockTemplateResponse,
+    template: &BlockTemplateResponse,
+) -> Option<u32> {
+    (previous.previous_block_hash == template.previous_block_hash
+        && previous.height == template.height
+        && previous.bits == template.bits
+        && previous.min_time == template.min_time
+        && previous.max_time <= template.max_time)
+        .then_some(previous.long_poll_id.max_timestamp)
+}
+
 /// Keeps `cache` filled with a block template for the current mining parent.
 ///
-/// Publishes a coinbase-only template as soon as the chain tip changes, then replaces it with a
-/// template that contains mempool transactions. Rebuilds after throttled mempool changes, with a
+/// Publishes a coinbase-only template as soon as the chain tip changes, then stages a template
+/// that contains mempool transactions, which [`validate_templates()`] serves once it passes
+/// proposal validation. Rebuilds after throttled mempool changes, with a
 /// backstop for missed events and clock changes after at least [`MEMPOOL_LONG_POLL_INTERVAL`]
 /// seconds. Both waits respect the previous build's duration. A candidate under verification
 /// takes priority and receives only coinbase-only work.
@@ -345,7 +425,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     // Dropping the updater also cancels its single validation worker.
     let mut validation = tokio::task::JoinSet::new();
     validation.spawn(validate_templates(
-        cache.subscribe(),
+        cache.clone(),
         network.clone(),
         verifier,
         latest_chain_tip.clone(),
@@ -585,7 +665,13 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     was_failing = false;
                 }
 
-                cache.publish(template);
+                // Coinbase-only work needs no validation. A transaction-bearing build is served
+                // once its proposal validates, so a solved block can reuse that verdict.
+                if template.transactions.is_empty() {
+                    cache.publish(template);
+                } else {
+                    cache.stage(template);
+                }
                 Some(mempool_tx_ids)
             }
             // The state and the mempool disagreed about the tip, so retry with fresh data.
@@ -720,29 +806,42 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
     }
 }
 
-/// Validate one template at a time, coalescing publications while the verifier is busy.
+/// Validates staged builds one at a time, and serves the ones that pass.
 ///
-/// Abandon outdated parents immediately, including queued conversion and verification work.
+/// Coalesces builds staged while the verifier is busy, and abandons outdated parents immediately,
+/// including queued conversion and verification work. A build staged before the tip watch
+/// reports its parent waits for that notification. A failure keeps the previously served work, so
+/// miners hold coinbase-only or validated work throughout.
 async fn validate_templates(
-    mut templates: TemplateChanges,
+    cache: TemplateCache,
     network: Network,
     verifier: impl BlockVerifierService,
     mut latest_chain_tip: impl ChainTip,
 ) {
+    let mut staged = cache.subscribe_staged();
+    // A build whose parent the tip watch has not reported yet, or that it reported superseded.
+    let mut pending = None;
+    let mut was_failing = false;
     loop {
-        templates.changed().await;
-        let template = templates
-            .0
-            .borrow_and_update()
-            .as_ref()
-            .filter(|state| state.error.is_none())
-            .and_then(|state| state.template.clone());
-        let Some(template) = template.filter(|template| !template.transactions.is_empty()) else {
+        tokio::select! {
+            biased;
+            // This task owns a cache clone, so the staged channel outlives it.
+            _ = staged.changed() => pending = staged.borrow_and_update().clone(),
+            changed = latest_chain_tip.best_tip_changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+        }
+        let Some(template) = pending.take_if(|template| {
+            latest_chain_tip.best_tip_hash() == Some(template.previous_block_hash)
+        }) else {
             continue;
         };
         let parent = template.previous_block_hash;
         let validation = async {
             let network = network.clone();
+            let template = template.clone();
             let proposal = AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
                 proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
             }))
@@ -775,8 +874,33 @@ async fn validate_templates(
             } => continue,
             result = validation => result,
         };
-        if let Err(error) = result {
-            tracing::debug!(?error, "background block proposal validation failed");
+        match result {
+            Ok(_) => {
+                if was_failing {
+                    tracing::info!("block template validation recovered");
+                    was_failing = false;
+                }
+                if latest_chain_tip.best_tip_hash() != Some(parent) || !cache.promote(template) {
+                    tracing::debug!(
+                        ?parent,
+                        "discarding a validated template for a superseded parent"
+                    );
+                }
+            }
+            Err(error) => {
+                // Miners keep coinbase-only work for this parent, so they silently lose fees while
+                // this keeps failing. Log the start of a failing spell loudly, then stay quiet.
+                if was_failing {
+                    tracing::debug!(?error, "block template failed validation");
+                } else {
+                    tracing::warn!(
+                        ?error,
+                        "block template failed validation, serving coinbase-only work until this \
+                         recovers"
+                    );
+                    was_failing = true;
+                }
+            }
         }
     }
 }

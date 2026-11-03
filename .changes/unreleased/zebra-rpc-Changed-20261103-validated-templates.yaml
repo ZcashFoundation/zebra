@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The template updater stages transaction-bearing builds until background proposal validation accepts them, so `getblocktemplate` serves only coinbase-only or validated work. Fallback templates built without a live updater are validated before they are returned.'
+time: 2026-11-03T00:00:00Z
