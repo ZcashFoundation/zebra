@@ -1,13 +1,15 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     block::{
         Block,
         Commitment::{self, ChainHistoryActivationReserved},
+        Height,
     },
-    history_tree::NonEmptyHistoryTree,
-    parameters::{Network, NetworkUpgrade},
-    primitives::zcash_history::BlockCommitmentTreeRoots,
+    history_tree::{HistoryPeak, HistoryTreeError, NonEmptyHistoryTree},
+    orchard,
+    parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
+    primitives::zcash_history::{self, BlockCommitmentTreeRoots},
     sapling,
     serialization::ZcashDeserializeInto,
 };
@@ -72,6 +74,16 @@ fn push_and_prune_for_network_upgrade(
     assert_eq!(tree.size(), 1);
     assert_eq!(tree.peaks().len(), 1);
     assert_eq!(tree.current_height().0, height);
+    // Heartwood and Canopy trees have V1 nodes, which carry no Orchard or Ironwood root.
+    assert_eq!(
+        tree.last_peak()?,
+        HistoryPeak {
+            end_height: Height(height),
+            end_sapling_root: (&first_sapling_root).into(),
+            end_orchard_root: None,
+            end_ironwood_root: None,
+        },
+    );
 
     // Compute root hash of the history tree, which will be included in the next block
     let first_root = tree.hash();
@@ -110,6 +122,16 @@ fn push_and_prune_for_network_upgrade(
     // The tree must have been pruned, resulting in a single peak (the parent).
     assert_eq!(tree.peaks().len(), 1);
     assert_eq!(tree.current_height().0, height + 1);
+    // The parent's end fields are its rightmost leaf's: the second block's.
+    assert_eq!(
+        tree.last_peak()?,
+        HistoryPeak {
+            end_height: Height(height + 1),
+            end_sapling_root: (&second_sapling_root).into(),
+            end_orchard_root: None,
+            end_ironwood_root: None,
+        },
+    );
 
     Ok(())
 }
@@ -189,6 +211,279 @@ fn upgrade_for_network_upgrade(network: Network, network_upgrade: NetworkUpgrade
     assert_eq!(tree.size(), 1);
     assert_eq!(tree.peaks().len(), 1);
     assert_eq!(tree.current_height().0, height);
+
+    Ok(())
+}
+
+/// Returns the Mainnet test vector block at `height`.
+fn mainnet_block(height: u32) -> Arc<Block> {
+    Arc::new(
+        zebra_test::vectors::MAINNET_BLOCKS
+            .get(&height)
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    )
+}
+
+/// Asserts that `tree` and the same tree rebuilt from its cached peaks both
+/// report `expected` as their last peak.
+///
+/// The rebuilt tree combines its peaks into a new root, so this also checks
+/// that the root of a multi-peak tree carries its rightmost peak's fields.
+fn assert_last_peak(tree: &NonEmptyHistoryTree, expected: HistoryPeak) -> Result<()> {
+    assert_eq!(tree.last_peak()?, expected);
+
+    let rebuilt = NonEmptyHistoryTree::from_cache(
+        tree.network(),
+        tree.size(),
+        tree.peaks().clone(),
+        tree.current_height(),
+    )?;
+    assert_eq!(rebuilt.last_peak()?, expected);
+    assert_eq!(rebuilt.hash(), tree.hash());
+
+    Ok(())
+}
+
+/// Returns the Orchard root in the Mainnet Orchard root vector `bytes`.
+///
+/// Those vectors are stored reversed: their hex strings are already in
+/// serialized order, and reversing them makes values above the Pallas modulus.
+fn orchard_root(bytes: [u8; 32]) -> Result<orchard::tree::Root> {
+    let mut bytes = bytes;
+    bytes.reverse();
+    Ok(orchard::tree::Root::try_from(bytes)?)
+}
+
+/// Returns a single-leaf Canopy history tree on Mainnet whose leaf ends at
+/// `end_height`.
+fn tree_ending_at(end_height: u64) -> Result<NonEmptyHistoryTree> {
+    let network = Network::Mainnet;
+    let current_height = NetworkUpgrade::Canopy
+        .activation_height(&network)
+        .expect("Canopy is active on Mainnet");
+
+    let leaf = <zcash_history::V1 as zcash_history::Version>::block_to_history_node(
+        mainnet_block(current_height.0),
+        &network,
+        BlockCommitmentTreeRoots {
+            sapling: &Default::default(),
+            orchard: &Default::default(),
+            ironwood: &Default::default(),
+        },
+    );
+    let leaf = ::zcash_history::NodeData {
+        start_height: end_height,
+        end_height,
+        ..leaf
+    };
+    let mut bytes = [0; ::zcash_history::MAX_ENTRY_SIZE];
+    ::zcash_history::Entry::<zcash_history::V1>::new_leaf(leaf)
+        .write(&mut &mut bytes[..])
+        .expect("a leaf entry fits in the maximum entry size");
+
+    Ok(NonEmptyHistoryTree::from_cache(
+        &network,
+        1,
+        BTreeMap::from([(0, zcash_history::Entry::from_raw_bytes_padded(&bytes))]),
+        current_height,
+    )?)
+}
+
+/// NU5 trees have V2 nodes, whose last peak carries the Orchard root as well
+/// as the Sapling root, checked with real Mainnet blocks and roots.
+#[test]
+fn last_peak_reads_the_orchard_root_of_v2_nodes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (_blocks, sapling_roots) = network.block_sapling_roots_map();
+    let orchard_roots = network.orchard_anchors();
+    let roots = |height: u32| -> Result<(sapling::tree::Root, orchard::tree::Root)> {
+        Ok((
+            sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("vector exists"))?,
+            orchard_root(**orchard_roots.get(&height).expect("vector exists"))?,
+        ))
+    };
+    let peak = |height: u32| -> Result<HistoryPeak> {
+        let (sapling_root, orchard_root) = roots(height)?;
+        Ok(HistoryPeak {
+            end_height: Height(height),
+            end_sapling_root: (&sapling_root).into(),
+            end_orchard_root: Some((&orchard_root).into()),
+            end_ironwood_root: None,
+        })
+    };
+
+    // Three consecutive NU5 blocks, the first ones the vectors have.
+    let first = 1_687_106;
+    assert_eq!(
+        NetworkUpgrade::current(&network, Height(first)),
+        NetworkUpgrade::Nu5
+    );
+
+    let (sapling_root, orchard_root) = roots(first)?;
+    let mut tree = NonEmptyHistoryTree::from_block(
+        &network,
+        mainnet_block(first),
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root,
+            orchard: &orchard_root,
+            ironwood: &Default::default(),
+        },
+    )?;
+    assert_last_peak(&tree, peak(first)?)?;
+
+    for height in [first + 1, first + 2] {
+        let (sapling_root, orchard_root) = roots(height)?;
+        tree.push(
+            mainnet_block(height),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &Default::default(),
+            },
+        )?;
+        assert_last_peak(&tree, peak(height)?)?;
+    }
+
+    // Three leaves make two peaks, so the last peak came from a combined root.
+    assert_eq!(tree.peaks().len(), 2);
+
+    Ok(())
+}
+
+/// NU6.3 trees have V3 nodes, whose last peak also carries the Ironwood root
+/// (ZIP 258).
+///
+/// No NU6.3 block vectors exist, so this uses a Regtest network that activates
+/// NU6.3 at height 1, with the real Mainnet blocks 1 to 3, whose nodes only
+/// depend on their headers and transaction counts, and a distinct valid root
+/// for each pool and height.
+#[test]
+fn last_peak_reads_the_ironwood_root_of_v3_nodes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    assert_eq!(
+        NetworkUpgrade::current(&network, Height(1)),
+        NetworkUpgrade::Nu6_3
+    );
+
+    // Valid Sapling and Pallas field elements from the NU5 vectors, at heights whose Orchard roots
+    // all differ.
+    let (_blocks, sapling_roots) = Network::Mainnet.block_sapling_roots_map();
+    let orchard_roots = Network::Mainnet.orchard_anchors();
+    let vector_heights = [1_687_106, 1_687_107, 1_687_118, 1_687_121];
+    let roots = |height: u32| -> Result<(
+        sapling::tree::Root,
+        orchard::tree::Root,
+        orchard::tree::Root,
+    )> {
+        let index = usize::try_from(height - 1)?;
+        Ok((
+            sapling::tree::Root::try_from(
+                **sapling_roots
+                    .get(&vector_heights[index])
+                    .expect("vector exists"),
+            )?,
+            orchard_root(
+                **orchard_roots
+                    .get(&vector_heights[index])
+                    .expect("vector exists"),
+            )?,
+            orchard_root(
+                **orchard_roots
+                    .get(&vector_heights[index + 1])
+                    .expect("vector exists"),
+            )?,
+        ))
+    };
+    let peak = |height: u32| -> Result<HistoryPeak> {
+        let (sapling_root, orchard_root, ironwood_root) = roots(height)?;
+        assert_ne!(orchard_root, ironwood_root, "the pools have distinct roots");
+        Ok(HistoryPeak {
+            end_height: Height(height),
+            end_sapling_root: (&sapling_root).into(),
+            end_orchard_root: Some((&orchard_root).into()),
+            end_ironwood_root: Some((&ironwood_root).into()),
+        })
+    };
+    let block = |height: u32| -> Arc<Block> {
+        Arc::new(
+            zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+                .get(&height)
+                .expect("test vector exists")
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid"),
+        )
+    };
+
+    let (sapling_root, orchard_root, ironwood_root) = roots(1)?;
+    let mut tree = NonEmptyHistoryTree::from_block(
+        &network,
+        block(1),
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root,
+            orchard: &orchard_root,
+            ironwood: &ironwood_root,
+        },
+    )?;
+    assert_last_peak(&tree, peak(1)?)?;
+
+    for height in [2, 3] {
+        let (sapling_root, orchard_root, ironwood_root) = roots(height)?;
+        tree.push(
+            block(height),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &ironwood_root,
+            },
+        )?;
+        assert_last_peak(&tree, peak(height)?)?;
+    }
+    assert_eq!(tree.peaks().len(), 2);
+
+    Ok(())
+}
+
+/// A peak whose end height is not a block height is an error, not a
+/// truncated height.
+#[test]
+fn last_peak_rejects_end_heights_above_the_maximum() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for end_height in [
+        u64::from(Height::MAX.0) + 1,
+        u64::from(u32::MAX),
+        u64::from(u32::MAX) + 1,
+    ] {
+        assert_eq!(
+            tree_ending_at(end_height)?.last_peak(),
+            Err(HistoryTreeError::InvalidPeak(
+                "the end height is above the maximum block height"
+            )),
+            "{end_height}",
+        );
+    }
+
+    // The maximum block height itself is valid.
+    assert_eq!(
+        tree_ending_at(u64::from(Height::MAX.0))?
+            .last_peak()?
+            .end_height,
+        Height::MAX,
+    );
 
     Ok(())
 }

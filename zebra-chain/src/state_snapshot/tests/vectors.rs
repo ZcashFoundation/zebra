@@ -1,6 +1,10 @@
-//! Fixed test vectors for content-addressed synchronization artifacts.
+//! Fixed test vectors for state snapshot commitments.
 
-use crate::state_snapshot::ObjectHash;
+use crate::{
+    block,
+    parameters::Network,
+    state_snapshot::{ObjectHash, StateSnapshotCommitment},
+};
 
 /// The SHA-256 hash of the empty string, from FIPS 180-4's test vectors.
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -34,6 +38,48 @@ fn object_hash_hex_round_trips() {
     assert!(format!("zz{}", &EMPTY_SHA256[2..])
         .parse::<ObjectHash>()
         .is_err());
+}
+
+#[test]
+fn commitment_serializes_as_height_and_hex_hashes() {
+    let _init_guard = zebra_test::init();
+
+    let commitment = StateSnapshotCommitment {
+        height: block::Height(3_522_060),
+        block_hash: block::Hash([0x11; 32]),
+        manifest: ObjectHash([0x22; 32]),
+    };
+
+    let json = serde_json::to_value(commitment).expect("serializes");
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "height": 3_522_060,
+            "hash": "11".repeat(32),
+            "manifest": "22".repeat(32),
+        }),
+    );
+
+    let parsed: StateSnapshotCommitment = serde_json::from_value(json).expect("deserializes");
+    assert_eq!(parsed, commitment);
+
+    // Unknown fields are rejected, so a typo in a config file is an error.
+    let unknown = serde_json::json!({
+        "height": 1,
+        "hash": "11".repeat(32),
+        "manifest": "22".repeat(32),
+        "size": 1,
+    });
+    assert!(serde_json::from_value::<StateSnapshotCommitment>(unknown).is_err());
+}
+
+#[test]
+fn no_network_pins_a_commitment_yet() {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
+        assert_eq!(network.state_snapshot_commitment(), None, "{network}");
+    }
 }
 
 /// Bytes `0, 1, ..., 31`, which read differently in each byte order.
@@ -71,4 +117,56 @@ fn object_hash_hex_is_in_byte_order_and_case_insensitive() {
     // Hashes order by their bytes, so sorted lists are in hex order too.
     assert!(ObjectHash([0x00; 32]) < ObjectHash([0x01; 32]));
     assert!(ObjectHash([0xFF; 32]) > hash);
+}
+
+#[test]
+fn commitment_block_hash_is_in_display_order_and_manifest_in_byte_order() {
+    let _init_guard = zebra_test::init();
+
+    let commitment = StateSnapshotCommitment {
+        height: block::Height(7),
+        block_hash: block::Hash(ascending_bytes()),
+        manifest: ObjectHash(ascending_bytes()),
+    };
+
+    let forward = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+    let reversed = "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100";
+    assert_eq!(commitment.block_hash.to_string(), reversed);
+
+    let json = serde_json::to_value(commitment).expect("serializes");
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "height": 7,
+            "hash": reversed,
+            "manifest": forward,
+        }),
+    );
+    assert_eq!(
+        serde_json::from_value::<StateSnapshotCommitment>(json).expect("deserializes"),
+        commitment,
+    );
+
+    // Each field is required, and must be well-formed.
+    for (field, value) in [
+        ("height", serde_json::json!("7")),
+        ("hash", serde_json::json!(&reversed[2..])),
+        ("manifest", serde_json::json!(format!("{forward}00"))),
+    ] {
+        let mut json = serde_json::to_value(commitment).expect("serializes");
+        json[field] = value;
+        assert!(
+            serde_json::from_value::<StateSnapshotCommitment>(json).is_err(),
+            "malformed {field}",
+        );
+
+        let mut json = serde_json::to_value(commitment).expect("serializes");
+        json.as_object_mut()
+            .expect("a commitment is an object")
+            .remove(field);
+        assert!(
+            serde_json::from_value::<StateSnapshotCommitment>(json).is_err(),
+            "missing {field}",
+        );
+    }
 }
