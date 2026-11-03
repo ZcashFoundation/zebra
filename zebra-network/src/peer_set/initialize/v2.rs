@@ -286,7 +286,10 @@ where
         relay: true,
     };
 
-    // The default limits preserve the larger send window of snapshot-serving nodes.
+    // The default limits preserve the larger send window of snapshot-serving nodes. A memory
+    // budget only chooses the default windows for a node that serves no artifacts, and gives a
+    // serving node `SERVING` or compact windows (see `MemoryLimits::for_budget`), so this never
+    // buffers more than the budget charged.
     let windows = if quic_windows == quic::Windows::default() {
         quic::Windows::for_services(identity.services)
     } else {

@@ -14,7 +14,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    constants::{
+        DEFAULT_PEERSET_INITIAL_TARGET_SIZE, INBOUND_PEER_LIMIT_MULTIPLIER,
+        OUTBOUND_PEER_LIMIT_MULTIPLIER,
+    },
     types::PeerServices,
     Config, ObjectIndex, ObjectSource,
 };
@@ -221,6 +224,42 @@ fn total_connection_limit_includes_v2_share_only_when_enabled() {
     assert_eq!(tiny.v2_outbound_connection_limit(), 1);
     assert_eq!(tiny.v2_inbound_connection_limit(), 1);
     assert_eq!(tiny.peerset_total_connection_limit(), 2);
+}
+
+/// The memory limits' peer set target size replaces the configured one, whatever it is, except
+/// for a zero target size; no target size keeps the configured one.
+#[test]
+fn limits_target_size_replaces_the_configured_size() {
+    let _init_guard = zebra_test::init();
+
+    for configured in [DEFAULT_PEERSET_INITIAL_TARGET_SIZE, 3, 50] {
+        let config = Config {
+            peerset_initial_target_size: configured,
+            ..Config::default()
+        };
+
+        assert_eq!(
+            config.clone().with_peerset_initial_target_size(None),
+            config,
+            "no target size keeps the config"
+        );
+        assert_eq!(
+            config
+                .clone()
+                .with_peerset_initial_target_size(Some(8))
+                .peerset_initial_target_size,
+            8,
+            "the limits replace a configured size of {configured}"
+        );
+        assert_eq!(
+            config
+                .clone()
+                .with_peerset_initial_target_size(Some(0))
+                .peerset_initial_target_size,
+            configured,
+            "a zero target size keeps the configured size"
+        );
+    }
 }
 
 #[test]
@@ -1179,4 +1218,60 @@ fn v2_peer_discovery_defaults_on_and_round_trips() {
         0,
         "no endpoint, no slots"
     );
+}
+
+/// With the checkpoint sync engine registered, a small peer target still opens and aims for
+/// [`MIN_V2_SYNC_OUTBOUND_CONNECTIONS`] outbound version 2 connections; inbound limits, larger
+/// targets and nodes without an endpoint are unchanged.
+#[tokio::test]
+async fn checkpoint_sync_floors_the_v2_outbound_target() {
+    use crate::{config::MIN_V2_SYNC_OUTBOUND_CONNECTIONS, SyncPeersSender, V2Endpoint};
+
+    let _init_guard = zebra_test::init();
+
+    let (sync_peers, _peers) = SyncPeersSender::spawn();
+    let v2 = Config {
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+    let engine = Config {
+        v2_sync_peers: Some(sync_peers.clone()),
+        ..v2.clone()
+    };
+    assert_eq!(v2.v2_endpoint(), V2Endpoint::Enabled);
+    assert_eq!(engine.v2_endpoint(), V2Endpoint::CheckpointSync);
+
+    assert_eq!(v2.v2_outbound_connection_limit(), 1);
+    assert_eq!(v2.v2_outbound_target(), 1);
+    assert_eq!(
+        engine.v2_outbound_connection_limit(),
+        MIN_V2_SYNC_OUTBOUND_CONNECTIONS
+    );
+    assert_eq!(
+        engine.v2_outbound_target(),
+        MIN_V2_SYNC_OUTBOUND_CONNECTIONS
+    );
+    assert_eq!(
+        engine.v2_inbound_connection_limit(),
+        v2.v2_inbound_connection_limit()
+    );
+    assert_eq!(
+        engine.peerset_total_connection_limit(),
+        v2.peerset_total_connection_limit() + 1
+    );
+
+    let large = Config {
+        peerset_initial_target_size: 8,
+        ..engine.clone()
+    };
+    assert_eq!(large.v2_outbound_target(), 4);
+
+    let no_endpoint = Config {
+        v2_listen_addr: None,
+        ..engine
+    };
+    assert_eq!(no_endpoint.v2_endpoint(), V2Endpoint::Disabled);
+    assert_eq!(no_endpoint.v2_outbound_connection_limit(), 0);
+    assert_eq!(no_endpoint.v2_outbound_target(), 0);
 }

@@ -85,6 +85,7 @@ mod tests;
 
 use addr_budget::AddrTokenBucket;
 use announcements::{AnnouncementPermits, AnnouncementWriter};
+pub(crate) use inbound::INBOUND_REQUEST_CONCURRENCY;
 
 /// What this node provides to every version 2 connection.
 #[derive(Clone)]
