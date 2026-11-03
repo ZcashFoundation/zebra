@@ -13,7 +13,10 @@ use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{
         v2::{
-            handshake::{handshake, HandshakeError, LocalIdentity, Role},
+            handshake::{
+                handshake, handshake_requiring, CompletedHandshake, HandshakeError, LocalIdentity,
+                Role,
+            },
             nonces::NonceRegistry,
             tests::{connected_pair, identity, run_handshake},
         },
@@ -471,6 +474,132 @@ async fn non_serving_outbound_peers_are_declined_while_syncing() {
         theirs.expect("the initiator completes");
         let ours = ours.expect("a non-serving inbound peer is accepted");
         assert_eq!(ours.connection_info.remote.services(), PeerServices::empty());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Runs the handshake as `role` on `connection`, requiring
+/// `required_services` of an outbound peer.
+async fn run_handshake_requiring(
+    connection: &Connection,
+    role: Role,
+    network: &Network,
+    identity: &LocalIdentity,
+    nonces: &NonceRegistry,
+    required_services: PeerServices,
+) -> Result<CompletedHandshake, HandshakeError> {
+    let addr = connection.remote_address().into();
+    let connected_addr = match role {
+        Role::Initiator => ConnectedAddr::new_outbound_direct(addr),
+        Role::Responder => ConnectedAddr::new_inbound_direct(addr),
+    };
+    let mut minimum_peer_version = MinimumPeerVersion::new(NoChainTip, network);
+    handshake_requiring(
+        connection,
+        connected_addr,
+        role,
+        identity,
+        &mut minimum_peer_version,
+        nonces,
+        Instant::now() + TEST_TIMEOUT,
+        required_services,
+    )
+    .await
+}
+
+/// A state-snapshot bootstrap requires `NODE_SYNC_ARTIFACTS` of the peers it
+/// dials instead of `NODE_NETWORK` (DESIGN §5): while syncing, a pruned node
+/// that serves snapshot objects is accepted by the bootstrap's handshake and
+/// declined by the normal dialer's, and a node that serves blocks but no
+/// objects is accepted by the normal dialer's and declined by the
+/// bootstrap's.
+#[tokio::test]
+async fn bootstrap_handshake_requires_artifact_service_instead_of_node_network() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // `NoChainTip` reports no tip, so the dialling node counts as syncing.
+        let us = identity("/us/");
+        let pruned_services =
+            PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS;
+        let pruned_server = LocalIdentity {
+            user_agent: "/pruned/".to_string(),
+            services: pruned_services,
+            relay: true,
+        };
+        let archive = identity("/archive/");
+        let our_nonces = NonceRegistry::spawn(8);
+        let their_nonces = NonceRegistry::spawn(8);
+
+        // The normal dialer declines the pruned server.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake(&outbound, Role::Initiator, &network, &us, &our_nonces),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &pruned_server,
+                &their_nonces
+            ),
+        );
+        let error = ours
+            .err()
+            .expect("the normal dialer declines a pruned server");
+        assert!(
+            matches!(error, HandshakeError::MissingRequiredServices { services } if services == pruned_services),
+            "got {error:?}"
+        );
+        drop(theirs);
+        assert_eq!(closed_with(&inbound).await, Some(ErrorCode::NoError.code()));
+
+        // The bootstrap accepts it.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake_requiring(
+                &outbound,
+                Role::Initiator,
+                &network,
+                &us,
+                &our_nonces,
+                PeerServices::NODE_SYNC_ARTIFACTS,
+            ),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &pruned_server,
+                &their_nonces
+            ),
+        );
+        let ours = ours.expect("the bootstrap accepts a pruned server with the artifact bit");
+        theirs.expect("the responder completes");
+        assert_eq!(ours.connection_info.remote.services(), pruned_services);
+
+        // The bootstrap declines a node that serves blocks but no objects.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake_requiring(
+                &outbound,
+                Role::Initiator,
+                &network,
+                &us,
+                &our_nonces,
+                PeerServices::NODE_SYNC_ARTIFACTS,
+            ),
+            run_handshake(&inbound, Role::Responder, &network, &archive, &their_nonces),
+        );
+        let error = ours
+            .err()
+            .expect("the bootstrap declines a server without the artifact bit");
+        assert!(
+            matches!(error, HandshakeError::MissingRequiredServices { services } if services == PeerServices::NODE_NETWORK),
+            "got {error:?}"
+        );
+        drop(theirs);
+        assert_eq!(closed_with(&inbound).await, Some(ErrorCode::NoError.code()));
     })
     .await
     .expect("the test completes well within the timeout");
