@@ -54,7 +54,10 @@ peers are not recorded there (see below).
   `initial_v2_peers`. Configured peers are reconnected after a disconnection,
   after the reconnection delay plus a random extra of up to a quarter of it. A
   configured peer that already has a version 2 connection to this node is not
-  dialled.
+  dialled. When the configured hosts resolve to more addresses than the
+  outbound version 2 limit, each host gets a connection before any host gets a
+  second one, and a failed or closed connection's slot goes to the next host
+  or address in turn.
 - Serving and requesting headers, blocks, and transactions. Zebra answers
   block and transaction requests in request order, up to about 1 MB per
   response.

@@ -3072,9 +3072,10 @@ async fn v2_listener_refuses_connections_past_per_ip_limit() {
     assert_v2_listener_accepts_one_of_two_dialers(listener_config).await;
 }
 
-/// The version 2 dialer only dials as many configured peers as its share of the outbound limit.
+/// With one outbound version 2 slot, a configured peer whose connection stays up keeps the slot,
+/// so the next configured peer waits for it to free, instead of a live connection being ended.
 #[tokio::test]
-async fn v2_dialer_skips_initial_peers_over_outbound_limit() {
+async fn v2_dialer_keeps_live_initial_peer_slot() {
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -3100,12 +3101,126 @@ async fn v2_dialer_skips_initial_peers_over_outbound_limit() {
     assert_eq!(
         drain_discovered_peers(&mut second_rx),
         0,
-        "a configured peer over the outbound limit must not be dialled"
+        "a configured peer must wait while the only slot holds a live connection"
     );
 
     first_task.abort();
     second_task.abort();
     dialer_task.abort();
+}
+
+/// With a single outbound version 2 slot, a configured peer that cannot be reached frees its
+/// slot after its failed attempt, so the next configured peer is dialled instead of the dead one
+/// keeping the slot forever.
+#[tokio::test]
+async fn v2_dialer_moves_on_from_unreachable_initial_peer() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // Nothing listens on the first address once its probe is dropped.
+    let [unreachable_addr, live_addr] = free_udp_addrs();
+    let (mut live_rx, live_task) = spawn_v2_node(v2_test_config(live_addr, &[]), no_bans());
+
+    let dialer_config = Config {
+        peerset_initial_target_size: 1,
+        ..v2_test_config(any_udp_addr(), &[unreachable_addr, live_addr])
+    };
+    assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
+    let (_dialer_rx, dialer_task) = spawn_v2_node(dialer_config, no_bans());
+
+    // The unreachable peer is dialled first, and its attempt times out before the slot is freed.
+    tokio::time::timeout(
+        constants::HANDSHAKE_TIMEOUT + V2_TEST_CONNECT_TIMEOUT,
+        live_rx.next(),
+    )
+    .await
+    .expect("the live configured peer gets the slot after the unreachable one fails")
+    .expect("the listener is running");
+
+    live_task.abort();
+    dialer_task.abort();
+}
+
+/// An early configured host that resolves to more addresses than there are outbound version 2
+/// slots does not take every slot: each host gets a slot before any host gets a second one.
+#[test]
+fn v2_initial_peer_slots_go_to_each_host_before_any_second_address() {
+    let _init_guard = zebra_test::init();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
+    let late_host = test_v2_addr(4);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host(early_host);
+    slots.add_host([late_host]);
+
+    let dialled = [slots.take_next(), slots.take_next()];
+    assert_eq!(dialled, [Some(early_host[0]), Some(late_host)]);
+    assert_eq!(slots.take_next(), None, "both slots are taken");
+
+    // With more slots than hosts, the early host's other addresses fill them.
+    let mut slots = v2::InitialPeerSlots::new(4);
+    slots.add_host(early_host);
+    slots.add_host([late_host]);
+    let dialled: HashSet<_> = std::iter::from_fn(|| slots.take_next()).collect();
+    assert_eq!(dialled.len(), 4);
+    assert!(dialled.contains(&late_host));
+}
+
+/// A freed slot goes to the next host in turn, then to the next address of a host, and an
+/// address that freed its slot can take one again, so a single configured peer is redialled.
+#[test]
+fn v2_initial_peer_slots_rotate_freed_slots() {
+    let _init_guard = zebra_test::init();
+
+    let (first, second) = (test_v2_addr(1), test_v2_addr(2));
+
+    // Two hosts with one slot: the slot alternates between them.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host([first]);
+    slots.add_host([second]);
+    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(), None);
+    slots.free(&first);
+    assert_eq!(slots.take_next(), Some(second));
+    slots.free(&second);
+    assert_eq!(slots.take_next(), Some(first));
+
+    // One host with two addresses and one slot: the slot alternates between its addresses.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host([first, second]);
+    assert_eq!(slots.take_next(), Some(first));
+    slots.free(&first);
+    assert_eq!(slots.take_next(), Some(second));
+    slots.free(&second);
+    assert_eq!(slots.take_next(), Some(first));
+
+    // One address: it takes the slot again once it freed it.
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([first]);
+    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(), None, "an address holds at most one slot");
+    slots.free(&first);
+    assert_eq!(slots.take_next(), Some(first));
+}
+
+/// An address that two configured hosts resolve to holds at most one slot.
+#[test]
+fn v2_initial_peer_slots_dial_a_shared_address_once() {
+    let _init_guard = zebra_test::init();
+
+    let shared = test_v2_addr(1);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([shared]);
+    slots.add_host([shared]);
+    assert_eq!(slots.take_next(), Some(shared));
+    assert_eq!(slots.take_next(), None);
+}
+
+/// A distinct version 2 peer address for the slot tests, which never connect to it.
+fn test_v2_addr(port: u16) -> PeerSocketAddr {
+    SocketAddr::new(Ipv4Addr::new(203, 0, 113, 1).into(), port).into()
 }
 
 /// The version 2 dialer keeps one connection to each configured peer: it does not redial while
