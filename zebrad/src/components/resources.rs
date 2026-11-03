@@ -56,6 +56,10 @@ pub struct ExplicitLimits {
 
     /// `[network] peerset_initial_target_size`, if it is not its default.
     pub peerset_initial_target_size: Option<usize>,
+
+    /// Whether the operator set glibc's malloc arena cap with `MALLOC_ARENA_MAX` or the
+    /// `glibc.malloc.arena_max` tunable, which wins over the derived cap (design §4.7).
+    pub malloc_arena_max: bool,
 }
 
 impl ExplicitLimits {
@@ -70,8 +74,79 @@ impl ExplicitLimits {
             peerset_initial_target_size: (peerset_initial_target_size
                 != zebra_network::Config::default().peerset_initial_target_size)
                 .then_some(peerset_initial_target_size),
+            malloc_arena_max: false,
         }
     }
+}
+
+/// Returns whether the operator set glibc's malloc arena cap, in the `MALLOC_ARENA_MAX`
+/// environment variable or in a `glibc.malloc.arena_max` entry of `GLIBC_TUNABLES`.
+///
+/// This is the check `zebrad`'s `main()` makes before it sets its default cap of 16.
+#[cfg(unix)]
+pub fn has_malloc_arena_override(
+    malloc_arena_max: Option<&std::ffi::OsStr>,
+    glibc_tunables: Option<&std::ffi::OsStr>,
+) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    malloc_arena_max.is_some()
+        || glibc_tunables.is_some_and(|tunables| {
+            tunables
+                .as_bytes()
+                .split(|&byte| byte == b':')
+                .any(|entry| entry.starts_with(b"glibc.malloc.arena_max="))
+        })
+}
+
+/// Returns whether this process's environment sets glibc's malloc arena cap.
+#[cfg(unix)]
+fn environment_has_malloc_arena_override() -> bool {
+    has_malloc_arena_override(
+        std::env::var_os("MALLOC_ARENA_MAX").as_deref(),
+        std::env::var_os("GLIBC_TUNABLES").as_deref(),
+    )
+}
+
+/// Returns whether this process's environment sets glibc's malloc arena cap.
+#[cfg(not(unix))]
+fn environment_has_malloc_arena_override() -> bool {
+    false
+}
+
+/// Lowers glibc's malloc arena cap to `clamp(cores / 4, 2, 16)` when `config` sets a memory
+/// budget and the operator did not set the cap, and returns the cap it set (design §4.7, P8).
+///
+/// Existing arenas never shrink, so this must run before the rayon and tokio threads start:
+/// `main()` has set the default cap of 16 by then, and only the main and tracing threads exist.
+pub fn apply_arena_cap(config: &ZebradConfig) -> Option<usize> {
+    config.resources.memory_budget?;
+    if environment_has_malloc_arena_override() {
+        return None;
+    }
+
+    let arena_max = AllocatorLimits::arena_max_for_cores(node_cores(config));
+
+    set_arena_max(arena_max).then_some(arena_max)
+}
+
+/// Sets glibc's malloc arena cap, and returns whether glibc accepted it.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn set_arena_max(arena_max: usize) -> bool {
+    let arena_max = std::os::raw::c_int::try_from(arena_max)
+        .expect("the arena cap is at most 16, which fits in a C int");
+
+    // SAFETY: mallopt takes integer parameters, and M_ARENA_MAX accepts a positive limit.
+    #[allow(unsafe_code)]
+    let accepted = unsafe { nix::libc::mallopt(nix::libc::M_ARENA_MAX, arena_max) };
+
+    accepted == 1
+}
+
+/// Other allocators have no arena cap to set.
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn set_arena_max(_arena_max: usize) -> bool {
+    false
 }
 
 /// A node's memory budget, and everything else its plan is derived from.
@@ -232,6 +307,10 @@ impl BudgetSettings {
             }
         }
 
+        if self.explicit.malloc_arena_max {
+            plan.allocator.arena_max = None;
+        }
+
         Ok((plan, warnings))
     }
 
@@ -384,9 +463,10 @@ pub fn startup_summary(
         u32_mib(quic.connection_receive_window),
         mib(quic.send_window),
         mib_floor(plan.shares.get(Component::Rpc)),
-        plan.allocator
-            .arena_max
-            .map_or_else(|| "default".to_string(), |arenas| arenas.to_string()),
+        plan.allocator.arena_max.map_or_else(
+            || "set by the operator".to_string(),
+            |arenas| arenas.to_string()
+        ),
     )
 }
 
@@ -424,7 +504,7 @@ impl MemoryResources {
 /// If the budget is below the floors (without `--unsafe-low-specs`), or an `"auto"` budget
 /// cannot be detected or is below the initial sync minimum.
 pub fn init(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<MemoryResources, Report> {
-    let Some((settings, warnings)) =
+    let Some((mut settings, warnings)) =
         BudgetSettings::from_config(config, unsafe_low_specs, detect::detect)?
     else {
         let (plan_sender, _) = watch::channel(MemoryPlan::default());
@@ -437,6 +517,10 @@ pub fn init(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<MemoryResou
     for warning in warnings {
         tracing::warn!("{warning}");
     }
+
+    // `register_components` has already applied the plan's arena cap, unless the operator set
+    // one.
+    settings.explicit.malloc_arena_max = environment_has_malloc_arena_override();
 
     let (plan, warnings) = settings.plan(settings.initial_profile())?;
     for warning in warnings {
