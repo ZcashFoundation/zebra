@@ -21,6 +21,9 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
+
 const LIFETIME: Duration = Duration::from_secs(15);
 const REJECTION_LIFETIME: Duration = Duration::from_secs(60);
 const MAX_REJECTIONS: usize = 8;

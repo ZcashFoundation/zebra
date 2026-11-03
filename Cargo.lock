@@ -7710,6 +7710,7 @@ dependencies = [
  "itertools 0.14.0",
  "jubjub",
  "lazy_static",
+ "loom",
  "metrics",
  "mset",
  "once_cell",
