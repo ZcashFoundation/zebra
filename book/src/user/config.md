@@ -149,7 +149,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `initial_mainnet_peers` | Array of address strings | Mainnet seed list below | Initial Mainnet peers; each IP address or DNS name must include a port. Duplicate strings are removed while preserving order. |
 | `initial_testnet_peers` | Array of address strings | Testnet seed list below | Initial Testnet peers. Regtest removes public seed names and retains only resolved loopback addresses. |
 | `cache_dir` | Boolean or path string | `true` | Use the default cache directory when `true`, disable the peer disk cache when `false`, or use the supplied directory. Independent of `[state] cache_dir`. |
-| `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Zero produces a warning and becomes `25`. |
+| `peerset_initial_target_size` | `usize` | `25` | Initial peer target. Also sets the outbound connection limit to three times this value and the inbound limit to five times it. Zero produces a warning and becomes `25`. Derived from [`memory_budget`](#resources) unless set explicitly; a value equal to the default counts as unset. |
 | `crawl_new_peer_interval` | Duration string | `"1m 1s"` | Interval between routine peer-address crawls. Zebra also crawls when all peers are busy and no connection candidates remain. The old key `new_peer_interval` is an accepted alias. |
 | `max_connections_per_ip` | `usize` | `1` | Concurrent peer-connection limit per IPv4 address or IPv6 `/64` subnet. Also affects inbound reconnection rate limiting. Zero produces a warning and becomes `1`; increasing it reduces peer diversity protections. |
 | `testnet_parameters` | Optional table | Absent | Compatibility layout for Testnet or Regtest parameters, used with a string-valued network selector. Ignored for Mainnet and when `network` itself contains parameters. |
@@ -396,6 +396,9 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 Do not supply both an alias and its current key: they deserialize as duplicate
 fields.
 
+A [`memory_budget`](#resources) does not change these concurrency limits: it
+bounds the memory of the blocks in the sync pipeline on top of them.
+
 With zero threads configured, [Rayon](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads)
 uses a positive `RAYON_NUM_THREADS` environment value, otherwise the available
 logical CPU count, with a one-thread fallback if detection fails. If that
@@ -410,7 +413,7 @@ Rust API: [`zebrad::components::mempool::Config`](https://docs.rs/zebrad/latest/
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `tx_cost_limit` | `u64` | `80000000` | Maximum sum of [ZIP 401 transaction costs](https://zips.z.cash/zip-0401). Each transaction costs the greater of its serialized byte size and `10000`; this is not a literal RAM-byte limit. |
+| `tx_cost_limit` | `u64` | `80000000` | Maximum sum of [ZIP 401 transaction costs](https://zips.z.cash/zip-0401). Each transaction costs the greater of its serialized byte size and `10000`; this is not a literal RAM-byte limit. Derived from [`memory_budget`](#resources) unless set explicitly; a value equal to the default counts as unset. |
 | `eviction_memory_time` | Duration string | `"1h"` | Retention limit for randomly evicted, mined, expired, and chain-conflicting transaction IDs in rejection caches. Capacity eviction or a mempool reset can remove entries earlier. Does not set transaction lifetimes or retention for every rejection reason. |
 | `debug_enable_at_height` | Optional `u32` | Absent | Force-enable the mempool once the best chain reaches this height, regardless of synchronization status. Omission retains sync-status gating except on Regtest, where startup always overrides this field to `0`. |
 | `max_datacarrier_bytes` | Optional `u32` | `83` | Maximum standard `OP_RETURN` script size in bytes, including the opcode and pushdata overhead. Omission still uses `83`. This is relay policy, not a block-consensus limit. |
@@ -559,6 +562,15 @@ Rust API: [`zebrad::components::resources::Config`](https://docs.rs/zebrad/lates
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `memory_budget` | Optional string | Absent | How much memory Zebra may use: `"auto"`, or a whole number with a unit, like `"2 GiB"` or `"1536 MiB"`. The units are `B`, `KiB`, `MiB` and `GiB` (binary) and `MB` and `GB` (decimal), in any case; a number without a unit is rejected. Absent applies no budget, and every component keeps its usual limits. |
+
+Zebra derives the memory limits of RocksDB, the sync pipeline, the network, the
+mempool and the RPC proposal cache from the budget, and logs them at startup.
+`"auto"` budgets half of the memory available to Zebra, between the initial
+sync minimum and 8 GiB, and only works on Linux. A budget below 963 MiB, or
+below 1,113 MiB for a node that has not reached the last checkpoint, refuses
+to start unless you run `zebrad start --unsafe-low-specs`. `zebrad generate`
+prints this section empty, because the budget is absent by default. See
+[Memory](memory.md) for how the budget is split and what each budget gives up.
 
 ## `[zcashd_compat]`
 

@@ -114,6 +114,12 @@ operation and accommodate the network's block production intervals.
 | `zcash.mempool.cost.bytes` | Gauge | Aggregate mempool eviction cost, in cost bytes rather than process memory bytes. Compare with `[mempool] tx_cost_limit`. |
 | `zebra.state.rocksdb.total_disk_size_bytes` | Gauge | Sum of RocksDB's `total-sst-files-size` properties across column families, in bytes. Track growth, but monitor filesystem free space separately. |
 | `zebra.state.rocksdb.batch_commit.duration_seconds` | Summary | RocksDB batch-write latency in seconds. Use sustained increases to diagnose storage bottlenecks. |
+| `zebra.process.rss_bytes`, `zebra.process.rss_anon_bytes`, `zebra.process.vm_hwm_bytes` | Gauge | The process's resident memory, its anonymous part, and its peak, in bytes, every 10 seconds on Linux. Alert on the anonymous memory approaching the container's memory limit. |
+| `zebra.memory.budget_bytes` | Gauge | The [memory budget](memory.md), in bytes, or 0 without one. |
+| `zebra.memory.plan_bytes` | Gauge, `component` label | Each component's share of the budget (`rocksdb`, `pipeline`, `non_finalized`, `network`, `mempool`, `rpc`), and the `fixed` reserve and `slack`. Compare with `zebra.memory.usage_bytes`. |
+| `zebra.memory.usage_bytes` | Gauge, `component` label | Measured memory: RocksDB's memtables, block cache and table readers. |
+| `zebra.memory.profile` | Gauge | `1` during initial sync, `0` at the tip. |
+| `zebra.memory.pressure` | Gauge | `0` below 85 % of the budget, `1` from 85 %, `2` from 95 %, measured on the anonymous resident memory. Alert on sustained `2`. |
 
 Prometheus also generates `up{job="zebra"}` for scrape success. Alert on zero
 or missing scrape data separately from chain progress. This metric comes
