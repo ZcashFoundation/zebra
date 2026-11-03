@@ -109,6 +109,11 @@ enum Event {
     /// this connection; `error` is [`PeerError::Overloaded`] or
     /// [`PeerError::InboundTimeout`].
     Overloaded(PeerError),
+
+    /// Close the connection because the inbound service failed to become
+    /// ready, which only happens when it has shut down, as the legacy
+    /// connection does.
+    ServiceShutdown,
 }
 
 /// How many best-effort events may wait for the connection task before new
@@ -613,6 +618,11 @@ where
             // (draft, "Misbehavior and Banning"), so the close is graceful.
             Event::Overloaded(error) => Some(Exit {
                 error,
+                code: ErrorCode::NoError,
+            }),
+            // This node is shutting down, or its inbound service failed: the peer is not to blame.
+            Event::ServiceShutdown => Some(Exit {
+                error: PeerError::ServiceShutdown,
                 code: ErrorCode::NoError,
             }),
         }

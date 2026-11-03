@@ -2653,6 +2653,60 @@ async fn timed_out_announcements_close_the_connection() {
     .expect("the test completes well within the timeout");
 }
 
+/// An inbound service that has shut down: it never becomes ready.
+#[derive(Clone)]
+struct ShutDownService;
+
+impl Service<Request> for ShutDownService {
+    type Response = Response;
+    type Error = BoxError;
+    type Future = futures::future::Ready<Result<Response, BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), BoxError>> {
+        std::task::Poll::Ready(Err("the inbound service has shut down".into()))
+    }
+
+    fn call(&mut self, _request: Request) -> Self::Future {
+        futures::future::ready(Err("called while not ready".into()))
+    }
+}
+
+/// A request or announcement that finds the inbound service shut down
+/// closes the connection with `NO_ERROR`, and the client's error is
+/// `ServiceShutdown`, as on the legacy connection.
+#[tokio::test]
+async fn inbound_service_shutdown_closes_the_connection() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let shut_down = || Some(BoxCloneService::new(ShutDownService));
+
+        let mut raw = raw_peer_node_with(&network, shut_down()).await;
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: vec![block::Hash([0xAB; 32])],
+        });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        assert!(recv.read_to_end(1024).await.is_err(), "no response is sent");
+        assert_overload_close(&mut raw, "ServiceShutdown").await;
+
+        let mut raw = raw_peer_node_with(&network, shut_down()).await;
+        let mut send = raw.connection.open_uni().await.expect("opens");
+        send.write_all(&[StreamType::TransactionAnnouncements.code()])
+            .await
+            .expect("writes");
+        let id = UnminedTxId::Legacy(transaction::Hash([0xAB; 32]));
+        let record = RecordCodec::encode_record(encode_tx_record(id)).expect("valid");
+        send.write_all(&record).await.expect("writes");
+        assert_overload_close(&mut raw, "ServiceShutdown").await;
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// Handshake-stream records of unknown kinds are ignored, as the draft
 /// requires, and never close the connection, but only a few are read a
 /// minute: the node leaves the rest unread, so a peer that keeps sending

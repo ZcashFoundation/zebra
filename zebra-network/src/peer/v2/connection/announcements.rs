@@ -454,7 +454,8 @@ fn handle_addr_announcements(payloads: &[Bytes], events: &Events) -> Result<(), 
 /// Sends an announcement-derived request to the inbound service, logging
 /// failures: an announcement needs no answer, so service errors do not end
 /// the connection, except when an overload or timeout makes the connection's
-/// overload policy drop it, as on the legacy connection.
+/// overload policy drop it, or the inbound service has shut down, as on the
+/// legacy connection.
 async fn call_inbound<S>(
     inbound_service: &mut Inbound<'_, S>,
     request: Request,
@@ -463,11 +464,13 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
     let command = request.command();
-    let result = match inbound_service.service.ready().await {
-        Ok(service) => service.call(request).await,
-        Err(error) => Err(error),
+    let Ok(service) = inbound_service.service.ready().await else {
+        // The load-shed layer is always ready, so a readiness error means the inbound service
+        // has shut down: close the connection, as the legacy connection does.
+        tracing::debug!(command, "inbound service shut down, closing the connection");
+        return Err(Handled::Close(Event::ServiceShutdown));
     };
-    if let Err(error) = result {
+    if let Err(error) = service.call(request).await {
         tracing::debug!(%error, command, "inbound service rejected announcement");
         if let Some(event) = inbound_service.overloads.record(&error) {
             return Err(Handled::Close(event));

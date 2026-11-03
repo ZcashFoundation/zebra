@@ -303,7 +303,8 @@ struct Inbound<'a, S> {
 }
 
 /// Calls the inbound service, mapping its failures to stream refusals, or,
-/// when the connection's overload policy drops the connection, to a close.
+/// when the connection's overload policy drops the connection or the
+/// inbound service has shut down, to a close.
 async fn call_service<S>(inbound: Inbound<'_, S>, request: Request) -> Result<Response, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
@@ -317,8 +318,11 @@ where
     // The inbound service is wrapped in buffer, load-shed, and timeout layers by the caller.
     // A refused stream tells the peer to try elsewhere; overloads and timeouts also count
     // towards closing the connection, as on the legacy connection.
+    //
+    // The load-shed layer is always ready, so a readiness error means the inbound service has
+    // shut down: close the connection, as the legacy connection does.
     if service.ready().await.is_err() {
-        return Err(Outcome::Refuse(ErrorCode::Refused));
+        return Err(Outcome::Close(Event::ServiceShutdown));
     }
     service.call(request).await.map_err(|error| {
         if let Some(event) = overloads.record(&error) {
