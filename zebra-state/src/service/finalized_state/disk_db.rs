@@ -1315,6 +1315,27 @@ impl DiskDb {
         self.db.write(batch.batch)
     }
 
+    /// Compacts transaction bodies in `heights`, where the pruning worker deleted them.
+    ///
+    /// A range starting at genesis starts at the beginning of the column family. Runs on the
+    /// pruning worker, without taking the state writer's locks or stalling writes for a flush.
+    pub(crate) fn compact_pruned_bodies(&self, heights: std::ops::Range<Height>) {
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .expect("transaction column family was created when opening state");
+        let mut options = rocksdb::CompactOptions::default();
+        options.set_exclusive_manual_compaction(false);
+        options.set_bottommost_level_compaction(rocksdb::BottommostLevelCompaction::ForceOptimized);
+        let start = (heights.start > Height::MIN)
+            .then(|| TransactionLocation::min_for_height(heights.start).as_bytes());
+        self.db.compact_range_cf_opt(
+            &transactions,
+            start,
+            Some(TransactionLocation::min_for_height(heights.end).as_bytes()),
+            &options,
+        );
+    }
+
     // Private methods
 
     /// Tries to reuse an existing db after a major upgrade.
