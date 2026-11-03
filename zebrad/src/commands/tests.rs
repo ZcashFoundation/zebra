@@ -171,6 +171,7 @@ fn pruned_network_services_clear_archive_capability() {
                 &config,
                 HistoryCapabilities {
                     lowest_retained_height,
+                    ..HistoryCapabilities::default()
                 },
             )
             .unwrap(),
@@ -202,6 +203,7 @@ fn pruned_history_rejects_both_sidecar_modes() {
                 &config,
                 HistoryCapabilities {
                     lowest_retained_height,
+                    ..HistoryCapabilities::default()
                 },
             )
             .expect_err("sidecars require complete block history and pruning disabled");
