@@ -85,6 +85,14 @@ fn default_peer_connection_limits() {
     assert_eq!(config.peerset_outbound_connection_limit(), 750);
     assert_eq!(config.peerset_inbound_connection_limit(), 1_250);
     assert_eq!(config.peerset_total_connection_limit(), 2_000);
+    assert_eq!(config.peer_addr_response_limit(), PEER_ADDR_RESPONSE_LIMIT);
+
+    let reduced_config = Config {
+        peerset_initial_target_size: 25,
+        ..config
+    };
+    assert_eq!(reduced_config.peerset_outbound_connection_limit(), 75);
+    assert_eq!(reduced_config.peer_addr_response_limit(), 37);
 
     // A zero target size is invalid, so it is replaced by the default.
     let zero_config: Config = toml::from_str("peerset_initial_target_size = 0").unwrap();

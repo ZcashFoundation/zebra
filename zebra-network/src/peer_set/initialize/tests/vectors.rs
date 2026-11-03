@@ -116,6 +116,27 @@ const PEER_SET_UNREADY_POLLS: usize = 2;
 const MISBEHAVIOR_FLUSH_TIMEOUT: Duration =
     constants::MISBEHAVIOR_FLUSH_INTERVAL.saturating_add(Duration::from_secs(5));
 
+#[test]
+fn inventory_channel_capacity_is_independent_of_large_peer_limits() {
+    let _init_guard = zebra_test::init();
+    let config = Config::default();
+
+    assert_eq!(config.peerset_total_connection_limit(), 2_000);
+    assert_eq!(
+        crate::peer_set::initialize::inventory_channel_capacity(&config),
+        crate::peer_set::inventory_registry::INVENTORY_CHANNEL_CAPACITY,
+    );
+
+    let small_config = Config {
+        peerset_initial_target_size: 1,
+        ..config
+    };
+    assert_eq!(
+        crate::peer_set::initialize::inventory_channel_capacity(&small_config),
+        small_config.peerset_total_connection_limit(),
+    );
+}
+
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
 ///

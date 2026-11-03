@@ -94,17 +94,26 @@ pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 /// process open file limit of at least 4,096.
 pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 250;
 
-/// The maximum number of peers we will add to the address book after each `getaddr` request.
+/// The default maximum number of peers we will add to the address book after each `getaddr`
+/// request.
 ///
 /// This is half the default outbound connection limit, so a node with the default
 /// [`DEFAULT_PEERSET_INITIAL_TARGET_SIZE`] can fill its outbound slots from a few responses.
-/// It is pinned, so lowering `Config.peerset_initial_target_size` does not lower it.
+/// Connections use [`Config::peer_addr_response_limit`](crate::Config::peer_addr_response_limit),
+/// which applies the same ratio to the configured peer target.
 ///
 /// # Security
 ///
 /// This bounds how much of the address book a single peer can fill with one `getaddr`
 /// response: 375 of the [`MAX_ADDRS_IN_ADDRESS_BOOK`] addresses, 7.5% per response.
-pub const PEER_ADDR_RESPONSE_LIMIT: usize = 375;
+pub const PEER_ADDR_RESPONSE_LIMIT: usize =
+    DEFAULT_PEERSET_INITIAL_TARGET_SIZE * OUTBOUND_PEER_LIMIT_MULTIPLIER / 2;
+
+/// The maximum number of unused addresses retained by each peer connection.
+///
+/// This is enough to satisfy a default-sized `getaddr` response entirely from the cache, while
+/// bounding the aggregate cache memory used by the default connection limit.
+pub const MAX_CACHED_ADDRS_PER_PEER: usize = PEER_ADDR_RESPONSE_LIMIT;
 
 /// The buffer size for the peer set.
 ///
