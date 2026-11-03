@@ -25,7 +25,11 @@ use tokio::{
 use tower::service_fn;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::NoChainTip, diagnostic::task::CheckForPanics};
+use zebra_chain::{
+    chain_tip::{ChainTip, NoChainTip},
+    diagnostic::task::CheckForPanics,
+    parameters::Network,
+};
 
 use crate::{
     connection_metrics::{
@@ -100,6 +104,15 @@ pub const BOOTSTRAP_CLOSE_GRACE: Duration = Duration::from_secs(2);
 /// scheduler downloads from at most this many at once.
 pub const MAX_BOOTSTRAP_PEERS: usize = 8;
 
+/// Returns the minimum peer version for the current protocol epoch, without
+/// changing the empty chain tip advertised by the bootstrap.
+pub(in crate::peer_set::initialize) fn bootstrap_minimum_peer_version(
+    network: &Network,
+) -> MinimumPeerVersion<NoChainTip> {
+    MinimumPeerVersion::new(NoChainTip, network)
+        .with_protocol_epoch_height(network.checkpoint_list().max_height())
+}
+
 /// Dials `peers` over the version 2 protocol for a state-snapshot bootstrap,
 /// and returns the connected clients.
 ///
@@ -158,10 +171,9 @@ pub async fn v2_bootstrap_clients(
         );
     }
 
-    // `NoChainTip` reports no tip: the node has no state yet, so it counts as syncing, which is
-    // what makes the handshake require services of the peers, and its `init` records carry a
-    // start height of 0.
-    let minimum_peer_version = MinimumPeerVersion::new(NoChainTip, network);
+    // The identity's start height stays zero, but version negotiation uses the highest
+    // checkpoint's protocol epoch rather than accepting versions from the genesis epoch.
+    let minimum_peer_version = bootstrap_minimum_peer_version(network);
     let nonces = NonceRegistry::spawn(peers.len());
     let params = ConnectionParams {
         inbound_service: service_fn(refuse_request),
@@ -364,7 +376,7 @@ async fn connect_once<S>(
     addr: PeerSocketAddr,
     network: zebra_chain::parameters::Network,
     identity: LocalIdentity,
-    mut minimum_peer_version: MinimumPeerVersion<NoChainTip>,
+    mut minimum_peer_version: MinimumPeerVersion<impl ChainTip + Clone + Send + Sync + 'static>,
     nonces: NonceRegistry,
     params: ConnectionParams<S>,
     mut tracker: ConnectionTracker,

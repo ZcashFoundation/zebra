@@ -24,7 +24,10 @@ use crate::{
         initialize::{
             v2::{
                 self,
-                bootstrap::{select_peers, spawn_report_log, MAX_BOOTSTRAP_PEERS},
+                bootstrap::{
+                    bootstrap_minimum_peer_version, select_peers, spawn_report_log,
+                    MAX_BOOTSTRAP_PEERS,
+                },
                 v2_bootstrap_clients,
             },
             DiscoveredPeer,
@@ -102,6 +105,25 @@ fn bootstrap_peers_are_deduplicated_by_ip_and_capped() {
     );
 
     assert!(select_peers(&[]).is_empty());
+}
+
+/// The bootstrap negotiates using the highest checkpoint's protocol epoch,
+/// not the genesis-era minimum that an empty chain tip would select.
+#[test]
+fn bootstrap_minimum_version_uses_the_checkpoint_epoch() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let mut minimum = bootstrap_minimum_peer_version(&network);
+    let expected = crate::protocol::external::types::Version::min_remote_for_height(
+        &network,
+        Some(network.checkpoint_list().max_height()),
+    );
+    assert_ne!(
+        expected,
+        crate::protocol::external::types::Version::min_remote_for_height(&network, None),
+        "this network distinguishes the checkpoint and genesis protocol epochs"
+    );
+    assert_eq!(minimum.current(), expected);
 }
 
 /// The bootstrap drains the misbehavior reports of its peers in place of the
