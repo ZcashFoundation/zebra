@@ -34,15 +34,19 @@ use zebra_chain::{
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
-        block::TRANSACTION_LOCATION_DISK_BYTES, FromDisk, IntoDisk, TransactionIndex,
-        TransactionLocation,
+        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES, FromDisk,
+        IntoDisk, TransactionIndex, TransactionLocation,
     },
-    write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, StateInitError,
+    write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
+    StateInitError,
 };
 
-use super::zebra_db::transparent::{
-    fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
-    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+use super::zebra_db::{
+    chain::SNAPSHOT_BASE,
+    transparent::{
+        fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+    },
 };
 // Doc-only imports
 #[allow(unused_imports)]
@@ -1254,20 +1258,26 @@ impl DiskDb {
     }
 
     /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
+    ///
+    /// A database imported from a state snapshot has no blocks below its window start, so its
+    /// [`SnapshotBase`] marker anchors the suffix instead: the database counts as pruned, and
+    /// its bodies start at the window start or the first retained body above it.
     pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         let invalid = |source: BoxError| StateInitError::HistoryRead {
             path: self.path().to_path_buf(),
             source,
         };
+        let snapshot_base = self.snapshot_base().map_err(invalid)?;
         let Some(index) = self.cf_handle("hash_by_tx_loc") else {
             return Ok(HistoryCapabilities::default());
         };
         let first = TransactionLocation::min_for_height(Height(1)).as_bytes();
-        if self
-            .db
-            .get_pinned_cf(&index, first)
-            .map_err(|error| invalid(error.into()))?
-            .is_none()
+        if snapshot_base.is_none()
+            && self
+                .db
+                .get_pinned_cf(&index, first)
+                .map_err(|error| invalid(error.into()))?
+                .is_none()
         {
             return Ok(HistoryCapabilities::default());
         }
@@ -1287,6 +1297,13 @@ impl DiskDb {
                 "the first retained body is missing its coinbase".into(),
             ));
         }
+        if let Some(base) = snapshot_base {
+            return Ok(HistoryCapabilities {
+                lowest_retained_height: location.height.max(base.window_start),
+                lowest_known_height: base.window_start,
+                snapshot_base: Some(base),
+            });
+        }
         Ok(HistoryCapabilities {
             lowest_retained_height: if location.height == Height(1) {
                 Height::MIN
@@ -1296,6 +1313,25 @@ impl DiskDb {
             lowest_known_height: Height::MIN,
             snapshot_base: None,
         })
+    }
+
+    /// Returns the marker of a database imported from a state snapshot, or `None` for any other
+    /// database.
+    fn snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
+        let Some(markers) = self.cf_handle(SNAPSHOT_BASE) else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.db.get_pinned_cf(&markers, ().as_bytes())? else {
+            return Ok(None);
+        };
+        if bytes.len() != SNAPSHOT_BASE_DISK_BYTES {
+            return Err("the state snapshot base marker has an invalid length".into());
+        }
+        let base = SnapshotBase::from_bytes(bytes);
+        if base.window_start == Height::MIN || base.window_start > base.height {
+            return Err("the state snapshot base marker has an invalid window".into());
+        }
+        Ok(Some(base))
     }
 
     /// Returns the column family handle for `cf_name`.
