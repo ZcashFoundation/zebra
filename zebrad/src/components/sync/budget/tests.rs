@@ -152,6 +152,8 @@ async fn default_limits_leave_the_pipeline_unbounded() {
     assert_eq!(budget.charged_bytes(), 0);
     assert!(!budget.is_over_limit());
     assert!(!PipelineBudget::default().is_bounded());
+    budget.update_limit(1);
+    assert_eq!(budget.limit(), None);
     assert!(PipelineAdmission::new(budget, checkpoints(), Height(10)).is_none());
 
     let config = ZebradConfig::default();
@@ -444,6 +446,91 @@ async fn shared_release_admits_a_waiting_download() {
             advertiser: None,
         })
         .await;
+}
+
+/// Shrinking the ceiling rejects subsequent gossip and sync admissions until held charges drain.
+#[tokio::test(start_paused = true)]
+async fn runtime_shrink_applies_to_new_gossip_and_sync_admissions() {
+    let _init_guard = zebra_test::init();
+
+    let budget = bounded(100);
+    let first = budget.charge(60).expect("the budget is bounded");
+    let second = budget.charge(20).expect("the budget is bounded");
+    budget.update_limit(50);
+    assert_eq!(budget.limit(), Some(50));
+    assert!(budget.is_over_limit());
+    assert_eq!(
+        budget
+            .try_charge(1)
+            .expect_err("gossip cannot charge above the shrunken ceiling"),
+        OverLimit {
+            charged: 80,
+            limit: 50,
+        }
+    );
+
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(0));
+    let mut admission = PipelineAdmission::new(budget.clone(), checkpoints(), Height(0))
+        .expect("the budget is bounded");
+    admission
+        .admit(&tip, Instant::now())
+        .await
+        .expect_err("sync waits while held charges exceed the shrunken ceiling");
+
+    drop(first);
+    assert_eq!(budget.charged_bytes(), 20);
+    admission
+        .admit(&tip, Instant::now())
+        .await
+        .expect("draining below the new ceiling admits sync work");
+    assert_eq!(
+        budget
+            .try_charge(31)
+            .expect_err("gossip still checks the new ceiling"),
+        OverLimit {
+            charged: 20,
+            limit: 50,
+        }
+    );
+    let fitting = budget
+        .try_charge(30)
+        .expect("an exact fit is admitted")
+        .expect("the budget is bounded");
+    drop(fitting);
+    drop(second);
+    assert_eq!(budget.charged_bytes(), 0);
+}
+
+/// Growing the ceiling wakes a blocked sync admission even before any held charge is released.
+#[tokio::test(start_paused = true)]
+async fn runtime_growth_wakes_waiting_sync_admission() {
+    let _init_guard = zebra_test::init();
+
+    let (mut downloads, mut network, _verifier) = bounded_downloads(Height(0), 1);
+    let budget = downloads.pipeline_budget();
+    let held = budget.charge(2).expect("the budget is bounded");
+    let updater = budget.clone();
+    let growth_delay = Duration::from_secs(1);
+    let hash = mainnet_block(1).hash();
+
+    let started = Instant::now();
+    let (admitted, ()) = tokio::join!(downloads.download_and_verify(hash), async move {
+        tokio::time::sleep(growth_delay).await;
+        updater.update_limit(2);
+    });
+    admitted.expect("growing the ceiling wakes the waiting download");
+    assert_eq!(started.elapsed(), growth_delay);
+    assert_eq!(budget.limit(), Some(2));
+    assert_eq!(budget.charged_bytes(), 2, "the held charge is unchanged");
+
+    let _pending_download = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await;
+    drop(held);
 }
 
 /// Above the bound, the downloads of the oldest checkpoint range are still admitted without
