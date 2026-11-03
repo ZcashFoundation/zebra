@@ -108,13 +108,13 @@ pub struct Config {
     /// The network to connect to.
     pub network: Network,
 
-    /// Enable experimental next-tip early block relay with peers that also opt in.
+    /// Enable compact block relay with peers that also enable it.
     ///
-    /// Disabled by default. Negotiated peers can serve authenticated blocks before full
-    /// transaction validation; callers must still fully verify every block.
-    /// Ordinary committed relay is unchanged.
-    /// The temporary service bit is experimental; a production allocation is pending.
-    pub experimental_early_block_relay: bool,
+    /// Implements the draft ZIP ["Compact Block Relay"](https://github.com/zcash/zips/pull/1429).
+    /// Enabled by default. Negotiated peers reconstruct compact blocks from their mempools
+    /// and can serve authenticated next-tip blocks before full transaction validation.
+    /// Callers must still fully verify every block. Ordinary committed relay is unchanged.
+    pub compact_block_relay: bool,
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
@@ -581,7 +581,7 @@ impl Default for Config {
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
             network: Network::Mainnet,
-            experimental_early_block_relay: false,
+            compact_block_relay: true,
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             cache_dir: CacheDir::default(),
@@ -667,7 +667,7 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
-    experimental_early_block_relay: bool,
+    compact_block_relay: bool,
 
     /// Legacy testnet parameters, kept for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -689,7 +689,7 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
-            experimental_early_block_relay: config.experimental_early_block_relay,
+            compact_block_relay: config.compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
@@ -751,7 +751,7 @@ impl From<Config> for DConfig {
             listen_addr,
             external_addr,
             network,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -785,7 +785,7 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -806,7 +806,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
-            experimental_early_block_relay,
+            compact_block_relay,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -885,7 +885,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr: canonical_socket_addr(listen_addr),
             external_addr: external_socket_addr,
             network,
-            experimental_early_block_relay,
+            compact_block_relay,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,

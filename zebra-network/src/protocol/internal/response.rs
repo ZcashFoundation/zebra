@@ -106,7 +106,7 @@ pub enum Response {
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
     Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
-    /// Blocks downloaded from a connection that bilaterally negotiated experimental early relay.
+    /// Blocks downloaded from a connection that bilaterally negotiated compact block relay.
     ///
     /// All block responses on such connections carry this provenance, even for committed blocks.
     /// The source address is unchanged. This is not evidence of validity: receivers authenticate

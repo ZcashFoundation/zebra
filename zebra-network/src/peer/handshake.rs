@@ -144,7 +144,7 @@ pub struct ConnectionInfo {
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
 
-    /// Whether both ends advertised the experimental early-block-relay service bit.
+    /// Whether both ends advertised support for the Compact Block Relay ZIP.
     ///
     /// Derived from this connection's version exchange, not gossiped services or user agents.
     /// This permits early serving but does not authenticate or validate any received block.
@@ -703,8 +703,8 @@ where
         }
     };
     our_services.set(
-        PeerServices::NODE_EARLY_BLOCK_RELAY,
-        config.experimental_early_block_relay && !matches!(connected_addr, Isolated),
+        PeerServices::NODE_COMPACT_BLOCKS,
+        config.compact_block_relay && !matches!(connected_addr, Isolated),
     );
 
     let start_height = minimum_peer_version
@@ -853,7 +853,7 @@ where
     let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote.version);
     let early_block_relay = our_services
         .intersection(remote.services)
-        .contains(PeerServices::NODE_EARLY_BLOCK_RELAY);
+        .contains(PeerServices::NODE_COMPACT_BLOCKS);
 
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
     let connection_info = Arc::new(ConnectionInfo {
@@ -1326,7 +1326,7 @@ fn serialization_error_metric_label(error: &SerializationError) -> &'static str 
 }
 
 /// Register any advertised or missing inventory in `msg` for `connected_addr`.
-/// Compact announcements count only on connections that negotiated experimental early relay.
+/// Compact announcements count only on connections that negotiated compact block relay.
 pub(crate) async fn register_inventory_status(
     msg: Result<Message, SerializationError>,
     connected_addr: ConnectedAddr,

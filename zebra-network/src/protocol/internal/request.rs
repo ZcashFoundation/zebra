@@ -73,7 +73,7 @@ pub enum Request {
     /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source.
     BlocksByHash(HashSet<block::Hash>),
 
-    /// Request blocks from this node on a connection that negotiated experimental early relay.
+    /// Request blocks from this node on a connection that negotiated compact block relay.
     ///
     /// Only the inbound connection creates this request, based on both peers' service bits.
     /// The inbound service may consult its bounded early-relay cache before committed state.

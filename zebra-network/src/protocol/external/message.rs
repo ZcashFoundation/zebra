@@ -205,7 +205,7 @@ pub enum Message {
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
     Block(Arc<Block>),
 
-    /// Provisional compact relay opt-in; requires bilateral early-block-relay consent.
+    /// Compact relay opt-in; requires bilateral compact-block service-bit consent.
     SendCompact {
         /// Whether to push high-bandwidth announcements.
         high_bandwidth: bool,

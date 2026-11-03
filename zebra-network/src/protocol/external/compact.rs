@@ -1,4 +1,4 @@
-//! Provisional compact relay encoding version 1, requiring bilateral early-relay consent.
+//! Compact relay encoding version 1, requiring bilateral compact-block service-bit consent.
 //!
 //! Short IDs commit to witnessed identities, not just transaction effects. Reconstruction checks
 //! size, ordering, transaction Merkle roots and duplicates; callers must authenticate authorizing

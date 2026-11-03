@@ -236,19 +236,19 @@ async fn outbound_direct_accepts_serving_peer() {
 async fn early_block_relay_requires_bilateral_handshake() {
     let _init_guard = zebra_test::init();
     timeout(TEST_TIMEOUT, async {
-        for local_setting in [
-            "",
-            "experimental_early_block_relay = false",
-            "experimental_early_block_relay = true",
+        for (local_setting, local_enabled) in [
+            ("", true),
+            ("compact_block_relay = false", false),
+            ("compact_block_relay = true", true),
         ] {
             for remote_enabled in [false, true] {
                 for isolated in [false, true] {
                     let config: Config = toml::from_str(local_setting).unwrap();
-                    let local_enabled = config.experimental_early_block_relay;
+                    assert_eq!(config.compact_block_relay, local_enabled);
                     // Exercise the serialized operator configuration, not just a Rust field.
                     let config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
                     let remote_config = Config {
-                        experimental_early_block_relay: remote_enabled,
+                        compact_block_relay: remote_enabled,
                         ..Config::default()
                     };
                     let (local, remote) = tokio::io::duplex(65536);
@@ -286,7 +286,7 @@ async fn early_block_relay_requires_bilateral_handshake() {
                         ),
                     )
                     .expect("both peers support this network version");
-                    let bit = PeerServices::NODE_EARLY_BLOCK_RELAY;
+                    let bit = PeerServices::NODE_COMPACT_BLOCKS;
                     assert_eq!(local_info.remote.services.contains(bit), remote_enabled);
                     assert_eq!(
                         remote_info.remote.services.contains(bit),

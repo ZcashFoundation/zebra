@@ -92,7 +92,7 @@ impl Codec {
         self.builder.max_len = MAX_PROTOCOL_MESSAGE_LEN;
     }
 
-    /// Enables compact negotiation only after bilateral experimental service-bit consent.
+    /// Enables compact negotiation only after bilateral service-bit consent.
     pub(crate) fn reconfigure_early_block_relay(&mut self, enabled: bool) {
         self.early_block_relay = enabled;
     }
