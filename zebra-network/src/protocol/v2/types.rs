@@ -149,8 +149,6 @@ pub enum ErrorCode {
     /// The peer exceeded a size or rate limit.
     Flood,
     /// The peer's misbehavior score reached the ban threshold.
-    // TODO: construct when misbehavior penalties are reported to peers.
-    #[cfg_attr(not(test), allow(dead_code))]
     Misbehavior,
     /// Stop-sending/reset: the request is no longer wanted.
     Cancelled,
