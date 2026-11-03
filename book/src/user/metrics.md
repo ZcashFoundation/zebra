@@ -159,7 +159,7 @@ The state's block writer times each phase of committing a semantically verified 
 | --- | --- |
 | `queue` | The wait in the writer's queue, from the state sending the block to the writer starting on it. |
 | `contextual_commit` | Contextual validation and the non-finalized commit, including the sub-phases below. |
-| `update_latest_chain_channels` | Publishing the new tip and non-finalized snapshot to readers, before the commit is acknowledged. |
+| `update_latest_chain_channels` | Publishing the new tip and non-finalized snapshot to readers, before the commit is acknowledged. The replaced snapshot is freed after the acknowledgement. |
 | `finalization` | Finalizing blocks past the reorg limit, after the acknowledgement. |
 | `transparent_spend` | Sub-phase: the transparent spend checks, including UTXO reads from the database. |
 | `anchor_reads` | Sub-phase: the Sapling and Orchard anchor checks and the Sprout treestate reads. |
