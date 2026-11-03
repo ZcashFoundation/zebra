@@ -443,7 +443,7 @@ impl NonFinalizedState {
         // Push onto a replayed spare when there is one, so a shared parent chain is not cloned.
         // A shared parent chain is retired as the next spare: readers release it once they see
         // this commit. A private one, such as a new fork, is pushed onto directly.
-        let (new_chain, retired) = match self.take_spare(&parent_chain) {
+        let (new_chain, retired) = match self.take_spare_waiting(&parent_chain) {
             Some(spare) => (Arc::new(spare), Some(parent_chain)),
             None => match Arc::try_unwrap(parent_chain) {
                 Ok(private_chain) => (Arc::new(private_chain), None),
@@ -523,7 +523,7 @@ impl NonFinalizedState {
             self.update_metrics_for_committed_block(height, hash);
             return Ok(());
         }
-        let (private_chain, retired) = match self.take_spare(&parent_chain) {
+        let (private_chain, retired) = match self.take_spare_waiting(&parent_chain) {
             Some(spare) => (spare, Some(parent_chain)),
             None => match Arc::try_unwrap(parent_chain) {
                 Ok(private_chain) => (private_chain, None),
@@ -539,6 +539,18 @@ impl NonFinalizedState {
         }
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Like [`Self::take_spare()`], but waits up to [`COMMIT_SPARE_WAIT`] for a reader to
+    /// release a spare that matches `target`, because that is far cheaper than cloning it.
+    fn take_spare_waiting(&mut self, target: &Chain) -> Option<Chain> {
+        if self.spare_matches(target) {
+            let deadline = Instant::now() + COMMIT_SPARE_WAIT;
+            while self.spare_is_shared() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        self.take_spare(target)
     }
 
     /// Locks the shared prepared chain.
@@ -1496,6 +1508,12 @@ impl Drop for NonFinalizedState {
         self.disable_metrics();
     }
 }
+
+/// How long a commit waits for a reader to release a matching spare before cloning the chain.
+///
+/// Readers hold a snapshot for one request, so a spare that is still shared when a block arrives
+/// is normally released within a few milliseconds.
+const COMMIT_SPARE_WAIT: Duration = Duration::from_millis(5);
 
 /// Returns `true` if `chain` is a version of `target`: both contain `target`'s root block, so
 /// popping `chain`'s extra tips and roots and pushing `target`'s later blocks makes them equal.
