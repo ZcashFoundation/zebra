@@ -1038,7 +1038,7 @@ version = "1.70.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.openrpsee]]
-version = "0.1.1"
+version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.openssl-probe]]

@@ -4,7 +4,17 @@ use derive_getters::Getters;
 use derive_new::new;
 
 /// `z_listunifiedreceivers` response
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct ZListUnifiedReceiversResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     orchard: Option<String>,

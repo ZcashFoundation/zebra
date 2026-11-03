@@ -5,7 +5,7 @@ use derive_new::new;
 /// Response to a `getnetworkinfo` RPC request
 ///
 /// See the notes for [`Rpc::get_network_info` method]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct GetNetworkInfoResponse {
     /// The server version
     pub version: u64,
@@ -43,7 +43,9 @@ pub struct GetNetworkInfoResponse {
 }
 
 /// Information about a specific network (ipv4, ipv6, onion).
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, new)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, new, schemars::JsonSchema,
+)]
 pub struct NetworkInfo {
     /// Network (ipv4, ipv6 or onion)
     pub name: String,
@@ -62,7 +64,9 @@ pub struct NetworkInfo {
 }
 
 /// Local address info.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct LocalAddress {
     /// Network address
     pub address: String,

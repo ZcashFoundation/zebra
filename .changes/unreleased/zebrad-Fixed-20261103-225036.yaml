@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: '`rpc.discover` describes the real result of each method. It previously described every result as an OpenRPC document ([#9477](https://github.com/ZcashFoundation/zebra/issues/9477)).'
+time: 2026-11-03T22:50:36.000000000Z

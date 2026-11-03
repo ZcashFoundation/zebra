@@ -293,6 +293,12 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         &settings,
     );
 
+    // `rpc.discover` doesn't depend on the network, so it is only checked once.
+    if network.is_mainnet() {
+        let discover = rpc.openrpc().expect("rpc.discover should succeed");
+        check_openrpc_document(&discover);
+    }
+
     // `getblockchaininfo`
     let get_blockchain_info = rpc
         .get_blockchain_info()
@@ -707,6 +713,33 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     settings.bind(|| {
         insta::assert_json_snapshot!("z_get_subtrees_by_index_for_orchard".to_string(), subtrees)
     });
+}
+
+/// Checks that `zebra-rpc/openrpc.json` matches the `rpc.discover` document.
+///
+/// Run the test with `ZEBRA_BLESS=1` to rewrite the file. `info.version` isn't compared, so a
+/// release version bump doesn't need a regenerated file.
+fn check_openrpc_document(discover: &openrpsee::openrpc::OpenRpc) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("openrpc.json");
+    let mut generated = serde_json::to_value(discover).expect("the document serializes");
+
+    if std::env::var_os("ZEBRA_BLESS").is_some() {
+        let rendered = serde_json::to_string_pretty(discover).expect("the document serializes");
+        std::fs::write(&path, rendered + "\n").expect("openrpc.json is writable");
+        return;
+    }
+
+    let committed: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&path).expect("zebra-rpc/openrpc.json exists"),
+    )
+    .expect("openrpc.json is valid JSON");
+    generated["info"]["version"] = committed["info"]["version"].clone();
+
+    assert!(
+        generated == committed,
+        "zebra-rpc/openrpc.json is out of date: regenerate it with \
+         `ZEBRA_BLESS=1 cargo test -p zebra-rpc test_rpc_response_data`",
+    );
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.

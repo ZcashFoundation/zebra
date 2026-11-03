@@ -11,7 +11,16 @@ use zebra_chain::{
 
 /// `z_validateaddress` response
 #[derive(
-    Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
+    Clone,
+    Default,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
 )]
 pub struct ZValidateAddressResponse {
     /// Whether the address is valid.
@@ -47,7 +56,9 @@ impl ZValidateAddressResponse {
 
 /// Address types supported by the `z_validateaddress` RPC according to
 /// <https://zcash.github.io/rpc/z_validateaddress.html>.
-#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(
+    Copy, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ZValidateAddressType {
     /// The `p2pkh` address type.
