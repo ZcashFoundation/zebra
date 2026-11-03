@@ -102,8 +102,8 @@ struct Behavior {
     /// Refuses every request.
     refuse: bool,
 
-    /// Refuses a request that arrives while another of the peer's requests is
-    /// in flight, as a server whose request slots are taken does.
+    /// Refuses a data request that arrives while two of the peer's requests are
+    /// in flight, as a server whose object-stream permits are taken does.
     refuse_when_busy: bool,
 
     /// Refuses the requests that start in these windows of time since the
@@ -290,24 +290,24 @@ struct CallGuard {
     /// The request, as it will be logged.
     call: Call,
 
-    /// Another of the peer's requests was in flight when this one arrived.
+    /// The peer's two object-stream permits were already taken when this request arrived.
     busy: bool,
 }
 
 impl CallGuard {
     /// Starts logging a request to `peer`.
     fn start(peer: &FakePeer, hash: ObjectHash, offset: u64, length: u32) -> Self {
-        let mut busy = false;
-        for counters in [&peer.counters, &peer.all] {
-            let in_flight = counters.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-            counters
-                .max_in_flight
-                .fetch_max(in_flight, Ordering::SeqCst);
-            busy = in_flight > 1;
-        }
+        let per_peer_in_flight = peer.counters.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        peer.counters
+            .max_in_flight
+            .fetch_max(per_peer_in_flight, Ordering::SeqCst);
+        let all_in_flight = peer.all.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        peer.all
+            .max_in_flight
+            .fetch_max(all_in_flight, Ordering::SeqCst);
         CallGuard {
+            busy: per_peer_in_flight > 2,
             peer: peer.clone(),
-            busy,
             call: Call {
                 peer: peer.index,
                 hash,
@@ -381,9 +381,7 @@ impl FakePeer {
         {
             guard.answered(None);
             // How the network layer reports a peer's `REFUSED` stream reset.
-            let refusal = zn::PeerError::RequestStreamFailed(
-                "stream I/O error: stream reset by peer: error 8".to_string(),
-            );
+            let refusal = zn::PeerError::RequestRefused;
             return Err(zn::SharedPeerError::from(refusal).into());
         }
 
@@ -870,6 +868,26 @@ async fn three_peers_download_every_piece() {
         );
         assert!(call.length <= 4 * MIB);
     }
+
+    // Count response payloads, independently of the stored objects. On this happy path every
+    // object arrives as one contiguous sequence of ranges: no duplicated or retried bytes.
+    for object in 0..outcome.objects.len() {
+        let hash = outcome.hash(object);
+        let mut calls: Vec<&Call> = outcome
+            .calls
+            .iter()
+            .filter(|call| call.hash == hash)
+            .collect();
+        calls.sort_by_key(|call| call.offset);
+        let mut next_offset = 0;
+        for call in calls {
+            assert_eq!(call.offset, next_offset, "no duplicate or retry: {call:?}");
+            let delivered = call.delivered.expect("every happy-path answer has data");
+            assert_eq!(delivered, usize::try_from(call.length).expect("a u32 fits in usize"));
+            next_offset += u64::try_from(delivered).expect("a usize fits in u64");
+        }
+        assert_eq!(next_offset, outcome.size_of(hash));
+    }
 }
 
 /// After its first answers, a peer is asked for 8 seconds of its rate at a
@@ -1225,9 +1243,10 @@ async fn a_refusing_peer_backs_off_without_penalty() {
     assert_eq!(taken_over.start, secs(32));
 }
 
-/// A refusal is a busy signal: the peer keeps its piece and the sub-range in
-/// flight with the refused one, and is asked for the refused sub-range again
-/// after its backoff, with no penalty.
+/// A refusal is a busy signal: the peer keeps its piece and the sub-ranges
+/// in flight with the refused one, and is asked for the refused sub-range again
+/// after its backoff, with no penalty. The first two requests share the peer's
+/// two server permits; only the third is refused.
 #[tokio::test(start_paused = true)]
 async fn a_refused_sub_range_keeps_the_peers_piece() {
     let _init_guard = zebra_test::init();
@@ -1237,20 +1256,24 @@ async fn a_refused_sub_range_keeps_the_peers_piece() {
         refuse_when_busy: true,
         ..Behavior::default()
     };
-    let outcome = Scenario::new(objects(&[2 * MIB]), vec![peer]).run().await;
+    let mut scenario = Scenario::new(objects(&[3 * MIB]), vec![peer]);
+    scenario.config.max_in_flight_per_peer = 3;
+    let outcome = scenario.run().await;
 
     outcome.assert_complete();
-    // At 0.1 s one 1 MiB sub-range is delivered and the other refused; the peer rests for 1 s,
-    // then is asked for the refused sub-range alone.
+    // At 0.1 s two 1 MiB sub-ranges are delivered and the third is refused; the peer rests for
+    // 1 s, then is asked for the refused sub-range alone.
     let calls = outcome.calls_of(0);
-    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert_eq!(calls.len(), 4, "{calls:?}");
+    assert_eq!(calls[2].delivered, None, "the third request is refused");
+    assert!(calls[..2].iter().all(|call| call.delivered.is_some()));
     let delivered: usize = calls.iter().filter_map(|call| call.delivered).sum();
     assert_eq!(
         delivered,
-        usize::try_from(2 * MIB).expect("fits"),
+        usize::try_from(3 * MIB).expect("fits"),
         "nothing is asked for twice"
     );
-    assert_eq!(calls[2].start, ms(1_100));
+    assert_eq!(calls[3].start, ms(1_100));
     assert_eq!(outcome.elapsed, ms(1_200));
 }
 
