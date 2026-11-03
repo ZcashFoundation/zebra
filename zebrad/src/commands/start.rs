@@ -94,7 +94,9 @@ use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::genesis::regtest_genesis_block, parameters::known_hashes::KnownHashListSpec,
+    block::{genesis::regtest_genesis_block, Height},
+    chain_tip::ChainTip,
+    parameters::known_hashes::KnownHashListSpec,
 };
 use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
@@ -106,9 +108,14 @@ use crate::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
-        state_snapshot::serving,
+        state_snapshot::{
+            bootstrap,
+            decision::{self, Decision},
+            progress::{self, RuntimeStages, Stage},
+            serving,
+        },
         sync::{
-            self, record_tip_block_delay, show_block_chain_progress,
+            self, record_tip_block_delay, show_block_chain_progress, StateSnapshotFallback,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
         },
         tokio::{RuntimeRun, TokioComponent},
@@ -487,14 +494,54 @@ impl StartCmd {
             None
         };
 
-        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
-        // index once the scan finishes. The network does not wait for it: every node with an
-        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
-        // yet as not found.
+        // An empty pruned node may bootstrap from a state snapshot (design, §6) before the state
+        // opens: the import renames a complete database into place, and `zebra_state::init`
+        // then opens it at the snapshot height like any other state.
         let snapshot_store = zebra_state::state_snapshot::store::ArtifactStore::new(
             &config.state,
             &config.network.network,
         );
+        let mut bootstrapped_height = None;
+        if let Decision::Bootstrap { commitment, peers } =
+            decision::should_bootstrap(&config, &snapshot_store)
+        {
+            info!(
+                height = commitment.height.0,
+                hash = %commitment.block_hash,
+                manifest = %commitment.manifest,
+                peers = peers.len(),
+                "{}",
+                Stage::BootstrapStarted
+            );
+            match bootstrap::bootstrap(&config, commitment, peers).await {
+                Ok(()) => bootstrapped_height = Some(commitment.height),
+                Err(error) => match config.sync.state_snapshot_fallback {
+                    StateSnapshotFallback::Error => {
+                        return Err(Report::new(error).wrap_err(
+                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
+                             is \"error\", so Zebra exits without a state directory and the next \
+                             start retries. Check sync.state_snapshot_peers and the commitment; \
+                             set sync.state_snapshot_fallback = \"genesis\" to sync from genesis \
+                             when a bootstrap fails, or sync.state_snapshot_sync = false to turn \
+                             snapshot sync off",
+                        ));
+                    }
+                    StateSnapshotFallback::Genesis => {
+                        warn!(
+                            %error,
+                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
+                             is \"genesis\": syncing from genesis instead"
+                        );
+                    }
+                },
+            }
+        }
+
+        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
+        // index once the scan finishes. The network does not wait for it: every node with an
+        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
+        // yet as not found. The scan starts after the bootstrap, so a snapshot downloaded just
+        // now is in the index.
         // With any hints mode, a node with version 2 enabled serves the saved
         // spentness-hint artifact to its version 2 peers. The state snapshot store's
         // objects are added to the same index, which the network serves `get-object`
@@ -576,6 +623,18 @@ impl StartCmd {
         else {
             unreachable!("state returns history capabilities for its capabilities request");
         };
+        let snapshot_height = history
+            .snapshot_base
+            .map(|base| base.height)
+            .or(bootstrapped_height);
+        if let Some(snapshot_height) = snapshot_height {
+            info!(
+                snapshot_height = snapshot_height.0,
+                tip_height = ?latest_chain_tip.best_tip_height().map(|height| height.0),
+                "{}",
+                Stage::StateInitialized
+            );
+        }
         let local_services = Self::network_services(&config, history)?;
 
         info!("logging database metrics on startup");
@@ -1072,6 +1131,20 @@ impl StartCmd {
         }
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
+        // On a snapshot state, log the sync stages above the snapshot height (design, §10).
+        let snapshot_stages_task_handle = if let Some(snapshot_height) = snapshot_height {
+            let stages = RuntimeStages::new(
+                snapshot_height,
+                max_checkpoint_height,
+                config.state.debug_stop_at_height.map(Height),
+            );
+            tokio::spawn(
+                progress::log_runtime_stages(stages, chain_tip_change.clone()).in_current_span(),
+            )
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
+        };
+
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
         // TODO: add a config to enable the miner rather than a feature.
@@ -1320,6 +1393,7 @@ impl StartCmd {
         end_of_support_task_handle.abort();
         miner_task_handle.abort();
         spentness_hints_task_handle.abort();
+        snapshot_stages_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {
