@@ -265,6 +265,10 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+
+    /// Serializes block proposal checks, so they take turns with the prepared chain instead of
+    /// each cloning the published best chain.
+    proposal_check: Arc<std::sync::Mutex<()>>,
 }
 
 impl Drop for StateService {
@@ -1176,6 +1180,7 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            proposal_check: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
@@ -2273,6 +2278,10 @@ impl Service<ReadRequest> for ReadStateService {
                     "attempting to validate and commit block proposal \
                          onto a cloned non-finalized state"
                 );
+                let _one_check_at_a_time = state
+                    .proposal_check
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
                 // The previous block of a valid proposal must be on the best chain tip.

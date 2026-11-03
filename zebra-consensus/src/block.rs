@@ -162,7 +162,12 @@ async fn cache_proposal(
     .await
     .expect("proposal retention accounting uses saturating content-size arithmetic");
     proposals.send_modify(|proposals| {
-        proposals.retain(|proposal| proposal.key != key);
+        // Proposals are validated against the best tip, so entries for other parents can only
+        // match a submission that forks the chain, and full verification covers those.
+        let parent = block.header.previous_block_hash;
+        proposals.retain(|proposal| {
+            proposal.key != key && proposal.block.header.previous_block_hash == parent
+        });
         proposals.push_front(PreparedProposal {
             key,
             transaction_bytes,

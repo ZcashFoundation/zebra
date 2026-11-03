@@ -1140,37 +1140,35 @@ where
         .map_misc_error()?
     }
 
-    /// Validates a transaction-bearing fallback template as a block proposal before it is served.
+    /// Validates a transaction-bearing fallback template as a block proposal in the background,
+    /// so a block solved from it reuses the verdict in `submitblock`.
     ///
-    /// The updater validates its own builds in the background, so this only runs without a live
-    /// updater. Served work must be coinbase-only or validated, so a rejected template is reported
-    /// to the caller instead of being served. The verifier router bounds the wait, like the
-    /// `proposal` mode of this RPC.
-    async fn validate_fallback_template(
-        &self,
-        template: BlockTemplateResponse,
-    ) -> Result<BlockTemplateResponse> {
+    /// The updater validates its own builds, so this only runs without a live updater. A failed
+    /// check is logged: the template is already served, as the updater's first build for a tip is.
+    fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
         let network = self.network.clone();
-        let (template, proposal) = tokio::task::spawn_blocking(move || {
-            let proposal =
-                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network);
-            (template, proposal)
-        })
-        .await
-        .map_misc_error()?;
-        let proposal = proposal.map_misc_error()?;
-        self.gbt
-            .block_verifier_router()
-            .oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal)))
-            .await
-            .map_err(|error| {
-                ErrorObject::owned(
-                    0,
-                    format!("block template failed validation: {error}"),
-                    None::<()>,
+        let template = template.clone();
+        let verifier = self.gbt.block_verifier_router();
+        tokio::spawn(async move {
+            let proposal = tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            })
+            .await;
+            let result = match proposal {
+                Ok(Ok(proposal)) => tokio::time::timeout(
+                    types::get_block_template::PROPOSAL_CHECK_TIMEOUT,
+                    verifier.oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal))),
                 )
-            })?;
-        Ok(template)
+                .await
+                .map_err(|elapsed| elapsed.to_string())
+                .and_then(|result| result.map(|_| ()).map_err(|error| error.to_string())),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = result {
+                tracing::debug!(%error, "fallback block template failed validation");
+            }
+        });
     }
 
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
@@ -2996,6 +2994,7 @@ where
                 &self.network,
                 latest_chain_tip,
                 sync_status,
+                self.gbt.proposal_checks(),
             )
             .await;
         }
@@ -3160,21 +3159,10 @@ where
                     template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
                     )?;
-                // Served work is coinbase-only or validated, so a solved block that changes only
-                // the nonce and Equihash solution reuses this verdict in `submitblock`. Validate
-                // after clamping, because the proposal carries the served `cur_time`.
+                // Validate the served work in the background, so a solve of it reuses the
+                // verdict in `submitblock`. The proposal carries the served `cur_time`.
                 if !template.transactions.is_empty() {
-                    template = self.validate_fallback_template(template).await?;
-                    // Validation takes time, so recheck the parent before serving.
-                    let current_tip = tokio::time::timeout(
-                        precompute::SNAPSHOT_TIMEOUT,
-                        precompute::state_tip_hash(read_state.clone()),
-                    )
-                    .await
-                    .map_misc_error()??;
-                    if current_tip != Some(committed_tip) {
-                        continue;
-                    }
+                    self.validate_fallback_template(&template);
                 }
                 if let Some(cache) = self.gbt.template_cache() {
                     cache.preserve_work_identity(&mut template);

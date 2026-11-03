@@ -4794,10 +4794,10 @@ async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit()
     }
 }
 
-/// Without a live updater, a transaction-bearing fallback template is validated before it is
-/// served, and a rejected template is an error rather than unvalidated work.
+/// Without a live updater, a transaction-bearing fallback template is served at once and
+/// validated in the background, so a block solved from it can reuse the verdict.
 #[tokio::test]
-async fn getblocktemplate_fallback_serves_transaction_bearing_work_only_after_validation() {
+async fn getblocktemplate_fallback_validates_transaction_bearing_work_in_the_background() {
     use crate::methods::types::get_block_template::{
         proposal::proposal_block_from_template, BlockTemplateTimeSource,
     };
@@ -4875,57 +4875,34 @@ async fn getblocktemplate_fallback_serves_transaction_bearing_work_only_after_va
             verifier.clone(),
         );
 
-        // A rejected template is an error, never served work.
-        let rejected = rpc.get_block_template(None);
-        tokio::pin!(rejected);
-        let request = tokio::select! {
-            biased;
-            request = verifier.expect_request_that(|request| {
-                matches!(request, zebra_consensus::Request::CheckProposal(_))
-            }) => request,
-            result = &mut rejected => {
-                panic!("transaction-bearing work must not be served before validation: {result:?}")
-            }
-        };
-        let proposal = request.request().block();
-        assert_eq!(proposal.transactions.len(), 2);
-        assert_eq!(proposal.transactions[1].hash(), transaction_hash);
-        request.respond_error("rejected".into());
-        let error = rejected
+        let template = rpc
+            .get_block_template(None)
             .await
-            .expect_err("a rejected fallback template must not be served");
-        assert!(error.message().contains("failed validation"), "{error:?}");
-
-        // An accepted template is served, and matches the validated proposal.
-        let accepted = rpc.get_block_template(None);
-        tokio::pin!(accepted);
-        let request = tokio::select! {
-            biased;
-            request = verifier.expect_request_that(|request| {
-                matches!(request, zebra_consensus::Request::CheckProposal(_))
-            }) => request,
-            result = &mut accepted => {
-                panic!("transaction-bearing work must not be served before validation: {result:?}")
-            }
-        };
-        let proposal = request.request().block();
-        request.respond(proposal.hash());
-        let template = accepted
-            .await
-            .expect("a validated fallback template is served")
+            .expect("a fallback template is served")
             .try_into_template()
             .expect("a template response");
         assert_eq!(template.transactions.len(), 1);
         assert_eq!(template.transactions[0].hash, transaction_hash);
+
+        // The served template is validated after it was returned.
+        let request = verifier
+            .expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposal(_))
+            })
+            .await;
+        let proposal = request.request().block();
+        assert_eq!(proposal.transactions.len(), 2);
+        assert_eq!(proposal.transactions[1].hash(), transaction_hash);
         assert_eq!(
             proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
                 .expect("the served template converts to a block"),
             *proposal,
             "the served template is the validated proposal"
         );
+        request.respond(proposal.hash());
     })
     .await
-    .expect("fallback validation must complete without waiting for a backstop");
+    .expect("fallback validation must not delay the template");
 }
 
 /// A cached failure must not leave a caller stuck on its authoritative tip recheck.

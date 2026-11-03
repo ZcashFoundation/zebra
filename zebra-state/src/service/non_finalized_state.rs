@@ -718,7 +718,7 @@ impl NonFinalizedState {
             self.insert_with(Arc::new(chain), |chains| {
                 chains.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
             });
-            *self.prepared() = Some(parent_chain);
+            self.replace_prepared(Some(parent_chain));
             self.retained_finalized_height = None;
             self.update_metrics_for_committed_block(height, hash);
             return Ok(());
@@ -790,7 +790,7 @@ impl NonFinalizedState {
             Ok(()) => Some(chain),
             // The chain is unchanged, so the next proposal can still replay it.
             Err(_) => {
-                *self.prepared() = Some(Arc::new(chain));
+                self.replace_prepared(Some(Arc::new(chain)));
                 None
             }
         }
@@ -821,7 +821,14 @@ impl NonFinalizedState {
 
     /// Stores `chain` as the prepared chain, replacing any previous one.
     pub(crate) fn store_prepared(&self, chain: Chain) {
-        *self.prepared() = Some(Arc::new(chain));
+        self.replace_prepared(Some(Arc::new(chain)));
+    }
+
+    /// Replaces the prepared chain, dropping the previous one after releasing the lock, because
+    /// freeing a chain's indexes takes time proportional to the chain and commits take this lock.
+    fn replace_prepared(&self, chain: Option<Arc<Chain>>) {
+        let previous = std::mem::replace(&mut *self.prepared(), chain);
+        drop(previous);
     }
 
     /// Replays the spare into a private copy of the best chain ahead of the next commit or
