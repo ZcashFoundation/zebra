@@ -4,10 +4,10 @@
 //! peer group and kept across connections, so a peer cannot shed its score by
 //! reconnecting, or by being disconnected and redialled. A group whose score
 //! reaches [`MAX_PEER_MISBEHAVIOR_SCORE`] is reported to the address book,
-//! which bans it, and keeps its full score until the score lapses: the ban
-//! is in force only from the address book's next flush of misbehavior
-//! reports, and until then a connection from the group is closed on its
-//! first penalty.
+//! which bans it, and keeps its full score for a ban duration from the
+//! report: the ban is in force only from the address book's next flush of
+//! misbehavior reports, and until then a connection from the group is closed
+//! on its first penalty; the score lapses no later than the ban ends.
 
 use std::{collections::HashMap, net::IpAddr, time::Duration};
 
@@ -93,11 +93,13 @@ impl MisbehaviorScores {
     }
 }
 
-/// A peer group's score, when the group's first penalty in the current
-/// window was assigned, and whether the group has been reported for banning.
+/// A peer group's score, when its current window started, and whether the
+/// group has been reported for banning.
 #[derive(Clone, Copy, Debug)]
 struct Score {
     points: u32,
+    /// When the window started: at the group's first penalty, or at its
+    /// report (see [`Score::report`]).
     since: Instant,
     /// Whether the group was reported to the address book in this window. A
     /// reported group keeps its score until the window ends, so each of its
@@ -110,6 +112,21 @@ impl Score {
     /// last about as long as a ban (draft, "Misbehavior and Banning").
     fn has_lapsed(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.since) >= BAN_DURATION
+    }
+
+    /// Records that the group was reported to the address book at `now`, and
+    /// starts the window again there.
+    ///
+    /// The ban is in force from the address book's next flush of reports, at
+    /// most `MISBEHAVIOR_FLUSH_INTERVAL` after `now`, and lasts
+    /// [`BAN_DURATION`]. A score that kept the window of the group's first
+    /// penalty could lapse before the ban begins, if the report came at the
+    /// end of that window, and the group's next connection would start from
+    /// zero. From `now`, the score lasts until the ban is in force, and lapses
+    /// no later than the ban ends.
+    fn report(&mut self, now: Instant) {
+        self.reported = true;
+        self.since = now;
     }
 }
 
@@ -131,7 +148,8 @@ async fn run(
     }) = commands.recv().await
     {
         let group = connection_limit_key(addr.ip());
-        let score = add_points(&mut scores, group, points, Instant::now(), limit);
+        let now = Instant::now();
+        let score = add_points(&mut scores, group, points, now, limit);
         let reached_threshold = score.points >= MAX_PEER_MISBEHAVIOR_SCORE;
         if reached_threshold && !score.reported {
             // The address book only acts on a full score, and bans the whole group.
@@ -142,12 +160,12 @@ async fn run(
             )) {
                 // # Security
                 //
-                // The score stays at the threshold until it lapses. The ban is in force only
-                // from the address book's next flush of misbehavior reports, so a peer that
-                // reconnects before then would otherwise start from zero, with a threshold's
-                // worth of misbehavior before its next report; instead its first penalty closes
-                // the connection again.
-                Ok(()) => score.reported = true,
+                // The score stays at the threshold until it lapses, a ban duration from now. The
+                // ban is in force only from the address book's next flush of misbehavior
+                // reports, so a peer that reconnects before then would otherwise start from
+                // zero, with a threshold's worth of misbehavior before its next report; instead
+                // its first penalty closes the connection again.
+                Ok(()) => score.report(now),
                 // The score stays at the threshold, so the group's next penalty reports it again.
                 Err(error) => {
                     tracing::warn!(?addr, %error, "could not report a misbehaving v2 peer");

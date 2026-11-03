@@ -59,9 +59,10 @@ async fn scores_persist_across_connections_until_the_threshold() {
     assert!(reports_rx.try_recv().is_err(), "the group is reported once");
 }
 
-/// A score lapses a ban duration after its first penalty, along with its
-/// report, and the map of scores stays within its limit, dropping lapsed
-/// scores first, then the oldest.
+/// A score lapses a ban duration after its first penalty, or after its
+/// report, which starts its window again, along with the report, and the map
+/// of scores stays within its limit, dropping lapsed scores first, then the
+/// oldest.
 #[test]
 fn scores_lapse_and_stay_bounded() {
     let _init_guard = zebra_test::init();
@@ -69,18 +70,34 @@ fn scores_lapse_and_stay_bounded() {
     let [a, b, c] =
         ["203.0.113.1", "203.0.113.2", "203.0.113.3"].map(|ip| ip.parse().expect("valid IP"));
     let start = Instant::now();
+    let second = Duration::from_secs(1);
 
     let score = add_points(&mut scores, a, POINTS, start, 2);
     assert_eq!(score.points, POINTS);
-    score.reported = true;
-    let score = add_points(&mut scores, a, POINTS, start, 2);
+    let score = add_points(&mut scores, a, POINTS, start + second, 2);
     assert_eq!(score.points, 2 * POINTS);
+
+    // A report just before the window ends starts it again: the score outlasts the window of the
+    // group's first penalty, so it is still there once the ban it reported is in force.
+    let reported_at = start + BAN_DURATION - second;
+    let score = add_points(&mut scores, a, POINTS, reported_at, 2);
+    assert_eq!(score.points, 3 * POINTS);
+    score.report(reported_at);
+    let score = add_points(&mut scores, a, POINTS, start + BAN_DURATION + second, 2);
+    assert_eq!(
+        score.points,
+        4 * POINTS,
+        "a reported score lasts a ban duration from its report"
+    );
     assert!(score.reported, "a report lasts as long as its score");
-    let score = add_points(&mut scores, a, POINTS, start + BAN_DURATION, 2);
+
+    // The score lapses a ban duration after the report, by when the ban has run its course.
+    let lapsed_at = reported_at + BAN_DURATION;
+    let score = add_points(&mut scores, a, POINTS, lapsed_at, 2);
     assert_eq!(score.points, POINTS, "a lapsed score starts again");
     assert!(!score.reported, "a lapsed score is unreported");
 
-    let later = start + BAN_DURATION + Duration::from_secs(1);
+    let later = lapsed_at + second;
     assert_eq!(add_points(&mut scores, b, POINTS, later, 2).points, POINTS);
     assert_eq!(
         add_points(&mut scores, c, POINTS, later + BAN_DURATION / 2, 2).points,
