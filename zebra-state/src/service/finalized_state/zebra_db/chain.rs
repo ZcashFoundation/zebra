@@ -36,7 +36,7 @@ use crate::{
         zebra_db::{metrics::value_pool_metrics, ZebraDb},
         TypedColumnFamily,
     },
-    HashOrHeight, ValidateContextError,
+    HashOrHeight, SnapshotBase, ValidateContextError,
 };
 
 #[cfg(test)]
@@ -91,8 +91,25 @@ pub const SNAPSHOT_BASE: &str = "snapshot_base";
 /// column family.
 pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
+/// The type for reading the snapshot base marker from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type SnapshotBaseCf<'cf> = TypedColumnFamily<'cf, (), SnapshotBase>;
+
 impl ZebraDb {
     // Column family convenience methods
+
+    /// Returns a typed handle to the snapshot base column family.
+    pub(crate) fn snapshot_base_cf(&self) -> SnapshotBaseCf<'_> {
+        SnapshotBaseCf::new(&self.db, SNAPSHOT_BASE)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns the marker of the state snapshot this database was imported from, if any.
+    pub fn snapshot_base(&self) -> Option<SnapshotBase> {
+        self.snapshot_base_cf().zs_get(&())
+    }
 
     /// Returns a typed handle to the `history_tree` column family.
     pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {

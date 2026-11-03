@@ -12,6 +12,7 @@ use zebra_chain::{
 };
 
 pub mod setup;
+pub(crate) mod snapshot_db;
 
 /// Helper trait for constructing "valid" looking chains of blocks
 pub trait FakeChainHelper {

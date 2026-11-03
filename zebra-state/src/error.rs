@@ -155,6 +155,21 @@ pub enum StateInitError {
         lowest_retained_height: block::Height,
     },
 
+    /// A database imported from a state snapshot was opened for writing with pruning disabled.
+    #[error(
+        "cannot open state at {path:?} with pruning disabled: it was imported from a state \
+         snapshot at height {height:?} and only has the blocks from height {window_start:?}. \
+         Enable state.prune_blocks_older_than, or fully resync in a separate cache directory"
+    )]
+    SnapshotDatabase {
+        /// The database imported from a state snapshot.
+        path: PathBuf,
+        /// The snapshot height.
+        height: block::Height,
+        /// The first height with a complete block.
+        window_start: block::Height,
+    },
+
     /// A pruned database cannot reconstruct indexes for a different build's spending-index mode.
     #[error(
         "cannot open pruned state at {path:?}: changing spending-index mode from \

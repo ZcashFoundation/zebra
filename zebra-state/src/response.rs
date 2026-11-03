@@ -78,6 +78,15 @@ impl HistoryCapabilities {
     pub fn has_block_body(self, height: block::Height) -> bool {
         height == block::Height::MIN || height >= self.lowest_retained_height
     }
+
+    /// Returns whether a best-chain block at `height` is known by hash and header, including
+    /// the genesis exception.
+    ///
+    /// A database imported from a state snapshot knows no blocks between genesis and its window
+    /// start; below that start, only indexes carried by the snapshot can refer to a height.
+    pub fn knows_block(self, height: block::Height) -> bool {
+        height == block::Height::MIN || height >= self.lowest_known_height
+    }
 }
 
 /// A retained block header and its best-chain identity.

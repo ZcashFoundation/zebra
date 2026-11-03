@@ -4,5 +4,6 @@
 
 mod history;
 mod prop;
+mod snapshot;
 mod transparent;
 mod vectors;
