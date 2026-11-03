@@ -152,12 +152,20 @@ fn pruned_network_services_clear_archive_capability() {
         super::StartCmd::network_services(&config, HistoryCapabilities::default()).unwrap(),
         PeerServices::NODE_NETWORK,
     );
-    for (retention, lowest_retained_height) in [
-        (None, Height(MIN_PRUNING_RETENTION)),
-        (Some(MIN_PRUNING_RETENTION), Height(0)),
-        (Some(MIN_PRUNING_RETENTION), Height(MIN_PRUNING_RETENTION)),
+    for (retention, lowest_retained_height, limited) in [
+        (None, Height(MIN_PRUNING_RETENTION), false),
+        (Some(MIN_PRUNING_RETENTION), Height(0), true),
+        (
+            Some(MIN_PRUNING_RETENTION),
+            Height(MIN_PRUNING_RETENTION),
+            true,
+        ),
+        // Fewer retained blocks than limited service promises, as on Regtest.
+        (Some(1_001), Height(1_001), false),
     ] {
         config.state.prune_blocks_older_than = retention;
+        let mut expected = PeerServices::empty();
+        expected.set(PeerServices::NODE_NETWORK_LIMITED, limited);
         assert_eq!(
             super::StartCmd::network_services(
                 &config,
@@ -166,7 +174,8 @@ fn pruned_network_services_clear_archive_capability() {
                 },
             )
             .unwrap(),
-            PeerServices::empty(),
+            expected,
+            "retention {retention:?}",
         );
     }
 }

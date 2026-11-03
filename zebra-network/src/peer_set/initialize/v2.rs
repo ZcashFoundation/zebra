@@ -208,6 +208,7 @@ pub async fn close_v2_endpoint(grace: Duration) {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     inv_collector: broadcast::Sender<InventoryChange>,
     latest_chain_tip: C,
@@ -224,6 +225,7 @@ where
 {
     start_with_intervals(
         config,
+        local_services,
         inbound_service,
         inv_collector,
         latest_chain_tip,
@@ -242,6 +244,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start_with_intervals<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     inv_collector: broadcast::Sender<InventoryChange>,
     latest_chain_tip: C,
@@ -268,16 +271,9 @@ where
          {MAX_USER_AGENT_LENGTH} bytes.",
         user_agent.len(),
     );
-    // A node with an object index serves `get-object` requests, so it advertises them: it answers
-    // the objects its index holds, and every other object as not found (draft, "`get-object`").
-    let mut services = PeerServices::NODE_NETWORK;
-    services.set(
-        PeerServices::NODE_SYNC_ARTIFACTS,
-        config.object_source.is_some(),
-    );
     let identity = LocalIdentity {
         user_agent,
-        services,
+        services: config.v2_advertised_services(local_services),
         relay: true,
     };
 

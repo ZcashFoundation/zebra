@@ -103,6 +103,12 @@ download blocks from it, even near the tip, and syncing Zebra nodes do not keep 
 peer. A pruned mining node should therefore also connect to archive nodes, or to Zebra peers that
 use [early block relay](mining.md#early-block-relay-and-compact-blocks), so that the blocks it finds still propagate.
 
+With a retention of at least 2,304 blocks, a pruned node advertises `NODE_NETWORK_LIMITED` to
+[version 2 protocol](p2p-v2.md) peers, which tells them it serves at least the most recent 2,304
+blocks; pruning keeps at least `state.prune_blocks_older_than` recent bodies, so the promise holds
+while the node syncs too. Legacy peers are not told, because ZIP 204 defines no such service for the
+legacy protocol.
+
 ## Watch pruning converge
 
 Enable the [Prometheus endpoint](metrics.md) and watch these metrics:

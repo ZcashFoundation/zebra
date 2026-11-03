@@ -179,6 +179,10 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
+    // Legacy peers are not told about `NODE_NETWORK_LIMITED`: ZIP 204 does not define it, so only
+    // version 2 `init` records carry it.
+    let legacy_services = local_services - PeerServices::NODE_NETWORK_LIMITED;
+
     let (
         address_book,
         bans_receiver,
@@ -186,7 +190,7 @@ where
         address_book_service,
         address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, listen_addr, local_services);
+    ) = AddressBookUpdater::spawn(&config, listen_addr, legacy_services);
 
     let (misbehavior_tx, misbehavior_rx) = mpsc::channel::<MisbehaviorReport>(
         // Leave enough room for a misbehaviour update on every peer connection
@@ -227,7 +231,7 @@ where
             .with_inventory_collector(inv_sender.clone())
             .with_address_book_updater(address_book_updater.clone())
             .with_bans(bans_receiver.clone())
-            .with_advertised_services(local_services)
+            .with_advertised_services(legacy_services)
             .with_user_agent(user_agent.clone())
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)
@@ -315,6 +319,7 @@ where
     //    is a guard because its exit is fatal.
     let v2_task = v2::start(
         config.clone(),
+        local_services,
         inbound_service,
         inv_sender,
         latest_chain_tip,

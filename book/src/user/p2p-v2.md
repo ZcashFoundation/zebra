@@ -115,6 +115,14 @@ version 2 peers are recorded in a separate version 2 address book.
   `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
   announcements from peers are received and acted on.
+- [Pruned nodes](pruning.md). A pruned node never advertises `NODE_NETWORK`.
+  With `state.prune_blocks_older_than` of at least 2,304, it advertises the
+  draft's `NODE_NETWORK_LIMITED` service to version 2 peers instead, since
+  pruning keeps at least that many recent blocks. It serves
+  headers for the whole chain, and answers requests for pruned blocks with
+  not-found results. A syncing node does not keep version 2 peers it dials
+  unless they advertise `NODE_NETWORK`, as on the legacy protocol. The
+  `getnetworkinfo` RPC reports the services sent to legacy peers.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
   inbound and outbound limits of half the legacy ones. Protocol violations
   close the connection with the draft's error codes.
