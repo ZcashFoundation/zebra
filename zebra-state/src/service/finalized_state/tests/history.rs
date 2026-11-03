@@ -1478,3 +1478,82 @@ fn recent_address_checks_reject_an_unavailable_required_window() {
     let error = Upgrade.validate(&state.db, &receiver).unwrap().unwrap_err();
     assert!(error.contains("require unavailable block history"));
 }
+
+/// A database imported from a state snapshot has no blocks below its window start, and no
+/// height-one transaction index row. Its marker sets the known and retained floors, so it counts
+/// as pruned instead of as an archive, even when its window starts at height one.
+#[test]
+fn snapshot_base_marker_sets_the_history_floors() {
+    use zebra_chain::state_snapshot::ObjectHash;
+
+    use super::super::zebra_db::chain::SNAPSHOT_BASE;
+    use crate::SnapshotBase;
+
+    let _init_guard = zebra_test::init();
+    let base = |window_start, state: &FinalizedState| SnapshotBase {
+        window_start,
+        height: Height(3),
+        block_hash: state.db.finalized_tip_hash(),
+        manifest: ObjectHash([7; 32]),
+        deferred_checks: SnapshotBase::DEFERRED_BLOCK_HASH,
+    };
+    let mark = |state: &FinalizedState, base: SnapshotBase, below: Height| {
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_insert(&state.db.cf_handle(SNAPSHOT_BASE).unwrap(), (), base);
+        if below > Height(1) {
+            delete_body_prefix(&mut batch, &state.db, below);
+            batch.zs_delete(
+                &state.db.cf_handle("hash_by_tx_loc").unwrap(),
+                TransactionLocation::min_for_height(Height(1)),
+            );
+        }
+        state.db.write_batch(batch).unwrap();
+        state.db.history_capabilities().unwrap()
+    };
+
+    // A window above height one, with no height-one index row: an archive without the marker.
+    let state = populated(&Config::ephemeral());
+    let window = base(Height(2), &state);
+    let history = mark(&state, window, Height(2));
+    assert_eq!(
+        history,
+        HistoryCapabilities {
+            lowest_retained_height: Height(2),
+            lowest_known_height: Height(2),
+            snapshot_base: Some(window),
+        }
+    );
+    assert!(history.is_pruned());
+    assert!(!history.has_block_body(Height(1)));
+    assert!(history.has_block_body(Height(2)));
+
+    // Pruning above the window start raises the retained floor, not the known floor.
+    let state = populated(&Config::ephemeral());
+    let window = base(Height(2), &state);
+    let history = mark(&state, window, Height(3));
+    assert_eq!(history.lowest_retained_height, Height(3));
+    assert_eq!(history.lowest_known_height, Height(2));
+
+    // A window that starts at height one still counts as pruned.
+    let state = populated(&Config::ephemeral());
+    let window = base(Height(1), &state);
+    let history = mark(&state, window, Height(1));
+    assert_eq!(history.lowest_retained_height, Height(1));
+    assert_eq!(history.snapshot_base, Some(window));
+    assert!(history.is_pruned());
+    assert!(history.has_block_body(Height(1)));
+
+    // A marker that is not a snapshot base is an error, not an archive.
+    let state = populated(&Config::ephemeral());
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_insert(
+        &state.db.cf_handle(SNAPSHOT_BASE).unwrap(),
+        (),
+        [0u8; 3].as_slice(),
+    );
+    state.db.write_batch(batch).unwrap();
+    assert!(matches!(
+        state.db.history_capabilities(),
+        Err(StateInitError::HistoryRead { .. })
+    ));
+}
