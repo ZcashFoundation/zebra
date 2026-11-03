@@ -14,7 +14,7 @@ use serde_big_array::BigArray;
 use zebra_chain::{
     block::{Block, Height},
     history_tree::NonEmptyHistoryTree,
-    parameters::{Network, NetworkKind},
+    parameters::{testnet, Network, NetworkKind},
     primitives::zcash_history::BlockCommitmentTreeRoots,
     sapling,
     serialization::ZcashDeserializeInto,
@@ -756,6 +756,34 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
         exported[&ComponentId::HistoryTree],
         [(Vec::new(), HistoryTreeParts::from(&history_tree).as_bytes())],
     );
+}
+
+/// The exporter writes the network's parameters hash into the manifest, and the
+/// decoder reads one only on the networks that need it, so the two must agree
+/// on every kind of network for exported manifests to decode.
+#[test]
+fn manifests_carry_a_parameters_hash_exactly_where_the_decoder_reads_one() {
+    let _init_guard = zebra_test::init();
+
+    let custom_testnet = testnet::Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_funding_streams(Vec::new())
+        .to_network()
+        .expect("the parameters are valid");
+    assert!(!custom_testnet.is_default_testnet());
+
+    for network in [
+        Network::Mainnet,
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
+        custom_testnet,
+    ] {
+        assert_eq!(
+            network.state_snapshot_parameters_hash().is_some(),
+            Manifest::needs_parameters_hash(&network),
+            "{network}",
+        );
+    }
 }
 
 #[test]
