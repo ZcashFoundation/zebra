@@ -254,6 +254,11 @@ pub enum SnapshotError {
     /// The imported database could not be opened.
     #[error("cannot open the imported state: {0}")]
     Open(crate::StateInitError),
+
+    /// The snapshot's `history_tree` value does not decode, is not canonical,
+    /// or is for another network or a pre-Heartwood height.
+    #[error("invalid snapshot history tree: {0}")]
+    InvalidHistoryTree(String),
 }
 
 impl SnapshotError {
@@ -264,7 +269,7 @@ impl SnapshotError {
         match self {
             SnapshotError::Refused { check, .. } => check.rejects_snapshot(),
             SnapshotError::Format(format::FormatError::Io(_)) => false,
-            SnapshotError::Format(_) => true,
+            SnapshotError::Format(_) | SnapshotError::InvalidHistoryTree(_) => true,
             SnapshotError::Io { .. }
             | SnapshotError::MissingPiece { .. }
             | SnapshotError::Unsupported(_)

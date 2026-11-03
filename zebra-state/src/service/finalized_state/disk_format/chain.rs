@@ -15,7 +15,7 @@ use zebra_chain::{
     block::{self, merkle::AuthDataRoot, Height, SyncHashEntry},
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
-    parameters::{Network, NetworkKind},
+    parameters::{Network, NetworkKind, NetworkUpgrade},
     primitives::zcash_history,
     state_snapshot::ObjectHash,
     value_balance::{ValueBalance, SERIALIZED_SIZE},
@@ -92,6 +92,41 @@ pub struct HistoryTreeParts {
 }
 
 impl HistoryTreeParts {
+    /// Decodes a state snapshot's `history_tree` value for `network` without trusting it: the
+    /// bytes must be exactly the current encoding of a tree for this network at a height where
+    /// the history tree exists, and the tree must rebuild from its peaks.
+    pub(crate) fn decode_canonical(
+        bytes: &[u8],
+        network: &Network,
+    ) -> Result<NonEmptyHistoryTree, String> {
+        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
+            .deserialize(bytes)
+            .map_err(|error| format!("the history tree does not decode: {error}"))?;
+
+        if parts.as_bytes() != bytes {
+            return Err("the history tree is not in the canonical encoding".to_string());
+        }
+
+        if parts.network_kind != network.kind() {
+            return Err(format!(
+                "the history tree is for {:?}, not {:?}",
+                parts.network_kind,
+                network.kind()
+            ));
+        }
+
+        if NetworkUpgrade::current(network, parts.current_height) < NetworkUpgrade::Heartwood {
+            return Err(format!(
+                "the history tree ends at height {}, before Heartwood",
+                parts.current_height.0
+            ));
+        }
+
+        parts
+            .with_network(network)
+            .map_err(|error| format!("the history tree does not rebuild from its peaks: {error}"))
+    }
+
     /// Converts [`HistoryTreeParts`] to a [`NonEmptyHistoryTree`].
     pub(crate) fn with_network(
         self,

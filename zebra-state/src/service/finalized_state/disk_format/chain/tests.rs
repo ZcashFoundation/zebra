@@ -195,3 +195,68 @@ fn snapshot_base_round_trips_through_disk_format() {
     }
     .has_deferred(SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS));
 }
+
+/// A snapshot's `history_tree` value must be the exact current encoding of a tree for the
+/// network at a post-Heartwood height, and rebuild from its peaks.
+#[test]
+fn history_tree_parts_decode_canonical_requires_the_exact_current_encoding() {
+    use std::sync::Arc;
+
+    use zebra_chain::{
+        block::Block, orchard, primitives::zcash_history::BlockCommitmentTreeRoots, sapling,
+        serialization::ZcashDeserializeInto,
+    };
+
+    // The Heartwood activation block starts the history tree with one leaf.
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_903000_BYTES
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    let sapling_root = sapling::tree::Root::default();
+    let orchard_root = orchard::tree::Root::default();
+    let tree = NonEmptyHistoryTree::from_block(
+        &Network::Mainnet,
+        block,
+        BlockCommitmentTreeRoots {
+            sapling: &sapling_root,
+            orchard: &orchard_root,
+            ironwood: &orchard_root,
+        },
+    )
+    .expect("the activation block starts the tree");
+    let bytes = HistoryTreeParts::from(&tree).as_bytes();
+
+    let decoded = HistoryTreeParts::decode_canonical(&bytes, &Network::Mainnet)
+        .expect("the canonical encoding decodes");
+    assert_eq!(decoded.hash(), tree.hash());
+    assert_eq!(decoded.current_height(), tree.current_height());
+
+    assert!(
+        HistoryTreeParts::decode_canonical(&bytes[..bytes.len() - 1], &Network::Mainnet).is_err(),
+        "a truncated value does not decode"
+    );
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(
+        HistoryTreeParts::decode_canonical(&trailing, &Network::Mainnet).is_err(),
+        "a value with a trailing byte is not canonical"
+    );
+
+    // The same value in another encoding: bincode's varint decoder accepts the one-leaf
+    // tree's `size` of 1 written in the three-byte u16 form, but the encoding is not canonical.
+    assert_eq!(
+        &bytes[..2],
+        &[0, 1],
+        "Mainnet is variant 0, and the tree has one leaf"
+    );
+    let mut non_minimal = vec![bytes[0], 0xFB, 0x01, 0x00];
+    non_minimal.extend_from_slice(&bytes[2..]);
+    assert!(
+        HistoryTreeParts::decode_canonical(&non_minimal, &Network::Mainnet).is_err(),
+        "a non-minimal varint is not canonical"
+    );
+
+    assert!(
+        HistoryTreeParts::decode_canonical(&bytes, &Network::new_default_testnet()).is_err(),
+        "a tree for another network is refused"
+    );
+}

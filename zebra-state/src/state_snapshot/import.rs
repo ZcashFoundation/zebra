@@ -12,18 +12,15 @@
 //! snapshot that is wrong for this node is refused with
 //! [`SnapshotError::Refused`] instead of failing later.
 //!
-//! The manifest's parameters hash is checked for presence only, because the
-//! snapshot format does not yet compute the hash of a network's consensus
-//! parameters (design, §4). On Regtest and custom testnets, whose genesis
-//! block does not identify the network, a snapshot for a network with other
-//! activation heights is still refused through its history tree's network
-//! upgrade, but other parameter differences are not caught.
+//! The manifest's parameters hash is checked against the network's consensus
+//! parameters, so Regtest and custom-testnet snapshots cannot be imported for
+//! a different configuration with the same genesis block.
 
 use std::{
     collections::HashMap,
     fmt,
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, BufReader, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -32,6 +29,7 @@ use rocksdb::{IngestExternalFileOptions, SstFileWriter, WriteBatch, DB};
 
 use zebra_chain::{
     block,
+    history_tree::NonEmptyHistoryTree,
     parameters::{Network, NetworkUpgrade},
     state_snapshot::{ObjectHash, StateSnapshotCommitment},
 };
@@ -42,7 +40,9 @@ use crate::{
         state_database_format_version_in_code, DATABASE_FORMAT_VERSION_FILE_NAME,
         STATE_DATABASE_KIND,
     },
-    service::finalized_state::{DiskDb, SNAPSHOT_BASE, STATE_COLUMN_FAMILIES_IN_CODE},
+    service::finalized_state::{
+        DiskDb, HistoryTreeParts, SNAPSHOT_BASE, STATE_COLUMN_FAMILIES_IN_CODE,
+    },
     Config, IntoDisk,
 };
 
@@ -438,6 +438,42 @@ impl SstMetadata {
             .map_err(io_error(&path))?;
         Ok(Self::decode(&bytes))
     }
+}
+
+/// Decodes the history tree a snapshot ships for its height from the single
+/// record of its `history_tree` piece at `piece_path`, for `network`.
+///
+/// The value is not trusted: it must be the canonical encoding of a tree for
+/// this network that rebuilds from its peaks.
+pub fn decode_history_tree(
+    piece_path: &Path,
+    network: &Network,
+) -> Result<NonEmptyHistoryTree, SnapshotError> {
+    let io_error = |source| SnapshotError::Io {
+        path: piece_path.to_path_buf(),
+        source,
+    };
+
+    let file = File::open(piece_path).map_err(io_error)?;
+    let mut reader = PieceReader::new(BufReader::new(file));
+
+    let record = reader.next_record()?.ok_or_else(|| {
+        SnapshotError::InvalidHistoryTree("the history tree piece has no record".to_string())
+    })?;
+    if !record.key.is_empty() {
+        return Err(SnapshotError::InvalidHistoryTree(
+            "the history tree record has a key, but the column family has a single `()` key"
+                .to_string(),
+        ));
+    }
+    if reader.next_record()?.is_some() {
+        return Err(SnapshotError::InvalidHistoryTree(
+            "the history tree piece has more than one record".to_string(),
+        ));
+    }
+
+    HistoryTreeParts::decode_canonical(&record.value, network)
+        .map_err(SnapshotError::InvalidHistoryTree)
 }
 
 /// Imports the snapshot `manifest` describes into the database `config` names
