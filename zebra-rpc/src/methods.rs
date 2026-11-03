@@ -3287,19 +3287,26 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        // The input byte bound keeps ordinary small-block parsing cheaper than a worker hop.
-        let inline = block_bytes.len() <= 4 * 1024;
-        let prepared_blocks = self.prepared_blocks.clone();
-        let decode = move || match prepared_blocks {
-            Some(cache) => cache.deserialize(&block_bytes),
-            None => zebra_consensus::DecodedBlock::deserialize(&block_bytes),
-        };
-        let decoded = if inline {
-            decode()
-        } else {
-            tokio::task::spawn_blocking(decode).await.expect(
+        // A solved template that matches a validated proposal only parses its header and compares
+        // its bytes, which is cheap enough to run inline. Anything else is decoded inline if it is
+        // small, because the input byte bound keeps ordinary small-block parsing cheaper than a
+        // worker hop, and off the executor otherwise.
+        let decoded = match self
+            .prepared_blocks
+            .as_ref()
+            .and_then(|cache| cache.reuse(&block_bytes))
+        {
+            Some(decoded) => Ok(decoded),
+            None if block_bytes.len() <= 4 * 1024 => {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            }
+            None => tokio::task::spawn_blocking(move || {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            })
+            .await
+            .expect(
                 "block deserialization reports malformed input as an error rather than panicking",
-            )
+            ),
         };
         let decoded = match decoded {
             Ok(decoded) => decoded,
