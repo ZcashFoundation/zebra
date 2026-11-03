@@ -15,23 +15,22 @@ use crate::{
 
 use super::*;
 
-/// Bit 24 is used for a different capability, not early block relay.
+/// Only bit 16 permits compact blocks, early adverts, and early serving.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
+async fn compact_block_service_bit_controls_early_adverts_and_serving() {
     let _init_guard = zebra_test::init();
     timeout(Duration::from_secs(30), async {
         let block: Arc<block::Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
             .as_slice()
             .zcash_deserialize_into()
             .unwrap();
-        for (remote_bit, early_relay) in [(1 << 24, false), (1 << 25, true)] {
+        for (remote_bit, early_relay) in [(1 << 24, false), (1 << 25, false), (1 << 16, true)] {
             let mut inbound: MockService<Request, Response, PanicAssertion> =
                 MockService::build().finish();
             let network = Network::Mainnet;
             let handshake = Handshake::builder()
                 .with_config(Config {
                     network: network.clone(),
-                    experimental_early_block_relay: true,
                     ..Config::default()
                 })
                 .with_inbound_service(inbound.clone())
@@ -55,7 +54,7 @@ async fn bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
                     };
                     assert_eq!(
                         version.services.bits(),
-                        PeerServices::NODE_NETWORK.bits() | (1 << 25)
+                        PeerServices::NODE_NETWORK.bits() | (1 << 16)
                     );
                     // Retain the unknown bit so the collision is tested on the actual wire.
                     version.services =
@@ -117,7 +116,7 @@ async fn bit24_excludes_early_adverts_and_serving_but_bit25_opts_in() {
             } else {
                 assert!(
                     result.is_err(),
-                    "bit 24 must not authorize early adverts, even to sidecars"
+                    "unrelated service bits must not authorize early adverts, even to sidecars"
                 );
                 assert!(remote.next().now_or_never().is_none());
             }

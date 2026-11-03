@@ -11,6 +11,7 @@ Contents:
   - [Miner memo](#miner-memo)
   - [RPC section](#rpc-section)
   - [ZMQ block notifications](#zmq-block-notifications)
+  - [Compact block relay](#compact-block-relay)
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
 - [Run a mining pool](#run-a-mining-pool)
@@ -172,6 +173,29 @@ Never expose it directly to the public Internet. These limits do not provide fai
 a misbehaving trusted client can still occupy all slots by subscribing, even to an unused topic
 or subsequently cancelling, or repeatedly reconnect to obtain fresh inbound budgets. Restrict
 access to well-behaved clients; the endpoint is not a defense against hostile clients.
+
+### Compact block relay
+
+Compact block relay is enabled by default. Keep it enabled on every mining node in
+your fleet to reduce propagation delay between participating nodes:
+
+```toml
+[network]
+compact_block_relay = true
+```
+
+Set `compact_block_relay = false` to disable it. It only helps between nodes that
+both keep it enabled.
+After NU5, a block extending the best tip can be announced once its proof of work
+and transaction commitments have been checked, before full validation. Selected
+peers receive a compact block when it is smaller than the full block. The receiver
+rebuilds it from its mempool, requests missing transactions once, and falls back to
+the full block if reconstruction fails or times out. It still validates the block
+fully. Other peers retain ordinary full-block relay.
+
+End-to-end Mainnet propagation benefits have not been measured. Negotiation uses
+service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
+[draft Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429).
 
 ## Running zebra
 

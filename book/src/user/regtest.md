@@ -43,12 +43,11 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
-### Experimental early block relay
+### Compact block relay
 
-For private relay experiments, set `experimental_early_block_relay = true` in
-`[network]` on each participating Zebra node. It defaults to `false` and requires
-both ends of a connection to advertise the experimental capability during the
-handshake. Peers that have not opted in retain ordinary full-block relay.
+Compact block relay is enabled by default. Set `compact_block_relay = false` in
+`[network]` to disable it. Both ends of a connection must advertise support during
+the handshake; other peers retain ordinary full-block relay.
 
 After NU5, opted-in nodes can advertise and serve an authenticated child of the
 committed best tip before transaction verification finishes. Full validation is
@@ -69,7 +68,7 @@ unavailable context remains non-punitive, while a failed authentication is score
 Withdrawn bodies are rechecked before their local wire write begins, falling back
 to committed state if necessary. Bytes already sent cannot be recalled.
 
-These connections also negotiate provisional compact encoding version 1 with
+These connections also negotiate compact encoding version 1 with
 `sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
 other connections receive ordinary inventory and full blocks. Up to three opted-in
 peers are selected as compact receive sources, preferring first announcers only
@@ -89,12 +88,11 @@ bounded snapshot before connection cleanup. The normal consensus verifier still
 checks every reconstructed block. Coinbase-only blocks use full relay because
 compact encoding would not save bytes.
 
-This uses experimental service bit 25 from the
-[temporary-experiment range inherited from Bitcoin](https://github.com/zcash/zcash/blob/16ac743764a513e41dafb2cd79c2417c5bb41e81/src/protocol.h#L77-L83).
-Bit 25 avoids bit 24, which another implementation already uses for a different
-capability. This is not a production protocol
-allocation: use it only with explicitly coordinated participants. Regtest's disabled
-proof of work does not measure the cost of authenticated admission on a public network.
+This uses service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
+[draft Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429).
+Peers using the previous experimental service bit do not negotiate this feature.
+Regtest's disabled proof of work does not measure the cost of authenticated admission
+on a public network.
 
 ### Testing NU7 reissuance
 
