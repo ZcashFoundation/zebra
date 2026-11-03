@@ -1973,7 +1973,7 @@ where
 /// If a connection sends multiple overloads close together, it is very likely to be
 /// disconnected. If a connection has two overloads multiple seconds apart, it is unlikely
 /// to be disconnected.
-fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> f32 {
+pub(crate) fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> f32 {
     let Some(prev) = prev else {
         return MIN_OVERLOAD_DROP_PROBABILITY;
     };

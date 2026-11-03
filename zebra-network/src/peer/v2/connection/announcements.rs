@@ -31,7 +31,7 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::{refuse_stream, Event};
+use super::{refuse_stream, Event, Overloads};
 
 /// How long a stream task waits to hand an event to the connection task.
 pub(super) const CHANNEL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -190,7 +190,8 @@ pub(super) async fn serve<S>(
     mut recv: RecvStream,
     permits: AnnouncementPermits,
     transient_addr: Option<PeerSocketAddr>,
-    mut inbound_service: S,
+    inbound_service: S,
+    overloads: Arc<Overloads>,
     inv_collector: broadcast::Sender<InventoryChange>,
     events: mpsc::Sender<Event>,
 ) where
@@ -257,6 +258,10 @@ pub(super) async fn serve<S>(
         }
     };
 
+    let mut inbound_service = Inbound {
+        service: inbound_service,
+        overloads: &overloads,
+    };
     let mut records = FramedRead::new(recv, RecordCodec);
     loop {
         // One record, waited for; then whatever else has already arrived.
@@ -312,16 +317,23 @@ pub(super) async fn serve<S>(
             StreamType::AddressAnnouncements => handle_addr_announcements(&payloads, &events).await,
             _ => unreachable!("only announcement types are handed to this task"),
         };
-        if let Err(code) = handled {
-            send_event(
-                &events,
-                Event::Violation {
-                    reason: format!("nonconforming {stream_type} record"),
-                    code,
-                },
-            )
-            .await;
-            break;
+        match handled {
+            Ok(()) => {}
+            Err(Handled::Violation(code)) => {
+                send_event(
+                    &events,
+                    Event::Violation {
+                        reason: format!("nonconforming {stream_type} record"),
+                        code,
+                    },
+                )
+                .await;
+                break;
+            }
+            Err(Handled::Close(event)) => {
+                send_event(&events, event).await;
+                break;
+            }
         }
         if let Some(error) = framing_error {
             if let Some(Violation::Close(code)) = error.violation() {
@@ -340,23 +352,39 @@ pub(super) async fn serve<S>(
     // The permit is released when this task ends, however it ends.
 }
 
+/// Why a batch of announcement records ends the stream.
+enum Handled {
+    /// A nonconforming record: close the connection with this code.
+    Violation(ErrorCode),
+    /// The inbound service's overload policy dropped the connection: have the
+    /// connection task act on this event.
+    Close(Event),
+}
+
 /// Announcement records have no per-record refusal or misbehaviour rule:
 /// every decoder error closes the connection (draft, "Announcement
 /// Streams"); the fallback only keeps the match total.
-fn close_code(error: WireError) -> ErrorCode {
-    match error.violation() {
+fn close_code(error: WireError) -> Handled {
+    Handled::Violation(match error.violation() {
         Some(Violation::Close(code)) => code,
         _ => ErrorCode::ProtocolError,
-    }
+    })
+}
+
+/// The inbound service, with the connection's record of the overloads the
+/// peer's announcements cause.
+struct Inbound<'a, S> {
+    service: S,
+    overloads: &'a Overloads,
 }
 
 /// Acts on a batch of block announcement records.
 async fn handle_block_announcements<S>(
     payloads: &[Bytes],
     transient_addr: Option<PeerSocketAddr>,
-    inbound_service: &mut S,
+    inbound_service: &mut Inbound<'_, S>,
     inv_collector: &broadcast::Sender<InventoryChange>,
-) -> Result<(), ErrorCode>
+) -> Result<(), Handled>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
@@ -373,7 +401,7 @@ where
             inbound_service,
             Request::AdvertiseBlock(hash, transient_addr),
         )
-        .await;
+        .await?;
     }
     Ok(())
 }
@@ -383,9 +411,9 @@ where
 async fn handle_tx_announcements<S>(
     payloads: &[Bytes],
     transient_addr: Option<PeerSocketAddr>,
-    inbound_service: &mut S,
+    inbound_service: &mut Inbound<'_, S>,
     inv_collector: &broadcast::Sender<InventoryChange>,
-) -> Result<(), ErrorCode>
+) -> Result<(), Handled>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
@@ -411,8 +439,7 @@ where
         inbound_service,
         Request::AdvertiseTransactionIds(ids, transient_addr),
     )
-    .await;
-    Ok(())
+    .await
 }
 
 /// Hands a batch of address announcement records to the connection task's
@@ -420,7 +447,7 @@ where
 async fn handle_addr_announcements(
     payloads: &[Bytes],
     events: &mpsc::Sender<Event>,
-) -> Result<(), ErrorCode> {
+) -> Result<(), Handled> {
     let mut addrs = Vec::new();
     for payload in payloads {
         if let Some(addr) = decode_addr_record(payload).map_err(close_code)? {
@@ -435,17 +462,25 @@ async fn handle_addr_announcements(
 
 /// Sends an announcement-derived request to the inbound service, logging
 /// failures: an announcement needs no answer, so service errors do not end
-/// the connection.
-async fn call_inbound<S>(inbound_service: &mut S, request: Request)
+/// the connection, except when an overload or timeout makes the connection's
+/// overload policy drop it, as on the legacy connection.
+async fn call_inbound<S>(
+    inbound_service: &mut Inbound<'_, S>,
+    request: Request,
+) -> Result<(), Handled>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
     let command = request.command();
-    let result = match inbound_service.ready().await {
+    let result = match inbound_service.service.ready().await {
         Ok(service) => service.call(request).await,
         Err(error) => Err(error),
     };
     if let Err(error) = result {
         tracing::debug!(%error, command, "inbound service rejected announcement");
+        if let Some(event) = inbound_service.overloads.record(&error) {
+            return Err(Handled::Close(event));
+        }
     }
+    Ok(())
 }

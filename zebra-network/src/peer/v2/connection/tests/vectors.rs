@@ -2539,3 +2539,119 @@ async fn batch_requests_make_few_lookup_calls() {
     .await
     .expect("the test completes well within the timeout");
 }
+
+/// An inbound service that fails every call with `error`, like the inbound
+/// service's load-shed or timeout layer.
+fn failing_service(error: fn() -> BoxError) -> TestService {
+    BoxCloneService::new(service_fn(move |_request: Request| async move {
+        Err::<Response, BoxError>(error())
+    }))
+}
+
+/// Waits for the node to close `raw`'s connection, and checks it closed
+/// gracefully, with `NO_ERROR`, and that the client's error is
+/// `expected_error`.
+async fn assert_overload_close(raw: &mut RawPeer, expected_error: &str) {
+    let close = tokio::time::timeout(SHORT_WAIT * 10, raw.connection.closed())
+        .await
+        .expect("the overloaded connection is closed");
+    match close {
+        quinn::ConnectionError::ApplicationClosed(close) => {
+            assert_eq!(close.error_code.into_inner(), ErrorCode::NoError.code());
+        }
+        other => panic!("unexpected close {other:?}"),
+    }
+    let error = call(&mut raw.node.client, Request::Ping(Default::default()))
+        .await
+        .expect_err("the connection failed");
+    assert!(
+        error.inner_debug().contains(expected_error),
+        "expected {expected_error}, got {}",
+        error.inner_debug()
+    );
+}
+
+/// A peer whose requests keep overloading the inbound service is
+/// disconnected, as on the legacy connection: each overload refuses its
+/// stream and may close the connection, more likely the more recent the
+/// last overload, so a peer that retries at once is soon closed with
+/// `NO_ERROR`, and the client's error is `Overloaded`.
+#[tokio::test]
+async fn overloaded_requests_close_the_connection() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let service = failing_service(|| tower::load_shed::error::Overloaded::new().into());
+        let mut raw = raw_peer_node_with(&network, Some(service)).await;
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: vec![block::Hash([0xAB; 32])],
+        })
+        .encode()
+        .expect("encodes");
+
+        // Each retry after an overload a moment ago is dropped with probability near one half,
+        // so 100 retries leave the connection open with negligible probability.
+        let mut refused = 0;
+        for _ in 0..100 {
+            let Ok((mut send, mut recv)) = raw.connection.open_bi().await else {
+                break;
+            };
+            let sent = async {
+                send.write_all(&[StreamType::GetBlocks.code()]).await?;
+                send.write_all(&request).await?;
+                send.finish()?;
+                Ok::<(), BoxError>(())
+            };
+            if sent.await.is_err() {
+                break;
+            }
+            match recv.read_to_end(1024).await {
+                Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code)))
+                    if code == app_error_code(ErrorCode::Refused) =>
+                {
+                    refused += 1
+                }
+                _ => break,
+            }
+        }
+        assert!(refused > 0, "overloaded requests are refused");
+        assert_overload_close(&mut raw, "Overloaded").await;
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Announcements that time out in the inbound service count as overloads
+/// too: a peer that keeps announcing is soon closed with `NO_ERROR`, and
+/// the client's error is `InboundTimeout`.
+#[tokio::test]
+async fn timed_out_announcements_close_the_connection() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let service = failing_service(|| tower::timeout::error::Elapsed::new().into());
+        let mut raw = raw_peer_node_with(&network, Some(service)).await;
+
+        let mut send = raw.connection.open_uni().await.expect("opens");
+        send.write_all(&[StreamType::TransactionAnnouncements.code()])
+            .await
+            .expect("writes");
+        // One announcement at a time, so each is its own inbound service call.
+        for index in 0..100u8 {
+            let id = UnminedTxId::Legacy(transaction::Hash([index; 32]));
+            let record = RecordCodec::encode_record(encode_tx_record(id)).expect("valid");
+            if send.write_all(&record).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if raw.connection.close_reason().is_some() {
+                break;
+            }
+        }
+        assert_overload_close(&mut raw, "InboundTimeout").await;
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}

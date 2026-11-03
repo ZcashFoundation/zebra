@@ -44,7 +44,7 @@ use crate::{
     BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
-use super::{announcements::send_event, refuse_stream, Event};
+use super::{announcements::send_event, refuse_stream, Event, Overloads};
 
 /// How many of one peer's request streams may be served at once.
 ///
@@ -114,6 +114,7 @@ pub(super) async fn serve<S>(
     mut recv: RecvStream,
     inbound_service: S,
     permits: Arc<Semaphore>,
+    overloads: Arc<Overloads>,
     get_addr_allowed: Arc<AtomicBool>,
     events: mpsc::Sender<Event>,
 ) where
@@ -133,6 +134,7 @@ pub(super) async fn serve<S>(
             &mut recv,
             inbound_service,
             permits,
+            &overloads,
             &get_addr_allowed,
             deadline,
         ),
@@ -147,6 +149,10 @@ pub(super) async fn serve<S>(
             send_event(&events, Event::Violation { reason, code }).await;
         }
         Err(Outcome::Refuse(code)) => refuse_stream(Some(&mut send), &mut recv, code),
+        Err(Outcome::Close(event)) => {
+            refuse_stream(Some(&mut send), &mut recv, ErrorCode::Refused);
+            send_event(&events, event).await;
+        }
     }
 }
 
@@ -157,6 +163,10 @@ enum Outcome {
     Violation { reason: String, code: ErrorCode },
     /// Refuse this stream and keep the connection.
     Refuse(ErrorCode),
+    /// Refuse this stream and have the connection task act on `event`,
+    /// which closes the connection without blaming the peer for a protocol
+    /// violation.
+    Close(Event),
     /// The transport ended the stream or connection.
     Transport,
 }
@@ -183,6 +193,7 @@ async fn serve_inner<S>(
     recv: &mut RecvStream,
     inbound_service: S,
     permits: Arc<Semaphore>,
+    overloads: &Overloads,
     get_addr_allowed: &AtomicBool,
     deadline: tokio::time::Instant,
 ) -> Result<(), Outcome>
@@ -251,6 +262,10 @@ where
     )
     .increment(1);
 
+    let inbound_service = Inbound {
+        service: inbound_service,
+        overloads,
+    };
     match wire_request {
         WireRequest::Headers(request) => serve_headers(send, request, inbound_service).await,
         WireRequest::Blocks(request) => serve_blocks(send, request, inbound_service).await,
@@ -278,19 +293,36 @@ where
     Ok(())
 }
 
-/// Calls the inbound service, mapping its failures to stream refusals.
-async fn call_service<S>(mut service: S, request: Request) -> Result<Response, Outcome>
+/// The inbound service, with the connection's record of the overloads the
+/// peer's requests cause.
+#[derive(Clone)]
+struct Inbound<'a, S> {
+    service: S,
+    overloads: &'a Overloads,
+}
+
+/// Calls the inbound service, mapping its failures to stream refusals, or,
+/// when the connection's overload policy drops the connection, to a close.
+async fn call_service<S>(inbound: Inbound<'_, S>, request: Request) -> Result<Response, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
+    let Inbound {
+        mut service,
+        overloads,
+    } = inbound;
     // # Security
     //
     // The inbound service is wrapped in buffer, load-shed, and timeout layers by the caller.
-    // A refused stream tells the peer to try elsewhere without ending the connection.
+    // A refused stream tells the peer to try elsewhere; overloads and timeouts also count
+    // towards closing the connection, as on the legacy connection.
     if service.ready().await.is_err() {
         return Err(Outcome::Refuse(ErrorCode::Refused));
     }
     service.call(request).await.map_err(|error| {
+        if let Some(event) = overloads.record(&error) {
+            return Outcome::Close(event);
+        }
         if error.is::<tower::load_shed::error::Overloaded>()
             || error.is::<tower::timeout::error::Elapsed>()
         {
@@ -318,7 +350,7 @@ async fn write(send: &mut SendStream, bytes: &[u8]) -> Result<(), Outcome> {
 async fn serve_headers<S>(
     send: &mut SendStream,
     request: GetHeaders,
-    service: S,
+    service: Inbound<'_, S>,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
@@ -398,7 +430,7 @@ where
 async fn serve_blocks<S>(
     send: &mut SendStream,
     request: GetBlocks,
-    service: S,
+    service: Inbound<'_, S>,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone,
@@ -456,7 +488,11 @@ where
 /// lookup fails after some entries were written, so the requester keeps
 /// them. A repeated reference is answered again from its first answer, and
 /// each copy counts against the byte budget.
-async fn serve_txs<S>(send: &mut SendStream, request: GetTx, service: S) -> Result<(), Outcome>
+async fn serve_txs<S>(
+    send: &mut SendStream,
+    request: GetTx,
+    service: Inbound<'_, S>,
+) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone,
 {
@@ -579,7 +615,7 @@ where
 /// in `hashes` in `answered`, and returns how many of `hashes` were
 /// answered.
 async fn lookup_blocks<S>(
-    service: S,
+    service: Inbound<'_, S>,
     hashes: &HashSet<block::Hash>,
     answered: &mut HashMap<block::Hash, Option<Arc<Block>>>,
 ) -> Result<usize, Outcome>
@@ -614,7 +650,7 @@ where
 /// Looks up `ids` in the inbound service, records each answer for an ID in
 /// `ids` in `answered`, and returns how many of `ids` were answered.
 async fn lookup_txs<S>(
-    service: S,
+    service: Inbound<'_, S>,
     ids: &HashSet<UnminedTxId>,
     answered: &mut HashMap<UnminedTxId, Option<Arc<Transaction>>>,
 ) -> Result<usize, Outcome>
@@ -657,7 +693,7 @@ async fn write_entry<T: zebra_chain::serialization::ZcashSerialize>(
 
 /// Serves a `get-addr` request with the addresses the inbound service
 /// supplies (already sanitized by the address book).
-async fn serve_addr<S>(send: &mut SendStream, service: S) -> Result<(), Outcome>
+async fn serve_addr<S>(send: &mut SendStream, service: Inbound<'_, S>) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
@@ -675,7 +711,7 @@ where
 ///
 /// The subscription is not kept open yet: after the snapshot, the stream is
 /// finished, which the draft defines as ending the subscription.
-async fn serve_mempool<S>(send: &mut SendStream, service: S) -> Result<(), Outcome>
+async fn serve_mempool<S>(send: &mut SendStream, service: Inbound<'_, S>) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {

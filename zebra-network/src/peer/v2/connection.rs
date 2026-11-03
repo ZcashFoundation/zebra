@@ -12,7 +12,13 @@
 //! connection-level outcomes to this task as an [`Event`]; a violation closes
 //! the connection with the draft's code.
 
-use std::sync::{atomic::AtomicBool, Arc};
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
 use bytes::Bytes;
 use futures::{
@@ -20,6 +26,7 @@ use futures::{
     FutureExt, StreamExt,
 };
 use quinn::{Connection, RecvStream, SendStream, VarInt};
+use rand::RngExt;
 use tokio::{
     sync::{mpsc, Semaphore},
     task::JoinSet,
@@ -33,8 +40,9 @@ use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedT
 use crate::{
     meta_addr::MetaAddr,
     peer::{
-        connection::Handler, CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo, ErrorSlot,
-        PeerError, SharedPeerError,
+        connection::{overload_drop_connection_probability, Handler},
+        CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo, ErrorSlot, PeerError,
+        SharedPeerError,
     },
     peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
@@ -95,6 +103,85 @@ enum Event {
     /// Addresses from the peer: announced, or left over from a `get-addr`
     /// answer after the client's sample; cached for `Request::Peers`.
     Addresses(Vec<MetaAddr>),
+
+    /// Close the connection because the peer's requests overloaded the
+    /// inbound service, or timed out in it, and [`Overloads`] chose to drop
+    /// this connection; `error` is [`PeerError::Overloaded`] or
+    /// [`PeerError::InboundTimeout`].
+    Overloaded(PeerError),
+}
+
+/// The connection's inbound service overloads, shared by its stream tasks:
+/// the version 2 form of the legacy connection's overload policy, which
+/// drops a connection at random on an overload or timeout, more likely the
+/// more recently the connection last overloaded the inbound service (see
+/// [`overload_drop_connection_probability`]).
+///
+/// # Security
+///
+/// Without it, a peer whose requests are shed or time out keeps its
+/// connection and its share of the inbound service, and can retry for as
+/// long as it likes.
+struct Overloads {
+    /// The time the overload times are measured from.
+    origin: Instant,
+    /// The time of the last overload, in milliseconds after `origin`, plus
+    /// one; zero before the first overload.
+    last: AtomicU64,
+}
+
+impl Overloads {
+    fn new() -> Self {
+        Overloads {
+            origin: Instant::now(),
+            last: AtomicU64::new(0),
+        }
+    }
+
+    /// Records an inbound service failure `error` of a request from the peer
+    /// or an announcement it made. Returns the event that closes the
+    /// connection if `error` is an overload or timeout and the overload
+    /// policy drops the connection for it.
+    fn record(&self, error: &BoxError) -> Option<Event> {
+        let error = if error.is::<tower::load_shed::error::Overloaded>() {
+            PeerError::Overloaded
+        } else if error.is::<tower::timeout::error::Elapsed>() {
+            PeerError::InboundTimeout
+        } else {
+            return None;
+        };
+
+        let now = Instant::now();
+        let since_origin = u64::try_from(now.duration_since(self.origin).as_millis())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        let prev = match self.last.swap(since_origin, Ordering::Relaxed) {
+            0 => None,
+            prev => Some(self.origin + Duration::from_millis(prev - 1)),
+        };
+        let drop_connection_probability = overload_drop_connection_probability(now, prev);
+
+        let overloaded = matches!(error, PeerError::Overloaded);
+        if rand::rng().random::<f32>() < drop_connection_probability {
+            if overloaded {
+                metrics::counter!("pool.closed.loadshed").increment(1);
+            } else {
+                metrics::counter!("pool.closed.inbound.timeout").increment(1);
+            }
+            tracing::info!(
+                drop_connection_probability = format!("{drop_connection_probability:.3}"),
+                "inbound service {error} error, closing version 2 connection",
+            );
+            Some(Event::Overloaded(error))
+        } else {
+            if overloaded {
+                metrics::counter!("pool.ignored.loadshed").increment(1);
+            } else {
+                metrics::counter!("pool.ignored.inbound.timeout").increment(1);
+            }
+            None
+        }
+    }
 }
 
 /// The error slot entry for a connection closed with `code`.
@@ -159,6 +246,7 @@ where
         tx_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
+        overloads: Arc::new(Overloads::new()),
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
         tasks: JoinSet::new(),
         events_tx,
@@ -226,6 +314,8 @@ struct ConnectionTask<S> {
     announcement_permits: AnnouncementPermits,
     /// Bounds how many of the peer's requests are in the inbound service at once.
     inbound_permits: Arc<Semaphore>,
+    /// The peer's inbound service overloads, which may close the connection.
+    overloads: Arc<Overloads>,
     /// Bounds how many of this node's requests are in flight to the peer at once.
     outbound_permits: Arc<Semaphore>,
     tasks: JoinSet<()>,
@@ -311,6 +401,7 @@ where
                             self.announcement_permits.clone(),
                             self.transient_addr,
                             self.params.inbound_service.clone(),
+                            self.overloads.clone(),
                             self.params.inv_collector.clone(),
                             self.events_tx.clone(),
                         ));
@@ -397,6 +488,13 @@ where
                 Handler::update_addr_cache(&mut self.cached_addrs, &addrs, None);
                 None
             }
+            // Like the legacy connection, an overload drop blames the inbound service's load,
+            // not a protocol violation: the draft leaves overload to disconnection without a ban
+            // (draft, "Misbehavior and Banning"), so the close is graceful.
+            Event::Overloaded(error) => Some(Exit {
+                error,
+                code: ErrorCode::NoError,
+            }),
         }
     }
 
@@ -407,6 +505,7 @@ where
             recv,
             self.params.inbound_service.clone(),
             self.inbound_permits.clone(),
+            self.overloads.clone(),
             self.get_addr_allowed.clone(),
             self.events_tx.clone(),
         ));
