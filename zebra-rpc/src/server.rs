@@ -7,7 +7,7 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{collections::HashSet, fmt, panic, sync::Arc};
+use std::{collections::HashSet, fmt, net::SocketAddr, panic, sync::Arc};
 
 use cookie::Cookie;
 use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
@@ -123,10 +123,13 @@ impl RpcServer {
         BlockVerifierRouter: BlockVerifierService,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     {
-        Self::start_with_addr(rpc, conf).await
+        Self::start_with_addr(rpc, conf)
+            .await
+            .map(|(server_task, _local_addr)| server_task)
     }
 
-    /// Starts the RPC server, like [`RpcServer::start`].
+    /// Starts the RPC server, like [`RpcServer::start`], and also returns the address it is
+    /// listening on, which is the OS-assigned port when the configured port is 0.
     ///
     /// # Panics
     ///
@@ -142,7 +145,7 @@ impl RpcServer {
     >(
         rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
         conf: config::rpc::Config,
-    ) -> Result<ServerTask, tower::BoxError>
+    ) -> Result<(ServerTask, SocketAddr), tower::BoxError>
     where
         Mempool: MempoolService,
         State: StateService,
@@ -193,12 +196,15 @@ impl RpcServer {
             .build(listen_addr)
             .await?;
 
-        info!("{OPENED_RPC_ENDPOINT_MSG}{}", server.local_addr()?);
+        let local_addr = server.local_addr()?;
+        info!("{OPENED_RPC_ENDPOINT_MSG}{local_addr}");
 
-        Ok(tokio::spawn(async move {
+        let server_task = tokio::spawn(async move {
             server.start(rpc).stopped().await;
             Ok(())
-        }))
+        });
+
+        Ok((server_task, local_addr))
     }
 
     /// Shut down this RPC server, blocking the current thread.
