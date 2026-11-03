@@ -84,15 +84,17 @@ const L: u32 = H + 1 - NODE_NETWORK_LIMITED_BLOCKS;
 /// Configured pruning alone withdraws `NODE_NETWORK`, so A still counts as pruned (design, §10).
 const RETENTION_A: u32 = 4_000;
 
-/// Node B's retention, larger than the chain this test mines, so its retained floor stays at the
-/// window start rather than moving up as its own pruning runs.
-const RETENTION_B: u32 = 4_000;
+/// Node B's initial retention, larger than the chain through the spend block, so its floor stays
+/// at the window start through import, initial sync, and the first restart. The ongoing-pruning
+/// phase lowers it explicitly.
+const RETENTION_B: u32 = 5_000;
 
 /// The height of node B's last checkpoint above `H`, as blocks above `H`.
 const BLOCKS_ABOVE_H: u32 = 1_000;
 
-/// The blocks node A mines above the last checkpoint, which B verifies semantically.
-const SEMANTIC_TAIL: u32 = 100;
+/// The blocks node A mines above the last checkpoint, which B verifies semantically. A full reorg
+/// window makes the later spend finalize exactly one block without a large gossip backlog.
+const SEMANTIC_TAIL: u32 = MAX_BLOCK_REORG_HEIGHT;
 
 /// The gap between the Regtest checkpoints generated from A's chain above `H + 2`.
 const CHECKPOINT_GAP: u32 = 250;
@@ -107,15 +109,15 @@ const _: () = assert!(
     RETENTION_A > H,
     "A still holds the window when it exports at H"
 );
-// A's best tip ends one block above `H + BLOCKS_ABOVE_H + SEMANTIC_TAIL`, the block B mines, and
-// its finalized tip is the non-finalized depth below that.
+// A's best tip ends two blocks above `H + BLOCKS_ABOVE_H + SEMANTIC_TAIL`: B's spend and
+// ongoing-pruning blocks. A is switched to archival service before those blocks.
 const _: () = assert!(
-    RETENTION_A > H + BLOCKS_ABOVE_H + SEMANTIC_TAIL + 1 - MAX_BLOCK_REORG_HEIGHT,
+    RETENTION_A > H + BLOCKS_ABOVE_H + SEMANTIC_TAIL + 2 - MAX_BLOCK_REORG_HEIGHT,
     "A never prunes a body, so C can sync from genesis through it"
 );
 const _: () = assert!(
     RETENTION_B > H + BLOCKS_ABOVE_H + SEMANTIC_TAIL + 1,
-    "B never prunes during the test, so its floor stays at L"
+    "B's floor stays at L through the initial sync and first restart"
 );
 const _: () = assert!(
     // u32 to usize is a lossless widening on every target Zebra supports.
@@ -273,6 +275,21 @@ async fn blockchain_info(client: &RpcRequestClient) -> Result<Value> {
         .map_err(|err| eyre!(err))
 }
 
+/// Waits for asynchronous body deletion to become visible at `floor`.
+async fn pruned_info(client: &RpcRequestClient, floor: u32) -> Result<Value> {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let info = blockchain_info(client).await?;
+            if info["pruned"] == true && info["pruneheight"] == floor {
+                return Ok(info);
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .map_err(|_| eyre!("pruning did not reach height {floor}"))?
+}
+
 /// The `getblock` error for `height` at verbosity 0 and 1: the JSON-RPC error object.
 async fn get_block_error(client: &RpcRequestClient, height: u32, verbosity: u8) -> Result<Value> {
     let response: Value = serde_json::from_str(
@@ -286,6 +303,16 @@ async fn get_block_error(client: &RpcRequestClient, height: u32, verbosity: u8) 
         ));
     }
     Ok(response["error"].clone())
+}
+
+/// Checks that a formerly retained body has been deleted by ongoing pruning.
+async fn assert_body_pruned(client: &RpcRequestClient, height: u32) -> Result<()> {
+    for verbosity in [0, 2] {
+        let error = get_block_error(client, height, verbosity).await?;
+        assert_eq!(error["code"], -32603);
+        assert_eq!(error["message"], "Block not available (pruned data)");
+    }
+    Ok(())
 }
 
 /// The commitment `zebrad export-state-snapshot` prints as TOML on success.
@@ -378,7 +405,7 @@ fn assert_snapshot_traffic(metrics_a: &str, metrics_b: &str, expected_bytes: u64
         metric(body, name, command)?
             .ok_or_else(|| eyre!("missing required Prometheus counter {name}"))
     };
-    let transport_bytes = required(metrics_a, "zebra.net.in.objects.bytes", None)?;
+    let transport_bytes = required(metrics_a, "zebra.net.out.objects.bytes", None)?;
     let requests_a = required(metrics_a, "zebra.net.in.requests", Some("get-object"))?;
     let responses_a = required(metrics_a, "zebra.net.out.responses", Some("get-object"))?;
     let requests_b = required(metrics_b, "zebra.net.out.requests", Some("Object"))?;
@@ -769,7 +796,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         let dir_b = node_b
             .dir
             .take()
-            .expect("retain the state directory until the end");
+            .expect("retain the state directory for ongoing pruning");
         node_b.expect_stdout_line_matches(regex::escape(&SkipReason::ExistingState.to_string()))?;
         wait_for_mempool_activation(&b).await?;
         wait_for_height(&b, tip, SYNC_TIMEOUT, "node B after its restart").await?;
@@ -778,12 +805,65 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(restarted["bestblockhash"], spend_block_hash.to_string());
         assert_eq!(restarted["pruned"], true);
         assert_eq!(restarted["pruneheight"], L);
+
+        // The full semantic tail and the spend finalized one block and left a full non-finalized
+        // window, so the retention change below initially leaves the floor at `L`.
+        stop_node(node_b)?;
+
+        // Lower only B's retention so the current floor stays at `L`, then mine one block on B.
+        // The next finalized tip moves the floor to `L + 1`, proving that a snapshot-born node
+        // continues pruning newly finalized history after the import-specific checks above.
+        let ongoing_retention = tip + 1 - MAX_BLOCK_REORG_HEIGHT - L;
+        config_b.state.prune_blocks_older_than = Some(ongoing_retention);
+        let mut node_b = start_node(dir_b.replace_config(&mut config_b)?)?.with_failure_regex_set(
+            regex::escape(&Stage::BootstrapStarted.to_string()),
+            regex::RegexSet::empty(),
+        );
+        let dir_b = node_b
+            .dir
+            .take()
+            .expect("retain the state directory for the pruning restart");
+        node_b.expect_stdout_line_matches(regex::escape(&SkipReason::ExistingState.to_string()))?;
+        wait_for_mempool_activation(&b).await?;
+        let ongoing_hashes = b.generate(1).await?;
+        let ongoing_tip = tip + 1;
+        let best_block_hash = *ongoing_hashes.last().expect("one block was generated");
+        let pruned = pruned_info(&b, L + 1).await?;
+        assert_eq!(pruned["blocks"], ongoing_tip);
+        assert_eq!(pruned["bestblockhash"], best_block_hash.to_string());
+        assert_body_pruned(&b, L).await?;
+        let retained = b
+            .get_block(i32::try_from(L + 1)?)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("the new retained floor has a body");
+        assert_eq!(retained.coinbase_height(), Some(Height(L + 1)));
+        wait_for_height(&a, ongoing_tip, RELAY_TIMEOUT, "node A").await?;
+        assert_eq!(block_hash(&a, ongoing_tip).await?, best_block_hash);
+
+        // The advanced floor and deleted body survive another restart without bootstrapping again.
+        stop_node(node_b)?;
+        let mut node_b = start_node(dir_b)?.with_failure_regex_set(
+            regex::escape(&Stage::BootstrapStarted.to_string()),
+            regex::RegexSet::empty(),
+        );
+        let dir_b = node_b
+            .dir
+            .take()
+            .expect("retain the state directory until the end");
+        node_b.expect_stdout_line_matches(regex::escape(&SkipReason::ExistingState.to_string()))?;
+        wait_for_mempool_activation(&b).await?;
+        let restarted = pruned_info(&b, L + 1).await?;
+        assert_eq!(restarted["blocks"], ongoing_tip);
+        assert_eq!(restarted["bestblockhash"], best_block_hash.to_string());
+        assert_body_pruned(&b, L).await?;
         stop_node(node_b)?;
         drop(dir_b);
 
-        // A second empty node with B's config but without checkpoints is refused by the decision
-        // rule, because `H + 1` is above the last checkpoint, and syncs from genesis instead,
-        // verifying every block semantically.
+        let tip = ongoing_tip;
+        // A second empty node without B's checkpoints is refused by the decision rule, because
+        // `H + 1` is above the last checkpoint. Start C pruned so the decision reaches that check,
+        // then restart it archival to verify every block semantically from genesis.
         let mut config_c = node_config(&network, rpc_c, p2p_c, RETENTION_B, &key_b)?;
         config_c.sync.full_verify_concurrency_limit = 1;
         config_c.sync.parallel_cpu_threads = 1;
@@ -798,14 +878,22 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
                 regex::escape(&Stage::BootstrapStarted.to_string()),
                 regex::RegexSet::empty(),
             );
+        let dir_c = node_c
+            .dir
+            .take()
+            .expect("retain the state directory for C's archival restart");
         node_c.expect_stdout_line_matches(regex::escape(
             &SkipReason::PreconditionFailed(Precondition::BelowLastCheckpoint).to_string(),
         ))?;
+        stop_node(node_c)?;
+        config_c.state.prune_blocks_older_than = None;
+        let node_c = start_node(dir_c.replace_config(&mut config_c)?)?.with_failure_regex_set(
+            regex::escape(&Stage::BootstrapStarted.to_string()),
+            regex::RegexSet::empty(),
+        );
         let c = RpcRequestClient::new_with_timeout(loopback(rpc_c), TEST_TIMEOUT);
         wait_for_mempool_activation(&c).await?;
-        // C is syncing from genesis, so it refuses outbound peers without `NODE_NETWORK`, which
-        // the pruned A does not advertise. Restart A dialling C instead: inbound connections are
-        // exempt, and A is at its tip, so it keeps a peer that serves nothing.
+        // C has no ordinary peer configured, so restart A dialling C to serve the genesis sync.
         stop_node(node_a)?;
         config_a.network.initial_testnet_peers = [p2p_c.to_string()].into();
         let node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
@@ -813,7 +901,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         wait_for_height(&c, tip, SYNC_TIMEOUT, "node C").await?;
         let info_c = blockchain_info(&c).await?;
         assert_eq!(info_c["blocks"], tip);
-        assert_eq!(info_c["bestblockhash"], spend_block_hash.to_string());
+        assert_eq!(info_c["bestblockhash"], best_block_hash.to_string());
         assert_eq!(
             info_c["pruned"], false,
             "C synced the whole chain and never pruned"
@@ -841,16 +929,16 @@ fn expected_stages_follow_the_contract() {
 fn parses_prometheus_object_counters() {
     let _init_guard = zebra_test::init();
     let scrape = r#"
-# TYPE zebra_net_in_objects_bytes counter
-zebra_net_in_objects_bytes_total 123
+# TYPE zebra_net_out_objects_bytes counter
+zebra_net_out_objects_bytes_total 123
 # TYPE zebra_net_in_requests counter
 zebra_net_in_requests_total{command="get-object"} 17
 zebra_net_in_requests_total{command="get-blocks"} 99
-zebra_net_in_objects_bytes_extra 999
+zebra_net_out_objects_bytes_extra 999
 "#;
 
     assert_eq!(
-        metric(scrape, "zebra.net.in.objects.bytes", None).unwrap(),
+        metric(scrape, "zebra.net.out.objects.bytes", None).unwrap(),
         Some(123)
     );
     assert_eq!(
