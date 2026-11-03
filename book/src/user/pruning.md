@@ -44,9 +44,11 @@ pruned snapshot can therefore start with less history than the configured window
 A single background worker waits for database migrations, spending-index conversion, and initial
 format checks to finish successfully. Skipped, cancelled, or failed checks do not permit deletion.
 The worker runs at startup and after finalized-tip changes, deleting at most 100 complete block
-heights per batch. It yields between batches and finishes an in-flight batch before shutdown.
-Normal RocksDB compaction reclaims the obsolete transaction data later, outside the block commit
-path. Unexpected deletion failures are fatal, not silently retried.
+heights per batch. It yields between batches. After a backlog spanning more than one batch has
+been deleted, the worker compacts the deleted transaction-body range and logs its start and
+completion. Normal RocksDB compaction handles ongoing deletion. Both run outside the block commit
+path; shutdown waits for any in-flight deletion or compaction. Unexpected deletion failures are
+fatal, not silently retried.
 
 Restart checks require retained evidence that the cached chain follows the configured network
 upgrades. After NU5, a matching V5/V6 transaction provides that evidence; the check searches back at
