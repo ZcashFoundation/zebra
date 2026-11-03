@@ -86,7 +86,8 @@ fn auto_budget_follows_the_detected_memory() {
     let (settings, warnings) = resolve(&config, false, Some(2 * GIB)).expect("2 GiB is enough");
     assert_eq!(
         settings.budget,
-        MemoryPlan::min_budget(Profile::Ibd, &settings.inputs)
+        1084 * MIB,
+        "the initial sync minimum, in whole mebibytes"
     );
     assert!(
         warnings[0].starts_with("auto budget raised to the minimum; the host has little headroom"),
