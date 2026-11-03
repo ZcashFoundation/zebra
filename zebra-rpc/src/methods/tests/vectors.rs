@@ -20,8 +20,8 @@ use zcash_protocol::consensus::NetworkType;
 use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
-    block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    amount::{Amount, NegativeAllowed, NonNegative},
+    block::{Block, Commitment, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     block_info::BlockInfo,
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
@@ -31,8 +31,11 @@ use zebra_chain::{
         Network::*,
         NetworkKind,
     },
-    serialization::{DateTime32, Duration32, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserializeInto, ZcashSerialize,
+    },
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
+    value_balance::ValueBalance,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;

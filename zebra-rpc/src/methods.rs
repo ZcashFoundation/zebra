@@ -61,8 +61,8 @@ use tracing::Instrument;
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed},
-    block::{self, Commitment, Height, SerializedBlock, TryIntoHeight},
+    amount::Amount,
+    block::{self, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
@@ -72,11 +72,10 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade,
     },
-    serialization::{BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashSerialize},
+    serialization::{DateTime32, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
-    value_balance::ValueBalance,
     work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
@@ -103,6 +102,7 @@ use crate::{
     },
 };
 
+pub(crate) mod get_block;
 pub(crate) mod hex_data;
 pub(crate) mod trees;
 pub(crate) mod types;
@@ -1991,36 +1991,20 @@ where
                 .map_body_read_error("Block not available (pruned data)")?;
             let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response {
                 zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
-                    tx_ids
-                        .ok_or_misc_error("block not found")?
-                        .iter()
-                        .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
-                        .collect(),
+                    get_block::transaction_ids(&tx_ids.ok_or_misc_error("block not found")?),
                     None,
                 ),
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
-                    let block_time = block.header.time;
-
-                    let mut transactions = Vec::with_capacity(block.transactions.len());
-                    for tx in block.transactions.iter() {
-                        let mut object = TransactionObject::from_transaction(
-                            tx.clone(),
-                            Some(height),
-                            Some(confirmations),
-                            &network,
-                            Some(block_time),
-                            Some(hash),
-                            Some(in_active_chain),
-                            tx.hash(),
-                        );
-
-                        if verbosity == 3 {
-                            object.add_prevouts(tx, &spent_outputs, &network);
-                        }
-
-                        transactions.push(GetBlockTransaction::Object(Box::new(object)));
-                    }
+                    let transactions = get_block::transaction_objects(
+                        &block,
+                        height,
+                        confirmations,
+                        &network,
+                        hash,
+                        in_active_chain,
+                        (verbosity == 3).then_some(&spent_outputs),
+                    );
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -2033,26 +2017,10 @@ where
                 unreachable!("unmatched response to a OrchardTree request");
             };
 
-            let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
-
             // This could be `None` if there's a chain reorg between state queries.
             let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
 
-            let final_orchard_root = match nu5_activation {
-                Some(activation_height) if height >= activation_height => {
-                    Some(orchard_tree.root().into())
-                }
-                _other => None,
-            };
-
-            let sapling = SaplingTrees {
-                size: sapling_tree_size,
-            };
-
-            let orchard_tree_size = orchard_tree.count();
-            let orchard = OrchardTrees {
-                size: orchard_tree_size,
-            };
+            let final_orchard_root = get_block::final_orchard_root(&network, height, &orchard_tree);
 
             let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
@@ -2064,15 +2032,12 @@ where
             // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
             // Ironwood tree is empty (size 0).
             let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
-            let ironwood = IronwoodTrees {
-                size: ironwood_tree.count(),
-            };
 
-            let trees = GetBlockTrees {
-                sapling,
-                orchard,
-                ironwood,
-            };
+            let trees = get_block::trees(
+                sapling_tree_size,
+                orchard_tree.count(),
+                ironwood_tree.count(),
+            );
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
@@ -2087,15 +2052,8 @@ where
                 unreachable!("unmatched response to a BlockInfo request");
             };
 
-            let delta = block_info.as_ref().and_then(|d| {
-                let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
-                let prev_value_pools = prev_block_info
-                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
-                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
-                    .ok()?;
-                (value_pools - prev_value_pools).ok()
-            });
-            let size = size.or(block_info.as_ref().map(|d| d.size() as usize));
+            let delta = get_block::value_pool_delta(block_info.as_ref(), prev_block_info);
+            let size = get_block::block_size(size, block_info.as_ref());
 
             Ok(GetBlockResponse::Object(Box::new(BlockObject {
                 hash,
@@ -2111,12 +2069,9 @@ where
                 n_tx: tx.len(),
                 tx,
                 trees,
-                chain_supply: block_info
-                    .as_ref()
-                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
-                value_pools: block_info
-                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
-                size: size.map(|size| size as i64),
+                chain_supply: get_block::chain_supply(block_info.as_ref()),
+                value_pools: get_block::value_pools(block_info, delta),
+                size,
                 block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
@@ -2200,43 +2155,17 @@ where
                 panic!("unexpected response to SaplingTree request")
             };
 
-            // From <https://zcash.github.io/rpc/getblock.html>
-            // TODO: Deduplicate const definition, consider refactoring this to avoid duplicate logic
-            const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
+            let confirmations = get_block::confirmations(depth);
 
-            // Confirmations are one more than the depth.
-            // Depth is limited by height, so it will never overflow an i64.
-            let confirmations = depth
-                .map(|depth| i64::from(depth) + 1)
-                .unwrap_or(NOT_IN_BEST_CHAIN_CONFIRMATIONS);
+            let nonce = get_block::nonce(&header);
 
-            let mut nonce = *header.nonce;
-            nonce.reverse();
-
-            let sapling_activation = NetworkUpgrade::Sapling.activation_height(&network);
             let sapling_tree_size = sapling_tree.count();
-            let final_sapling_root: [u8; 32] =
-                if sapling_activation.is_some() && height >= sapling_activation.unwrap() {
-                    let mut root: [u8; 32] = sapling_tree.root().into();
-                    root.reverse();
-                    root
-                } else {
-                    [0; 32]
-                };
+            let final_sapling_root = get_block::final_sapling_root(&network, height, &sapling_tree);
 
-            let difficulty = header.difficulty_threshold.relative_to_network(&network);
+            let difficulty = get_block::difficulty(&header, &network);
 
-            let block_commitments = match header.commitment(&network, height).expect(
-                "Unexpected failure while parsing the blockcommitments field in get_block_header",
-            ) {
-                Commitment::PreSaplingReserved(bytes) => bytes,
-                Commitment::FinalSaplingRoot(_) => final_sapling_root,
-                Commitment::ChainHistoryActivationReserved => [0; 32],
-                Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
-                Commitment::ChainHistoryBlockTxAuthCommitment(hash) => {
-                    hash.bytes_in_display_order()
-                }
-            };
+            let block_commitments =
+                get_block::block_commitments(&header, &network, height, final_sapling_root);
 
             let block_header = BlockHeaderObject {
                 hash,
