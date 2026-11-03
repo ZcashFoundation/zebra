@@ -158,14 +158,15 @@ non-finalized state.
 | `pickup` | The wait for a rayon thread to start the job that copies the parent chain. |
 | `chain_clone` | Copying the parent chain before adding the block to it. |
 | `trees` | The note commitment tree appends and root calculations. |
-| `chain_updates` | The chain's other indexes and value pools, which update in parallel with `trees`. |
+| `chain_updates` | The chain's other indexes and value pools. |
 | `history` | The history tree update, which needs the new tree roots. |
 
 The sub-phases are recorded once a block is committed, so rejected blocks have none. They are not
 recorded for block proposals, or for mined blocks committed from an already validated proposal. At
-startup they include blocks restored from the non-finalized state backup. Some sub-phases run in
-parallel, so they don't add up to the whole commit. A `zebra-rpc` trusted chain sync, which follows
-another node's chain without a block writer, also records the sub-phases.
+startup they include blocks restored from the non-finalized state backup. The `trees` sub-phase runs
+in parallel with the sub-phases before `history`, so the sub-phases don't add up to the whole
+commit. A `zebra-rpc` trusted chain sync, which follows another node's chain without a block
+writer, also records the sub-phases.
 
 ## Memory metrics
 

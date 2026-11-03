@@ -34,7 +34,7 @@ const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
 const DEFAULT_SHORT_CHAIN_PROPTEST_CASES: u32 = 16;
 
 /// Resolve both earlier-block and intra-block spends for contextual test construction.
-fn spent_utxos(
+pub(super) fn spent_utxos(
     block: &SemanticallyVerifiedBlock,
     chain: &Chain,
 ) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {

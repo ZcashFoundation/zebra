@@ -10,6 +10,9 @@ use crate::{
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// An argument wrapper struct for note commitment trees.
 ///
 /// The default instance represents the trees and subtrees that correspond to the genesis block.
@@ -38,6 +41,18 @@ pub struct NoteCommitmentTrees {
 
     /// The ironwood note commitment subtree (NU6.3).
     pub ironwood_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
+}
+
+/// Runs `job` on the calling thread if `run_here` is true, or spawns it on `scope` otherwise.
+fn spawn_or_run_here<'scope, F>(scope: &rayon::ScopeFifo<'scope>, run_here: bool, job: F)
+where
+    F: FnOnce(&rayon::ScopeFifo<'scope>) + Send + 'scope,
+{
+    if run_here {
+        job(scope);
+    } else {
+        scope.spawn_fifo(job);
+    }
 }
 
 /// Note commitment tree errors.
@@ -98,9 +113,21 @@ impl NoteCommitmentTrees {
         let mut orchard_result = None;
         let mut ironwood_result = None;
 
+        // The costliest pool with commitments runs on the calling thread, so that thread hashes
+        // instead of waiting for a rayon thread to start the job. Orchard and Ironwood hash with
+        // Sinsemilla, which costs more than Sapling's Pedersen hash, and Sprout's SHA-256 costs
+        // the least.
+        let run_orchard_here = !orchard_note_commitments.is_empty();
+        let run_ironwood_here = !run_orchard_here && !ironwood_note_commitments.is_empty();
+        let run_sapling_here =
+            !run_orchard_here && !run_ironwood_here && !sapling_note_commitments.is_empty();
+        let run_sprout_here = !run_orchard_here && !run_ironwood_here && !run_sapling_here;
+
+        // Pools are started from the cheapest to the costliest, so the pool that runs on this
+        // thread starts after the others are spawned.
         rayon::in_place_scope_fifo(|scope| {
             if !sprout_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
+                spawn_or_run_here(scope, run_sprout_here, |_scope| {
                     sprout_result = Some(Self::update_sprout_note_commitment_tree(
                         sprout,
                         sprout_note_commitments,
@@ -109,7 +136,7 @@ impl NoteCommitmentTrees {
             }
 
             if !sapling_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
+                spawn_or_run_here(scope, run_sapling_here, |_scope| {
                     sapling_result = Some(Self::update_sapling_note_commitment_tree(
                         sapling,
                         sapling_note_commitments,
@@ -117,20 +144,20 @@ impl NoteCommitmentTrees {
                 });
             }
 
-            if !orchard_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
-                    orchard_result = Some(Self::update_orchard_note_commitment_tree(
-                        orchard,
-                        orchard_note_commitments,
+            if !ironwood_note_commitments.is_empty() {
+                spawn_or_run_here(scope, run_ironwood_here, |_scope| {
+                    ironwood_result = Some(Self::update_ironwood_note_commitment_tree(
+                        ironwood,
+                        ironwood_note_commitments,
                     ));
                 });
             }
 
-            if !ironwood_note_commitments.is_empty() {
-                scope.spawn_fifo(|_scope| {
-                    ironwood_result = Some(Self::update_ironwood_note_commitment_tree(
-                        ironwood,
-                        ironwood_note_commitments,
+            if !orchard_note_commitments.is_empty() {
+                spawn_or_run_here(scope, run_orchard_here, |_scope| {
+                    orchard_result = Some(Self::update_orchard_note_commitment_tree(
+                        orchard,
+                        orchard_note_commitments,
                     ));
                 });
             }
