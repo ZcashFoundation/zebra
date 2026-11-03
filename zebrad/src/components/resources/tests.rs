@@ -7,8 +7,9 @@ use zebra_chain::block::Height;
 use crate::config::ZebradConfig;
 
 use super::{
-    ibd_refusal, init, plan_inputs, startup_summary, BudgetSettings, BudgetSource, ExplicitLimits,
-    MemoryBudget, MemoryPlan, MinimumBudgets, PlanInputs, Profile,
+    apply_arena_cap, environment_has_malloc_arena_override, ibd_refusal, init, plan_inputs,
+    startup_summary, AllocatorLimits, BudgetSettings, BudgetSource, ExplicitLimits, MemoryBudget,
+    MemoryPlan, MinimumBudgets, PlanInputs, Profile,
 };
 
 const MIB: u64 = 1024 * 1024;
@@ -163,6 +164,7 @@ fn explicit_limits_win_over_derived_limits() {
         ExplicitLimits {
             tx_cost_limit: Some(70_000_000),
             peerset_initial_target_size: Some(20),
+            malloc_arena_max: false,
         }
     );
     let (settings, _) = resolve(&config, false, None).expect("2 GiB is a valid budget");
@@ -326,4 +328,61 @@ fn startup_summary_lists_every_component() {
     };
     assert!(startup_summary(&plan, &auto, &config)
         .starts_with("memory budget 2 GiB (auto: effective RAM 7.6 GiB) profile=ibd"));
+}
+
+/// The operator's arena cap, from either environment variable, wins over the derived one.
+#[cfg(unix)]
+#[test]
+fn operator_arena_caps_are_detected() {
+    use std::ffi::OsStr;
+
+    use super::has_malloc_arena_override;
+
+    let _init_guard = zebra_test::init();
+
+    assert!(has_malloc_arena_override(Some(OsStr::new("32")), None));
+    assert!(has_malloc_arena_override(Some(OsStr::new("")), None));
+    for tunables in [
+        "glibc.malloc.arena_max=32",
+        "glibc.malloc.trim_threshold=128:glibc.malloc.arena_max=32",
+    ] {
+        assert!(
+            has_malloc_arena_override(None, Some(OsStr::new(tunables))),
+            "{tunables}"
+        );
+    }
+    for tunables in [
+        "glibc.malloc.arena_max",
+        "glibc.malloc.arena_max_extra=32",
+        "ignored=glibc.malloc.arena_max=32",
+    ] {
+        assert!(
+            !has_malloc_arena_override(None, Some(OsStr::new(tunables))),
+            "{tunables}"
+        );
+    }
+    assert!(!has_malloc_arena_override(None, None));
+}
+
+/// A budget sets the derived arena cap, unless the operator set one; without a budget the cap
+/// is left alone (design §4.7).
+#[test]
+fn arena_cap_needs_a_budget_and_no_operator_cap() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(apply_arena_cap(&ZebradConfig::default()), None);
+
+    let mut config = config_with_budget(MemoryBudget::Bytes(2 * GIB));
+    config.sync.parallel_cpu_threads = 32;
+    let expected = (cfg!(all(target_os = "linux", target_env = "gnu"))
+        && !environment_has_malloc_arena_override())
+    .then_some(AllocatorLimits::arena_max_for_cores(32));
+    assert_eq!(apply_arena_cap(&config), expected);
+
+    let (mut settings, _) = resolve(&config, false, None).expect("2 GiB is a valid budget");
+    settings.explicit.malloc_arena_max = true;
+    let (plan, _) = settings
+        .plan(Profile::Ibd)
+        .expect("2 GiB covers the floors");
+    assert_eq!(plan.allocator.arena_max, None, "the operator's cap wins");
 }
