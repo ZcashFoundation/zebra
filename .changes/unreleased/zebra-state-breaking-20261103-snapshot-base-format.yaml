@@ -1,0 +1,10 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Bumped the state database format to 30.1.0, which adds the `snapshot_base` column family that
+  marks a database imported from a state snapshot, and added the `lowest_known_height` and
+  `snapshot_base` fields to `HistoryCapabilities`: struct literals must supply them or use
+  `..HistoryCapabilities::default()`. Existing 30.0.0 databases are upgraded in place without
+  rewriting records. A database imported from a snapshot must not be opened by 30.0.0 builds or
+  renamed to `state/v29`.
+time: 2026-11-03T09:00:00.000000000-05:00

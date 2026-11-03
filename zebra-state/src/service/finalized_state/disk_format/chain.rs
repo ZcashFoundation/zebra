@@ -12,15 +12,55 @@ use serde_big_array::BigArray;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{merkle::AuthDataRoot, Height, SyncHashEntry},
+    block::{self, merkle::AuthDataRoot, Height, SyncHashEntry},
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
     parameters::{Network, NetworkKind},
     primitives::zcash_history,
+    state_snapshot::ObjectHash,
     value_balance::{ValueBalance, SERIALIZED_SIZE},
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
+use crate::{
+    service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk},
+    state_snapshot::SnapshotBase,
+};
+
+/// The on-disk width of a [`SnapshotBase`]: two heights, two hashes, and the
+/// deferred checks byte.
+pub const SNAPSHOT_BASE_DISK_BYTES: usize = 2 * HEIGHT_DISK_BYTES + 32 + 32 + 1;
+
+impl IntoDisk for SnapshotBase {
+    type Bytes = [u8; SNAPSHOT_BASE_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let mut bytes = [0; SNAPSHOT_BASE_DISK_BYTES];
+        bytes[..3].copy_from_slice(&self.window_start.as_bytes());
+        bytes[3..6].copy_from_slice(&self.height.as_bytes());
+        bytes[6..38].copy_from_slice(&self.block_hash.as_bytes());
+        bytes[38..70].copy_from_slice(&self.manifest.0);
+        bytes[70] = self.deferred_checks;
+        bytes
+    }
+}
+
+impl FromDisk for SnapshotBase {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
+        assert_eq!(
+            bytes.len(),
+            SNAPSHOT_BASE_DISK_BYTES,
+            "unexpected snapshot base length"
+        );
+        SnapshotBase {
+            window_start: Height::from_bytes(&bytes[..3]),
+            height: Height::from_bytes(&bytes[3..6]),
+            block_hash: block::Hash::from_bytes(&bytes[6..38]),
+            manifest: ObjectHash(bytes[38..70].try_into().expect("32 bytes were sliced")),
+            deferred_checks: bytes[70],
+        }
+    }
+}
 
 impl IntoDisk for ValueBalance<NonNegative> {
     type Bytes = [u8; SERIALIZED_SIZE];

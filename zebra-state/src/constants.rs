@@ -49,6 +49,12 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.1.0: adds the `snapshot_base` column family, which marks a database imported from a
+///   state snapshot with its window start, snapshot height, block hash and manifest. Existing
+///   databases get the column family empty when they are opened, so the upgrade rewrites no
+///   records. A database imported from a snapshot has no blocks below its window, and only
+///   readers of this version know that: 30.0.0 builds must not open it, and it must never be
+///   renamed back to `state/v29`.
 /// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
 ///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
 ///   binaries must not open a pruned v30 directory: their minor-version downgrade path assumes
@@ -77,7 +83,7 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

@@ -141,7 +141,12 @@ fn format_upgrades(
             "isolate pruned state from archive readers",
             Version::new(30, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 10])
+        // Opening the database creates the empty snapshot base column family.
+        Box::new(no_migration::NoMigration::new(
+            "add the state snapshot base marker",
+            Version::new(30, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 11])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
