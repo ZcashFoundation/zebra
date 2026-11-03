@@ -16,7 +16,7 @@ use super::super::{
 use crate::{
     constants::STATE_DATABASE_KIND, init_read_only, state_database_format_version_in_code,
     CheckpointVerifiedBlock, Config, HistoryCapabilities, ReadRequest, ReadResponse,
-    StateInitError,
+    StateInitError, MIN_PRUNING_RETENTION,
 };
 
 fn open(config: &Config, read_only: bool) -> Result<FinalizedState, StateInitError> {
@@ -214,7 +214,14 @@ fn pruning_without_a_restart_witness_waits_without_mutation() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(2),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         None
     );
@@ -228,7 +235,7 @@ fn invalid_pruning_retention_does_not_create_a_cache_directory() {
     let cache = tempfile::tempdir().unwrap();
     let config = Config {
         cache_dir: cache.path().join("invalid-pruning"),
-        prune_blocks_older_than: Some(9_999),
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION - 1),
         ..Config::default()
     };
     for read_only in [false, true] {
@@ -265,7 +272,14 @@ fn pruning_stages_at_most_one_hundred_contiguous_heights() {
         let mut batch = DiskWriteBatch::new();
         assert_eq!(
             batch
-                .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+                .prepare_history_pruning(
+                    &state.db,
+                    Height(351),
+                    state.db.history_capabilities().unwrap(),
+                    state.db.ready_for_pruning(),
+                    state.db.finalized_tip_height(),
+                    &mut Default::default(),
+                )
                 .unwrap(),
             Some(expected)
         );
@@ -300,7 +314,14 @@ fn pruning_stages_at_most_one_hundred_contiguous_heights() {
     let mut waiting = DiskWriteBatch::new();
     assert_eq!(
         waiting
-            .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(351),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         None
     );
@@ -321,7 +342,14 @@ fn pruning_restart_check_errors_leave_the_batch_unchanged() {
 
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     assert_eq!(
@@ -348,7 +376,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(2),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         Some(Height(2))
     );
@@ -397,7 +432,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     for invalid_floor in [Height(0), Height(1), Height(2), Height(5), Height::MAX] {
         let mut invalid = DiskWriteBatch::new();
         assert!(invalid
-            .prepare_history_pruning(&state.db, invalid_floor, &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                invalid_floor,
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .is_err());
         assert_eq!(invalid, DiskWriteBatch::new());
     }
@@ -414,7 +456,7 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
         )
         .unwrap()
     };
-    config.prune_blocks_older_than = Some(10_000);
+    config.prune_blocks_older_than = Some(MIN_PRUNING_RETENTION);
     let state = reopen(&config, false);
     assert_eq!(
         state
@@ -428,7 +470,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(3), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(3),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         Some(Height(3))
     );
@@ -544,7 +593,7 @@ async fn read_only_capability_requests_do_not_mutate_history() {
         let cache = tempfile::tempdir().unwrap();
         let config = Config {
             cache_dir: cache.path().to_path_buf(),
-            prune_blocks_older_than: Some(10_000),
+            prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
             ..Config::default()
         };
         let state = populated(&config);
@@ -577,7 +626,14 @@ async fn read_only_capability_requests_do_not_mutate_history() {
         let mut batch = DiskWriteBatch::new();
         assert!(!secondary.ready_for_pruning());
         assert!(batch
-            .prepare_history_pruning(&secondary, Height(3), &mut Default::default())
+            .prepare_history_pruning(
+                &secondary,
+                Height(3),
+                secondary.history_capabilities().unwrap(),
+                secondary.ready_for_pruning(),
+                secondary.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .is_err());
         assert_eq!(batch, DiskWriteBatch::new());
         delete_body_prefix(&mut batch, &secondary, Height(3));
@@ -765,7 +821,7 @@ fn pruned_index_mode_is_checked_before_returning_a_writable_database() {
     let cache = tempfile::tempdir().unwrap();
     let config = Config {
         cache_dir: cache.path().to_path_buf(),
-        prune_blocks_older_than: Some(10_000),
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
         ..Config::default()
     };
     let state = populated(&config);
@@ -871,7 +927,7 @@ fn shutdown_checks_cannot_enable_pruning_after_cancelled_index_conversion() {
     let cache = tempfile::tempdir().unwrap();
     let state = populated(&Config {
         cache_dir: cache.path().to_path_buf(),
-        prune_blocks_older_than: Some(10_000),
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
         ..Config::default()
     });
     let running_version = state_database_format_version_in_code();
@@ -910,7 +966,14 @@ fn shutdown_checks_cannot_enable_pruning_after_cancelled_index_conversion() {
     assert!(!state.db.ready_for_pruning());
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     assert!(state.db.block(Height(1).into()).unwrap().is_some());
@@ -1054,7 +1117,14 @@ fn pruning_waits_after_a_long_branchless_suffix() {
         let mut batch = DiskWriteBatch::new();
         assert_eq!(
             batch
-                .prepare_history_pruning(&state.db, Height(101), &mut witness)
+                .prepare_history_pruning(
+                    &state.db,
+                    Height(101),
+                    state.db.history_capabilities().unwrap(),
+                    state.db.ready_for_pruning(),
+                    state.db.finalized_tip_height(),
+                    &mut witness,
+                )
                 .unwrap(),
             None
         );
@@ -1085,13 +1155,27 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
     // The fixture writes block indexes directly; readiness is tested separately above.
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(5_004),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     state.db.mark_ready_for_pruning();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(5_004),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         Some(witness_height)
     );
@@ -1107,7 +1191,14 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
     let mut waiting = DiskWriteBatch::new();
     assert_eq!(
         waiting
-            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(5_004),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default(),
+            )
             .unwrap(),
         None
     );
@@ -1216,7 +1307,7 @@ fn subtree_checks_use_stored_subtrees_once_pruning_may_run() {
 
     let _init_guard = zebra_test::init();
     let config = Config {
-        prune_blocks_older_than: Some(10_000),
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
         ..Config::ephemeral()
     };
     let state = populated(&config);
@@ -1265,7 +1356,7 @@ fn subtree_checks_use_stored_subtrees_once_pruning_may_run() {
 
     // Before the first subtrees complete, nothing is stored and the check still passes.
     let config = Config {
-        prune_blocks_older_than: Some(10_000),
+        prune_blocks_older_than: Some(MIN_PRUNING_RETENTION),
         ..Config::ephemeral()
     };
     let state = populated(&config);
