@@ -85,7 +85,9 @@ pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch}
 pub use request::{FinalizedBlock, Treestate};
 
 pub use service::{
-    finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
+    finalized_state::{
+        restorable_db_versions, DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb,
+    },
     ReadStateService,
 };
 pub use state_snapshot::SnapshotBase;
