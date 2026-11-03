@@ -5,6 +5,9 @@ use crate::service::{finalized_state::RocksDbMemoryLimits, queued_blocks::MAX_QU
 #[cfg(test)]
 mod tests;
 
+/// The atomic sentinel for no non-finalized resident target.
+pub(crate) const NO_NON_FINALIZED_RESIDENT_LIMIT: u64 = u64::MAX;
+
 /// Memory limits for the state service, derived from zebrad's memory budget and passed to
 /// [`init_with_limits`](crate::init_with_limits).
 ///
@@ -15,10 +18,12 @@ pub struct MemoryLimits {
     /// The memory bounds of the finalized state's RocksDB database.
     pub rocksdb: RocksDbMemoryLimits,
 
-    /// The target resident bytes of non-finalized block bodies, charged with
-    /// [`block_retained_charge`](crate::block_retained_charge).
+    /// The target resident bytes of distinct non-finalized blocks, charged with
+    /// [`block_retained_charge`](crate::block_retained_charge). Above the target, the writer
+    /// finalizes best-chain roots until it reaches the target or preserves only the minimum
+    /// 100-block rollback window.
     ///
-    /// `None` never evicts a body from memory, which is today's behaviour.
+    /// `None` finalizes only past the usual 1,000-block reorg limit, which is today's behaviour.
     pub non_finalized_resident_bytes: Option<u64>,
 
     /// The retained bytes of the blocks queued while they wait for their parent block, above

@@ -932,6 +932,60 @@ async fn newer_mined_duplicate_restores_required_notifications() {
     );
 }
 
+/// A bound set through the read service applies the next time the state queues an orphan.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_service_changes_the_orphan_queue_bound() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (state, read_service, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
+        let (mut state, parent) = with_genesis(state).await;
+
+        let orphans = orphan_blocks(&parent.make_fake_child(), 5);
+        for orphan in &orphans[..4] {
+            drop(state.queue_and_commit_to_non_finalized_state(
+                orphan.clone().prepare(),
+                None,
+                None,
+            ));
+        }
+        assert_eq!(state.non_finalized_state_queued_blocks.blocks.len(), 4);
+
+        let charge = |block: &Arc<Block>| {
+            QueuedBlocks::retained_bytes(&(
+                block.clone().prepare(),
+                tokio::sync::oneshot::channel().0,
+                None,
+                None,
+            ))
+        };
+        let limit = charge(&orphans[0]) + charge(&orphans[1]);
+        read_service.set_queued_blocks_bytes(limit);
+        assert_eq!(
+            state.non_finalized_state_queued_blocks.max_queued_bytes(),
+            limit
+        );
+
+        drop(state.queue_and_commit_to_non_finalized_state(
+            orphans[4].clone().prepare(),
+            None,
+            None,
+        ));
+        let queue = &state.non_finalized_state_queued_blocks;
+        assert!(queue.queued_bytes <= limit);
+        assert_eq!(
+            queue.blocks.len(),
+            2,
+            "the two lowest orphans fit the bound"
+        );
+        assert!(queue.has(orphans[0].hash()));
+        assert!(queue.has(orphans[1].hash()));
+        assert_indexes(queue);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// The state's memory limits bound the orphan queue's retained bytes, and the default limits keep
 /// today's 320 MiB bound.
 #[tokio::test(flavor = "multi_thread")]
@@ -940,7 +994,7 @@ async fn memory_limits_bound_the_orphan_queue_bytes() {
     tokio::time::timeout(Duration::from_secs(30), async {
         let (mut state, parent) = orphan_state().await;
         assert_eq!(
-            state.non_finalized_state_queued_blocks.max_queued_bytes,
+            state.non_finalized_state_queued_blocks.max_queued_bytes(),
             MAX_QUEUED_BYTES
         );
 
@@ -981,7 +1035,7 @@ async fn memory_limits_bound_the_orphan_queue_bytes() {
             .collect();
 
         let queue = &state.non_finalized_state_queued_blocks;
-        assert_eq!(queue.max_queued_bytes, limit);
+        assert_eq!(queue.max_queued_bytes(), limit);
         assert!(queue.queued_bytes <= limit);
         assert_eq!(
             queue.blocks.len(),

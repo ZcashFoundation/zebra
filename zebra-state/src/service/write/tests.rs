@@ -112,6 +112,7 @@ async fn write_worker_survives_rejected_root_invalidation() {
         super::super::early_relay::EarlyRelayState::new(None),
         None,
         None,
+        Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
     );
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -192,6 +193,7 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
         super::super::early_relay::EarlyRelayState::new(None),
         None,
         None,
+        Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
     );
     let tx = sender.non_finalized.as_ref().unwrap();
 
@@ -320,6 +322,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: non_finalized,
+        non_finalized_resident_target: Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
         handoff_complete: Arc::new(AtomicBool::new(false)),
@@ -419,6 +422,7 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: state,
+        non_finalized_resident_target: Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
         handoff_complete: Arc::new(AtomicBool::new(false)),
@@ -614,6 +618,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         block_write_receiver: non_finalized_block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: state,
+        non_finalized_resident_target: Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
         handoff_complete: Arc::new(AtomicBool::new(false)),
@@ -788,4 +793,141 @@ fn publishing_the_chain_sets_the_resident_bytes_gauge() {
         update_latest_chain_channels(&empty, &finalized.db, &mut tip_sender, &state_sender, None)
     });
     assert_eq!(f64::from_bits(gauge.0.load(Ordering::SeqCst)), 0.0);
+}
+
+/// The read state service reports the resident charge of the latest published non-finalized state,
+/// the value of the `state.memory.resident_bytes` gauge, so the memory watchdog can read it.
+#[test]
+fn read_state_reports_the_published_resident_bytes() {
+    use crate::service::{watch_receiver::WatchReceiver, ReadStateService};
+
+    let _init_guard = zebra_test::init();
+    let (state, finalized, _blocks) = forked_state_with_charges([3_000_000, 5_000_000, 7_000_000]);
+    let (state_sender, state_receiver) = watch::channel(state);
+    let read_state = ReadStateService::new(
+        &finalized,
+        None,
+        WatchReceiver::new(state_receiver),
+        Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT)),
+    );
+
+    assert_eq!(read_state.non_finalized_resident_bytes(), 15_000_000);
+
+    state_sender.send_replace(NonFinalizedState::new(&Network::Mainnet));
+    assert_eq!(read_state.non_finalized_resident_bytes(), 0);
+}
+
+/// Commits the 101st block of a chain whose first 100 blocks each carry 100 bytes, after setting
+/// the atomic resident target to `target`. Returns the published state and durable database.
+fn commit_101_charged_blocks(
+    target: u64,
+) -> (
+    watch::Receiver<NonFinalizedState>,
+    ZebraDb,
+    block::Hash,
+    block::Hash,
+) {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let mut parent = root.clone();
+    for prepared in std::iter::once(root.clone())
+        .chain(std::iter::repeat_with(|| {
+            let child = parent.make_fake_child();
+            parent = child.clone();
+            child
+        }))
+        .take(
+            usize::try_from(MIN_TRANSPARENT_COINBASE_MATURITY)
+                .expect("the minimum rollback window fits in a usize"),
+        )
+    {
+        let mut prepared = prepared.prepare();
+        prepared.retained_charge = Some(100);
+        if state.is_chain_set_empty() {
+            state.commit_new_chain(prepared, &finalized.db).unwrap();
+        } else {
+            state.commit_block(prepared, &finalized.db).unwrap();
+        }
+    }
+    assert_eq!(state.best_chain_len(), Some(100));
+    assert_eq!(non_finalized_resident_bytes(&state), 10_000);
+
+    let mut child = parent.make_fake_child();
+    Arc::make_mut(&mut Arc::make_mut(&mut child).header).time += chrono::Duration::seconds(1);
+    let mut prepared = child.clone().prepare();
+    prepared.retained_charge = Some(100);
+    let mut proposal_state = state.clone();
+    proposal_state
+        .commit_block(prepared.clone(), &finalized.db)
+        .unwrap();
+    let contextual = proposal_state.best_tip_block().unwrap().clone();
+    let (chain_tip_sender, _, _) = ChainTipSender::new(None, &Network::Mainnet);
+    let (non_finalized_state_sender, snapshot) = watch::channel(state.clone());
+    let (queued, block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
+    let (rsp_tx, rsp_rx) = oneshot::channel();
+    queued
+        .send(WriteMessage::NonFinalized(
+            NonFinalizedWriteMessage::Commit(
+                (prepared, rsp_tx, Some(Box::new(contextual)), None),
+                Instant::now(),
+            ),
+        ))
+        .unwrap();
+    drop(queued);
+
+    let resident_target = Arc::new(AtomicU64::new(NO_NON_FINALIZED_RESIDENT_LIMIT));
+    resident_target.store(target, Ordering::Relaxed);
+    let worker = WriteBlockWorkerTask {
+        block_write_receiver,
+        finalized_state: finalized,
+        non_finalized_state: state,
+        non_finalized_resident_target: resident_target,
+        invalid_block_reset_sender,
+        non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        handoff_complete: Arc::new(AtomicBool::new(false)),
+        chain_tip_sender,
+        non_finalized_state_sender,
+        backup_dir_path: None,
+        early_relay: super::super::early_relay::EarlyRelayState::new(None),
+        spentness_hints: None,
+        pruning_wake: None,
+    };
+    let db = worker.finalized_state.db.clone();
+    worker.run();
+    rsp_rx.blocking_recv().unwrap().unwrap();
+
+    (snapshot, db, root.hash(), child.hash())
+}
+
+/// A live target update finalizes 101 × 100 = 10,100 charged bytes down to 100 × 100 = 10,000,
+/// exactly the minimum rollback window and the configured target.
+#[test]
+fn resident_target_update_enforces_the_next_commit() {
+    let (snapshot, db, root, child) = commit_101_charged_blocks(10_000);
+    let snapshot = snapshot.borrow();
+
+    assert_eq!(snapshot.best_chain_len(), Some(100));
+    assert_eq!(non_finalized_resident_bytes(&snapshot), 10_000);
+    assert_eq!(snapshot.best_tip().map(|tip| tip.1), Some(child));
+    assert_eq!(db.finalized_tip_hash(), root);
+}
+
+/// `u64::MAX`, which represents no configured target, leaves 101 × 100 = 10,100 charged bytes
+/// resident and finalizes nothing below the usual 1,000-block reorg limit.
+#[test]
+fn absent_resident_target_preserves_the_usual_reorg_window() {
+    let (snapshot, db, root, child) = commit_101_charged_blocks(NO_NON_FINALIZED_RESIDENT_LIMIT);
+    let snapshot = snapshot.borrow();
+
+    assert_eq!(snapshot.best_chain_len(), Some(101));
+    assert_eq!(non_finalized_resident_bytes(&snapshot), 10_100);
+    assert_eq!(snapshot.best_tip().map(|tip| tip.1), Some(child));
+    assert_ne!(db.finalized_tip_hash(), root);
+    assert_eq!(db.finalized_tip_hash(), Network::Mainnet.genesis_hash());
 }

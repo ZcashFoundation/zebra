@@ -4,6 +4,10 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     iter,
     mem::size_of,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use tokio::sync::oneshot;
@@ -64,7 +68,10 @@ pub struct QueuedBlocks {
     /// Sum of the immutable charges stored alongside queued payloads.
     queued_bytes: usize,
     /// The sum of charges above which [`Self::prune_overflow`] drops the highest queued blocks.
-    max_queued_bytes: usize,
+    ///
+    /// Shared with [`ReadStateService`](crate::ReadStateService), which changes it when the
+    /// memory plan changes.
+    max_queued_bytes: Arc<AtomicUsize>,
 }
 
 impl Default for QueuedBlocks {
@@ -118,8 +125,19 @@ impl QueuedBlocks {
             by_height: BTreeMap::new(),
             known_utxos: KnownUtxos::default(),
             queued_bytes: 0,
-            max_queued_bytes,
+            max_queued_bytes: Arc::new(AtomicUsize::new(max_queued_bytes)),
         }
+    }
+
+    /// Returns the current bound on the queue's retained charges.
+    pub fn max_queued_bytes(&self) -> usize {
+        self.max_queued_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Returns the shared bound on the queue's retained charges. A new value applies from the
+    /// next [`Self::prune_overflow`].
+    pub(crate) fn byte_limit(&self) -> Arc<AtomicUsize> {
+        self.max_queued_bytes.clone()
     }
 
     /// Queue a block for eventual verification and commit.
@@ -199,9 +217,10 @@ impl QueuedBlocks {
     ///
     /// Pressure is an operational error, not evidence that the evicted block is invalid.
     pub fn prune_overflow(&mut self) {
+        let max_queued_bytes = self.max_queued_bytes();
         // The reorganization window fits usize on every supported platform.
         while self.blocks.len() > MAX_BLOCK_REORG_HEIGHT as usize
-            || self.queued_bytes > self.max_queued_bytes
+            || self.queued_bytes > max_queued_bytes
         {
             let hash = *self
                 .by_height
