@@ -1458,8 +1458,71 @@ impl Chain {
         self.blocks.values().nth(n).map(|block| block.hash)
     }
 
+    /// Replaces the tip block with `block`, a block with the same transactions and the same
+    /// header apart from the nonce and Equihash solution, such as a solved block template.
+    ///
+    /// Only the block hash index, the tip's history tree and the stored block depend on those
+    /// header fields, so this costs a history tree append rather than a block push. An error
+    /// leaves the chain unchanged.
+    ///
+    /// # Panics
+    ///
+    /// If [`Self::can_rebind_tip()`] is false, or `block` is not at the tip height with the
+    /// tip's transactions.
+    pub(crate) fn rebind_tip(
+        &mut self,
+        block: ContextuallyVerifiedBlock,
+    ) -> Result<(), ValidateContextError> {
+        let height = self.non_finalized_tip_height();
+        let previous = self
+            .tip_block()
+            .expect("only called while blocks is populated");
+        assert_eq!(block.height, height, "rebinding replaces the tip block");
+        assert_eq!(
+            block.transaction_hashes, previous.transaction_hashes,
+            "rebinding keeps the tip's transactions"
+        );
+        let previous_hash = previous.hash;
+
+        let mut history_tree = self
+            .parent_history_tree()
+            .expect("checked by can_rebind_tip");
+        let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
+        let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
+        let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
+        Arc::make_mut(&mut history_tree)
+            .push(
+                &self.network,
+                block.block.clone(),
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &ironwood_root,
+                },
+            )
+            .map_err(Arc::new)?;
+
+        self.history_trees_by_height.insert(height, history_tree);
+        self.height_by_hash.remove(&previous_hash);
+        self.height_by_hash.insert(block.hash, height);
+        self.blocks.insert(height, Arc::new(block));
+        Ok(())
+    }
+
+    /// Returns `true` if the tip block can be rebound: the chain holds the history tree of the
+    /// tip's parent, which finalizing the parent removes.
+    pub(crate) fn can_rebind_tip(&self) -> bool {
+        !self.is_empty() && self.parent_history_tree().is_some()
+    }
+
+    /// Returns the history tree of the tip block's parent, if the chain still holds it.
+    fn parent_history_tree(&self) -> Option<Arc<HistoryTree>> {
+        let parent_height = self.non_finalized_tip_height().previous().ok()?;
+        self.history_trees_by_height.get(&parent_height).cloned()
+    }
+
     /// Remove the highest height block of the non-finalized portion of a chain.
-    fn pop_tip(&mut self) {
+    pub(crate) fn pop_tip(&mut self) {
         let block_height = self.non_finalized_tip_height();
 
         let block = self
