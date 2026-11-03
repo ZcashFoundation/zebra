@@ -141,6 +141,13 @@ impl DiskFormatUpgrade for Upgrade {
             .zs_last_key_value()
             .map(|(height, _)| height);
 
+        // A database imported from a state snapshot has no blocks below its window, so it has no
+        // synchronization metadata at all: records start at genesis, and commits above the
+        // snapshot have no parent record to continue from. Its `get-hashes` answers are empty.
+        if last_height.is_none() && db.snapshot_base().is_some() {
+            return Ok(Ok(()));
+        }
+
         // A commit that raced the end of the backfill can leave a short gap
         // below the tip, which the next commit fills.
         let lowest_valid_last_height =

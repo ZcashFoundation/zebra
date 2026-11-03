@@ -28,14 +28,16 @@ use rlimit::increase_nofile_limit;
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{
-    block::Height, parameters::Network, primitives::byte_array::increment_big_endian,
+    block::{self, Height},
+    parameters::Network,
+    primitives::byte_array::increment_big_endian,
 };
 
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
         block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES, FromDisk,
-        IntoDisk, TransactionIndex, TransactionLocation,
+        IntoDisk, TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
     write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
     StateInitError,
@@ -1152,6 +1154,18 @@ impl DiskDb {
 
                 // Guard the lowest writable entry point before launching migrations or checks.
                 let history = db.history_capabilities()?;
+                if let Some(base) = history
+                    .snapshot_base
+                    .filter(|_| !read_only && config.prune_blocks_older_than.is_none())
+                {
+                    // A snapshot-imported database never has the history below its window, so
+                    // it can only run as a pruned node (DESIGN §7).
+                    return Err(StateInitError::SnapshotDatabase {
+                        path,
+                        height: base.height,
+                        window_start: base.window_start,
+                    });
+                }
                 if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
                     return Err(StateInitError::PrunedDatabase {
                         path,
@@ -1261,7 +1275,8 @@ impl DiskDb {
     ///
     /// A database imported from a state snapshot has no blocks below its window start, so its
     /// [`SnapshotBase`] marker anchors the suffix instead: the database counts as pruned, and
-    /// its bodies start at the window start or the first retained body above it.
+    /// its bodies start at the window start or the first retained body above it. The marker must
+    /// agree with the stored hash at its height.
     pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         let invalid = |source: BoxError| StateInitError::HistoryRead {
             path: self.path().to_path_buf(),
@@ -1315,21 +1330,44 @@ impl DiskDb {
         })
     }
 
-    /// Returns the marker of a database imported from a state snapshot, or `None` for any other
-    /// database.
+    /// Reads the `snapshot_base` marker of a database imported from a state snapshot, checking
+    /// that its heights are ordered and that the stored hash at the snapshot height is its hash.
     fn snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
-        let Some(markers) = self.cf_handle(SNAPSHOT_BASE) else {
+        let Some(marker) = self.cf_handle(SNAPSHOT_BASE) else {
             return Ok(None);
         };
-        let Some(bytes) = self.db.get_pinned_cf(&markers, ().as_bytes())? else {
+        let Some(bytes) = self.db.get_pinned_cf(&marker, ().as_bytes())? else {
             return Ok(None);
         };
         if bytes.len() != SNAPSHOT_BASE_DISK_BYTES {
-            return Err("the state snapshot base marker has an invalid length".into());
+            return Err("the snapshot base marker has an invalid length".into());
         }
         let base = SnapshotBase::from_bytes(bytes);
-        if base.window_start == Height::MIN || base.window_start > base.height {
-            return Err("the state snapshot base marker has an invalid window".into());
+        if base.window_start == Height::MIN
+            || base.window_start > base.height
+            || base.height > MAX_ON_DISK_HEIGHT
+        {
+            return Err(format!(
+                "the snapshot base marker has invalid heights: window start {:?}, height {:?}",
+                base.window_start, base.height
+            )
+            .into());
+        }
+        let hashes = self
+            .cf_handle("hash_by_height")
+            .ok_or("snapshot databases have a block hash column family")?;
+        let stored = self
+            .db
+            .get_pinned_cf(&hashes, base.height.as_bytes())?
+            .filter(|hash| hash.len() == 32)
+            .map(|hash| block::Hash::from_bytes(&hash[..]));
+        if stored != Some(base.block_hash) {
+            return Err(format!(
+                "the snapshot base marker's block hash {:?} does not match the stored hash {:?} \
+                 at height {:?}",
+                base.block_hash, stored, base.height
+            )
+            .into());
         }
         Ok(Some(base))
     }
