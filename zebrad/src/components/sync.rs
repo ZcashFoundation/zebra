@@ -65,6 +65,7 @@ use budget::PipelineAdmission;
 use downloads::Downloads;
 use hedge::SuccessHedge;
 
+pub(crate) use budget::{compute_downloaded_block_charge, OverLimit};
 pub use budget::{PipelineBudget, SyncMemoryLimits, MAX_CHECKPOINT_CHARGE_RATIO};
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;

@@ -29,7 +29,10 @@ use zebra_chain::{
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
-use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, MIN_CONCURRENCY_LIMIT};
+use crate::components::sync::{
+    compute_downloaded_block_charge, OverLimit, PipelineBudget, BLOCK_DOWNLOAD_TIMEOUT,
+    MIN_CONCURRENCY_LIMIT,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -81,6 +84,33 @@ impl HeightLimitError {
     pub fn misbehavior_score(&self) -> u32 {
         zn::constants::MAX_PEER_MISBEHAVIOR_SCORE
     }
+}
+
+/// A gossiped block was dropped after its download because it did not fit under the sync
+/// pipeline's byte bound (design §4.2 step 5).
+///
+/// Like a full download queue, this is local load, not peer misbehavior: the drop is never
+/// attributed to the supplying peer, and the syncer downloads the block later.
+#[derive(Copy, Clone, Debug, Error)]
+#[error(
+    "sync pipeline is above its memory limit: dropped gossiped block {height:?} {hash:?} of \
+     {bytes} bytes, with {charged} of {limit} bytes charged"
+)]
+pub struct PipelineFullError {
+    /// The dropped block's height.
+    pub height: block::Height,
+
+    /// The dropped block's hash.
+    pub hash: block::Hash,
+
+    /// The dropped block's charge.
+    pub bytes: u64,
+
+    /// The pipeline's charge when the block was dropped.
+    pub charged: u64,
+
+    /// The pipeline's byte bound.
+    pub limit: u64,
 }
 
 /// Returns `advertiser_addr` if the parent header Zebra already holds proves that a gossiped block's
@@ -213,6 +243,10 @@ where
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: ZSTip,
 
+    /// The sync pipeline's byte bound, charged with every gossiped block until its verification
+    /// ends.
+    pipeline_budget: PipelineBudget,
+
     // Internal downloads state
     //
     /// A list of pending block download and verify tasks.
@@ -321,10 +355,18 @@ where
             verifier,
             state,
             latest_chain_tip,
+            pipeline_budget: PipelineBudget::default(),
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             in_flight_ips: HashSet::new(),
         }
+    }
+
+    /// Charges gossiped blocks to the sync pipeline's byte bound, dropping those that don't fit
+    /// (design §4.2 step 5).
+    pub fn with_pipeline_budget(mut self, pipeline_budget: PipelineBudget) -> Self {
+        self.pipeline_budget = pipeline_budget;
+        self
     }
 
     /// Queue a block for download and verification.
@@ -389,6 +431,7 @@ where
         let verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
         let full_verify_concurrency_limit = self.full_verify_concurrency_limit;
+        let pipeline_budget = self.pipeline_budget.clone();
 
         let fut = async move {
             // Check if the block is already in the state.
@@ -540,6 +583,42 @@ where
                     advertiser_addr,
                 ));
             }
+
+            // Charge the block to the sync pipeline's byte bound until its verification ends, or
+            // drop it if it doesn't fit, so gossip never waits for the bound: the syncer downloads
+            // the block later (design §4.2 step 5). Without a bound, skip the serialization pass.
+            let _pipeline_charge = if pipeline_budget.is_bounded() {
+                let bytes = compute_downloaded_block_charge(block.clone())
+                    .await
+                    .ok_or_else(|| (BoxError::from("canceled"), None))?;
+
+                pipeline_budget
+                    .try_charge(bytes)
+                    .map_err(|OverLimit { charged, limit }| {
+                        debug!(
+                            ?hash,
+                            ?block_height,
+                            bytes,
+                            charged,
+                            limit,
+                            "sync pipeline is above its memory limit: dropped downloaded block",
+                        );
+                        metrics::counter!("gossip.pipeline.full.dropped.block.count").increment(1);
+
+                        (
+                            BoxError::from(PipelineFullError {
+                                height: block_height,
+                                hash,
+                                bytes,
+                                charged,
+                                limit,
+                            }),
+                            None,
+                        )
+                    })?
+            } else {
+                None
+            };
 
             let request = if early_relay {
                 zebra_consensus::Request::CommitEarlyRelay(block)

@@ -46,7 +46,7 @@ use zebra_node_services::mempool;
 use crate::BoxError;
 
 // Re-use the syncer timeouts for consistency.
-use super::sync::BLOCK_VERIFY_TIMEOUT;
+use super::sync::{PipelineBudget, BLOCK_VERIFY_TIMEOUT};
 
 use InventoryResponse::*;
 
@@ -135,6 +135,12 @@ pub struct InboundSetupData {
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
     pub misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
+
+    /// The sync pipeline's byte bound, shared with gossiped block downloads.
+    ///
+    /// Use [`ChainSync::pipeline_budget`](crate::components::ChainSync::pipeline_budget), so gossip
+    /// follows the syncer's bound. The default has no bound.
+    pub pipeline_budget: PipelineBudget,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -350,17 +356,21 @@ impl Service<zn::Request> for Inbound {
                         state,
                         latest_chain_tip,
                         misbehavior_sender,
+                        pipeline_budget,
                     } = setup_data;
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 
-                    let block_downloads = Box::pin(BlockDownloads::new(
-                        full_verify_concurrency_limit,
-                        block_download_peer_set,
-                        Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
-                        state.clone(),
-                        latest_chain_tip,
-                    ));
+                    let block_downloads = Box::pin(
+                        BlockDownloads::new(
+                            full_verify_concurrency_limit,
+                            block_download_peer_set,
+                            Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
+                            state.clone(),
+                            latest_chain_tip,
+                        )
+                        .with_pipeline_budget(pipeline_budget),
+                    );
 
                     result = Ok(());
                     Setup::Initialized {
