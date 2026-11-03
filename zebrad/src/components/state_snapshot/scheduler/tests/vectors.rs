@@ -501,6 +501,14 @@ struct Scenario {
 
     /// The receiver of verified pieces is dropped before the run.
     drop_verified: bool,
+
+    /// How many verified pieces the channel holds before the receiver takes
+    /// them, instead of all of them.
+    verified_capacity: Option<usize>,
+
+    /// The receiver of verified pieces starts taking them this long after the
+    /// run starts, instead of after the run.
+    drain_verified_after: Option<Duration>,
 }
 
 /// What a scenario's run did.
@@ -549,6 +557,8 @@ impl Scenario {
             peers,
             fail_store: false,
             drop_verified: false,
+            verified_capacity: None,
+            drain_verified_after: None,
         }
     }
 
@@ -623,8 +633,22 @@ impl Scenario {
         }
         drop(calls_tx);
 
-        let (verified_tx, verified_rx) = mpsc::channel(descriptors.len().max(1));
+        let capacity = self.verified_capacity.unwrap_or(descriptors.len().max(1));
+        let (verified_tx, verified_rx) = mpsc::channel(capacity);
         let mut verified_rx = (!self.drop_verified).then_some(verified_rx);
+        let draining = self.drain_verified_after.map(|after| {
+            let mut receiver = verified_rx
+                .take()
+                .expect("a receiver that drains late is not dropped");
+            tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                let mut drained = Vec::new();
+                while let Some(piece) = receiver.recv().await {
+                    drained.push(piece);
+                }
+                drained
+            })
+        });
         let (blame_tx, mut blame_rx) = mpsc::channel(peers.len().max(1));
         let (stored_tx, mut stored_rx) = mpsc::unbounded_channel();
         let store = MemoryStore {
@@ -653,6 +677,10 @@ impl Scenario {
             while let Ok(piece) = receiver.try_recv() {
                 verified.push(piece);
             }
+        }
+        if let Some(draining) = draining {
+            // Every sender was dropped with the scheduler, so the receiver has taken every piece.
+            verified = draining.await.expect("the draining task does not panic");
         }
         let mut blamed = Vec::new();
         while let Ok(blame) = blame_rx.try_recv() {
@@ -1393,6 +1421,39 @@ async fn the_scheduler_stops_when_no_piece_verifies() {
         outcome.result
     );
     assert_eq!(outcome.elapsed, secs(60));
+}
+
+/// A piece that verifies is progress, though the receiver of verified pieces
+/// is slow to take it: the run is not stalled while pieces keep verifying.
+#[tokio::test(start_paused = true)]
+async fn verifying_pieces_count_as_progress() {
+    let _init_guard = zebra_test::init();
+
+    // A 1 MiB piece verifies every 10.24 s.
+    let peer = Behavior {
+        rate: Some((100 * KIB).into()),
+        ..Behavior::default()
+    };
+    let outcome = Scenario {
+        config: SchedulerConfig {
+            piece_phase_stall: secs(25),
+            ..SchedulerConfig::default()
+        },
+        verified_capacity: Some(1),
+        drain_verified_after: Some(secs(60)),
+        ..Scenario::new(objects(&[MIB; 8]), vec![peer])
+    }
+    .run()
+    .await;
+
+    outcome.assert_complete();
+    // Only the first piece is reported before the receiver starts taking them at 60 s, 50 s after
+    // that report, while a piece verifies every 10.24 s.
+    assert!(
+        outcome.elapsed >= ms(81_920) && outcome.elapsed < secs(82),
+        "{:?}",
+        outcome.elapsed
+    );
 }
 
 /// The scheduler stops when the receiver of verified pieces is dropped.

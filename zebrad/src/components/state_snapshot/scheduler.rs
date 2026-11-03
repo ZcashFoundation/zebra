@@ -244,7 +244,7 @@ pub enum SchedulerError {
     #[error("every bootstrap peer was excluded")]
     NoPeers,
 
-    /// No piece verified for the piece-phase stall deadline.
+    /// No piece verified or was reported for the piece-phase stall deadline.
     #[error("no piece verified for {0:?}")]
     Stalled(Duration),
 
@@ -279,9 +279,11 @@ where
     /// Only the first [`SchedulerConfig::max_peers`] peers are used. Pieces
     /// with the same hash and size are downloaded once, and each of them is
     /// reported. The receiver of `verified` must be drained while the
-    /// scheduler runs: a piece counts as done once it is reported. Each peer
-    /// is blamed at most once, so a `blame` channel with room for one report
-    /// per peer never makes the scheduler wait.
+    /// scheduler runs: a piece counts as done once it is reported, and the
+    /// piece-phase deadline passes once no piece has verified or been reported
+    /// for [`SchedulerConfig::piece_phase_stall`]. Each peer is blamed at most
+    /// once, so a `blame` channel with room for one report per peer never
+    /// makes the scheduler wait.
     pub fn new(
         config: SchedulerConfig,
         pieces: Vec<PieceDescriptor>,
@@ -783,7 +785,7 @@ struct Run<S, P> {
     /// The pieces not stored and reported yet.
     remaining: usize,
 
-    /// When the last piece was reported, or the run started.
+    /// When the last piece verified or was reported, or the run started.
     last_progress: Instant,
 
     /// Everything the run waits for: requests, hashing, storing, and reports.
@@ -926,6 +928,7 @@ where
     /// the run must stop.
     fn maintain(&mut self, now: Instant) -> Result<(), SchedulerError> {
         // Design, §6 "Failure handling": abort the piece phase if no piece verifies for 5 minutes.
+        // A report counts too, so a slow receiver does not end a run whose pieces are all verified.
         if now >= after(self.last_progress, self.config.piece_phase_stall) {
             return Err(SchedulerError::Stalled(self.config.piece_phase_stall));
         }
@@ -1379,6 +1382,7 @@ where
             tracing::debug!(peer = %self.peers[peer].addr, %hash, "verified a state snapshot piece");
             self.pieces[piece].status = PieceStatus::Verified;
             self.unverified = self.unverified.saturating_sub(1);
+            self.last_progress = Instant::now();
             // The piece's reservation is kept until the piece is stored.
             self.detach(id);
             for other in std::mem::take(&mut self.pieces[piece].downloads) {
