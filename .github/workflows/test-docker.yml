@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       test_docker: ${{ steps.filter.outputs.test_docker || 'true' }}
+      memory_budget_testnet: ${{ steps.filter.outputs.memory_budget_testnet || 'false' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -142,6 +143,14 @@ jobs:
             env_vars: -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
             grep_patterns: -e "0.0.0.0:9999"
 
+          # Memory budget (design §6.4). A 1 GiB budget only fits a node at the tip, so a fresh
+          # Testnet node refuses initial sync with its remedy. The budget is explicit because
+          # "auto" in a 1 GiB container would refuse to start before it opens the state.
+          - id: memory-1g-testnet
+            name: Memory budget 1 GiB refuses initial sync
+            env_vars: --memory=1g --memory-swap=1g -e ZEBRA_NETWORK__NETWORK=Testnet -e ZEBRA_RESOURCES__MEMORY_BUDGET=1GiB
+            grep_patterns: '-e "IBD needs >= 1,113 MiB: sync from a snapshot or raise the budget"'
+
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -198,6 +207,12 @@ jobs:
           EXIT_STATUS=$(docker wait ${{ matrix.id }} || echo "Error retrieving exit status");
           echo "docker exit status: $EXIT_STATUS";
 
+          # A memory-limited container must never be OOM-killed (design §6.4)
+          if [ "$(docker inspect --format '{{.State.OOMKilled}}' ${{ matrix.id }})" = "true" ]; then
+              echo "ERROR: the container was OOM-killed.";
+              exit 1;
+          fi
+
           # If grep didn't find the pattern, fail immediately
           if [ $LOGS_EXIT_STATUS -ne 0 ]; then
               echo "ERROR: Failed to find the expected pattern in logs. Check grep_patterns.";
@@ -208,6 +223,476 @@ jobs:
             exit 0;
           fi
 
+  # Mines Regtest blocks with a 1 GiB memory budget in a container limited to 1.1 GiB without
+  # swap, and fails if the container is OOM-killed or RocksDB stalls or delays writes (design §6.3, F13).
+  test-memory-budget-regtest:
+    name: Test memory budget on Regtest
+    needs: [changes, build-docker-image]
+    if: needs.changes.outputs.test_docker == 'true'
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    env:
+      CONTAINER: memory-budget-regtest
+      BLOCKS: 1200
+      RPC_URL: http://127.0.0.1:18232
+      METRICS_URL: http://127.0.0.1:9999/metrics
+      POLL_SECONDS: 2
+      ROCKSDB_METRICS_REFRESH_SECONDS: 30
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: zebrad-runtime
+          path: ${{ runner.temp }}
+
+      - name: Load image
+        run: |
+          docker load --input ${{ runner.temp }}/zebrad-runtime.tar
+
+      - name: Start Zebra with a 1 GiB budget in a 1.1 GiB container
+        run: |
+          docker run --detach --name "$CONTAINER" \
+            --memory=1.1g --memory-swap=1.1g \
+            -p 127.0.0.1:18232:18232 -p 127.0.0.1:9999:9999 \
+            -e ZEBRA_NETWORK__NETWORK=Regtest \
+            -e ZEBRA_RESOURCES__MEMORY_BUDGET="1 GiB" \
+            -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232 \
+            -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=false \
+            -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999 \
+            -e ZEBRA_MINING__MINER_ADDRESS=tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV \
+            -e ZEBRA_MEMPOOL__DEBUG_ENABLE_AT_HEIGHT=0 \
+            zebrad-runtime:${{ github.sha }} zebrad start
+
+          # Wait for the RPC server.
+          for _ in $(seq 1 120); do
+            if curl --silent --fail --max-time 5 -H 'content-type: application/json' \
+                --data '{"jsonrpc":"2.0","id":1,"method":"getblockcount","params":[]}' \
+                "$RPC_URL" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$CONTAINER"
+          echo "ERROR: the RPC server did not start."
+          exit 1
+
+      - name: Mine Regtest blocks
+        run: |
+          set -euo pipefail
+          MINING_METRICS_FILE="$RUNNER_TEMP/regtest-mining-metrics.txt"
+          : > "$MINING_METRICS_FILE"
+
+          curl --silent --show-error --fail --max-time 1500 -H 'content-type: application/json' \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"generate\",\"params\":[$BLOCKS]}" \
+            "$RPC_URL" > /dev/null &
+          GENERATE_PID=$!
+          while kill -0 "$GENERATE_PID" 2>/dev/null; do
+            METRICS=$(curl --silent --fail --max-time 30 "$METRICS_URL") || METRICS=""
+            if [ -n "$METRICS" ]; then
+              printf '%s\n' "$METRICS" >> "$MINING_METRICS_FILE"
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          if ! wait "$GENERATE_PID"; then
+            echo "ERROR: generating Regtest blocks failed."
+            exit 1
+          fi
+
+          HEIGHT=$(curl --silent --fail --max-time 30 -H 'content-type: application/json' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"getblockcount","params":[]}' \
+            "$RPC_URL" | jq '.result')
+          echo "mined height: $HEIGHT"
+          if [ "$HEIGHT" -lt "$BLOCKS" ]; then
+            echo "ERROR: only $HEIGHT of $BLOCKS blocks were mined."
+            exit 1
+          fi
+
+      - name: Check memory and write stalls
+        run: |
+          set -euo pipefail
+          check_write_stalls() {
+            local metrics=$1
+            local require_stall_micros=${2:-0}
+            if ! printf '%s\n' "$metrics" | awk -v require_stall_micros="$require_stall_micros" '
+              $1 == "zebra_state_rocksdb_write_stopped" && ($2 + 0) != 0 {
+                print "ERROR: RocksDB stopped writes." > "/dev/stderr"
+                bad = 1
+              }
+              $1 == "zebra_state_rocksdb_delayed_write_rate" && ($2 + 0) != 0 {
+                print "ERROR: RocksDB delayed writes." > "/dev/stderr"
+                bad = 1
+              }
+              $1 ~ /^zebra_state_rocksdb_stall_micros(_total)?$/ {
+                stall_micros_found = 1
+                if (($2 + 0) != 0) {
+                  print "ERROR: RocksDB stalled writes." > "/dev/stderr"
+                  bad = 1
+                }
+              }
+              END {
+                if (require_stall_micros && !stall_micros_found) {
+                  print "ERROR: the cumulative RocksDB stall counter is missing." > "/dev/stderr"
+                  bad = 1
+                }
+                exit bad
+              }
+            '; then
+              return 1
+            fi
+          }
+
+          MINING_METRICS_FILE="$RUNNER_TEMP/regtest-mining-metrics.txt"
+          if [ -s "$MINING_METRICS_FILE" ]; then
+            check_write_stalls "$(< "$MINING_METRICS_FILE")"
+          fi
+
+          # RocksDB exports every 30 seconds, so wait for a sample taken after mining completed.
+          sleep "$((ROCKSDB_METRICS_REFRESH_SECONDS + 1))"
+          METRICS=$(curl --silent --fail --max-time 30 "$METRICS_URL")
+          echo "$METRICS" | grep -E '^zebra_(memory|process)_' || true
+          if ! echo "$METRICS" | grep -E '^zebra_memory_budget_bytes 1073741824$'; then
+            echo "ERROR: the budget gauge is missing."
+            exit 1
+          fi
+          check_write_stalls "$METRICS" 1
+          for metric in zebra_state_rocksdb_write_stopped zebra_state_rocksdb_delayed_write_rate; do
+            if ! grep -q "^$metric " <<< "$METRICS"; then
+              echo "ERROR: the $metric gauge is missing."
+              exit 1
+            fi
+          done
+
+          echo "container memory events:"
+          docker exec "$CONTAINER" cat /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.peak || true
+          OOM_KILLS=$(docker exec "$CONTAINER" cat /sys/fs/cgroup/memory.events | awk '$1 == "oom_kill" { print $2 }')
+          if [ "${OOM_KILLS:-0}" != "0" ]; then
+            echo "ERROR: $OOM_KILLS processes were OOM-killed."
+            exit 1
+          fi
+
+          if ! docker logs "$CONTAINER" 2>&1 | grep -E 'memory budget 1 GiB \(explicit\) profile=tip_only'; then
+            echo "ERROR: the memory budget startup line is missing."
+            exit 1
+          fi
+
+      - name: Stop Zebra
+        if: always()
+        run: |
+          docker stop "$CONTAINER" || true
+          docker logs --tail 100 "$CONTAINER" || true
+          if [ "$(docker inspect --format '{{.State.OOMKilled}}' "$CONTAINER")" = "true" ]; then
+            echo "ERROR: the container was OOM-killed."
+            exit 1
+          fi
+
+  # Compare identical fresh Testnet syncs sequentially on one runner. Each run must verify and
+  # commit the checkpoint range ending at height 400 without a write stall or an OOM kill.
+  #
+  # It depends on public Testnet peers, so it runs on a schedule, on manual dispatch, and for pull
+  # requests that change the memory budget, and stays out of the required `test-docker` gate.
+  test-memory-budget-testnet:
+    name: Test memory budgets through a Testnet checkpoint range
+    needs: [changes, build-docker-image]
+    if: >-
+      needs.changes.outputs.test_docker == 'true' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.memory_budget_testnet == 'true')
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-26.04' }}
+    timeout-minutes: 90
+    env:
+      RESULTS_DIR: ${{ github.workspace }}/memory-budget-testnet
+      TARGET_HEIGHT: 400
+      CASE_TIMEOUT_SECONDS: 1200
+      POLL_SECONDS: 2
+      ROCKSDB_METRICS_REFRESH_SECONDS: 30
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: zebrad-runtime
+          path: ${{ runner.temp }}
+
+      - name: Load image
+        run: |
+          docker load --input ${{ runner.temp }}/zebrad-runtime.tar
+
+      - name: Sync the same Testnet checkpoint range with uncapped, 2g and 4g limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR"
+
+          check_write_stalls() {
+            local metrics=$1
+            local require_stall_micros=${2:-0}
+            if ! printf '%s\n' "$metrics" | awk -v require_stall_micros="$require_stall_micros" '
+              $1 == "zebra_state_rocksdb_write_stopped" && ($2 + 0) != 0 {
+                print "ERROR: RocksDB stopped writes." > "/dev/stderr"
+                bad = 1
+              }
+              $1 == "zebra_state_rocksdb_delayed_write_rate" && ($2 + 0) != 0 {
+                print "ERROR: RocksDB delayed writes." > "/dev/stderr"
+                bad = 1
+              }
+              $1 ~ /^zebra_state_rocksdb_stall_micros(_total)?$/ {
+                stall_micros_found = 1
+                if (($2 + 0) != 0) {
+                  print "ERROR: RocksDB stalled writes." > "/dev/stderr"
+                  bad = 1
+                }
+              }
+              END {
+                if (require_stall_micros && !stall_micros_found) {
+                  print "ERROR: the cumulative RocksDB stall counter is missing." > "/dev/stderr"
+                  bad = 1
+                }
+                exit bad
+              }
+            '; then
+              return 1
+            fi
+          }
+
+          run_case() {
+            local name=$1
+            local cap=$2
+            local budget=$3
+            local expected_startup_line=$4
+            local container="memory-budget-testnet-$name"
+            local case_dir="$RESULTS_DIR/$name"
+            local log_file="$case_dir/zebrad.log"
+            local metrics_file="$case_dir/metrics.txt"
+            local events_file="$case_dir/memory.events"
+            local image="zebrad-runtime:${GITHUB_SHA}"
+            local deadline=$((SECONDS + CASE_TIMEOUT_SECONDS))
+            local completed=0
+            mkdir -p "$case_dir"
+
+            local docker_args=(--detach --name "$container")
+            if [[ -n $cap ]]; then
+              docker_args+=(--memory="$cap" --memory-swap="$cap")
+            fi
+            docker_args+=(
+              -e ZEBRA_NETWORK__NETWORK=Testnet
+              -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232
+              -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
+              -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+              -e ZEBRA_TRACING__USE_COLOR=false
+            )
+            if [[ -n $budget ]]; then
+              docker_args+=(-e "ZEBRA_RESOURCES__MEMORY_BUDGET=$budget")
+            fi
+            docker_args+=("$image" zebrad start)
+
+            local started_ms finished_ms elapsed_ms
+            started_ms=$(date +%s%3N)
+            timeout 30 docker run "${docker_args[@]}"
+            echo "Started $name at $started_ms ms; waiting for verified and committed height $TARGET_HEIGHT."
+
+            while ((SECONDS < deadline && completed == 0)); do
+              # Timestamp the poll before diagnostics, so slow logs and scrapes do not change the
+              # checkpoint-sync wall time when this poll observes completion.
+              local observed_ms
+              observed_ms=$(date +%s%3N)
+
+              local state running oom_killed
+              if ! state=$(timeout 10 docker inspect --format '{{.State.Running}} {{.State.OOMKilled}}' "$container"); then
+                echo "ERROR: could not inspect $container."
+                return 1
+              fi
+              read -r running oom_killed <<< "$state"
+              if [[ $oom_killed == true ]]; then
+                echo "ERROR: $container was OOM-killed."
+                return 1
+              fi
+              if [[ $running != true ]]; then
+                echo "ERROR: $container exited before completing the checkpoint range."
+                docker logs --tail 200 "$container" || true
+                return 1
+              fi
+
+              local events oom_kills
+              if ! events=$(timeout 10 docker exec "$container" cat /sys/fs/cgroup/memory.events 2>/dev/null); then
+                echo "ERROR: cgroup v2 memory.events is unavailable in $container."
+                return 1
+              fi
+              printf '%s\n' "$events" > "$events_file"
+              oom_kills=$(awk '$1 == "oom_kill" { print $2 }' <<< "$events")
+              if [[ -z $oom_kills ]]; then
+                echo "ERROR: memory.events has no oom_kill field in $container."
+                return 1
+              fi
+              if ((oom_kills != 0)); then
+                echo "ERROR: $container reports $oom_kills OOM kills."
+                return 1
+              fi
+
+              local metrics=""
+              metrics=$(timeout 15 docker exec "$container" curl --silent --fail --max-time 5 \
+                http://127.0.0.1:9999/metrics 2>/dev/null) || metrics=""
+              if [[ -n $metrics ]]; then
+                printf '%s\n' "$metrics" > "$metrics_file"
+                if ! check_write_stalls "$metrics"; then
+                  return 1
+                fi
+              fi
+
+              timeout 30 docker logs "$container" > "$log_file" 2>&1 || true
+              local range_verified=0
+              if grep -F 'verified checkpoint range' "$log_file" | grep -F "Height($TARGET_HEIGHT)" >/dev/null; then
+                range_verified=1
+              fi
+
+              local rpc="" height=""
+              rpc=$(timeout 15 docker exec "$container" curl --silent --fail --max-time 5 \
+                -H 'content-type: application/json' \
+                --data '{"jsonrpc":"2.0","id":1,"method":"getblockcount","params":[]}' \
+                http://127.0.0.1:18232 2>/dev/null) || rpc=""
+              if [[ -n $rpc ]]; then
+                height=$(jq -r '.result // empty' <<< "$rpc" 2>/dev/null) || height=""
+              fi
+              if [[ $range_verified == 1 && $height =~ ^[0-9]+$ ]] && ((height >= TARGET_HEIGHT)); then
+                completed=1
+                finished_ms=$observed_ms
+                break
+              fi
+
+              sleep "$POLL_SECONDS"
+            done
+
+            if ((completed == 0)); then
+              echo "ERROR: $container did not verify and commit height $TARGET_HEIGHT within $CASE_TIMEOUT_SECONDS seconds."
+              docker logs --tail 200 "$container" || true
+              return 1
+            fi
+
+            elapsed_ms=$((finished_ms - started_ms))
+            if ((elapsed_ms <= 0)); then
+              echo "ERROR: $name has an invalid wall time of $elapsed_ms ms."
+              return 1
+            fi
+            printf '%s\n' "$elapsed_ms" > "$case_dir/wall-time-ms"
+
+            # RocksDB exports every 30 seconds. Wait for a fresh post-completion sample so stale
+            # zero gauges can not hide a stop or delay near the end of the checkpoint range.
+            sleep "$((ROCKSDB_METRICS_REFRESH_SECONDS + 1))"
+            local final_metrics
+            if ! final_metrics=$(timeout 15 docker exec "$container" curl --silent --fail --max-time 5 \
+              http://127.0.0.1:9999/metrics); then
+              echo "ERROR: the final metrics scrape failed for $container."
+              return 1
+            fi
+            printf '%s\n' "$final_metrics" > "$metrics_file"
+            local require_stall_micros=0
+            if [[ -n $cap ]]; then
+              require_stall_micros=1
+            fi
+            if ! check_write_stalls "$final_metrics" "$require_stall_micros"; then
+              return 1
+            fi
+            for metric in zebra_state_rocksdb_write_stopped zebra_state_rocksdb_delayed_write_rate; do
+              if ! grep -q "^$metric " "$metrics_file"; then
+                echo "ERROR: the $metric gauge is missing from the fresh sample for $container."
+                return 1
+              fi
+            done
+            if ! awk -v target="$TARGET_HEIGHT" '
+              $1 ~ /^sync_verified_block_count(_total)?$/ && ($2 + 0) >= target { found = 1 }
+              END { exit !found }
+            ' "$metrics_file"; then
+              echo "ERROR: sync.verified.block.count did not reach $TARGET_HEIGHT for $container."
+              return 1
+            fi
+            if ! awk -v target="$((TARGET_HEIGHT + 1))" '
+              $1 ~ /^checkpoint_verified_block_count(_total)?$/ && ($2 + 0) >= target { found = 1 }
+              END { exit !found }
+            ' "$metrics_file"; then
+              echo "ERROR: the checkpoint counter did not verify the range ending at $TARGET_HEIGHT for $container."
+              return 1
+            fi
+            if [[ -n $expected_startup_line ]] && ! grep -Fq "$expected_startup_line" "$log_file"; then
+              echo "ERROR: the expected startup line is missing for $container: $expected_startup_line"
+              return 1
+            fi
+
+            local peak
+            if ! peak=$(timeout 10 docker exec "$container" cat /sys/fs/cgroup/memory.peak); then
+              echo "ERROR: cgroup v2 memory.peak is unavailable in $container."
+              return 1
+            fi
+            printf '%s\n' "$peak" > "$case_dir/memory.peak"
+            if ! events=$(timeout 10 docker exec "$container" cat /sys/fs/cgroup/memory.events); then
+              echo "ERROR: the final memory.events read failed for $container."
+              return 1
+            fi
+            printf '%s\n' "$events" > "$events_file"
+            oom_kills=$(awk '$1 == "oom_kill" { print $2 }' <<< "$events")
+            if [[ -z $oom_kills ]] || ((oom_kills != 0)); then
+              echo "ERROR: $container has invalid or nonzero final OOM events: ${oom_kills:-missing}."
+              return 1
+            fi
+
+            if ! timeout 60 docker stop --time 30 "$container" >/dev/null; then
+              echo "ERROR: stopping $container timed out."
+              return 1
+            fi
+            oom_killed=$(timeout 10 docker inspect --format '{{.State.OOMKilled}}' "$container")
+            if [[ $oom_killed == true ]]; then
+              echo "ERROR: $container was OOM-killed during shutdown."
+              return 1
+            fi
+            echo "$name completed the verified range in $elapsed_ms ms; cgroup memory.peak=$peak."
+          }
+
+          run_case uncapped "" "" ""
+          run_case 2g 2g auto 'memory budget 1113 MiB (auto: effective RAM 2.0 GiB) profile=ibd'
+          run_case 4g 4g '4 GiB' 'memory budget 4 GiB (explicit) profile=ibd'
+
+      - name: Compare capped checkpoint-range wall times with the uncapped baseline
+        run: |
+          python3 - "$RESULTS_DIR" <<'PY'
+          from pathlib import Path
+          import sys
+
+          results = Path(sys.argv[1])
+          baseline = int((results / "uncapped/wall-time-ms").read_text())
+          if baseline <= 0:
+              raise SystemExit(f"invalid uncapped wall time: {baseline} ms")
+
+          failed = False
+          for name in ("2g", "4g"):
+              capped = int((results / name / "wall-time-ms").read_text())
+              percent = capped * 100.0 / baseline
+              print(f"{name}: {capped} ms; uncapped: {baseline} ms; ratio: {percent:.2f}%")
+              if capped * 100 < baseline * 90 or capped * 100 > baseline * 110:
+                  print(f"ERROR: {name} wall time is outside 90%-110% of the uncapped run", file=sys.stderr)
+                  failed = True
+
+          if failed:
+              raise SystemExit(1)
+          PY
+
+      - name: Show failed Testnet container diagnostics
+        if: failure()
+        run: |
+          for name in uncapped 2g 4g; do
+            container="memory-budget-testnet-$name"
+            echo "===== $container ====="
+            docker logs --tail 300 "$container" 2>&1 || true
+            docker inspect --format '{{json .State}}' "$container" || true
+          done
+
+      - name: Clean up Testnet containers
+        if: always()
+        run: |
+          docker rm --force memory-budget-testnet-uncapped memory-budget-testnet-2g memory-budget-testnet-4g 2>/dev/null || true
+
   test-docker:
     runs-on: ubuntu-26.04
     if: always() && needs.changes.result != 'skipped'
@@ -215,10 +700,11 @@ jobs:
       - changes
       - build-docker-image
       - test-configurations
+      - test-memory-budget-regtest
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: build-docker-image, test-configurations
+          allowed-skips: build-docker-image, test-configurations, test-memory-budget-regtest
