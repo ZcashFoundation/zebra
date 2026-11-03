@@ -1995,6 +1995,17 @@ impl Service<ReadRequest> for ReadStateService {
                 })))
             }
 
+            // For the `getblock` and `getblockheader` RPCs.
+            ReadRequest::BlockQuery {
+                hash_or_height,
+                fields,
+            } => Ok(ReadResponse::BlockQuery(read::block_query(
+                state.latest_best_chain(),
+                &state.db,
+                hash_or_height,
+                fields,
+            )?)),
+
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
                 read::mined_transaction(state.latest_best_chain(), &state.db, hash)?,

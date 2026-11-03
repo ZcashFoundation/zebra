@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, Block, ChainHistoryMmrRootHash, SerializedBlock},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
@@ -79,6 +79,51 @@ pub struct BlockHeader {
     pub height: block::Height,
     /// The hash of the next block in the best chain, if known.
     pub next_block_hash: Option<block::Hash>,
+}
+
+/// A best-chain block's requested parts, read under one chain snapshot. Unrequested parts are `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueriedBlock {
+    /// The hash of the block.
+    pub hash: block::Hash,
+    /// The height of the block in the best chain.
+    pub height: block::Height,
+    /// The block header, when `HEADER` was requested.
+    pub header: Option<Arc<block::Header>>,
+    /// `None` when not requested.
+    pub depth: Option<u32>,
+    /// `None` when not requested or the block is the chain tip.
+    pub next_block_hash: Option<block::Hash>,
+    /// The number of transactions, when `TRANSACTION_COUNT` was requested.
+    pub transaction_count: Option<usize>,
+    /// The transaction IDs in block order, when `TRANSACTION_IDS` was requested and the
+    /// transaction index could be read.
+    pub transaction_ids: Option<Arc<[transaction::Hash]>>,
+    /// The `BlockInfo` after this block, when `BLOCK_INFO` was requested and its row exists.
+    pub block_info: Option<BlockInfo>,
+    /// The `BlockInfo` after the parent block, when `PREVIOUS_BLOCK_INFO` was requested and its
+    /// row exists.
+    pub previous_block_info: Option<BlockInfo>,
+    /// The Sapling note commitment tree after this block, when `SAPLING_TREE` was requested and
+    /// the tree could be read.
+    pub sapling_tree: Option<Arc<sapling::tree::NoteCommitmentTree>>,
+    /// The Orchard note commitment tree after this block, when `ORCHARD_TREE` was requested and
+    /// the tree could be read.
+    pub orchard_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    /// The Ironwood note commitment tree after this block, when `IRONWOOD_TREE` was requested and
+    /// the tree could be read.
+    pub ironwood_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    /// The network-serialized block, when `RAW_BLOCK` was read.
+    pub raw_block: Option<SerializedBlock>,
+    /// The deserialized block, when `TRANSACTIONS` (or a flag implying it) was read.
+    pub block: Option<Arc<Block>>,
+    /// The serialized size, when the body was read (`RAW_BLOCK`, `TRANSACTIONS`, or a flag
+    /// implying it).
+    pub size: Option<usize>,
+    /// `None` when not requested, or when a parent is known but torn on a secondary (no prevouts).
+    pub spent_outputs: Option<HashMap<transparent::OutPoint, transparent::Utxo>>,
+    /// The ZIP 244 authorizing data root, when `AUTH_DATA_ROOT` was requested.
+    pub auth_data_root: Option<block::merkle::AuthDataRoot>,
 }
 
 /// Keeps early mining work alive and reserves its slot until block verification finishes.
@@ -591,6 +636,10 @@ pub enum ReadResponse {
     /// produce a service error instead of an incomplete map.
     SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
 
+    /// Response to [`ReadRequest::BlockQuery`] with the requested parts of the block, or `None`
+    /// if the block is unknown.
+    BlockQuery(Option<QueriedBlock>),
+
     /// Response to [`ReadRequest::BlockHeader`], or `None` if the block is unknown.
     BlockHeader(Option<BlockHeader>),
 
@@ -808,6 +857,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SpentOutputs(_)
+            | ReadResponse::BlockQuery(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

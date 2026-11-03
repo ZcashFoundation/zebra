@@ -200,7 +200,7 @@ impl ZebraDb {
     }
 
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
-    fn raw_block(
+    pub(crate) fn raw_block(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<(RawBytes, Vec<RawBytes>)>, BlockReadError> {
@@ -577,6 +577,81 @@ impl ZebraDb {
         }
 
         Some(transaction_hashes.into())
+    }
+
+    /// Returns the [`transaction::Hash`]es of the finalized block at `height`, in block order.
+    /// The caller must already know that the block exists.
+    ///
+    /// Reads the retained transaction index in one bounded range scan. Missing or non-contiguous
+    /// rows return [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn
+    /// secondary view, so a gap never shortens the list. A missing suffix of rows cannot be
+    /// detected without an independent transaction count.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_hashes_at_known_height(
+        &self,
+        height: Height,
+    ) -> Result<Option<Arc<[transaction::Hash]>>, BlockReadError> {
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        let locations = TransactionLocation::min_for_height(height)
+            ..=TransactionLocation::max_for_height(height);
+
+        // The two-byte transaction index bounds the scan, and the list, to 65,536 rows.
+        let mut transaction_hashes = Vec::new();
+        for (location, hash) in self
+            .db
+            .zs_forward_range_iter::<_, TransactionLocation, transaction::Hash, _>(
+                &hash_by_tx_loc,
+                locations,
+            )
+        {
+            if location.index.as_usize() != transaction_hashes.len() {
+                return self.incomplete_transaction_index(height);
+            }
+            transaction_hashes.push(hash);
+        }
+
+        if transaction_hashes.is_empty() {
+            return self.incomplete_transaction_index(height);
+        }
+
+        Ok(Some(transaction_hashes.into()))
+    }
+
+    /// Returns the number of transactions in the finalized block at `height`.
+    /// The caller must already know that the block exists.
+    ///
+    /// Reads only the block's last retained transaction index row. A missing index returns
+    /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_count(
+        &self,
+        height: Height,
+    ) -> Result<Option<usize>, BlockReadError> {
+        let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
+        let last = self
+            .db
+            .zs_prev_key_value_back_from::<_, TransactionLocation, transaction::Hash>(
+                &hash_by_tx_loc,
+                &TransactionLocation::max_for_height(height),
+            );
+
+        match last {
+            Some((location, _hash)) if location.height == height => {
+                Ok(Some(location.index.as_usize() + 1))
+            }
+            _ => self.incomplete_transaction_index(height),
+        }
+    }
+
+    /// Returns the result for a known block whose retained transaction index is incomplete.
+    ///
+    /// Secondary catch-up is not atomic across columns, so a torn secondary view returns `None`.
+    fn incomplete_transaction_index<T>(&self, height: Height) -> Result<Option<T>, BlockReadError> {
+        if self.db.is_read_only() {
+            Ok(None)
+        } else {
+            Err(BlockReadError::CorruptBlock { height })
+        }
     }
 
     // Write block methods

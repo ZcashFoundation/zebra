@@ -42,6 +42,7 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+mod block_query;
 mod header;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;

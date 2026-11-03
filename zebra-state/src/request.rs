@@ -1497,6 +1497,41 @@ impl Request {
     }
 }
 
+bitflags::bitflags! {
+    /// The parts of a block a `ReadRequest::BlockQuery` reads. Each flag is one read unit.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct BlockQueryFields: u32 {
+        /// The block header (all header fields come from one 1,487-byte row, or from the body read).
+        const HEADER = 1 << 0;
+        /// Depth below the best-chain tip (`confirmations`).
+        const DEPTH = 1 << 1;
+        /// The hash of the next block on the best chain.
+        const NEXT_BLOCK_HASH = 1 << 2;
+        /// The number of transactions (one `hash_by_tx_loc` seek).
+        const TRANSACTION_COUNT = 1 << 3;
+        /// All transaction IDs in block order (one `hash_by_tx_loc` range scan).
+        const TRANSACTION_IDS = 1 << 4;
+        /// `BlockInfo` after this block: serialized size and value pools.
+        const BLOCK_INFO = 1 << 5;
+        /// `BlockInfo` after the parent block, for value-pool deltas.
+        const PREVIOUS_BLOCK_INFO = 1 << 6;
+        /// The Sapling note commitment tree after this block.
+        const SAPLING_TREE = 1 << 7;
+        /// The Orchard note commitment tree after this block.
+        const ORCHARD_TREE = 1 << 8;
+        /// The Ironwood note commitment tree after this block.
+        const IRONWOOD_TREE = 1 << 9;
+        /// The serialized block bytes, without deserializing them. Fails for pruned bodies.
+        const RAW_BLOCK = 1 << 10;
+        /// The deserialized transactions (the whole `Block`). Fails for pruned bodies.
+        const TRANSACTIONS = 1 << 11;
+        /// The outputs spent by this block's inputs (implies `TRANSACTIONS`). Fails for pruned parents.
+        const SPENT_OUTPUTS = 1 << 12;
+        /// The ZIP 244 authorizing-data root (implies `TRANSACTIONS`).
+        const AUTH_DATA_ROOT = 1 << 13;
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
@@ -1631,6 +1666,20 @@ pub enum ReadRequest {
     /// Returns [`crate::BlockReadError`] if the block or a known parent is pruned or corrupt.
     /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     SpentOutputs(HashOrHeight),
+
+    /// Reads any combination of a block's parts in one request, on the best chain, under one chain
+    /// snapshot.
+    ///
+    /// Returns [`ReadResponse::BlockQuery`] with `None` for an unknown block. Unrequested parts are
+    /// `None` in the response. Requesting bodies for a pruned block returns
+    /// [`crate::BlockReadError::BlockBodyUnavailable`]; missing retained rows return
+    /// [`crate::BlockReadError::CorruptBlock`] on a primary and `None` parts on a torn secondary.
+    BlockQuery {
+        /// The block to read, by hash or by best-chain height.
+        hash_or_height: HashOrHeight,
+        /// The parts of the block to read.
+        fields: BlockQueryFields,
+    },
 
     /// Looks up a transaction by hash in the current best chain.
     ///
@@ -2043,6 +2092,7 @@ impl ReadRequest {
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::SpentOutputs(_) => "spent_outputs",
+            ReadRequest::BlockQuery { .. } => "block_query",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::KnownTransaction(_) => "known_transaction",

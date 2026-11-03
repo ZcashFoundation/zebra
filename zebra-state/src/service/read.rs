@@ -16,6 +16,7 @@ use crate::service;
 
 pub mod address;
 pub mod block;
+pub mod block_query;
 pub mod difficulty;
 pub mod find;
 pub mod tree;
@@ -33,6 +34,8 @@ pub use block::{
     known_transaction, mined_transaction, spent_outputs_for_block,
     transaction_hashes_for_any_block, transaction_hashes_for_block, unspent_output, unspent_utxo,
 };
+
+pub use block_query::block_query;
 
 #[cfg(feature = "indexer")]
 pub use block::spending_transaction_hash;

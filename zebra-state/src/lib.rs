@@ -49,9 +49,9 @@ pub use error::{
     StateInitError, ValidateContextError,
 };
 pub use request::{
-    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
-    SemanticallyVerifiedBlock,
+    AwaitUtxoRequest, BlockQueryFields, CheckpointVerifiedBlock,
+    CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest, MinedBlockNotifications,
+    ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
@@ -60,7 +60,7 @@ pub use request::Spend;
 pub use response::{
     AnyTx, BlockHeader, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
     MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, OutputWithMetadata,
-    ReadResponse, Response,
+    QueriedBlock, ReadResponse, Response,
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},

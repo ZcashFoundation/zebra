@@ -43,6 +43,7 @@ elasticsearch = [
 
 [dependencies]
 bincode = { workspace = true }
+bitflags = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
 dirs = { workspace = true }
 futures = { workspace = true }
