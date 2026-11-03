@@ -41,7 +41,7 @@ pub mod rpc_metrics;
 pub mod rpc_tracing;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Zebra RPC Server
 #[derive(Clone)]
