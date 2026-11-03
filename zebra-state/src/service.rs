@@ -1404,6 +1404,25 @@ impl ReadStateService {
         self.db.print_db_metrics();
     }
 
+    /// Returns a sample of the state database's memory use and write stalls.
+    ///
+    /// See [`ZebraDb::memory_sample`]. This reads RocksDB properties, so async callers run it on
+    /// a blocking thread.
+    pub fn memory_sample(&self) -> finalized_state::RocksDbMemorySample {
+        self.db.memory_sample()
+    }
+
+    /// Applies `limits` to the open state database on a blocking thread, where RocksDB allows a
+    /// live change.
+    ///
+    /// See [`ZebraDb::spawn_apply_memory_limits`].
+    pub async fn spawn_apply_memory_limits(
+        &self,
+        limits: finalized_state::RocksDbMemoryLimits,
+    ) -> Result<(), rocksdb::Error> {
+        self.db.spawn_apply_memory_limits(limits).await
+    }
+
     /// Changes the non-finalized resident target used by the writer for subsequent commits.
     pub fn set_non_finalized_resident_bytes(&self, target: Option<u64>) {
         self.non_finalized_resident_target.store(
