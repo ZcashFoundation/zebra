@@ -87,7 +87,7 @@ pub use request::{FinalizedBlock, Treestate};
 pub use service::{
     finalized_state::{
         restorable_db_source_versions, restorable_db_versions, DiskWriteBatch, FromDisk, IntoDisk,
-        WriteDisk, ZebraDb,
+        RocksDbMemoryLimits, WriteDisk, ZebraDb, READ_PATH_COLUMN_FAMILIES,
     },
     ReadStateService,
 };

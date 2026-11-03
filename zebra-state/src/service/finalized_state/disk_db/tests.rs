@@ -7,6 +7,9 @@ use std::ops::Deref;
 
 use crate::service::finalized_state::disk_db::{DiskDb, DB};
 
+#[cfg(test)]
+mod memory_limits;
+
 // Enable older test code to automatically access the inner database via Deref coercion.
 impl Deref for DiskDb {
     type Target = DB;
@@ -29,10 +32,10 @@ impl DiskDb {
 
     /// Returns a list of column family names in this database.
     pub fn list_cf(&self) -> Result<Vec<String>, rocksdb::Error> {
-        let opts = DiskDb::options();
+        let opts = &self.database_options.options;
         let path = self.path();
 
-        rocksdb::DB::list_cf(&opts, path)
+        rocksdb::DB::list_cf(opts, path)
     }
 }
 
