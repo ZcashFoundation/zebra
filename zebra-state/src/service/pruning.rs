@@ -83,7 +83,8 @@ fn prune_batch(
     let history = db.history_capabilities()?;
     metrics::gauge!("state.pruning.retained.height")
         .set(f64::from(history.lowest_retained_height.0));
-    if !db.ready_for_pruning() {
+    let ready = db.ready_for_pruning();
+    if !ready {
         return Ok(None);
     }
     let Some(tip) = db.finalized_tip_height() else {
@@ -103,7 +104,9 @@ fn prune_batch(
 
     let started = Instant::now();
     let mut batch = DiskWriteBatch::new();
-    let Some(end) = batch.prepare_history_pruning(db, target, witness)? else {
+    let Some(end) =
+        batch.prepare_history_pruning(db, target, history, ready, Some(tip), witness)?
+    else {
         return Ok(None);
     };
     db.write_batch(batch)?;

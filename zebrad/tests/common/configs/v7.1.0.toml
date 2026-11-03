@@ -52,8 +52,8 @@
 # retention only widens the future window; deleted bodies are never restored.
 # After deletion, disabling pruning requires an archive snapshot or a full resync
 # in a separate cache directory. Check getblockchaininfo for actual availability.
-# Normal RocksDB compaction reclaims space eventually, with no immediate disk
-# reduction guaranteed. Retained indexes and validation state still grow.
+# Catch-up pruning compacts deleted bodies after clearing the backlog. Normal
+# compaction handles ongoing deletion. Retained indexes and validation state still grow.
 # Enabling pruning immediately stops advertising archive service and rejects
 # zcashd-compat sidecars, even before the first deletion.
 

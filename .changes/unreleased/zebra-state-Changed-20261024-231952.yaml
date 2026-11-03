@@ -2,8 +2,8 @@ project: zebra-state
 kind: Changed
 body: >-
   Restart and migration checks fail closed when required block history is unavailable.
-  Periodic checks make at most three attempts when concurrent pruning invalidates their
-  captured history window, without retrying away permanent metadata corruption.
+  Runtime checks tolerate concurrent pruning and finalization without rejecting valid state,
+  while permanent metadata corruption remains an error.
   Read-only initialization can inspect a reusable older-major archive without moving it.
   It returns `StateInitError::ReadOnlyDatabaseNeedsUpgrade` if the recorded major differs
   from the selected directory or migration is required, including in a current-major directory.
