@@ -32,8 +32,8 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    BLOCK_DOWNLOAD_ROUND_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
 #[cfg(test)]
@@ -178,6 +178,9 @@ pub enum BlockDownloadVerifyError {
 
     #[error("timeout waiting for the network service to be ready")]
     Timeout,
+
+    #[error("the genesis block wasn't downloaded and verified before the genesis timeout")]
+    GenesisTimeout,
 }
 
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
@@ -246,8 +249,17 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// verify tasks, with the time each task was queued.
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, std::time::Instant)>,
+
+    /// The pending tasks in `cancel_handles` that might still be running.
+    in_flight_blocks: InFlightBlocks,
+
+    /// Whether [`Self::download_and_verify`] is waiting for network capacity.
+    ///
+    /// It stays set when an enclosing timeout cancels that wait, so the syncer can count the
+    /// timeout as the block's error.
+    awaiting_network_capacity: bool,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -277,17 +289,15 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
-
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
-                }
+            let result = join_result.expect("block download and verify tasks must not panic");
+            let hash = match &result {
+                Ok((_, hash)) | Err((_, hash)) => *hash,
+            };
+            if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
+                this.in_flight_blocks.remove(queued_at, hash);
             }
+
+            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
         } else {
             Poll::Ready(None)
         }
@@ -345,6 +355,8 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            in_flight_blocks: InFlightBlocks::default(),
+            awaiting_network_capacity: false,
         }
     }
 
@@ -370,8 +382,10 @@ where
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
         let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        let block_req = timeout_at(deadline, self.network.ready())
-            .await?
+        self.awaiting_network_capacity = true;
+        let ready = timeout_at(deadline, self.network.ready()).await;
+        self.awaiting_network_capacity = false;
+        let block_req = ready?
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
             .call(zn::Request::BlockDownload {
                 hash,
@@ -654,11 +668,16 @@ where
         // Try to start the spawned task before queueing the next block request
         tokio::task::yield_now().await;
 
+        let queued_at = std::time::Instant::now();
+        let task_handle = task.abort_handle();
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(hash, (cancel_tx, queued_at))
+                .is_none(),
             "blocks are only queued once"
         );
+        self.in_flight_blocks.insert(queued_at, hash, task_handle);
 
         Ok(())
     }
@@ -671,9 +690,11 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        for (_hash, (cancel, _queued_at)) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
+        self.in_flight_blocks.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -689,9 +710,20 @@ where
             .send(false);
     }
 
+    /// Returns whether an enclosing timeout cancelled a wait for network capacity, and forgets
+    /// that wait.
+    pub fn take_cancelled_network_wait(&mut self) -> bool {
+        std::mem::take(&mut self.awaiting_network_capacity)
+    }
+
     /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
+    }
+
+    /// Returns the tasks that might still be running, which the sync diagnostics share.
+    pub fn in_flight_blocks(&self) -> InFlightBlocks {
+        self.in_flight_blocks.clone()
     }
 
     /// Returns true if there are no in-flight download and verify tasks.

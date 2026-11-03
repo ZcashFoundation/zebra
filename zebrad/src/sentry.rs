@@ -34,6 +34,7 @@ use crate::{
 };
 
 mod distributions;
+mod periodic;
 
 pub(crate) use distributions::{send_tip_block_delay, SentryRecorder};
 
@@ -232,6 +233,16 @@ pub(crate) fn init(network: &Network) {
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
     }
+
+    let metrics_flush = thread::Builder::new()
+        .name("sentry metrics flush".to_owned())
+        .spawn(|| loop {
+            thread::sleep(periodic::FLUSH_INTERVAL);
+            periodic::flush();
+        });
+    if let Err(error) = metrics_flush {
+        warn!(?error, "unable to start Sentry metrics flush");
+    }
 }
 
 /// Starts the first release health session of this run.
@@ -316,10 +327,13 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Ends the release health session with `status`, then closes the client.
+/// Sends the counter totals and gauge values recorded since the last flush, ends the release
+/// health session with `status`, then closes the client.
 ///
-/// Returns `false` if queued events and logs could not be sent before the shutdown timeout.
+/// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
+/// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
+    periodic::flush();
     end_session(status);
 
     let guard = CLIENT_GUARD
@@ -1062,6 +1076,73 @@ mod tests {
             attribute("process.uptime_seconds").and_then(|value| value.as_u64()),
             Some(90),
         );
+    }
+
+    #[test]
+    fn listed_counters_and_gauges_are_sent_once_per_flush() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            for _ in 0..3 {
+                metrics::counter!("sync.block.error.count", "kind" => "not_found").increment(1);
+            }
+            metrics::counter!("sync.downloaded.block.count").increment(1);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
+
+            super::periodic::flush();
+            // No new errors, so only the gauge's latest value is sent again.
+            super::periodic::flush();
+        });
+
+        let mut metrics: Vec<_> = metrics
+            .iter()
+            .map(|metric| {
+                let kind = metric_attribute(metric, "kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                (metric.name.to_string(), metric.r#type, metric.value, kind)
+            })
+            .collect();
+        metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let oldest_age = (
+            "sync.downloads.oldest_age_seconds".to_string(),
+            MetricType::Gauge,
+            90.0,
+            None,
+        );
+        assert_eq!(
+            metrics,
+            [
+                (
+                    "sync.block.error.count".to_string(),
+                    MetricType::Counter,
+                    3.0,
+                    Some("not_found".to_string()),
+                ),
+                oldest_age.clone(),
+                oldest_age,
+            ],
+        );
+    }
+
+    #[test]
+    fn counts_since_the_last_flush_are_sent_at_shutdown() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout").increment(1);
+
+            super::end(SessionStatus::Crashed);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected the restart count, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "sync.restart.count");
+        assert_eq!(metric.value, 1.0);
     }
 
     #[test]
