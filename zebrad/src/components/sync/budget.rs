@@ -65,10 +65,10 @@ struct Bound {
     /// The retained bytes of every downloaded block that is still in the pipeline.
     charged: AtomicU64,
 
-    /// The configured `pipeline_bytes`.
-    limit: u64,
+    /// The current `pipeline_bytes`, updated when the memory plan changes profile.
+    limit: AtomicU64,
 
-    /// Notified after every release, so a waiting download can re-check the charge.
+    /// Notified after every release or limit update, so waiting downloads re-check admission.
     released: watch::Sender<()>,
 }
 
@@ -78,7 +78,7 @@ impl PipelineBudget {
         let bound = limits.pipeline_bytes.map(|limit| {
             Arc::new(Bound {
                 charged: AtomicU64::new(0),
-                limit,
+                limit: AtomicU64::new(limit),
                 released: watch::Sender::new(()),
             })
         });
@@ -91,9 +91,22 @@ impl PipelineBudget {
         self.bound.is_some()
     }
 
-    /// Returns the byte bound, or `None` without one.
+    /// Returns the current byte bound, or `None` without one.
     pub fn limit(&self) -> Option<u64> {
-        self.bound.as_ref().map(|bound| bound.limit)
+        self.bound.as_ref().map(|bound| bound.limit())
+    }
+
+    /// Changes the admission ceiling, updates its metrics, and wakes waiting sync admissions.
+    ///
+    /// Existing charges are unchanged. Unbounded handles stay unbounded and ignore updates.
+    pub fn update_limit(&self, limit: u64) {
+        let Some(bound) = self.bound.as_ref() else {
+            return;
+        };
+
+        bound.limit.store(limit, Ordering::Release);
+        bound.export_metrics(bound.charged.load(Ordering::Acquire));
+        bound.released.send_replace(());
     }
 
     /// Returns the retained bytes currently charged to the pipeline, 0 without a byte bound.
@@ -103,11 +116,11 @@ impl PipelineBudget {
             .map_or(0, |bound| bound.charged.load(Ordering::Acquire))
     }
 
-    /// Returns `true` if the charge is above the byte bound.
+    /// Returns `true` if the charge is above the current byte bound.
     pub fn is_over_limit(&self) -> bool {
         self.bound
             .as_ref()
-            .is_some_and(|bound| bound.charged.load(Ordering::Acquire) > bound.limit)
+            .is_some_and(|bound| bound.charged.load(Ordering::Acquire) > bound.limit())
     }
 
     /// Charges `bytes` to the pipeline until the returned guard is dropped, unless that takes
@@ -125,11 +138,11 @@ impl PipelineBudget {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |charged| {
                 charged
                     .checked_add(bytes)
-                    .filter(|charged| *charged <= bound.limit)
+                    .filter(|charged| *charged <= bound.limit())
             })
             .map_err(|charged| OverLimit {
                 charged,
-                limit: bound.limit,
+                limit: bound.limit(),
             })?
             .saturating_add(bytes);
         bound.export_metrics(charged);
@@ -149,6 +162,11 @@ impl PipelineBudget {
 }
 
 impl Bound {
+    /// Returns the current admission ceiling.
+    fn limit(&self) -> u64 {
+        self.limit.load(Ordering::Acquire)
+    }
+
     /// Charges `bytes` even above this bound's limit, as required for sync checkpoint liveness.
     fn charge(self: &Arc<Self>, bytes: u64) -> PipelineCharge {
         let charged = self
@@ -172,7 +190,7 @@ impl Bound {
         // Gauges are `f64`; byte counts lose precision only above 2^53 bytes.
         metrics::gauge!("sync.pipeline.charged_bytes").set(charged as f64);
         metrics::gauge!("sync.pipeline.over_admitted_bytes")
-            .set(charged.saturating_sub(self.limit) as f64);
+            .set(charged.saturating_sub(self.limit()) as f64);
     }
 }
 
