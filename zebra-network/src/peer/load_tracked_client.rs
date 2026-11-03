@@ -92,7 +92,10 @@ impl LoadTrackedClient {
     /// address segment instead. Object requests need a version 2 connection
     /// to a peer that advertises `NODE_SYNC_ARTIFACTS`: the legacy protocol
     /// has no `get-object`, so a legacy peer's bit 4 means something else.
-    /// Every other request is served on both protocols.
+    /// A v2 peer that advertised no services is not used for ordinary
+    /// requests: it may be a short-lived client that refuses them all.
+    /// Inventory downloads also need a peer that advertises block service,
+    /// full or limited.
     pub fn supports(&self, request: &Request) -> bool {
         let v2 = self.connection_info.remote.as_init_record().is_some();
         match request {
@@ -102,7 +105,17 @@ impl LoadTrackedClient {
                     .remote_services()
                     .contains(PeerServices::NODE_SYNC_ARTIFACTS)
             }
-            _ => true,
+            _ if request.is_inventory_download()
+                || matches!(
+                    request,
+                    Request::FindHeaders { .. } | Request::FindBlocks { .. }
+                ) =>
+            {
+                !v2 || self
+                    .remote_services()
+                    .intersects(PeerServices::NODE_NETWORK | PeerServices::NODE_NETWORK_LIMITED)
+            }
+            _ => !v2 || !self.remote_services().is_empty(),
         }
     }
 
