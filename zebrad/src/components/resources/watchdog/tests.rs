@@ -327,6 +327,37 @@ fn rocksdb_usage_sums_memtables_cache_and_table_readers() {
     );
 }
 
+/// The watchdog reads an open state database's memory and resizes it through the read state
+/// service.
+#[tokio::test]
+async fn reads_and_resizes_the_state_database() {
+    let _init_guard = zebra_test::init();
+
+    let network = zebra_chain::parameters::Network::Mainnet;
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network).await;
+
+    let sampled_state = read_state.clone();
+    let sample = tokio::task::spawn_blocking(move || sampled_state.memory_sample())
+        .await
+        .expect("the sample does not panic");
+    assert!(
+        sample
+            .block_cache
+            .is_some_and(|cache| cache.capacity_bytes > 0),
+        "an open database has a block cache: {sample:?}"
+    );
+
+    let tip_only = two_gib_settings()
+        .plan(Profile::TipOnly)
+        .expect("2 GiB covers the tip floors")
+        .0;
+    read_state
+        .spawn_apply_memory_limits(tip_only.state.rocksdb)
+        .await
+        .expect("the limits a plan derives apply to an open database");
+}
+
 /// A timed-out blocking sample stays outstanding across later deadlines instead of detaching and
 /// accumulating more blocking work. Other blocking work and watchdog shutdown remain bounded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
