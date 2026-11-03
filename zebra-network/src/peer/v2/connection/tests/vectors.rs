@@ -1964,9 +1964,8 @@ async fn cancelled_request_stops_its_stream() {
 /// request to a peer that never answers fails with
 /// `ConnectionReceiveTimeout` and cancels its stream with `CANCELLED`;
 /// requests from the peer that hold the node's request permits while the
-/// inbound service never answers are cancelled with `CANCELLED`, and one
-/// that waits for a busy permit is refused with `REFUSED` (or cancelled, if
-/// it got a freed permit just before its own deadline).
+/// inbound service never answers, and one that waits for a busy permit, are
+/// all refused with `REFUSED` at their deadlines.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
 /// unsafe with real sockets.
@@ -2020,9 +2019,8 @@ async fn stalled_requests_end_at_the_request_timeout() {
                 .map(|recv| recv.read_to_end(1024))
                 .collect::<Vec<_>>();
             // The requests holding the permits wait on the inbound service until their deadline,
-            // which cancels them; the extra one waits for a permit until its deadline, which
-            // refuses it, unless the cancelled requests free their permits first, a moment
-            // before its own deadline cancels it too.
+            // and the extra one waits for a permit until its own, or until the others free their
+            // permits a moment before it: every one is refused at its deadline.
             let mut codes = Vec::new();
             for read in futures::future::join_all(reads).await {
                 let error = read.expect_err("the stream is reset");
@@ -2032,18 +2030,9 @@ async fn stalled_requests_end_at_the_request_timeout() {
                 codes.push(code.into_inner());
             }
             assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
-            let cancelled = codes
-                .iter()
-                .filter(|code| **code == ErrorCode::Cancelled.code())
-                .count();
-            let refused = codes
-                .iter()
-                .filter(|code| **code == ErrorCode::Refused.code())
-                .count();
             assert!(
-                cancelled >= INBOUND_REQUEST_CONCURRENCY && cancelled + refused == codes.len(),
-                "requests holding permits are cancelled, the waiting one refused or cancelled: \
-                 {codes:?}"
+                codes.iter().all(|code| *code == ErrorCode::Refused.code()),
+                "every request is refused at its deadline: {codes:?}"
             );
         };
 
@@ -2337,7 +2326,7 @@ fn witnessed_mempool_service(counts: Vec<usize>) -> TestService {
 
 /// A response is bounded by one deadline from when its stream is accepted,
 /// however the peer paces its reads: a peer that reads just fast enough to
-/// keep every write moving still has the stream reset with `CANCELLED` at
+/// keep every write moving still has the stream reset with `REFUSED` at
 /// `REQUEST_TIMEOUT`, and the connection stays open.
 ///
 /// The raw peer leaves its first responses unread, so they use up almost
@@ -2398,7 +2387,7 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
                 .await
                 .expect("the stream was reset at its deadline")
                 .map(|response| response.len()),
-            ErrorCode::Cancelled,
+            ErrorCode::Refused,
         );
         assert!(
             raw.connection.close_reason().is_none(),
@@ -2411,7 +2400,7 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
 
 /// An inbound service call is bounded by the request deadline too: a
 /// request the inbound service never answers has its stream reset with
-/// `CANCELLED` at `REQUEST_TIMEOUT`, and the connection stays open.
+/// `REFUSED` at `REQUEST_TIMEOUT`, and the connection stays open.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time.
 #[tokio::test]
@@ -2428,7 +2417,7 @@ async fn unanswered_lookups_end_at_the_request_deadline() {
             txrefs: vec![TxRef::Txid(transaction::Hash([0xCD; 32]))],
         });
         let mut recv = raw_request(&raw.connection, &request).await;
-        assert_reset(recv.read_to_end(1024).await, ErrorCode::Cancelled);
+        assert_reset(recv.read_to_end(1024).await, ErrorCode::Refused);
         assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
         assert!(
             raw.connection.close_reason().is_none(),

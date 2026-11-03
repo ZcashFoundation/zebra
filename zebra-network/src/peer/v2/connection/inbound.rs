@@ -7,7 +7,10 @@
 //! type's format. The whole exchange, from accepting the stream to the last
 //! response byte, is bounded by one request deadline, [`REQUEST_TIMEOUT`]
 //! after the stream was accepted: the type byte, the permit, the request
-//! body, the inbound service calls, and every write of the response.
+//! body, the inbound service calls, and every write of the response. A
+//! request that misses its deadline is abandoned and its stream reset with
+//! `REFUSED` (draft, "Request Streams": a responder that cannot or will not
+//! serve a request MAY reset with `REFUSED`).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -136,12 +139,12 @@ pub(super) async fn serve<S>(
             permits,
             &overloads,
             &get_addr_allowed,
-            deadline,
         ),
     )
     .await
-    // The response did not complete in time: cancel the stream (draft, "Request Streams").
-    .unwrap_or(Err(Outcome::Refuse(ErrorCode::Cancelled)));
+    // The response did not complete in time: abandon the request (draft, "Request Streams": a
+    // responder that will not serve a request MAY reset with `REFUSED`).
+    .unwrap_or(Err(Outcome::Refuse(ErrorCode::Refused)));
     match served {
         // The peer went away or cancelled the stream: nothing to do.
         Ok(()) | Err(Outcome::Transport) => {}
@@ -186,8 +189,8 @@ impl From<WireError> for Outcome {
 }
 
 /// Reads the request, answers it, and writes the response. The caller
-/// bounds the whole exchange by `deadline`; the waits before the request is
-/// decoded also end at it, to choose their refusal codes.
+/// bounds the whole exchange, every wait here included, by the request
+/// deadline.
 async fn serve_inner<S>(
     send: &mut SendStream,
     recv: &mut RecvStream,
@@ -195,7 +198,6 @@ async fn serve_inner<S>(
     permits: Arc<Semaphore>,
     overloads: &Overloads,
     get_addr_allowed: &AtomicBool,
-    deadline: tokio::time::Instant,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -203,16 +205,15 @@ where
 {
     // The stream type comes first, and decides how much request may follow.
     let mut type_byte = [0u8; 1];
-    match tokio::time::timeout_at(deadline, recv.read_exact(&mut type_byte)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(quinn::ReadExactError::FinishedEarly(_))) => {
+    match recv.read_exact(&mut type_byte).await {
+        Ok(()) => {}
+        Err(quinn::ReadExactError::FinishedEarly(_)) => {
             return Err(Outcome::Violation {
                 reason: "stream finished before its type byte".to_string(),
                 code: ErrorCode::ProtocolError,
             })
         }
-        Ok(Err(quinn::ReadExactError::ReadError(_))) => return Err(Outcome::Transport),
-        Err(_elapsed) => return Err(Outcome::Refuse(ErrorCode::Cancelled)),
+        Err(quinn::ReadExactError::ReadError(_)) => return Err(Outcome::Transport),
     }
     let stream_type = match StreamType::from_code(type_byte[0]) {
         Some(stream_type) => stream_type,
@@ -237,15 +238,15 @@ where
     //
     // Only a few of one peer's requests are buffered and reach the inbound service at once; the
     // rest wait here, holding nothing, until the peer's share frees up.
-    let _permit = tokio::time::timeout_at(deadline, permits.acquire_owned())
+    let _permit = permits
+        .acquire_owned()
         .await
-        .map_err(|_elapsed| Outcome::Refuse(ErrorCode::Refused))?
         .map_err(|_closed| Outcome::Transport)?;
 
     // The body, up to the peer finishing its direction, bounded by what the type allows.
-    let body = tokio::time::timeout_at(deadline, recv.read_to_end(max_len))
+    let body = recv
+        .read_to_end(max_len)
         .await
-        .map_err(|_elapsed| Outcome::Refuse(ErrorCode::Cancelled))?
         .map_err(|error| match error {
             // A longer body than any conforming request: the peer is not following the format.
             quinn::ReadToEndError::TooLong => Outcome::Violation {
