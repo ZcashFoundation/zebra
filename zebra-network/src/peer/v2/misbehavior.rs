@@ -4,7 +4,10 @@
 //! peer group and kept across connections, so a peer cannot shed its score by
 //! reconnecting, or by being disconnected and redialled. A group whose score
 //! reaches [`MAX_PEER_MISBEHAVIOR_SCORE`] is reported to the address book,
-//! which bans it.
+//! which bans it, and keeps its full score until the score lapses: the ban
+//! is in force only from the address book's next flush of misbehavior
+//! reports, and until then a connection from the group is closed on its
+//! first penalty.
 
 use std::{collections::HashMap, net::IpAddr, time::Duration};
 
@@ -58,9 +61,10 @@ impl MisbehaviorScores {
 
     /// Adds `points` to `addr`'s peer group because of `reason`.
     ///
-    /// Returns `true` if the group's score reached the ban threshold, so the
-    /// connection must be closed with `MISBEHAVIOR`. If the score task cannot
-    /// be reached in time, the penalty is lost and this returns `false`.
+    /// Returns `true` if the group's score is at the ban threshold, whether
+    /// this penalty reached it or an earlier one did, so the connection must
+    /// be closed with `MISBEHAVIOR`. If the score task cannot be reached in
+    /// time, the penalty is lost and this returns `false`.
     pub async fn penalize(
         &self,
         addr: PeerSocketAddr,
@@ -89,12 +93,16 @@ impl MisbehaviorScores {
     }
 }
 
-/// A peer group's score, and when the group's first penalty in the current
-/// window was assigned.
+/// A peer group's score, when the group's first penalty in the current
+/// window was assigned, and whether the group has been reported for banning.
 #[derive(Clone, Copy, Debug)]
 struct Score {
     points: u32,
     since: Instant,
+    /// Whether the group was reported to the address book in this window. A
+    /// reported group keeps its score until the window ends, so each of its
+    /// penalties closes the connection again, without another report.
+    reported: bool,
 }
 
 impl Score {
@@ -123,19 +131,23 @@ async fn run(
     }) = commands.recv().await
     {
         let group = connection_limit_key(addr.ip());
-        let total = add_points(&mut scores, group, points, Instant::now(), limit);
-        let reached_threshold = total >= MAX_PEER_MISBEHAVIOR_SCORE;
-        if reached_threshold {
+        let score = add_points(&mut scores, group, points, Instant::now(), limit);
+        let reached_threshold = score.points >= MAX_PEER_MISBEHAVIOR_SCORE;
+        if reached_threshold && !score.reported {
             // The address book only acts on a full score, and bans the whole group.
             match reports.try_send(MisbehaviorReport::new(
                 addr,
                 MAX_PEER_MISBEHAVIOR_SCORE,
                 reason,
             )) {
-                // The ban replaces the score.
-                Ok(()) => {
-                    scores.remove(&group);
-                }
+                // # Security
+                //
+                // The score stays at the threshold until it lapses. The ban is in force only
+                // from the address book's next flush of misbehavior reports, so a peer that
+                // reconnects before then would otherwise start from zero, with a threshold's
+                // worth of misbehavior before its next report; instead its first penalty closes
+                // the connection again.
+                Ok(()) => score.reported = true,
                 // The score stays at the threshold, so the group's next penalty reports it again.
                 Err(error) => {
                     tracing::warn!(?addr, %error, "could not report a misbehaving v2 peer");
@@ -147,18 +159,18 @@ async fn run(
     }
 }
 
-/// Adds `points` to `group`'s score at `now`, and returns its new score.
+/// Adds `points` to `group`'s score at `now`, and returns the score.
 ///
-/// A lapsed score starts again from zero. If `limit` groups are already
-/// scored, lapsed scores are dropped, then the score whose window started
-/// first, so the map stays bounded however many groups misbehave.
+/// A lapsed score starts again from zero, unreported. If `limit` groups are
+/// already scored, lapsed scores are dropped, then the score whose window
+/// started first, so the map stays bounded however many groups misbehave.
 fn add_points(
     scores: &mut HashMap<IpAddr, Score>,
     group: IpAddr,
     points: u32,
     now: Instant,
     limit: usize,
-) -> u32 {
+) -> &mut Score {
     if !scores.contains_key(&group) && scores.len() >= limit {
         scores.retain(|_group, score| !score.has_lapsed(now));
         if scores.len() >= limit {
@@ -172,16 +184,15 @@ fn add_points(
         }
     }
 
-    let score = scores.entry(group).or_insert(Score {
+    let fresh = Score {
         points: 0,
         since: now,
-    });
+        reported: false,
+    };
+    let score = scores.entry(group).or_insert(fresh);
     if score.has_lapsed(now) {
-        *score = Score {
-            points: 0,
-            since: now,
-        };
+        *score = fresh;
     }
     score.points = score.points.saturating_add(points);
-    score.points
+    score
 }

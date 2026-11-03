@@ -20,7 +20,8 @@ fn addr(addr: &str) -> PeerSocketAddr {
 /// Scores add up across penalties from different connections of one peer
 /// group, here two source ports of one IP: the group is reported with a full
 /// score once it reaches the threshold, and only then. A penalty after the
-/// report starts a new score.
+/// report, from a connection the group made before its ban was in force,
+/// finds the score still at the threshold, and reports nothing more.
 #[tokio::test]
 async fn scores_persist_across_connections_until_the_threshold() {
     let _init_guard = zebra_test::init();
@@ -52,14 +53,15 @@ async fn scores_persist_across_connections_until_the_threshold() {
     assert_eq!(report.score, MAX_PEER_MISBEHAVIOR_SCORE);
     assert_eq!(report.reason, "last");
 
-    // The ban replaces the score.
-    assert!(!scores.penalize(first_connection, POINTS, "again").await);
-    assert!(reports_rx.try_recv().is_err());
+    // The score stays at the threshold until the ban is in force: a penalty from another
+    // connection of the group closes that connection too, without a second report.
+    assert!(scores.penalize(first_connection, POINTS, "again").await);
+    assert!(reports_rx.try_recv().is_err(), "the group is reported once");
 }
 
-/// A score lapses a ban duration after its first penalty, and the map of
-/// scores stays within its limit, dropping lapsed scores first, then the
-/// oldest.
+/// A score lapses a ban duration after its first penalty, along with its
+/// report, and the map of scores stays within its limit, dropping lapsed
+/// scores first, then the oldest.
 #[test]
 fn scores_lapse_and_stay_bounded() {
     let _init_guard = zebra_test::init();
@@ -68,18 +70,20 @@ fn scores_lapse_and_stay_bounded() {
         ["203.0.113.1", "203.0.113.2", "203.0.113.3"].map(|ip| ip.parse().expect("valid IP"));
     let start = Instant::now();
 
-    assert_eq!(add_points(&mut scores, a, POINTS, start, 2), POINTS);
-    assert_eq!(add_points(&mut scores, a, POINTS, start, 2), 2 * POINTS);
-    assert_eq!(
-        add_points(&mut scores, a, POINTS, start + BAN_DURATION, 2),
-        POINTS,
-        "a lapsed score starts again"
-    );
+    let score = add_points(&mut scores, a, POINTS, start, 2);
+    assert_eq!(score.points, POINTS);
+    score.reported = true;
+    let score = add_points(&mut scores, a, POINTS, start, 2);
+    assert_eq!(score.points, 2 * POINTS);
+    assert!(score.reported, "a report lasts as long as its score");
+    let score = add_points(&mut scores, a, POINTS, start + BAN_DURATION, 2);
+    assert_eq!(score.points, POINTS, "a lapsed score starts again");
+    assert!(!score.reported, "a lapsed score is unreported");
 
     let later = start + BAN_DURATION + Duration::from_secs(1);
-    assert_eq!(add_points(&mut scores, b, POINTS, later, 2), POINTS);
+    assert_eq!(add_points(&mut scores, b, POINTS, later, 2).points, POINTS);
     assert_eq!(
-        add_points(&mut scores, c, POINTS, later + BAN_DURATION / 2, 2),
+        add_points(&mut scores, c, POINTS, later + BAN_DURATION / 2, 2).points,
         POINTS
     );
     assert_eq!(scores.len(), 2, "the map stays within its limit");

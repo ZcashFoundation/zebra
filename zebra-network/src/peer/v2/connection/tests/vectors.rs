@@ -72,7 +72,10 @@ struct TestNode {
     client: Client,
     inv_rx: broadcast::Receiver<InventoryChange>,
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
-    /// The peers the node's misbehavior scores reported for banning.
+    /// The node's misbehavior scores, which another node can share.
+    misbehavior: MisbehaviorScores,
+    /// The peers the node's misbehavior scores reported for banning. A node
+    /// sharing another node's scores reports on that node's receiver.
     misbehavior_rx: tokio::sync::mpsc::Receiver<MisbehaviorReport>,
 }
 
@@ -163,9 +166,11 @@ impl Fixture {
 /// An inbound service for the tests.
 type TestService = BoxCloneService<Request, Response, BoxError>;
 
-/// Spawns a connection task over `connection` with the fixture as its
-/// inbound service.
-fn spawn_node(connection: Connection, completed: CompletedHandshake, fixture: Fixture) -> TestNode {
+/// The fixture as an inbound service, and the receiver its requests are
+/// copied to.
+fn fixture_service(
+    fixture: Fixture,
+) -> (TestService, tokio::sync::mpsc::UnboundedReceiver<Request>) {
     let (inbound_tx, inbound_rx) = tokio::sync::mpsc::unbounded_channel();
     let inbound_service = service_fn(move |request: Request| {
         let fixture = fixture.clone();
@@ -175,12 +180,14 @@ fn spawn_node(connection: Connection, completed: CompletedHandshake, fixture: Fi
             Ok::<Response, BoxError>(fixture.answer(request))
         }
     });
-    spawn_node_with(
-        connection,
-        completed,
-        BoxCloneService::new(inbound_service),
-        inbound_rx,
-    )
+    (BoxCloneService::new(inbound_service), inbound_rx)
+}
+
+/// Spawns a connection task over `connection` with the fixture as its
+/// inbound service.
+fn spawn_node(connection: Connection, completed: CompletedHandshake, fixture: Fixture) -> TestNode {
+    let (inbound_service, inbound_rx) = fixture_service(fixture);
+    spawn_node_with(connection, completed, inbound_service, inbound_rx)
 }
 
 /// Spawns a connection task over `connection` with `inbound_service`; its
@@ -191,8 +198,29 @@ fn spawn_node_with(
     inbound_service: TestService,
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
 ) -> TestNode {
-    let (inv_tx, inv_rx) = broadcast::channel(16);
     let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(8);
+    spawn_node_scored(
+        connection,
+        completed,
+        inbound_service,
+        inbound_rx,
+        MisbehaviorScores::spawn(misbehavior_tx, 8),
+        misbehavior_rx,
+    )
+}
+
+/// Spawns a connection task over `connection` with `inbound_service` and the
+/// `misbehavior` scores, whose reports arrive on `misbehavior_rx` if they
+/// were spawned with its sender.
+fn spawn_node_scored(
+    connection: Connection,
+    completed: CompletedHandshake,
+    inbound_service: TestService,
+    inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
+    misbehavior: MisbehaviorScores,
+    misbehavior_rx: tokio::sync::mpsc::Receiver<MisbehaviorReport>,
+) -> TestNode {
+    let (inv_tx, inv_rx) = broadcast::channel(16);
     let mut counter = ActiveConnectionCounter::new_counter();
 
     let client = spawn_connection(
@@ -203,7 +231,7 @@ fn spawn_node_with(
             inbound_service,
             inv_collector: inv_tx,
             genesis_hash: Network::Mainnet.genesis_hash(),
-            misbehavior: MisbehaviorScores::spawn(misbehavior_tx, 8),
+            misbehavior: misbehavior.clone(),
         },
         None,
     );
@@ -211,6 +239,7 @@ fn spawn_node_with(
         client,
         inv_rx,
         inbound_rx,
+        misbehavior,
         misbehavior_rx,
     }
 }
@@ -297,6 +326,21 @@ async fn raw_peer_node_configured(
     relay: bool,
     client_config: Option<quinn::ClientConfig>,
 ) -> RawPeer {
+    raw_peer_node_scored(network, inbound_service, relay, client_config, None).await
+}
+
+/// Connects a raw peer, which uses `client_config` if given, to a node and
+/// completes the handshake by hand, with `relay` in the raw peer's `init`
+/// record. The node serves `inbound_service`, or the fixture if `None`, and
+/// scores the peer's misbehavior in `misbehavior`, or in scores of its own if
+/// `None`.
+async fn raw_peer_node_scored(
+    network: &Network,
+    inbound_service: Option<TestService>,
+    relay: bool,
+    client_config: Option<quinn::ClientConfig>,
+    misbehavior: Option<MisbehaviorScores>,
+) -> RawPeer {
     let (connection, inbound, client_ep, server_ep) =
         connected_pair_with(network, client_config).await;
     let raw_init = InitRecord {
@@ -328,14 +372,21 @@ async fn raw_peer_node_configured(
         }
     );
     let completed = completed.expect("the handshake completes");
-    let node = match inbound_service {
-        Some(service) => spawn_node_with(
+    let (inbound_service, inbound_rx) = match inbound_service {
+        Some(service) => (service, tokio::sync::mpsc::unbounded_channel().1),
+        None => fixture_service(Fixture::new()),
+    };
+    let node = match misbehavior {
+        // The shared scores report on their own node's receiver; this one gets nothing.
+        Some(misbehavior) => spawn_node_scored(
             inbound,
             completed,
-            service,
-            tokio::sync::mpsc::unbounded_channel().1,
+            inbound_service,
+            inbound_rx,
+            misbehavior,
+            tokio::sync::mpsc::channel(1).1,
         ),
-        None => spawn_node(inbound, completed, Fixture::new()),
+        None => spawn_node_with(inbound, completed, inbound_service, inbound_rx),
     };
 
     RawPeer {
@@ -1818,6 +1869,92 @@ async fn misbehaving_responses_close_and_ban_at_the_threshold() {
                 );
             }
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Has `raw` answer the node's next `FindHeaders` request with `reply`, a
+/// response the node rejects as misbehavior.
+async fn reply_with_misbehavior(raw: &mut RawPeer, reply: &[u8]) {
+    let request = Request::FindHeaders {
+        known_blocks: vec![Network::Mainnet.genesis_hash()],
+        stop: None,
+    };
+    let (result, ()) = tokio::join!(call(&mut raw.node.client, request), async {
+        let (_, mut send, _recv) = accept_request(&raw.connection).await;
+        let _ = send.write_all(reply).await;
+        let _ = send.finish();
+    });
+    let inner = result
+        .expect_err("a misbehaving response is rejected")
+        .inner_debug();
+    assert!(inner.contains("ProtocolViolation"), "got {inner}");
+}
+
+/// A peer closed with `MISBEHAVIOR` keeps its full score until its ban is in
+/// force: the address book applies ban reports at its next flush, and a peer
+/// that reconnects before then, here a second raw peer from the same loopback
+/// address scored by the same node, is closed with `MISBEHAVIOR` on its first
+/// misbehaving response, without a second report.
+#[tokio::test]
+async fn reconnecting_banned_peers_are_closed_on_their_first_violation() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let mut non_contiguous = Vec::new();
+        write_headers_response(
+            &mut non_contiguous,
+            &[
+                fixture.blocks[2].header.clone(),
+                fixture.blocks[1].header.clone(),
+            ],
+            false,
+        )
+        .expect("writes to a Vec");
+        let penalties_to_ban = crate::constants::MAX_PEER_MISBEHAVIOR_SCORE
+            .div_ceil(crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY);
+
+        let mut raw = raw_peer_node(&network).await;
+        for _ in 0..penalties_to_ban {
+            reply_with_misbehavior(&mut raw, &non_contiguous).await;
+        }
+        let close = raw.connection.closed().await;
+        assert!(
+            matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
+                if close.error_code.into_inner() == ErrorCode::Misbehavior.code()),
+            "got {close:?}"
+        );
+        raw.node
+            .misbehavior_rx
+            .try_recv()
+            .expect("the peer is reported for banning");
+
+        // The report has not reached an address book: the peer reconnects, and the node scores
+        // it as before.
+        let mut again = raw_peer_node_scored(
+            &network,
+            None,
+            true,
+            None,
+            Some(raw.node.misbehavior.clone()),
+        )
+        .await;
+        reply_with_misbehavior(&mut again, &non_contiguous).await;
+        let close = tokio::time::timeout(SHORT_WAIT * 4, again.connection.closed())
+            .await
+            .expect("the reconnected peer is closed on its first misbehaving response");
+        assert!(
+            matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
+                if close.error_code.into_inner() == ErrorCode::Misbehavior.code()),
+            "got {close:?}"
+        );
+        assert!(
+            raw.node.misbehavior_rx.try_recv().is_err(),
+            "the peer is reported once"
+        );
     })
     .await
     .expect("the test completes well within the timeout");
