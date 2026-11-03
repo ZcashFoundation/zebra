@@ -360,12 +360,14 @@ fn arena_max_is_a_quarter_of_the_cores() {
 fn auto_budget_is_half_the_memory_within_the_clamp() {
     let _init_guard = zebra_test::init();
     let inputs = PlanInputs::default();
-    let minimum = MemoryPlan::min_budget(Profile::Ibd, &inputs);
+    let minimum = 1084 * MIB;
 
     let shortfall = MemoryPlan::auto_budget(GIB, &inputs)
         .expect_err("a 1 GiB host cannot sync, so auto refuses it");
     assert_eq!(shortfall.profile, Profile::Ibd);
     assert_eq!(shortfall.available, GIB);
+    MemoryPlan::auto_budget(minimum - 1, &inputs)
+        .expect_err("the minimum rounds up to a whole number of mebibytes");
 
     assert_eq!(
         MemoryPlan::auto_budget(minimum, &inputs),
@@ -395,6 +397,14 @@ fn auto_budget_is_half_the_memory_within_the_clamp() {
             budget: MAX_AUTO_BUDGET_BYTES,
             raised_to_minimum: false
         })
+    );
+    assert_eq!(
+        MemoryPlan::auto_budget(5 * GIB + 3, &inputs),
+        Ok(AutoBudget {
+            budget: 2560 * MIB,
+            raised_to_minimum: false
+        }),
+        "half of the memory rounds down to a whole number of mebibytes"
     );
 }
 
@@ -620,8 +630,11 @@ proptest! {
                 prop_assert_eq!(Profile::for_budget(auto.budget, &inputs), Profile::Ibd);
                 prop_assert!(MemoryPlan::derive(auto.budget, Profile::Ibd, &inputs).is_ok());
                 prop_assert!(MemoryPlan::derive(auto.budget, Profile::TipOnly, &inputs).is_ok());
+                prop_assert_eq!(auto.budget % MIB, 0, "auto budgets are whole mebibytes");
             }
-            Err(_) => prop_assert!(effective < MemoryPlan::min_budget(Profile::Ibd, &inputs)),
+            Err(_) => prop_assert!(
+                effective < MemoryPlan::min_budget(Profile::Ibd, &inputs).div_ceil(MIB) * MIB
+            ),
         }
     }
 }

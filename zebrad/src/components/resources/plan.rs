@@ -583,17 +583,30 @@ impl MemoryPlan {
     /// half of it, at least the `Ibd` minimum and at most [`MAX_AUTO_BUDGET_BYTES`]
     /// (design §2.2, C8).
     ///
+    /// The budget is a whole number of mebibytes, so that it reads like a configured one: half
+    /// of the memory rounds down, and the minimum rounds up.
+    ///
     /// # Errors
     ///
-    /// If `effective` is below the `Ibd` minimum.
+    /// If `effective` is below the `Ibd` minimum, rounded up.
     pub fn auto_budget(effective: u64, inputs: &PlanInputs) -> Result<AutoBudget, Shortfall> {
-        let minimum = Self::min_budget(Profile::Ibd, inputs);
+        let minimum = Self::min_budget(Profile::Ibd, inputs)
+            .div_ceil(MIB)
+            .saturating_mul(MIB);
         if effective < minimum {
-            return Err(Self::shares(effective, Profile::Ibd, inputs)
-                .expect_err("a budget below the minimum does not cover the floors"));
+            return Err(Shortfall {
+                needed: minimum,
+                available: effective,
+                per_component: Self::shares(effective, Profile::Ibd, inputs)
+                    .err()
+                    .map(|shortfall| shortfall.per_component)
+                    .unwrap_or_default(),
+                profile: Profile::Ibd,
+                minimums: MinimumBudgets::new(inputs),
+            });
         }
 
-        let half = mul_div_floor(effective, AUTO_BUDGET_PERCENT, 100);
+        let half = mul_div_floor(effective, AUTO_BUDGET_PERCENT, 100) / MIB * MIB;
         let budget = half.clamp(minimum, MAX_AUTO_BUDGET_BYTES.max(minimum));
 
         Ok(AutoBudget {
