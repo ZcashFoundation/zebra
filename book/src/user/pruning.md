@@ -3,7 +3,9 @@
 Pruning saves disk space on mining and pool backends by deleting old finalized transaction bodies.
 Validation state, current UTXOs, headers, transaction IDs, address indexes, and shielded tree data
 remain available. Mining, block submission, and spending old unspent outputs still work. Initial
-sync still downloads and validates the chain; pruning does not skip validation.
+sync still downloads and validates the chain; pruning does not skip validation. An empty pruned
+node can instead [start from a state snapshot](state-snapshot-sync.md) downloaded from version 2
+peers, which skips the history below the snapshot and trusts the snapshot's producer with it.
 
 Use an archive node instead for historical wallet rescans, indexer bootstrap, or serving full block
 history to peers. Both zcashd sidecar modes require an archive and are rejected when pruning is
@@ -69,6 +71,8 @@ The `getblockchaininfo` response describes actual stored history, not the config
 - After deletion, `pruned: true` accompanies `pruneheight`, the first height of the complete
   retained body suffix. Genesis remains available separately below it. This floor is derived
   from the first retained transaction row above genesis, not a separately persisted pruning marker.
+  A node [started from a state snapshot](state-snapshot-sync.md#after-the-bootstrap) also records
+  the snapshot's window start, and reports the higher of the two from its first start.
 
 For historical queries:
 
@@ -130,6 +134,21 @@ checks are still running or an older restart witness must be preserved. Check st
 actual `getblockchaininfo` availability before treating it as stalled. Disk usage can lag logical
 deletion while compaction runs, so also monitor free space and the existing RocksDB metrics.
 
+## Starting from a state snapshot
+
+Syncing a pruned node from genesis still downloads and validates every block. An empty pruned
+node can instead bootstrap from a state snapshot at a height `H`, downloaded from
+[version 2 protocol](p2p-v2.md) peers that advertise `NODE_SYNC_ARTIFACTS`, and sync only the
+blocks above `H`. The snapshot ships the complete state at `H` and the 2,304 most recent blocks,
+so the node starts with `pruneheight` at the snapshot's window start and advertises
+`NODE_NETWORK_LIMITED` from its first start. The history below the window is never downloaded.
+
+The snapshot is checked against a commitment, and the commitment's producer is trusted with the
+UTXO set, the nullifier and anchor sets, the value pools, and the address indexes, which the node
+cannot verify without the history. The feature is experimental, off by default, and documented in
+[Starting a pruned node from a state snapshot](state-snapshot-sync.md), including what is verified,
+what is trusted, and how to export and serve a snapshot from a stopped node.
+
 ## Format 30, recovery, and copies
 
 This release uses database format 30 for both archive and pruned nodes. When no v30 database exists,
@@ -152,6 +171,11 @@ rolled back to Zebra 7.0.0 by moving the directory back:
 Never do this with a database that has been pruned, even partially: Zebra 7.0.0 cannot detect
 missing block bodies, and would serve incomplete blocks to peers and RPC clients. A pruned node can
 only return to 7.0.0 from a separate archive backup.
+
+A database built from a [state snapshot](state-snapshot-sync.md) uses format 30.1.0 and records
+where its history starts. Never open it with a Zebra build that does not know state snapshots, and
+never move it to `v29`: such a build cannot tell that the history below the snapshot's window is
+missing, and would treat the database as a complete archive.
 
 Before upgrading or pruning, stop Zebra and keep any required archive backup outside the managed
 cache directory. After deletion, simply removing the option makes writable startup fail. To regain

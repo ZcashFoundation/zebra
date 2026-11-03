@@ -5,6 +5,12 @@ The Zcash Foundation publishes compressed Zebra state archives at
 Check [database compatibility](#check-the-database-format-version) before
 downloading.
 
+This page is about those archives, which hold a complete database that you
+download and extract yourself. A pruned node can instead download a smaller,
+hash-verified state snapshot from version 2 peers inside Zebra; that is a
+separate, experimental feature, described in
+[Starting a pruned node from a state snapshot](state-snapshot-sync.md).
+
 ## On trust
 
 A snapshot substitutes the producer's validation for your own initial sync.
