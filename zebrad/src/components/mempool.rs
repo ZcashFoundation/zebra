@@ -101,10 +101,24 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, Re
 /// [`MempoolMemoryLimits::default()`] is today's behaviour: the configured limits apply.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MempoolMemoryLimits {
-    /// Replaces [`Config::tx_cost_limit`] when it is not set explicitly.
+    /// Replaces [`Config::tx_cost_limit`].
     ///
-    /// `None` keeps the configured value.
+    /// `None` keeps the configured value. The memory plan leaves it `None` when the config sets a
+    /// limit explicitly, so an explicit limit wins.
     pub tx_cost_limit: Option<u64>,
+}
+
+impl MempoolMemoryLimits {
+    /// Returns a copy of `config` with these limits applied, for [`Mempool::new`].
+    pub fn apply_to(&self, config: &Config) -> Config {
+        let mut config = config.clone();
+
+        if let Some(tx_cost_limit) = self.tx_cost_limit {
+            config.tx_cost_limit = tx_cost_limit;
+        }
+
+        config
+    }
 }
 
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID

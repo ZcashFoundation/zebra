@@ -17,6 +17,7 @@ use zebra_chain::{
     transparent::{self, Address},
 };
 
+mod memory_limits;
 mod prop;
 mod vector;
 
