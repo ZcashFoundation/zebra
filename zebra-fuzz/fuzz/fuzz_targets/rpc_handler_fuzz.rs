@@ -33,9 +33,9 @@
 //! * `ReadRequest::Tip` → `Ok(ReadResponse::Tip(Some((Height(0), [0u8; 32]))))`
 //!   — drives every `getinfo` / `getblockchaininfo` / `getbestblockhash` etc.
 //!   handler that gates on a real tip.
-//! * `ReadRequest::Block(_)` → `Ok(ReadResponse::Block(None))` — drives the
-//!   `getblock` "block not found" formatter, including the verbosity=2 branch
-//!   that walks each tx (which is decode-light when the block is None).
+//! * `ReadRequest::BlockQuery { .. }` → `Ok(ReadResponse::BlockQuery(None))` —
+//!   drives the `getblock` and `getblockheader` "block not found" formatters,
+//!   at every verbosity and for field queries.
 //! * `ReadRequest::Transaction(_)` → `Ok(ReadResponse::Transaction(None))` —
 //!   drives `getrawtransaction` None-branch.
 //! * `ReadRequest::AddressBalance(_)` → constructed zero balance to walk the
@@ -77,9 +77,12 @@ use zebra_chain::{
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::MetaAddr, PeerSocketAddr};
 use zebra_node_services::{mempool, BoxError};
-use zebra_rpc::methods::{
-    AddNodeCommand, GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosRequest,
-    RpcImpl, RpcServer,
+use zebra_rpc::{
+    client::GetBlockQuery,
+    methods::{
+        AddNodeCommand, GetAddressBalanceRequest, GetAddressTxIdsRequest, GetAddressUtxosRequest,
+        RpcImpl, RpcServer,
+    },
 };
 
 /// Cached default testnet.
@@ -124,6 +127,68 @@ fn default_testnet() -> &'static Network {
 // path the variant covers.
 // ─────────────────────────────────────────────────────────────────────
 
+/// The second `getblock` argument, built from fuzzer input.
+#[derive(Debug, Arbitrary)]
+enum GetBlockArgument {
+    /// A verbosity level, including the ones the handler rejects.
+    Verbosity(u8),
+    /// A boolean verbosity.
+    Bool(bool),
+    /// A field query: each byte picks a field name, so the empty list, duplicates and
+    /// conflicting `tx` shapes are all reachable.
+    Fields(Vec<u8>),
+}
+
+/// The `getblock` field names, with the `txids` alias.
+const GET_BLOCK_FIELD_NAMES: [&str; 26] = [
+    "hash",
+    "confirmations",
+    "size",
+    "height",
+    "version",
+    "merkleroot",
+    "blockcommitments",
+    "authdataroot",
+    "finalsaplingroot",
+    "finalorchardroot",
+    "nTx",
+    "tx",
+    "txids",
+    "txdetails",
+    "txprevouts",
+    "time",
+    "nonce",
+    "solution",
+    "bits",
+    "difficulty",
+    "chainSupply",
+    "valuePools",
+    "trees",
+    "previousblockhash",
+    "nextblockhash",
+    "hex",
+];
+
+impl GetBlockArgument {
+    /// Parses the argument the way the RPC server parses its JSON form.
+    fn into_query(self) -> GetBlockQuery {
+        let value = match self {
+            GetBlockArgument::Verbosity(verbosity) => serde_json::Value::from(verbosity),
+            GetBlockArgument::Bool(verbose) => serde_json::Value::from(verbose),
+            GetBlockArgument::Fields(picks) => picks
+                .iter()
+                .map(|pick| {
+                    GET_BLOCK_FIELD_NAMES[usize::from(*pick) % GET_BLOCK_FIELD_NAMES.len()]
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        };
+
+        serde_json::from_value(value)
+            .expect("verbosity levels, booleans and field name lists are getblock arguments")
+    }
+}
+
 #[derive(Debug, Arbitrary)]
 enum RpcCall {
     // ── Tier-A · raw bytes / hex blob ──────────────────────────────────
@@ -143,7 +208,8 @@ enum RpcCall {
     /// `hash_or_height` parser is dual-form ("a number or a 64-char
     /// hex hash"); fuzzing the string covers parse-edge failure modes.
     /// `verbosity = 2` walks every tx and decodes each — wider surface.
-    GetBlock(String, Option<u8>),
+    /// The second argument also covers booleans and field queries.
+    GetBlock(String, Option<GetBlockArgument>),
     /// `getblockheader(hash_or_height, verbose)` — methods.rs:1442. Same
     /// `hash_or_height` parser as `getblock`, different downstream
     /// service, so worth fuzzing distinctly.
@@ -395,6 +461,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
             R::Block(_) => Ok(Resp::Block(None)),
+            R::BlockQuery { .. } => Ok(Resp::BlockQuery(None)),
             R::AnyChainBlock(_) => Ok(Resp::Block(None)),
             R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
             R::Transaction(_) => Ok(Resp::Transaction(None)),
@@ -706,6 +773,7 @@ async fn dispatch(rpc: &FuzzRpcImpl, call: RpcCall) {
 
         // ── Tier-B addressing ──────────────────────────────────────
         RpcCall::GetBlock(hash_or_height, verbosity) => {
+            let verbosity = verbosity.map(GetBlockArgument::into_query);
             let _ = AssertUnwindSafe(rpc.get_block(hash_or_height, verbosity))
                 .catch_unwind()
                 .await;

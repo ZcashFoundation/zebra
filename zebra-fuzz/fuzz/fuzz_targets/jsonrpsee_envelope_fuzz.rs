@@ -226,6 +226,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
             R::Block(_) => Ok(Resp::Block(None)),
+            R::BlockQuery { .. } => Ok(Resp::BlockQuery(None)),
             R::AnyChainBlock(_) => Ok(Resp::Block(None)),
             R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
             R::Transaction(_) => Ok(Resp::Transaction(None)),
@@ -518,6 +519,37 @@ fn build_envelope(data: &[u8]) -> Option<String> {
     ))
 }
 
+/// The `getblock` field names, with the `txids` alias and one unknown name.
+const GET_BLOCK_FIELD_NAMES: [&str; 27] = [
+    "hash",
+    "confirmations",
+    "size",
+    "height",
+    "version",
+    "merkleroot",
+    "blockcommitments",
+    "authdataroot",
+    "finalsaplingroot",
+    "finalorchardroot",
+    "nTx",
+    "tx",
+    "txids",
+    "txdetails",
+    "txprevouts",
+    "time",
+    "nonce",
+    "solution",
+    "bits",
+    "difficulty",
+    "chainSupply",
+    "valuePools",
+    "trees",
+    "previousblockhash",
+    "nextblockhash",
+    "hex",
+    "merkelroot",
+];
+
 /// Build a positional `params` JSON array tailored to the method's
 /// expected signature, fed by fuzz bytes.
 ///
@@ -525,7 +557,7 @@ fn build_envelope(data: &[u8]) -> Option<String> {
 /// mirror `RpcServer` trait method signatures in `zebra-rpc/src/methods.rs`:
 ///
 ///   sendrawtransaction(hex: String, allow_high_fees: Option<bool>)
-///   getblock(hash_or_height: String, verbosity: Option<u8>)
+///   getblock(hash_or_height: String, verbosity: Option<GetBlockQuery>)  // a number, a bool or field names
 ///   getblockheader(hash_or_height: String, verbose: Option<bool>)
 ///   getrawtransaction(txid: String, verbose: Option<u8>, block_hash: Option<String>)
 ///   gettxout(txid: String, n: u32, include_mempool: Option<bool>)
@@ -613,6 +645,27 @@ fn build_method_param_template(method: &str, payload: &[u8]) -> String {
             let verb = (take_u8(0) >> 2) & 0x7;
             if method == "getblockheader" {
                 format!(r#"[{},{}]"#, json_str(&s), verb % 2 == 1)
+            } else if method == "getblock" {
+                // `getblock` also takes a boolean or an array of field names. Each payload byte
+                // after the first picks a name, so empty, duplicate, conflicting and unknown
+                // names are all reachable.
+                let verbosity = match take_u8(0) >> 5 {
+                    0 => (verb % 2 == 1).to_string(),
+                    1..=3 => {
+                        let names: Vec<_> = payload[1.min(payload.len())..payload.len().min(9)]
+                            .iter()
+                            .map(|pick| {
+                                json_str(
+                                    GET_BLOCK_FIELD_NAMES
+                                        [usize::from(*pick) % GET_BLOCK_FIELD_NAMES.len()],
+                                )
+                            })
+                            .collect();
+                        format!("[{}]", names.join(","))
+                    }
+                    _ => verb.to_string(),
+                };
+                format!(r#"[{},{}]"#, json_str(&s), verbosity)
             } else {
                 format!(r#"[{},{}]"#, json_str(&s), verb)
             }

@@ -524,7 +524,6 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
     let merkle_root = header.merkle_root();
     let block_commitments = header.block_commitments();
     let final_sapling_root = header.final_sapling_root();
-    let sapling_tree_size = header.sapling_tree_size();
     let time = header.time();
     let nonce = header.nonce();
     let solution = header.solution();
@@ -541,7 +540,6 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
         merkle_root,
         block_commitments,
         final_sapling_root,
-        sapling_tree_size,
         time,
         nonce,
         solution,

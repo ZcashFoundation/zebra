@@ -1,10 +1,14 @@
 project: zebra-rpc
 kind: breaking
 body: >-
+  Changed `Rpc::get_block` to take `Option<GetBlockQuery>` instead of `Option<u8>`: a verbosity
+  level, or a set of `GetBlockField`s for a field query, both exported from `zebra_rpc::client`.
   Changed `BlockObject`'s `confirmations`, `n_tx`, `tx` and `trees` to `Option`s;
   `BlockObject::new` keeps its 21 parameters with those four types changed. Added the
   `auth_data_root` and `hex` fields to `BlockObject`, which are not constructor parameters: set
   them with `BlockObject::with_auth_data_root` and `BlockObject::with_hex`. Every optional
   `BlockObject` key, and `sapling` and `orchard` in `GetBlockTrees`, now deserializes as absent
-  when it is missing. Code constructing or matching `BlockObject` literally must change.
+  when it is missing. Removed `BlockHeaderObject::sapling_tree_size`, so
+  `BlockHeaderObject::new` takes 14 parameters. Code implementing or calling `Rpc::get_block`, or
+  constructing or matching these types literally, must change.
 time: 2026-11-03T04:39:50-05:00

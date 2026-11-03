@@ -1,0 +1,179 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: "serde_json::json!({ \"params\": params, \"components\": components })"
+---
+{
+  "components": {
+    "schemas": {
+      "GetBlockField": {
+        "description": "A `getblock` field name.\n\nEach name selects one key of the response object, except `tx`, `txdetails` and `txprevouts`, which\nselect the shape of the single `tx` key: transaction IDs, transaction objects, or transaction objects\nwith `prevout` and `fee`. `txids` is an alias of `tx`. `hash` is always returned.",
+        "oneOf": [
+          {
+            "const": "hash",
+            "description": "The block hash. Always returned, even when it is not requested.",
+            "type": "string"
+          },
+          {
+            "const": "confirmations",
+            "description": "The number of best-chain blocks from this block to the tip, including both.",
+            "type": "string"
+          },
+          {
+            "const": "size",
+            "description": "The serialized block size in bytes.",
+            "type": "string"
+          },
+          {
+            "const": "height",
+            "description": "The block height.",
+            "type": "string"
+          },
+          {
+            "const": "version",
+            "description": "The block header version.",
+            "type": "string"
+          },
+          {
+            "const": "merkleroot",
+            "description": "The transaction Merkle root.",
+            "type": "string"
+          },
+          {
+            "const": "blockcommitments",
+            "description": "The header's block commitments, whose meaning depends on the network upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "authdataroot",
+            "description": "The ZIP 244 authorizing data root. Needs the block body.",
+            "type": "string"
+          },
+          {
+            "const": "finalsaplingroot",
+            "description": "The root of the Sapling note commitment tree after this block.",
+            "type": "string"
+          },
+          {
+            "const": "finalorchardroot",
+            "description": "The root of the Orchard note commitment tree after this block, from NU5 on.",
+            "type": "string"
+          },
+          {
+            "const": "nTx",
+            "description": "The number of transactions in the block.",
+            "type": "string"
+          },
+          {
+            "const": "tx",
+            "description": "`tx` as transaction IDs in block order.",
+            "type": "string"
+          },
+          {
+            "const": "txdetails",
+            "description": "`tx` as transaction objects. Needs the block body.",
+            "type": "string"
+          },
+          {
+            "const": "txprevouts",
+            "description": "`tx` as transaction objects with `prevout` and `fee`. Needs the block body and the\ntransactions whose outputs it spends.",
+            "type": "string"
+          },
+          {
+            "const": "time",
+            "description": "The block header time.",
+            "type": "string"
+          },
+          {
+            "const": "nonce",
+            "description": "The Equihash nonce.",
+            "type": "string"
+          },
+          {
+            "const": "solution",
+            "description": "The Equihash solution.",
+            "type": "string"
+          },
+          {
+            "const": "bits",
+            "description": "The difficulty threshold in compact form.",
+            "type": "string"
+          },
+          {
+            "const": "difficulty",
+            "description": "The difficulty as a multiple of the network's minimum difficulty.",
+            "type": "string"
+          },
+          {
+            "const": "chainSupply",
+            "description": "The chain supply balance after this block.",
+            "type": "string"
+          },
+          {
+            "const": "valuePools",
+            "description": "The value pool balances after this block, and their changes in this block.",
+            "type": "string"
+          },
+          {
+            "const": "trees",
+            "description": "The sizes of the note commitment trees after this block.",
+            "type": "string"
+          },
+          {
+            "const": "previousblockhash",
+            "description": "The hash of the previous block.",
+            "type": "string"
+          },
+          {
+            "const": "nextblockhash",
+            "description": "The hash of the next block on the best chain. Omitted at the tip.",
+            "type": "string"
+          },
+          {
+            "const": "hex",
+            "description": "The serialized block, hex-encoded, as verbosity 0 returns it. Needs the block body.",
+            "type": "string"
+          }
+        ]
+      },
+      "GetBlockQuery": {
+        "anyOf": [
+          {
+            "format": "uint8",
+            "maximum": 3,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/GetBlockField"
+            },
+            "type": "array",
+            "uniqueItems": true
+          }
+        ]
+      }
+    }
+  },
+  "params": [
+    {
+      "description": "The block hash or height to return.",
+      "name": "hash_or_height",
+      "required": true,
+      "schema": {
+        "type": "string"
+      },
+      "summary": "The block hash or height to return."
+    },
+    {
+      "description": "A verbosity level from 0 to 3, a boolean, or an array of field names to return (`txids` is an alias of `tx`).",
+      "name": "verbosity",
+      "schema": {
+        "$ref": "#/components/schemas/GetBlockQuery"
+      },
+      "summary": "A verbosity level from 0 to 3, a boolean, or an array of field names to return (`txids` is an alias of `tx`)."
+    }
+  ]
+}

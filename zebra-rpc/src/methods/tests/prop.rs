@@ -1,7 +1,7 @@
 //! Randomised property tests for RPC methods.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
@@ -28,12 +28,14 @@ use zebra_chain::{
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{BoxError, GetBlockTemplateChainInfo};
+use zebra_state::{BlockQueryFields, BoxError, GetBlockTemplateChainInfo};
 use zebra_test::mock_service::MockService;
 
 use crate::methods::{
     self,
+    get_block::{self, GetBlockPlan, TxShape},
     types::{
+        get_block::{GetBlockField, GetBlockQuery},
         get_blockchain_info::GetBlockchainInfoBalance,
         get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
     },
@@ -1028,4 +1030,378 @@ where
     );
 
     (mempool, read_state, rpc, mempool_tx_queue)
+}
+
+/// Every `getblock` field except the three `tx` shapes.
+const NON_TX_FIELDS: [GetBlockField; 22] = [
+    GetBlockField::Hash,
+    GetBlockField::Confirmations,
+    GetBlockField::Size,
+    GetBlockField::Height,
+    GetBlockField::Version,
+    GetBlockField::MerkleRoot,
+    GetBlockField::BlockCommitments,
+    GetBlockField::AuthDataRoot,
+    GetBlockField::FinalSaplingRoot,
+    GetBlockField::FinalOrchardRoot,
+    GetBlockField::TxCount,
+    GetBlockField::Time,
+    GetBlockField::Nonce,
+    GetBlockField::Solution,
+    GetBlockField::Bits,
+    GetBlockField::Difficulty,
+    GetBlockField::ChainSupply,
+    GetBlockField::ValuePools,
+    GetBlockField::Trees,
+    GetBlockField::PreviousBlockHash,
+    GetBlockField::NextBlockHash,
+    GetBlockField::Hex,
+];
+
+/// The three `tx` shapes.
+const TX_SHAPE_FIELDS: [GetBlockField; 3] = [
+    GetBlockField::Tx,
+    GetBlockField::TxDetails,
+    GetBlockField::TxPrevouts,
+];
+
+/// The state reads of each field, from the "State fields" column of the design's field table,
+/// written out independently of `get_block::state_fields`.
+const FIELD_READS: [(GetBlockField, BlockQueryFields); 25] = [
+    (GetBlockField::Hash, BlockQueryFields::empty()),
+    (GetBlockField::Height, BlockQueryFields::empty()),
+    (GetBlockField::Confirmations, BlockQueryFields::DEPTH),
+    (GetBlockField::Size, BlockQueryFields::BLOCK_INFO),
+    (GetBlockField::Version, BlockQueryFields::HEADER),
+    (GetBlockField::Time, BlockQueryFields::HEADER),
+    (GetBlockField::Nonce, BlockQueryFields::HEADER),
+    (GetBlockField::Solution, BlockQueryFields::HEADER),
+    (GetBlockField::Bits, BlockQueryFields::HEADER),
+    (GetBlockField::PreviousBlockHash, BlockQueryFields::HEADER),
+    (GetBlockField::MerkleRoot, BlockQueryFields::HEADER),
+    (GetBlockField::Difficulty, BlockQueryFields::HEADER),
+    (
+        GetBlockField::BlockCommitments,
+        BlockQueryFields::HEADER.union(BlockQueryFields::SAPLING_TREE),
+    ),
+    (
+        GetBlockField::AuthDataRoot,
+        BlockQueryFields::AUTH_DATA_ROOT,
+    ),
+    (
+        GetBlockField::FinalSaplingRoot,
+        BlockQueryFields::SAPLING_TREE,
+    ),
+    (
+        GetBlockField::FinalOrchardRoot,
+        BlockQueryFields::ORCHARD_TREE,
+    ),
+    (GetBlockField::TxCount, BlockQueryFields::TRANSACTION_COUNT),
+    (GetBlockField::Tx, BlockQueryFields::TRANSACTION_IDS),
+    (
+        GetBlockField::TxDetails,
+        BlockQueryFields::TRANSACTIONS.union(BlockQueryFields::DEPTH),
+    ),
+    (
+        GetBlockField::TxPrevouts,
+        BlockQueryFields::TRANSACTIONS
+            .union(BlockQueryFields::SPENT_OUTPUTS)
+            .union(BlockQueryFields::DEPTH),
+    ),
+    (GetBlockField::ChainSupply, BlockQueryFields::BLOCK_INFO),
+    (
+        GetBlockField::ValuePools,
+        BlockQueryFields::BLOCK_INFO.union(BlockQueryFields::PREVIOUS_BLOCK_INFO),
+    ),
+    (
+        GetBlockField::Trees,
+        BlockQueryFields::SAPLING_TREE
+            .union(BlockQueryFields::ORCHARD_TREE)
+            .union(BlockQueryFields::IRONWOOD_TREE),
+    ),
+    (
+        GetBlockField::NextBlockHash,
+        BlockQueryFields::NEXT_BLOCK_HASH,
+    ),
+    (GetBlockField::Hex, BlockQueryFields::RAW_BLOCK),
+];
+
+/// Returns the state reads of `field` from [`FIELD_READS`].
+fn field_reads(field: GetBlockField) -> BlockQueryFields {
+    FIELD_READS
+        .iter()
+        .find(|(row, _)| *row == field)
+        .map(|(_, reads)| *reads)
+        .expect("FIELD_READS has a row for every field")
+}
+
+/// Returns the fields whose bits are set in `mask`, plus the `tx` shape `shape` selects, if any.
+fn fields_from(mask: u32, shape: usize) -> BTreeSet<GetBlockField> {
+    NON_TX_FIELDS
+        .into_iter()
+        .enumerate()
+        .filter(|(bit, _)| mask & (1 << bit) != 0)
+        .map(|(_, field)| field)
+        .chain(TX_SHAPE_FIELDS.get(shape).copied())
+        .collect()
+}
+
+/// Returns `object` with the optional keys whose bits are clear in `mask` set to `None`.
+fn sparse_block_object(mut object: methods::BlockObject, mask: u32) -> methods::BlockObject {
+    let keep = |bit: u32| mask & (1 << bit) != 0;
+    macro_rules! clear {
+        ($($bit:literal => $field:ident),* $(,)?) => {
+            $(if !keep($bit) { object.$field = None; })*
+        };
+    }
+    clear!(
+        0 => confirmations,
+        1 => size,
+        2 => height,
+        3 => version,
+        4 => merkle_root,
+        5 => block_commitments,
+        6 => auth_data_root,
+        7 => final_sapling_root,
+        8 => final_orchard_root,
+        9 => n_tx,
+        10 => tx,
+        11 => time,
+        12 => nonce,
+        13 => solution,
+        14 => bits,
+        15 => difficulty,
+        16 => chain_supply,
+        17 => value_pools,
+        18 => trees,
+        19 => previous_block_hash,
+        20 => next_block_hash,
+        21 => hex,
+    );
+    object
+}
+
+/// The JSON keys of the optional `BlockObject` fields, in the bit order of
+/// [`sparse_block_object`].
+const OPTIONAL_BLOCK_OBJECT_KEYS: [&str; 22] = [
+    "confirmations",
+    "size",
+    "height",
+    "version",
+    "merkleroot",
+    "blockcommitments",
+    "authdataroot",
+    "finalsaplingroot",
+    "finalorchardroot",
+    "nTx",
+    "tx",
+    "time",
+    "nonce",
+    "solution",
+    "bits",
+    "difficulty",
+    "chainSupply",
+    "valuePools",
+    "trees",
+    "previousblockhash",
+    "nextblockhash",
+    "hex",
+];
+
+/// Returns a `BlockObject` with every key set, for Mainnet block 1, with transaction IDs.
+fn full_block_object() -> methods::BlockObject {
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("the test vector is a valid block");
+    let plan = GetBlockPlan::new(fields_from(u32::MAX, 0));
+    let queried = super::vectors::queried_block(&block, plan.state_fields, 0);
+    let mut object = get_block::block_object(queried, &plan, &Network::Mainnet, true)
+        .expect("the queried block has every part the plan reads");
+
+    // Block 1 is before NU5 and has a next block only in a longer chain.
+    object.final_orchard_root = Some([1; 32]);
+    object.next_block_hash = Some(block.hash());
+    object
+}
+
+proptest! {
+    /// A plan reads the union of its fields' reads, without the reads other reads subsume: the
+    /// transaction count when the IDs or transactions are read, and `BlockInfo` when only `size`
+    /// needs it and the body is read. `authdataroot` reads the transactions.
+    #[test]
+    fn get_block_plan_reads_what_its_fields_need(mask in any::<u32>(), shape in 0..4usize) {
+        let fields = fields_from(mask, shape);
+        let plan = GetBlockPlan::new(fields.clone());
+        let has = |field| fields.contains(&field);
+
+        let union = fields
+            .iter()
+            .fold(BlockQueryFields::empty(), |reads, field| reads | field_reads(*field));
+        prop_assert!(union.contains(plan.state_fields));
+        prop_assert!((BlockQueryFields::TRANSACTION_COUNT | BlockQueryFields::BLOCK_INFO)
+            .contains(union.difference(plan.state_fields)));
+
+        let reads_transactions = has(GetBlockField::Tx)
+            || has(GetBlockField::TxDetails)
+            || has(GetBlockField::TxPrevouts)
+            || has(GetBlockField::AuthDataRoot);
+        prop_assert_eq!(
+            plan.state_fields.contains(BlockQueryFields::TRANSACTION_COUNT),
+            has(GetBlockField::TxCount) && !reads_transactions,
+        );
+
+        let reads_body = has(GetBlockField::Hex)
+            || has(GetBlockField::TxDetails)
+            || has(GetBlockField::TxPrevouts)
+            || has(GetBlockField::AuthDataRoot);
+        prop_assert_eq!(
+            plan.state_fields.contains(BlockQueryFields::BLOCK_INFO),
+            has(GetBlockField::ChainSupply)
+                || has(GetBlockField::ValuePools)
+                || (has(GetBlockField::Size) && !reads_body),
+        );
+
+        prop_assert_eq!(
+            plan.tx_shape,
+            [TxShape::Ids, TxShape::Objects, TxShape::ObjectsWithPrevouts].get(shape).copied(),
+        );
+
+        // A field query of the same fields has the same plan.
+        if !fields.is_empty() {
+            prop_assert_eq!(
+                GetBlockPlan::try_from(&GetBlockQuery::Fields(fields.clone())).ok(),
+                Some(plan.clone()),
+            );
+        }
+        prop_assert_eq!(plan.fields, fields);
+    }
+
+    /// A field query naming more than one `tx` shape fails, naming them in field order.
+    #[test]
+    fn get_block_plan_rejects_conflicting_shapes(mask in any::<u32>(), shapes in 0..8usize) {
+        let mut fields = fields_from(mask, usize::MAX);
+        let named: Vec<_> = TX_SHAPE_FIELDS
+            .into_iter()
+            .enumerate()
+            .filter(|(bit, _)| shapes & (1 << bit) != 0)
+            .map(|(_, field)| field)
+            .collect();
+        fields.extend(named.iter().copied());
+
+        let result = GetBlockPlan::try_from(&GetBlockQuery::Fields(fields.clone()));
+        if fields.is_empty() {
+            let error = result.expect_err("an empty field list is rejected");
+            prop_assert_eq!((error.code(), error.message()), (-8, "empty field list"));
+        } else if named.len() > 1 {
+            let names: Vec<_> = named
+                .iter()
+                .map(|field| match field {
+                    GetBlockField::Tx => "tx",
+                    GetBlockField::TxDetails => "txdetails",
+                    _ => "txprevouts",
+                })
+                .collect();
+            let error = result.expect_err("conflicting shapes are rejected");
+            prop_assert_eq!(error.code(), -8);
+            prop_assert_eq!(error.message(), format!("conflicting fields: {}", names.join(", ")));
+        } else {
+            prop_assert!(result.is_ok());
+        }
+    }
+
+    /// A `BlockObject` with any subset of its optional keys serializes to exactly those keys and
+    /// `hash`, and deserializes back to the same object.
+    #[test]
+    fn block_object_round_trips_with_any_keys(mask in any::<u32>()) {
+        let _init_guard = zebra_test::init();
+
+        let object = sparse_block_object(full_block_object(), mask);
+        let response = methods::GetBlockResponse::Object(Box::new(object));
+        let json = serde_json::to_value(&response).expect("block objects serialize");
+
+        let keys: BTreeSet<&str> = json
+            .as_object()
+            .expect("block objects serialize to JSON objects")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let expected_keys: BTreeSet<&str> = OPTIONAL_BLOCK_OBJECT_KEYS
+            .into_iter()
+            .enumerate()
+            .filter(|(bit, _)| mask & (1 << bit) != 0)
+            .map(|(_, key)| key)
+            .chain(["hash"])
+            .collect();
+        prop_assert_eq!(keys, expected_keys);
+
+        let parsed: methods::GetBlockResponse =
+            serde_json::from_value(json).expect("serialized block objects deserialize");
+        prop_assert_eq!(parsed, response);
+    }
+}
+
+/// [`FIELD_READS`] has one row for each field.
+#[test]
+fn field_reads_cover_every_field() {
+    let rows: BTreeSet<GetBlockField> = FIELD_READS.iter().map(|(field, _)| *field).collect();
+    let fields: BTreeSet<GetBlockField> =
+        NON_TX_FIELDS.into_iter().chain(TX_SHAPE_FIELDS).collect();
+
+    assert_eq!(rows.len(), FIELD_READS.len(), "each field has one row");
+    assert_eq!(rows, fields);
+}
+
+/// The verbosity levels are the plans of their preset fields, which are the keys verbosity 1
+/// returns.
+#[test]
+fn get_block_plan_presets() {
+    // The keys of a verbosity 1 snapshot, plus `finalorchardroot`, which verbosity 1 returns
+    // from NU5 and the snapshot's pre-NU5 block omits.
+    let snapshot = include_str!("snapshots/get_block_verbose_hash_verbosity_1@mainnet_10.snap");
+    let object = snapshot
+        .splitn(3, "---\n")
+        .nth(2)
+        .expect("an insta snapshot has a header between two `---` lines");
+    let object: serde_json::Value =
+        serde_json::from_str(object).expect("the snapshot is a JSON object");
+    let verbosity_1_fields: BTreeSet<GetBlockField> = object
+        .as_object()
+        .expect("verbosity 1 returns an object")
+        .keys()
+        .map(String::as_str)
+        .chain(["finalorchardroot"])
+        .map(|key| {
+            serde_json::from_value(key.into())
+                .unwrap_or_else(|error| panic!("{key} is a field name: {error}"))
+        })
+        .collect();
+    assert_eq!(
+        BTreeSet::from(get_block::VERBOSITY_1_FIELDS),
+        verbosity_1_fields
+    );
+
+    let preset = |tx| -> BTreeSet<GetBlockField> {
+        verbosity_1_fields
+            .iter()
+            .copied()
+            .filter(|field| *field != GetBlockField::Tx)
+            .chain([tx])
+            .collect()
+    };
+
+    for (verbosity, tx) in [
+        (1, GetBlockField::Tx),
+        (2, GetBlockField::TxDetails),
+        (3, GetBlockField::TxPrevouts),
+    ] {
+        assert_eq!(
+            GetBlockPlan::try_from(&GetBlockQuery::Verbosity(verbosity)).unwrap(),
+            GetBlockPlan::new(preset(tx)),
+        );
+    }
+    assert_eq!(
+        GetBlockPlan::try_from(&GetBlockQuery::Verbosity(0)).unwrap(),
+        GetBlockPlan::new([GetBlockField::Hex].into()),
+    );
+    assert_eq!(get_block::VERBOSITY_1_FIELDS.len(), 21);
 }

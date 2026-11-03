@@ -167,7 +167,7 @@ pub(super) const PARAM_HEX_DATA_DESC: &str = "The hex-encoded data to return.";
 pub(super) const PARAM_TXID_DESC: &str = "The transaction ID to return.";
 pub(super) const PARAM_HASH_OR_HEIGHT_DESC: &str = "The block hash or height to return.";
 pub(super) const PARAM_PARAMETERS_DESC: &str = "The parameters for the command.";
-pub(super) const PARAM_VERBOSITY_DESC: &str = "Whether to include verbose output.";
+pub(super) const PARAM_VERBOSITY_DESC: &str = "A verbosity level from 0 to 3, a boolean, or an array of field names to return (`txids` is an alias of `tx`).";
 pub(super) const PARAM_N_DESC: &str = "The output index in the transaction.";
 pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
     "Whether to include mempool transactions in the response.";
@@ -288,7 +288,8 @@ pub trait Rpc {
     /// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
     /// If the block is not in Zebra's state, returns
     /// [error code `-8`.](https://github.com/zcash/zcash/issues/5758) if a height was
-    /// passed or -5 if a hash was passed.
+    /// passed or -5 if a hash was passed. A field query returns `Block not found` with those
+    /// codes.
     ///
     /// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
     /// method: post
@@ -297,11 +298,20 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
-    /// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, 2 for a json object with transaction data, and 3 for a json object with transaction data including prevout information for inputs.
+    /// - `verbosity`: (number, boolean or array, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, 2 for a json object with transaction data, and 3 for 2 plus prevout and fee data; `true`/`false` mean 1/0; or an array of field names, e.g. `["hash","tx","trees"]`, returning only those fields (and `hash`).
     ///
     /// # Notes
     ///
-    /// The `size` field is only returned with verbosity>=2.
+    /// The field names are `hash`, `confirmations`, `size`, `height`, `version`, `merkleroot`,
+    /// `blockcommitments`, `authdataroot`, `finalsaplingroot`, `finalorchardroot`, `nTx`, `tx`,
+    /// `txdetails`, `txprevouts`, `time`, `nonce`, `solution`, `bits`, `difficulty`,
+    /// `chainSupply`, `valuePools`, `trees`, `previousblockhash`, `nextblockhash` and `hex`.
+    /// `tx`, `txdetails` and `txprevouts` select the shape of the one `tx` key: transaction IDs,
+    /// transaction objects, or transaction objects with `prevout` and `fee`, so a query names at
+    /// most one of them; `txids` is an alias of `tx`. `hash` is always returned. `authdataroot`
+    /// and `hex` are only returned when a field query names them. `authdataroot`, `hex`,
+    /// `txdetails` and `txprevouts` need the block body. `chainhistoryroot`, `chainwork` and
+    /// `anchor` are not available.
     ///
     /// Verbosity 3 adds a `prevout` object to each transparent input and a `fee` field to each
     /// non-coinbase transaction, matching Bitcoin Core's `getblock` verbosity 3.
@@ -311,14 +321,18 @@ pub trait Rpc {
     ///
     /// Pruned bodies return code `-32603`, "Block not available (pruned data)", at verbosity
     /// 0, 2, or 3. Verbosity 3 also fails if a required parent transaction was pruned.
-    /// Historical verbosity 1 remains available with complete transaction IDs.
+    /// Historical verbosity 1 remains available with complete transaction IDs. Field queries that
+    /// need the body fail the same way; index-backed fields keep working.
+    ///
+    /// State read failures on verbosity 1 to 3 and field queries return `-32603`; verbosity 0
+    /// returns `-1`.
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
     async fn get_block(
         &self,
         hash_or_height: String,
-        verbosity: Option<u8>,
+        verbosity: Option<GetBlockQuery>,
     ) -> Result<GetBlockResponse>;
 
     /// Returns the requested block header by hash or height, as a [`GetBlockHeader`] JSON string.
@@ -333,9 +347,11 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
-    /// - `verbose`: (bool, optional, default=false, example=true) false for hex encoded data, true for a json object
+    /// - `verbose`: (bool, optional, default=true, example=true) false for hex encoded data, true for a json object
     ///
     /// # Notes
+    ///
+    /// State read failures return `-32603`.
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblockheader")]
@@ -1857,14 +1873,15 @@ where
     // `lightwalletd` calls this RPC with verosity 1 for its initial sync of 2 million blocks, the
     // performance of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
     //
-    // Every verbosity reads the state with one `BlockQuery`, so the block is resolved once, on one
-    // chain snapshot, and only the parts the response needs are read.
+    // Every verbosity and field query reads the state with one `BlockQuery`, so the block is
+    // resolved once, on one chain snapshot, and only the parts the response needs are read.
     async fn get_block(
         &self,
         hash_or_height: String,
-        verbosity: Option<u8>,
+        verbosity: Option<GetBlockQuery>,
     ) -> Result<GetBlockResponse> {
-        let query = GetBlockQuery::Verbosity(verbosity.unwrap_or(1));
+        let query = verbosity.unwrap_or(GetBlockQuery::Verbosity(1));
+        let field_query = matches!(query, GetBlockQuery::Fields(_));
 
         let hash_or_height =
             HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
@@ -1909,11 +1926,20 @@ where
         let zebra_state::ReadResponse::BlockQuery(block) = response else {
             unreachable!("unmatched response to a BlockQuery request");
         };
+        // Field queries use zcashd's not-found message; verbosity levels keep the one they have
+        // always returned.
         let block = block.ok_or_else(|| {
-            get_block::not_found(&hash_or_height, "block height not in best chain")
+            get_block::not_found(
+                &hash_or_height,
+                if field_query {
+                    "Block not found"
+                } else {
+                    "block height not in best chain"
+                },
+            )
         })?;
 
-        get_block::block_object(block, &plan, &self.network, false)
+        get_block::block_object(block, &plan, &self.network, field_query)
             .map(|block| GetBlockResponse::Object(Box::new(block)))
     }
 
@@ -1973,7 +1999,6 @@ where
 
             let nonce = get_block::nonce(&header);
 
-            let sapling_tree_size = sapling_tree.count();
             let final_sapling_root = get_block::final_sapling_root(&network, height, &sapling_tree);
 
             let difficulty = get_block::difficulty(&header, &network);
@@ -1989,7 +2014,6 @@ where
                 merkle_root: header.merkle_root,
                 block_commitments,
                 final_sapling_root,
-                sapling_tree_size,
                 time: header.time.timestamp(),
                 nonce,
                 solution: header.solution,
@@ -4864,11 +4888,6 @@ pub struct BlockHeaderObject {
     #[getter(copy)]
     final_sapling_root: [u8; 32],
 
-    /// The number of Sapling notes in the Sapling note commitment tree
-    /// after applying this block. Used by the `getblock` RPC method.
-    #[serde(skip)]
-    sapling_tree_size: u64,
-
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     time: i64,
 
@@ -4925,7 +4944,6 @@ impl Default for BlockHeaderObject {
             merkle_root: block::merkle::Root([0; 32]),
             block_commitments: Default::default(),
             final_sapling_root: Default::default(),
-            sapling_tree_size: Default::default(),
             time: 0,
             nonce: [0; 32],
             solution: Solution::for_proposal(),
