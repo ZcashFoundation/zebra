@@ -33,7 +33,7 @@ use zebra_chain::{chain_tip::ChainTip, diagnostic::task::CheckForPanics, paramet
 /// Dialling version 2 peers for a state-snapshot bootstrap, before the peer set exists.
 pub(super) mod bootstrap;
 
-pub use bootstrap::BootstrapPeers;
+pub use bootstrap::{v2_bootstrap_clients, BootstrapPeers};
 
 use crate::{
     connection_metrics::{
