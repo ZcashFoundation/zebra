@@ -4,6 +4,9 @@ body: >-
   Restart and migration checks fail closed when required block history is unavailable.
   Periodic checks make at most three attempts when concurrent pruning invalidates their
   captured history window, without retrying away permanent metadata corruption.
+  Subtree checks use stored roots once pruning may run and tolerate concurrent finalization.
+  Subtree upgrade reset preserves completions finalized above its captured migration height.
+  Pruning reuses captured batch inputs and checks active workers without locking their handles.
   Read-only initialization can inspect a reusable older-major archive without moving it.
   It returns `StateInitError::ReadOnlyDatabaseNeedsUpgrade` if the recorded major differs
   from the selected directory or migration is required, including in a current-major directory.
