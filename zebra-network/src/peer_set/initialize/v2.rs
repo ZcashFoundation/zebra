@@ -57,7 +57,7 @@ type OpenInbound = HashMap<PeerSocketAddr, usize>;
 
 /// What every version 2 connection attempt shares.
 #[derive(Clone)]
-struct Shared<S, C> {
+pub(super) struct Shared<S, C> {
     network: Network,
     inbound_limit: usize,
     max_connections_per_ip: usize,
@@ -84,7 +84,7 @@ where
     /// Returns what the connections of `endpoint` share, and the sender the listener keeps the
     /// open inbound connections up to date with.
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub(super) fn new(
         config: &Config,
         endpoint: quinn::Endpoint,
         identity: LocalIdentity,
@@ -596,7 +596,7 @@ impl InitialPeerSlots {
 /// A configured peer whose IP is in `bans_receiver` is not dialled until its
 /// ban lapses.
 #[instrument(skip_all)]
-async fn keep_initial_peers_connected<S, C>(
+pub(super) async fn keep_initial_peers_connected<S, C>(
     shared: Shared<S, C>,
     hosts: IndexSet<String>,
     outbound_limit: usize,
@@ -607,6 +607,20 @@ async fn keep_initial_peers_connected<S, C>(
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    // `Config::v2_outbound_connection_limit` is at least one when the endpoint is configured, so
+    // this only guards a change there: with no slot, every configured peer would wait for a
+    // connection to fail or end that never comes, and the dialer would exit without a word.
+    if outbound_limit == 0 {
+        if !hosts.is_empty() {
+            tracing::warn!(
+                ?hosts,
+                "the outbound v2 connection limit is zero, so the initial v2 peers are never \
+                 dialled"
+            );
+        }
+        return;
+    }
+
     // An address holds its slot from its dial until its attempt returns, so admission is on
     // `slots`. Each connection attempt gets a fresh tracker from this counter, which is drained
     // on every attempt, for the progress bar and logs only.

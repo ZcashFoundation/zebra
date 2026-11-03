@@ -41,7 +41,10 @@ use crate::{
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
-    peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
+    peer::{
+        self, v2::handshake::LocalIdentity, ClientTestHarness, ConnectedAddr, HandshakeRequest,
+        OutboundConnectorRequest,
+    },
     peer_set::{
         crawler_services,
         initialize::{
@@ -3113,6 +3116,48 @@ async fn v2_dialer_frees_banned_initial_peer_slot_at_once() {
 
     live_task.abort();
     dialer_task.abort();
+}
+
+/// A dialer with no outbound slot warns that its configured peers are never dialled, and stops,
+/// instead of logging that they are dialled when a connection fails or ends, which never happens.
+///
+/// `Config::v2_outbound_connection_limit` is at least one when the endpoint is configured, so this
+/// checks the dialer's guard against a change there.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
+    // No `zebra_test::init()`: `traced_test` installs the subscriber that records the logs.
+    let config = v2_test_config(any_udp_addr(), &[*test_v2_addr(1)]);
+    let endpoint = crate::quic::bind(&config.network, any_udp_addr()).expect("a UDP port is free");
+    let identity = LocalIdentity {
+        user_agent: "v2 test node".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    let (shared, _open_inbound_tx) = v2::Shared::new(
+        &config,
+        endpoint,
+        identity,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        misbehavior_tx,
+        V2_TEST_RECONNECTION_DELAY,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+    );
+    let (peerset_tx, _peerset_rx) = mpsc::channel(1);
+
+    tokio::time::timeout(
+        V2_TEST_CONNECT_TIMEOUT,
+        v2::keep_initial_peers_connected(shared, config.initial_v2_peers, 0, no_bans(), peerset_tx),
+    )
+    .await
+    .expect("the dialer stops when it has no slot");
+
+    assert!(logs_contain("the outbound v2 connection limit is zero"));
+    assert!(!logs_contain("wait for a connection to fail or end"));
 }
 
 /// The version 2 listener refuses connections over its share of the inbound limit.

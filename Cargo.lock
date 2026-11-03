@@ -7668,6 +7668,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
+ "tracing-test",
  "zebra-chain",
  "zebra-test",
 ]
