@@ -3472,6 +3472,8 @@ fn spawn_v2_node(
 ) {
     let (peerset_tx, peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
     let (inv_collector, _) = broadcast::channel(16);
+    // These tests do not check misbehavior reports; a closed channel drops them.
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
     let task = v2::start_with_intervals(
         config,
         service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
@@ -3479,6 +3481,7 @@ fn spawn_v2_node(
         NoChainTip,
         "v2 test node".to_string(),
         bans_receiver,
+        misbehavior_tx,
         peerset_tx,
         V2_TEST_RECONNECTION_DELAY,
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,

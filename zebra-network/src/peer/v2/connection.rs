@@ -51,7 +51,7 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::handshake::CompletedHandshake;
+use super::{handshake::CompletedHandshake, misbehavior::MisbehaviorScores};
 
 mod announcements;
 mod inbound;
@@ -74,6 +74,10 @@ pub struct ConnectionParams<S> {
     /// The hash of the network's genesis block, which a `get-headers` response
     /// to a locator the peer does not know starts after (draft, "`get-headers`").
     pub genesis_hash: block::Hash,
+
+    /// The misbehavior scores of every version 2 peer, which report peers to
+    /// ban to the address book.
+    pub misbehavior: MisbehaviorScores,
 }
 
 /// Something a stream task needs the connection task to act on.
@@ -492,6 +496,7 @@ where
                     self.connection.clone(),
                     self.transient_addr,
                     self.params.genesis_hash,
+                    self.params.misbehavior.clone(),
                     self.events_tx.clone(),
                 ));
                 return;

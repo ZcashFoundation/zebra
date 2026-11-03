@@ -307,6 +307,7 @@ where
         latest_chain_tip,
         user_agent,
         bans_receiver,
+        misbehavior_tx.clone(),
         peerset_tx.clone(),
     );
     peer_set.extend_tasks(v2_task.iter().map(JoinHandle::abort_handle));

@@ -28,6 +28,7 @@ use crate::{
                 spawn_connection, ConnectionParams,
             },
             handshake::{CompletedHandshake, Role},
+            misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
             tests::{connected_pair, identity, run_handshake},
         },
@@ -51,7 +52,7 @@ use crate::{
         },
     },
     quic::app_error_code,
-    BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
+    BoxError, MisbehaviorReport, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 /// Every loopback exchange finishes in well under this.
@@ -66,6 +67,8 @@ struct TestNode {
     client: Client,
     inv_rx: broadcast::Receiver<InventoryChange>,
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
+    /// The peers the node's misbehavior scores reported for banning.
+    misbehavior_rx: tokio::sync::mpsc::Receiver<MisbehaviorReport>,
 }
 
 /// Fixed data the test inbound service answers with.
@@ -184,6 +187,7 @@ fn spawn_node_with(
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
 ) -> TestNode {
     let (inv_tx, inv_rx) = broadcast::channel(16);
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(8);
     let mut counter = ActiveConnectionCounter::new_counter();
 
     let client = spawn_connection(
@@ -194,6 +198,7 @@ fn spawn_node_with(
             inbound_service,
             inv_collector: inv_tx,
             genesis_hash: Network::Mainnet.genesis_hash(),
+            misbehavior: MisbehaviorScores::spawn(misbehavior_tx, 8),
         },
         None,
     );
@@ -201,6 +206,7 @@ fn spawn_node_with(
         client,
         inv_rx,
         inbound_rx,
+        misbehavior_rx,
     }
 }
 
@@ -1588,6 +1594,104 @@ async fn header_responses_are_bound_to_the_request() {
                 }
             }
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Misbehaving `get-headers` responses cost the peer: each one is discarded
+/// with a penalty, the connection stays open below the ban threshold, a valid
+/// response in between does not clear the score, and the response that
+/// reaches the threshold closes the connection with `MISBEHAVIOR` and reports
+/// the peer to the address book for banning (draft, "Misbehavior and
+/// Banning").
+#[tokio::test]
+async fn misbehaving_responses_close_and_ban_at_the_threshold() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let genesis = fixture.blocks[0].hash();
+        let block_1 = fixture.blocks[1].clone();
+        let block_2 = fixture.blocks[2].clone();
+        let mut raw = raw_peer_node(&network).await;
+
+        let mut non_contiguous = Vec::new();
+        write_headers_response(
+            &mut non_contiguous,
+            &[block_2.header.clone(), block_1.header.clone()],
+            false,
+        )
+        .expect("writes to a Vec");
+        // A count of 161 headers, one over the limit, is misbehavior from the count alone.
+        let too_many = vec![161];
+        let mut empty = Vec::new();
+        write_headers_response(&mut empty, &[], false).expect("writes to a Vec");
+
+        let penalties_to_ban = crate::constants::MAX_PEER_MISBEHAVIOR_SCORE
+            .div_ceil(crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY);
+        let mut replies = vec![too_many, empty];
+        let penalties_to_ban = usize::try_from(penalties_to_ban).expect("a small count fits");
+        replies.extend(std::iter::repeat_n(non_contiguous, penalties_to_ban - 1));
+
+        for (index, reply) in replies.iter().enumerate() {
+            let is_last = index + 1 == replies.len();
+            let request = Request::FindHeaders {
+                known_blocks: vec![genesis],
+                stop: None,
+            };
+            let (result, ()) = tokio::join!(call(&mut raw.node.client, request), async {
+                let (_, mut send, _recv) = accept_request(&raw.connection).await;
+                let _ = send.write_all(reply).await;
+                let _ = send.finish();
+            });
+
+            if index == 1 {
+                result.expect("a valid empty response is accepted");
+            } else {
+                let inner = result
+                    .expect_err("a misbehaving response is rejected")
+                    .inner_debug();
+                assert!(
+                    inner.contains("ProtocolViolation"),
+                    "reply {index}: got {inner}"
+                );
+            }
+
+            if is_last {
+                let close = raw.connection.closed().await;
+                assert!(
+                    matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
+                        if close.error_code.into_inner() == ErrorCode::Misbehavior.code()),
+                    "got {close:?}"
+                );
+            } else {
+                call(&mut raw.node.client, Request::Ping(Default::default()))
+                    .await
+                    .unwrap_or_else(|error| panic!("reply {index}: the client fails: {error}"));
+                assert!(
+                    raw.connection.close_reason().is_none(),
+                    "reply {index}: the connection stays open below the threshold"
+                );
+                assert!(
+                    raw.node.misbehavior_rx.try_recv().is_err(),
+                    "reply {index}: nothing is reported below the threshold"
+                );
+            }
+        }
+
+        let report = raw
+            .node
+            .misbehavior_rx
+            .try_recv()
+            .expect("the peer is reported for banning");
+        assert_eq!(report.score, crate::constants::MAX_PEER_MISBEHAVIOR_SCORE);
+        assert!(report.addr.ip().is_loopback(), "got {report:?}");
+        assert!(
+            report.reason.contains("not a contiguous chain"),
+            "got {report:?}"
+        );
     })
     .await
     .expect("the test completes well within the timeout");

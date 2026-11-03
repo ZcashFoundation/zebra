@@ -23,14 +23,17 @@ use zebra_chain::{
 
 use crate::{
     constants::{PEER_ADDR_RESPONSE_LIMIT, REQUEST_TIMEOUT},
-    peer::{connection::Handler, MustUseClientResponseSender, PeerError, SharedPeerError},
+    peer::{
+        connection::Handler, v2::misbehavior::MisbehaviorScores, MustUseClientResponseSender,
+        PeerError, SharedPeerError,
+    },
     protocol::{
         external::InventoryHash,
         internal::{InventoryResponse, Request, Response},
         v2::{
             constants::{
                 MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
-                MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS,
+                MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS, RESPONSE_MISBEHAVIOR_PENALTY,
             },
             request::{GetBlocks, GetHeaders, GetTx, Request as WireRequest},
             response::{decode_addr_response, read_headers, read_objects, ObjectResult},
@@ -99,6 +102,11 @@ impl Drop for ResponseGuard {
 /// If the client stops waiting for the response, the request is abandoned:
 /// its streams are cancelled with `CANCELLED` and the client is not
 /// answered.
+///
+/// A misbehaving response adds to the peer's score in `misbehavior`; once the
+/// score reaches the ban threshold, the connection is closed with
+/// `MISBEHAVIOR` (draft, "Misbehavior and Banning").
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn drive(
     request: Request,
     tx: MustUseClientResponseSender,
@@ -106,6 +114,7 @@ pub(super) async fn drive(
     connection: Connection,
     transient_addr: Option<PeerSocketAddr>,
     genesis_hash: block::Hash,
+    misbehavior: MisbehaviorScores,
     events: mpsc::Sender<Event>,
 ) {
     let mut guard = ResponseGuard(Some(tx));
@@ -168,9 +177,32 @@ pub(super) async fn drive(
                 Failure::Violation { reason, code } => Some((reason.clone(), *code)),
                 _ => None,
             };
+            let misbehavior_reason = match &failure {
+                Failure::Misbehavior(reason) => Some(reason.clone()),
+                _ => None,
+            };
             guard.send(Err(failure.into()));
             if let Some((reason, code)) = violation {
                 send_event(&events, Event::Violation { reason, code }).await;
+            }
+
+            // Draft, "Misbehavior and Banning": a misbehaving response is discarded and penalized,
+            // and the connection stays open until the peer's score reaches the ban threshold. The
+            // score is kept by peer group, so it survives reconnections.
+            if let (Some(reason), Some(addr)) = (misbehavior_reason, transient_addr) {
+                if misbehavior
+                    .penalize(addr, RESPONSE_MISBEHAVIOR_PENALTY, reason.clone())
+                    .await
+                {
+                    send_event(
+                        &events,
+                        Event::Violation {
+                            reason,
+                            code: ErrorCode::Misbehavior,
+                        },
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -189,7 +221,8 @@ enum Failure {
     #[error("closing the connection with {code}: {reason}")]
     Violation { reason: String, code: ErrorCode },
 
-    /// The peer's response is misbehaviour: discarded, with a penalty to come.
+    /// The peer's response is misbehaviour: discarded, with a
+    /// [`RESPONSE_MISBEHAVIOR_PENALTY`].
     #[error("misbehaving response: {0}")]
     Misbehavior(String),
 
@@ -221,7 +254,6 @@ impl From<WireError> for Failure {
                 reason: error.to_string(),
                 code,
             },
-            // TODO: assign a misbehavior penalty through the address book updater.
             Some(Violation::Misbehavior) => Failure::Misbehavior(error.to_string()),
             None => Failure::Transport(error.to_string()),
         }

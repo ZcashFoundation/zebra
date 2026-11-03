@@ -44,6 +44,15 @@ pub const MAX_TXS_PER_REQUEST: usize = 50_000;
 /// not a connection error (draft, "`get-addr`").
 pub const MAX_ADDRS_PER_RESPONSE: usize = crate::constants::MAX_ADDRS_IN_MESSAGE;
 
+/// The misbehavior penalty for a `get-headers` response with more than
+/// [`MAX_HEADERS_PER_RESPONSE`] headers or with non-contiguous headers, and
+/// for a `get-addr` response with more than [`MAX_ADDRS_PER_RESPONSE`]
+/// records (draft, "Misbehavior and Banning").
+///
+/// Zebra also assigns it for a `get-headers` response its request could not
+/// have selected, which the draft's table does not list separately.
+pub const RESPONSE_MISBEHAVIOR_PENALTY: u32 = 20;
+
 /// The length of a short transaction ID, in bytes
 /// (draft, "Transaction References", "Short Transaction IDs").
 pub const SHORT_TX_ID_LEN: usize = 6;

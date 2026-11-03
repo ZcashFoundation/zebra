@@ -13,7 +13,7 @@ use futures::{sink::SinkExt, FutureExt};
 use indexmap::{IndexMap, IndexSet};
 use rand::RngExt;
 use tokio::{
-    sync::{broadcast, oneshot, watch},
+    sync::{broadcast, mpsc, oneshot, watch},
     task::{JoinHandle, JoinSet},
     time::Instant,
 };
@@ -34,6 +34,7 @@ use crate::{
         v2::{
             connection::{spawn_connection, ConnectionParams},
             handshake::{handshake, LocalIdentity, Role},
+            misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
         },
         ConnectedAddr, MinimumPeerVersion,
@@ -47,7 +48,7 @@ use crate::{
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
-    BanList, BoxError, Config, PeerSocketAddr, Request, Response,
+    BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 /// The remote addresses of the open inbound version 2 connections, each with its number of
@@ -114,6 +115,7 @@ pub async fn close_v2_endpoint(grace: Duration) {
 /// bytes: like the legacy listener, an explicitly configured endpoint that
 /// silently failed would leave the operator without the peers they
 /// configured.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn start<S, C>(
     config: Config,
     inbound_service: S,
@@ -121,6 +123,7 @@ pub(super) fn start<S, C>(
     latest_chain_tip: C,
     user_agent: String,
     bans_receiver: watch::Receiver<BanList>,
+    misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
 ) -> Option<JoinHandle<Result<(), BoxError>>>
 where
@@ -135,6 +138,7 @@ where
         latest_chain_tip,
         user_agent,
         bans_receiver,
+        misbehavior_tx,
         peerset_tx,
         constants::MIN_PEER_RECONNECTION_DELAY,
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
@@ -151,6 +155,7 @@ pub(super) fn start_with_intervals<S, C>(
     latest_chain_tip: C,
     user_agent: String,
     bans_receiver: watch::Receiver<BanList>,
+    misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     reconnection_delay: Duration,
     inbound_interval: Duration,
@@ -209,6 +214,10 @@ where
             inbound_service,
             inv_collector,
             genesis_hash: config.network.genesis_hash(),
+            misbehavior: MisbehaviorScores::spawn(
+                misbehavior_tx,
+                config.peerset_total_connection_limit(),
+            ),
         },
         endpoint,
         identity,
