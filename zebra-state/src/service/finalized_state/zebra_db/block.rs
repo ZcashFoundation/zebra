@@ -450,6 +450,30 @@ impl ZebraDb {
         Ok(Some((tx, height, header.time)))
     }
 
+    /// Returns a known transaction and its height, or `None` for an unknown hash, without
+    /// reading its block header.
+    ///
+    /// Missing bytes below the retained-body floor return
+    /// [`BlockReadError::BlockBodyUnavailable`]. Missing retained bytes return
+    /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_body(
+        &self,
+        hash: transaction::Hash,
+    ) -> Result<Option<(Arc<Transaction>, Height)>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let Some(tx) = self.db.zs_get(&tx_by_loc, &location) else {
+            return self
+                .missing_body_error(location.height)
+                .map_or(Ok(None), Err);
+        };
+
+        Ok(Some((tx, location.height)))
+    }
+
     /// Reads only the version header of a retained transaction body.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn transaction_version(&self, hash: transaction::Hash) -> Option<u32> {

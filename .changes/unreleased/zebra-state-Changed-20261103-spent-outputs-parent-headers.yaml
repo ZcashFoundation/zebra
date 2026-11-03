@@ -1,0 +1,6 @@
+project: zebra-state
+kind: Changed
+body: >-
+  Changed `ReadRequest::SpentOutputs` to read each parent transaction without its block header,
+  so the outputs of a parent whose header row is missing are still returned.
+time: 2026-11-03T05:19:09.516177033-05:00

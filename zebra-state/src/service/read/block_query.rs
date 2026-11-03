@@ -87,7 +87,7 @@ pub fn block_query(
 
     let spent_outputs = match &parts.block {
         Some(block) if fields.contains(BlockQueryFields::SPENT_OUTPUTS) => {
-            spent_outputs_for(block, chain, db)?
+            spent_outputs_for(block, chain, db, cached.is_none())?
         }
         _ => None,
     };

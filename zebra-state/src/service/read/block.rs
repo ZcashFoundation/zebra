@@ -242,22 +242,6 @@ where
         return Ok(None);
     };
 
-    spent_outputs_for(&block, chain, db)
-}
-
-/// Returns the transparent outputs spent by the non-coinbase inputs of `block`, keyed by the
-/// [`OutPoint`](transparent::OutPoint) that spends them, reading them from the non-finalized
-/// `chain` or finalized `db` that `block` was read from.
-///
-/// See [`spent_outputs_for_block`] for the errors, correctness and performance notes.
-pub(crate) fn spent_outputs_for<C>(
-    block: &Block,
-    chain: Option<&C>,
-    db: &ZebraDb,
-) -> Result<Option<HashMap<transparent::OutPoint, Utxo>>, BlockReadError>
-where
-    C: AsRef<Chain>,
-{
     // The finalized tip can only advance between these reads, which can only turn a UTXO hit
     // into a parent read, never the reverse.
     let is_finalized = match (block.coinbase_height(), db.finalized_tip_height()) {
@@ -265,6 +249,26 @@ where
         _ => false,
     };
 
+    spent_outputs_for(&block, chain, db, is_finalized)
+}
+
+/// Returns the transparent outputs spent by the non-coinbase inputs of `block`, keyed by the
+/// [`OutPoint`](transparent::OutPoint) that spends them, reading them from the non-finalized
+/// `chain` or finalized `db` that `block` was read from.
+///
+/// `is_finalized` says whether `block` was read from the finalized state, whose UTXO set no
+/// longer holds the outputs it spends. Parent transactions are read without their headers.
+///
+/// See [`spent_outputs_for_block`] for the errors, correctness and performance notes.
+pub(crate) fn spent_outputs_for<C>(
+    block: &Block,
+    chain: Option<&C>,
+    db: &ZebraDb,
+    is_finalized: bool,
+) -> Result<Option<HashMap<transparent::OutPoint, Utxo>>, BlockReadError>
+where
+    C: AsRef<Chain>,
+{
     let mut spent_outputs = HashMap::new();
 
     // Outpoints missing from the UTXO set, grouped by parent so each parent is read once,
@@ -287,7 +291,18 @@ where
     }
 
     for (parent_hash, outpoints) in by_parent {
-        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash)? else {
+        // The parent's header only carries its block time, which a `Utxo` does not need.
+        let cached_parent = chain.and_then(|chain| {
+            chain
+                .as_ref()
+                .transaction(parent_hash)
+                .map(|(tx, height, _)| (tx.clone(), height))
+        });
+        let parent = match cached_parent {
+            Some(parent) => Some(parent),
+            None => db.transaction_body(parent_hash)?,
+        };
+        let Some((parent_tx, height)) = parent else {
             if known_transaction(chain, db, parent_hash) {
                 return Ok(None);
             }

@@ -750,6 +750,165 @@ fn block_query_resolves_spent_outputs_and_rejects_pruned_parents() {
     );
 }
 
+/// Spent outputs read each parent transaction's body without its block header, which only
+/// carries the block time that a spent output does not need.
+#[test]
+fn spent_outputs_read_parent_bodies_without_their_headers() {
+    let _init_guard = zebra_test::init();
+    let (state, spender) = spending_chain();
+    let height = spender.coinbase_height().unwrap();
+    let spent_outputs =
+        || read::spent_outputs_for_block(None::<Arc<Chain>>, &state.db, height.into());
+    let expected = spent_outputs().unwrap();
+    assert_eq!(expected.as_ref().map(|outputs| outputs.len()), Some(2));
+
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &state.db.cf_handle("block_header_by_height").unwrap(),
+        Height(1),
+    );
+    state.db.write_batch(batch).unwrap();
+
+    assert_eq!(spent_outputs(), Ok(expected.clone()));
+    assert_eq!(
+        read::block_query(
+            None,
+            &state.db,
+            height.into(),
+            BlockQueryFields::SPENT_OUTPUTS
+        )
+        .map(|queried| queried.and_then(|queried| queried.spent_outputs)),
+        Ok(expected)
+    );
+}
+
+/// Spent outputs of non-finalized chain blocks come from the chain's created outputs and the
+/// finalized UTXO set, which keeps the outputs that only the chain spends, so they don't need the
+/// finalized parents' bodies.
+#[test]
+fn block_query_resolves_spent_outputs_of_chain_blocks_from_the_utxo_set() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let output = || Output::new(Amount::try_from(1).unwrap(), Script::new(&[0x76; 25]));
+    let spend = |outpoint, outputs| {
+        let input = Input::PrevOut {
+            outpoint,
+            unlock_script: Script::new(&[]),
+            sequence: u32::MAX,
+        };
+        Arc::new(
+            Transaction::clone(&genesis.transactions[0])
+                .with_transparent_inputs(vec![input])
+                .with_transparent_outputs(outputs),
+        )
+    };
+
+    // Coinbase outputs are immature in the next blocks, so the chain spends the outputs of a
+    // non-coinbase transaction.
+    let funding = Arc::new(
+        Transaction::clone(&genesis.transactions[0])
+            .with_transparent_inputs(Vec::new())
+            .with_transparent_outputs(vec![output(), output()]),
+    );
+    let funding_output = |index| OutPoint {
+        hash: funding.hash(),
+        index,
+    };
+    let mut parent = Block::clone(&genesis.make_fake_child());
+    parent.transactions.push(funding.clone());
+    let parent = Arc::new(parent);
+    let retained = parent.make_fake_child();
+    let finalized = finalized_state(&[genesis.clone(), parent.clone(), retained.clone()]);
+
+    let mut root = Block::clone(&retained.make_fake_child());
+    root.transactions
+        .push(spend(funding_output(0), vec![output()]));
+    root.transactions.push(spend(funding_output(1), Vec::new()));
+    let root = Arc::new(root);
+    let mut child = Block::clone(&root.make_fake_child());
+    let chain_output = OutPoint {
+        hash: root.transactions[1].hash(),
+        index: 0,
+    };
+    child.transactions.push(spend(chain_output, Vec::new()));
+    let child = Arc::new(child);
+
+    let mut cached = NonFinalizedState::new(&network);
+    cached
+        .commit_new_chain(root.clone().prepare(), &finalized)
+        .unwrap();
+    cached
+        .commit_block(child.clone().prepare(), &finalized)
+        .unwrap();
+    let chain = cached.best_chain().cloned();
+
+    let parent_height = parent.coinbase_height().unwrap();
+    let root_height = root.coinbase_height().unwrap();
+    let check_spent_outputs = || {
+        for (block, mut outpoints, height) in [
+            (
+                &root,
+                vec![funding_output(0), funding_output(1)],
+                parent_height,
+            ),
+            (&child, vec![chain_output], root_height),
+        ] {
+            let spent_outputs = read::block_query(
+                chain.clone(),
+                &finalized.db,
+                block.hash().into(),
+                BlockQueryFields::SPENT_OUTPUTS,
+            )
+            .unwrap()
+            .unwrap()
+            .spent_outputs
+            .unwrap();
+            assert_eq!(
+                Some(&spent_outputs),
+                read::spent_outputs_for_block(chain.clone(), &finalized.db, block.hash().into())
+                    .unwrap()
+                    .as_ref()
+            );
+
+            let mut spent: Vec<_> = spent_outputs.keys().copied().collect();
+            spent.sort_by_key(|outpoint| outpoint.index);
+            outpoints.sort_by_key(|outpoint| outpoint.index);
+            assert_eq!(spent, outpoints);
+            for utxo in spent_outputs.values() {
+                assert_eq!(utxo.output, output());
+                assert_eq!(utxo.height, height);
+                assert!(!utxo.from_coinbase);
+            }
+        }
+    };
+    check_spent_outputs();
+
+    // Prune the finalized parent's body.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &finalized.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::min_for_height(parent_height),
+        TransactionLocation::min_for_height(parent_height.next().unwrap()),
+    );
+    finalized.db.write_batch(batch).unwrap();
+    assert_eq!(
+        read::block_query(
+            chain.clone(),
+            &finalized.db,
+            parent_height.into(),
+            BlockQueryFields::TRANSACTIONS
+        ),
+        Err(BlockReadError::BlockBodyUnavailable {
+            height: parent_height
+        })
+    );
+
+    check_spent_outputs();
+}
+
 /// A gap in a block's transaction index is corrupt, instead of a shortened transaction list.
 #[test]
 fn block_query_rejects_gaps_in_the_transaction_index() {
