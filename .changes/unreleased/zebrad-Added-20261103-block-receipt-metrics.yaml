@@ -1,0 +1,10 @@
+project: zebrad
+kind: Added
+body: >-
+  Added gossiped block receipt timings `zebra.net.block.decode.duration_seconds`,
+  `zebra.net.block.decode.wait_seconds`, `gossip.block.download.duration_seconds` and
+  `gossip.block.verify_commit.duration_seconds`, mempool reuse counters
+  `zebra.consensus.block.reuse_query`, `zebra.consensus.block.reused_transactions` and
+  `zebra.consensus.block.verified_transactions`, and `download_ms` and `verify_ms` fields on the
+  `downloaded and verified gossiped block` log line.
+time: 2026-11-03T11:07:39.219665732+00:00

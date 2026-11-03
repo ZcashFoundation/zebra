@@ -186,6 +186,31 @@ Watch increases in rejected submissions and failed announcements alongside risin
 durations. A successful local write is not proof against stale blocks, and a stalled attempt has no
 completion sample yet. These metrics do not measure network-wide propagation or stale-block rates.
 
+## Block receipt and verification
+
+These metrics time a gossiped block from its arrival to its commit, and show how often block
+verification reuses the mempool's transaction verification.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `zebra.net.block.decode.duration_seconds` | Summary | None | Seconds from a `block` message body passing its checksum to the decoded block, including the wait below. Successful decodes only. |
+| `zebra.net.block.decode.wait_seconds` | Summary | None | Seconds each `block` message parse waited for the shared Rayon thread pool, from entering `block_in_place` to the start of its parse job. |
+| `gossip.block.download.duration_seconds` | Summary | None | Seconds for each successful download of a gossiped block: peer selection, the `getdata` request, the peer's response, the transfer and the decode. |
+| `gossip.block.verify_commit.duration_seconds` | Summary | None | Seconds from sending a downloaded gossiped block to the block verifier until its commit was acknowledged. Verified blocks only. |
+| `zebra.consensus.block.reuse_query` | Counter | `outcome` | Mempool queries for already-verified transactions, one per block that reaches transaction verification: `answered`, `timeout` (no answer within 10 ms), `error` (the mempool returned an error or an unexpected response), or `none` (no mempool is attached to the verifier, so no query was made). |
+| `zebra.consensus.block.reused_transactions` | Counter | None | Block transactions whose mempool verification was reused, skipping their proof and script checks. |
+| `zebra.consensus.block.verified_transactions` | Counter | None | Non-coinbase block transactions sent to the transaction verifier. Coinbase transactions are always verified and never reused, so they are not counted. |
+
+The block verifier counters exclude block proposals, like the verifier's phase timings.
+`reused_transactions / (reused_transactions + verified_transactions)` is the share of non-coinbase
+block transactions that skipped verification.
+
+The `downloaded and verified gossiped block` log line also reports each block's `download_ms` and
+`verify_ms`, the same intervals as the two `gossip.block` summaries, so release builds can match
+timings to block hashes. Download time includes the decode. Subtracting the verifier's
+`zebra.consensus.block.phase.duration_seconds` phases from the verify time leaves the time spent
+passing the block between services.
+
 ## Observability stack
 
 The [Compose stack][compose-source] builds Zebra and starts Prometheus,

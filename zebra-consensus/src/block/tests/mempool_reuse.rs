@@ -2,10 +2,11 @@
 
 use std::{
     future::{pending, ready},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::Duration,
 };
 
+use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
 use tokio::sync::oneshot;
 use tower::{service_fn, util::BoxCloneService};
 use zebra_chain::{
@@ -499,4 +500,127 @@ async fn cached_shielded_prefix_does_not_hold_the_miss_batch_open() {
         assert_eq!(dispatched.contains(&cached_hash), !reuse);
         assert_eq!(flushes.load(Ordering::SeqCst), 1);
     }
+}
+
+const REUSE_QUERY_OUTCOMES: [&str; 4] = ["answered", "timeout", "error", "none"];
+
+/// Counts the block verifier's mempool reuse metrics, and ignores every other metric.
+#[derive(Default)]
+struct ReuseRecorder {
+    outcomes: [Arc<AtomicU64>; 4],
+    reused: Arc<AtomicU64>,
+    verified: Arc<AtomicU64>,
+}
+
+impl ReuseRecorder {
+    /// Returns the query outcome counts in [`REUSE_QUERY_OUTCOMES`] order, then the reused and
+    /// verified transaction counts.
+    fn counts(&self) -> ([u64; 4], u64, u64) {
+        (
+            self.outcomes
+                .each_ref()
+                .map(|count| count.load(Ordering::SeqCst)),
+            self.reused.load(Ordering::SeqCst),
+            self.verified.load(Ordering::SeqCst),
+        )
+    }
+}
+
+impl Recorder for ReuseRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+        let counter = match key.name() {
+            "zebra.consensus.block.reused_transactions" => &self.reused,
+            "zebra.consensus.block.verified_transactions" => &self.verified,
+            "zebra.consensus.block.reuse_query" => {
+                let outcome = key
+                    .labels()
+                    .find(|label| label.key() == "outcome")
+                    .expect("reuse queries are labeled by outcome");
+                let index = REUSE_QUERY_OUTCOMES
+                    .iter()
+                    .position(|known| *known == outcome.value())
+                    .unwrap_or_else(|| panic!("unexpected reuse query outcome: {outcome:?}"));
+                &self.outcomes[index]
+            }
+            _ => return Counter::noop(),
+        };
+        Counter::from_arc(counter.clone())
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, _: &Key, _: &Metadata<'_>) -> Histogram {
+        Histogram::noop()
+    }
+}
+
+/// Block verification counts each mempool reuse query outcome and whether each non-coinbase
+/// transaction's verdict was reused or verified, excluding block proposals.
+#[tokio::test]
+async fn reuse_metrics_count_query_outcomes_and_transaction_paths() {
+    let _init_guard = zebra_test::init();
+    // The current-thread runtime polls the verifier on this thread, so the local recorder sees it.
+    let recorder = ReuseRecorder::default();
+    let _recorder_guard = metrics::set_default_local_recorder(&recorder);
+    let network = network();
+    let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+    let hits = || block.transactions.iter().cloned().map(entry).collect();
+
+    // A hit reuses the spend. The coinbase is always verified, so it is not counted.
+    let (result, _) = verify(
+        &network,
+        block.clone(),
+        mempool(&block, hits()),
+        mock_state(),
+    )
+    .await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(recorder.counts(), ([1, 0, 0, 0], 1, 0));
+
+    let pool = mempool(&block, Vec::new());
+    let (result, _) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(recorder.counts(), ([2, 0, 0, 0], 1, 1));
+
+    let pool = service_fn(|_| pending::<Result<mempool::Response, BoxError>>());
+    let pool = BoxCloneService::new(pool);
+    let (result, _) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(recorder.counts(), ([2, 1, 0, 0], 1, 2));
+
+    let pool = service_fn(|_| ready(Err::<mempool::Response, BoxError>("unavailable".into())));
+    let pool = BoxCloneService::new(pool);
+    let (result, _) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(recorder.counts(), ([2, 1, 1, 0], 1, 3));
+
+    // A verifier with no mempool attached makes no query.
+    let transactions = Buffer::new(transaction::BlockTxVerifier::new(&network, mock_state()), 1);
+    let verifier = SemanticBlockVerifier::new(&network, mock_state(), transactions);
+    let result = verifier.oneshot(Request::Commit(block.clone())).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_eq!(recorder.counts(), ([2, 1, 1, 1], 1, 4));
+
+    // A proposal makes the same query and reuses the same hit, but records neither.
+    let state = service_fn(|request| async move {
+        match request {
+            zs::Request::CheckBlockProposalValidity(_) => Err("proposal checked".into()),
+            request => mock_state().oneshot(request).await,
+        }
+    });
+    let transactions = Buffer::new(transaction::BlockTxVerifier::new(&network, state), 1);
+    let (sender, receiver) = oneshot::channel();
+    let verifier = SemanticBlockVerifier::new(&network, state, transactions).with_mempool(receiver);
+    sender.send(mempool(&block, hits())).unwrap();
+    let result = verifier
+        .oneshot(Request::CheckProposal(block.clone()))
+        .await;
+    assert!(matches!(result, Err(VerifyBlockError::ValidateProposal(_))));
+    assert_eq!(recorder.counts(), ([2, 1, 1, 1], 1, 4));
 }
