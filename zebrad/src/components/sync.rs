@@ -30,6 +30,7 @@ use tower::{
 use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
+    state_snapshot::StateSnapshotCommitment,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network as zn;
@@ -364,6 +365,68 @@ pub struct Config {
     /// Testnet use the pins compiled into Zebra, and refuse this field: Zebra
     /// does not start if it is set for them.
     pub v2_known_hash_pins: Option<KnownHashPins>,
+
+    /// Whether an empty pruned node downloads a state snapshot over the version 2 protocol and
+    /// syncs only the blocks above it, instead of syncing from genesis.
+    ///
+    /// Off by default. The snapshot is downloaded only when `state.prune_blocks_older_than` is
+    /// set, the state is not ephemeral, no state database exists yet, a snapshot commitment is
+    /// pinned for the network or configured in `state_snapshot`, `consensus.checkpoint_sync` is
+    /// on, zcashd-compat mode is off, and `state_snapshot_peers` or `network.initial_v2_peers`
+    /// names a peer. Otherwise Zebra logs why and syncs normally.
+    ///
+    /// The UTXO set, the nullifiers, the Sprout tree, and the value pools of a snapshot are
+    /// trusted on its commitment, like the checkpoints are trusted, and the history below the
+    /// snapshot is never downloaded.
+    pub state_snapshot_sync: bool,
+
+    /// The state snapshot to trust: its `height`, the `hash` of the block at that height, and
+    /// the `manifest` hash, as hex strings.
+    ///
+    /// `None` by default, which uses the commitment this build pins for the network, if any. On
+    /// Mainnet and the default Testnet, a configured commitment is accepted only if it equals the
+    /// pinned one, or if `unsafe_trust_state_snapshot` is on. On Regtest and custom testnets any
+    /// commitment is accepted.
+    pub state_snapshot: Option<StateSnapshotCommitment>,
+
+    /// Whether to trust a configured `state_snapshot` on Mainnet or the default Testnet that
+    /// differs from the commitment this build pins.
+    ///
+    /// Off by default. Turning it on makes the node trust whoever produced the configured
+    /// snapshot with its view of the chain state, and logs a warning at every start.
+    pub unsafe_trust_state_snapshot: bool,
+
+    /// The version 2 peers the snapshot is downloaded from, as `host:port` strings.
+    ///
+    /// Empty by default, which uses `network.initial_v2_peers`.
+    pub state_snapshot_peers: Vec<String>,
+
+    /// What to do when the snapshot cannot be downloaded or is rejected.
+    ///
+    /// `"error"` by default: exit with an actionable message and leave no state directory, so
+    /// the next start retries. `"genesis"` continues with a normal sync from genesis.
+    pub state_snapshot_fallback: StateSnapshotFallback,
+
+    /// Whether to serve the state snapshots this node holds to version 2 peers.
+    ///
+    /// Every node with `network.v2_listen_addr` set advertises the `NODE_SYNC_ARTIFACTS` service,
+    /// with or without this setting, and answers the objects it does not hold as not found.
+    ///
+    /// Off by default. A node that downloaded a snapshot keeps its pieces only when this is on;
+    /// the `zebrad export-state-snapshot` command adds snapshots to serve.
+    pub serve_state_snapshots: bool,
+}
+
+/// What `zebrad start` does when a state snapshot cannot be downloaded or is rejected.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateSnapshotFallback {
+    /// Exit with an actionable error and leave no state directory, so the next start retries.
+    #[default]
+    Error,
+
+    /// Continue with a normal sync from genesis.
+    Genesis,
 }
 
 impl Default for Config {
@@ -405,6 +468,12 @@ impl Default for Config {
 
             // Mainnet and the default Testnet use their compiled-in lists.
             v2_known_hash_pins: None,
+            state_snapshot_sync: false,
+            state_snapshot: None,
+            unsafe_trust_state_snapshot: false,
+            state_snapshot_peers: Vec::new(),
+            state_snapshot_fallback: StateSnapshotFallback::Error,
+            serve_state_snapshots: false,
         }
     }
 }
