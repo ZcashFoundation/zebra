@@ -154,16 +154,17 @@ impl SchedulerConfig {
         len.max(1)
     }
 
-    /// Returns how long a sub-range of `length` bytes may take: as long as a
-    /// peer at the rate floor needs to deliver it, and at least twice the
-    /// duration sub-ranges are sized for.
+    /// Returns how long a sub-range may take when its peer has `bytes` to
+    /// deliver with it, its own and those of the sub-ranges in flight ahead of
+    /// it, which share the peer's connection: as long as a peer at the rate
+    /// floor needs to deliver them, and at least twice the duration sub-ranges
+    /// are sized for.
     ///
     /// With the defaults, a first 1 MiB sub-range gets 16 seconds, inside the
     /// network layer's own 20-second request timeout, so a peer that never
     /// answers is caught here rather than surfacing as a failed request.
-    fn sub_range_deadline(&self, length: u32) -> Duration {
-        let at_floor_micros =
-            u64::from(length).saturating_mul(1_000_000) / self.min_rate_bytes_per_sec.max(1);
+    fn sub_range_deadline(&self, bytes: u64) -> Duration {
+        let at_floor_micros = bytes.saturating_mul(1_000_000) / self.min_rate_bytes_per_sec.max(1);
         Duration::from_micros(at_floor_micros).max(self.range_duration.saturating_mul(2))
     }
 
@@ -365,8 +366,11 @@ struct Peer<S> {
     /// The download the peer is working on: one piece at a time.
     download: Option<DownloadId>,
 
-    /// The rate the peer delivers one sub-range at, once it has answered.
+    /// The rate the peer delivers at, once it has answered.
     rate: Option<Rate>,
+
+    /// When the peer's last answer arrived.
+    last_answer: Option<Instant>,
 
     /// Refusals in a row.
     refusals: u32,
@@ -420,9 +424,8 @@ struct Download {
     /// The byte ranges neither received nor requested, as start → end.
     unrequested: BTreeMap<u64, u64>,
 
-    /// The sub-range requests in flight, by offset. Dropping a sender cancels
-    /// its request, so dropping the download cancels them all.
-    in_flight: HashMap<u64, oneshot::Sender<Infallible>>,
+    /// The sub-range requests in flight, by offset.
+    in_flight: HashMap<u64, InFlight>,
 
     /// Received bytes after a gap, by offset.
     ahead: BTreeMap<u64, Vec<u8>>,
@@ -500,6 +503,16 @@ impl Download {
     }
 }
 
+/// A sub-range request in flight.
+struct InFlight {
+    /// The requested length.
+    length: u32,
+
+    /// Dropping it cancels the request, so dropping the download cancels them
+    /// all.
+    _cancel: oneshot::Sender<Infallible>,
+}
+
 /// Returns the length of `data` as a `u64`.
 fn len_u64(data: &[u8]) -> u64 {
     u64::try_from(data.len()).expect("a usize length fits in a u64 on supported targets")
@@ -524,8 +537,8 @@ enum Event {
         offset: u64,
         /// The requested length.
         length: u32,
-        /// How long the request took.
-        elapsed: Duration,
+        /// When the request started.
+        started: Instant,
         /// How it ended.
         answer: Answer,
     },
@@ -588,10 +601,10 @@ fn after(instant: Instant, duration: Duration) -> Instant {
         .unwrap_or_else(|| instant + Duration::from_secs(365 * 24 * 60 * 60))
 }
 
-/// A peer's rate: moving averages of the bytes it delivers per sub-range and
-/// of the time a sub-range takes, each the first answer's, then moved a
-/// quarter of the way to each new answer's. Their ratio is the rate, which a
-/// small answer, such as the last few bytes of a piece, barely moves.
+/// A peer's rate: moving averages of the bytes it delivers per answer and of
+/// the time each answer adds, each the first answer's, then moved a quarter of
+/// the way to each new answer's. Their ratio is the rate, which a small
+/// answer, such as the last few bytes of a piece, barely moves.
 #[derive(Clone, Copy, Debug)]
 struct Rate {
     /// The average bytes per answer.
@@ -662,7 +675,7 @@ where
             download,
             offset,
             length,
-            elapsed: started.elapsed(),
+            started,
             answer,
         }
     }
@@ -742,6 +755,7 @@ where
                 service,
                 download: None,
                 rate: None,
+                last_answer: None,
                 refusals: 0,
                 short_answers: 0,
                 slow_since: None,
@@ -1063,8 +1077,24 @@ where
                 download.unrequested.insert(request_end, end);
             }
 
+            // The peer delivers the sub-ranges in flight ahead of this one first.
+            let ahead: u64 = download
+                .in_flight
+                .values()
+                .map(|in_flight| u64::from(in_flight.length))
+                .sum();
+            let deadline = self
+                .config
+                .sub_range_deadline(ahead.saturating_add(u64::from(length)));
+
             let (cancel, cancelled) = oneshot::channel();
-            download.in_flight.insert(start, cancel);
+            download.in_flight.insert(
+                start,
+                InFlight {
+                    length,
+                    _cancel: cancel,
+                },
+            );
             self.futures.push(request(
                 self.peers[peer].service.clone(),
                 id,
@@ -1074,7 +1104,7 @@ where
                     length,
                 },
                 (start, length),
-                self.config.sub_range_deadline(length),
+                deadline,
                 cancelled,
             ));
         }
@@ -1119,9 +1149,9 @@ where
                 download,
                 offset,
                 length,
-                elapsed,
+                started,
                 answer,
-            } => self.answered(download, (offset, length), elapsed, answer),
+            } => self.answered(download, (offset, length), started, answer),
             Event::Hashed { download, assembly } => {
                 if let Some(state) = self.downloads.get_mut(&download) {
                     state.assembly = Some(assembly);
@@ -1147,7 +1177,7 @@ where
         &mut self,
         id: DownloadId,
         (offset, length): (u64, u32),
-        elapsed: Duration,
+        started: Instant,
         answer: Answer,
     ) {
         // An abandoned download's answers are dropped.
@@ -1173,11 +1203,11 @@ where
             Answer::TimedOut => {
                 download.give_back(offset, offset + u64::from(length));
                 // Nothing arrived in time, so the sub-range is a short answer of no bytes.
-                self.measure(peer, 0, length, elapsed, now);
+                self.measure(peer, 0, length, started, now);
             }
             Answer::Response(zn::Response::ObjectNotFound) => self.not_found(peer, piece, now),
             Answer::Response(zn::Response::Object { size, data }) => {
-                self.delivered(id, (offset, length), elapsed, size, data)
+                self.delivered(id, (offset, length), started, size, data)
             }
             Answer::Response(response) => {
                 self.refused(peer, now, &format!("unexpected response {response}"))
@@ -1191,7 +1221,7 @@ where
         &mut self,
         id: DownloadId,
         (offset, length): (u64, u32),
-        elapsed: Duration,
+        started: Instant,
         size: u64,
         data: Vec<u8>,
     ) {
@@ -1232,7 +1262,7 @@ where
         };
 
         self.peers[peer].refusals = 0;
-        if !self.measure(peer, delivered, length, elapsed, Instant::now()) {
+        if !self.measure(peer, delivered, length, started, Instant::now()) {
             // The peer stalled, so its partial piece was discarded.
             return;
         }
@@ -1330,21 +1360,27 @@ where
         self.peers[peer].excluded = true;
     }
 
-    /// Updates `peer`'s rate with an answer of `delivered` bytes to a
-    /// sub-range of `length` bytes, which took `elapsed`, and stalls the peer
-    /// after too many short answers in a row (design, §6.1 "Stalls"). Returns
-    /// whether the peer is still downloading.
+    /// Updates `peer`'s rate with an answer of `delivered` bytes, at `now`, to
+    /// a sub-range of `length` bytes requested at `started`, and stalls the
+    /// peer after too many short answers in a row (design, §6.1 "Stalls").
+    /// Returns whether the peer is still downloading.
     fn measure(
         &mut self,
         peer: usize,
         delivered: u32,
         length: u32,
-        elapsed: Duration,
+        started: Instant,
         now: Instant,
     ) -> bool {
         let config = &self.config;
         let state = &mut self.peers[peer];
-        let rate = Rate::update(state.rate, delivered, elapsed);
+
+        // The rate is the peer's, not one sub-range's (design, §6.1 "Stalls"). Its sub-ranges in
+        // flight share its connection, so a sub-range requested before the peer's last answer was
+        // delivered behind it, and only its time since then counts.
+        let from = state.last_answer.map_or(started, |last| last.max(started));
+        state.last_answer = Some(now);
+        let rate = Rate::update(state.rate, delivered, now.saturating_duration_since(from));
         state.rate = Some(rate);
 
         // Sub-ranges never go past the end of the piece, so a short answer is always one that
