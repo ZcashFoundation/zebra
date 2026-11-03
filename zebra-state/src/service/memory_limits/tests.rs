@@ -228,3 +228,42 @@ fn contextual_block_equality_ignores_the_block_charge() {
         "records of different blocks still differ",
     );
 }
+
+/// The numeric retained charge and the RAII retention token are independent metadata, and both
+/// survive contextual conversion.
+#[test]
+fn contextual_conversion_carries_charge_and_retention_independently() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vectors are valid");
+    let dropped = Arc::new(AtomicBool::new(false));
+    let mut prepared = SemanticallyVerifiedBlock::from(block.clone());
+    let charge = block_retained_charge(&block, &prepared.transaction_hashes) + 1_000_000;
+    prepared.retained_charge = Some(charge);
+    prepared.retention = Some(crate::BlockRetentionToken::new(DropFlag(dropped.clone())));
+
+    let contextual = ContextuallyVerifiedBlock::test_with_zero_spent_utxos(prepared);
+    let semantic = SemanticallyVerifiedBlock::from(contextual.clone());
+
+    assert_eq!(semantic.retained_charge, Some(charge));
+    assert_eq!(semantic.retention, contextual.retention);
+    assert!(!dropped.load(Ordering::SeqCst));
+
+    drop(semantic);
+    drop(contextual);
+    assert!(
+        dropped.load(Ordering::SeqCst),
+        "the last converted owner releases the RAII token"
+    );
+}

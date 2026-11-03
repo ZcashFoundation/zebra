@@ -26,6 +26,7 @@ use crate::common::{
 };
 
 mod compact_relay;
+mod memory;
 mod nu7;
 mod pruning;
 mod state_snapshot;

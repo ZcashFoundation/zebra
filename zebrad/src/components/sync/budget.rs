@@ -49,6 +49,65 @@ pub struct SyncMemoryLimits {
     pub pipeline_bytes: Option<u64>,
 }
 
+/// A checkpoint gap exceeds the range a byte-bounded pipeline can always admit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CheckpointGapTooLarge {
+    /// The checkpoint at the end of the gap.
+    pub checkpoint: Height,
+
+    /// The number of blocks between the two checkpoints.
+    pub gap: u32,
+}
+
+impl std::fmt::Display for CheckpointGapTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "memory budget cannot sync a checkpoint list with a gap of {} blocks ending at height {}; the maximum checkpoint gap is {} blocks",
+            self.gap,
+            self.checkpoint.0,
+            zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
+        )
+    }
+}
+
+impl std::error::Error for CheckpointGapTooLarge {}
+
+/// Checks every checkpoint gap the verifier can use from `start_height` through
+/// `max_checkpoint_height`. Gaps before the current tip are already behind it, so a snapshot-born
+/// state does not check the history it did not download.
+///
+/// A bounded pipeline always admits the oldest checkpoint range so it can drain. That liveness
+/// rule depends on every range having at most `MAX_CHECKPOINT_HEIGHT_GAP` blocks.
+pub(crate) fn check_checkpoint_gaps(
+    checkpoint_list: &CheckpointList,
+    max_checkpoint_height: Height,
+    start_height: Height,
+) -> Result<(), CheckpointGapTooLarge> {
+    let mut previous: Option<Height> = None;
+
+    for (height, _) in checkpoint_list
+        .iter()
+        .take_while(|(height, _)| **height <= max_checkpoint_height)
+        .filter(|(height, _)| **height >= start_height)
+    {
+        if let Some(previous) = previous {
+            let gap = height.0.saturating_sub(previous.0);
+            if usize::try_from(gap).unwrap_or(usize::MAX)
+                > zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP
+            {
+                return Err(CheckpointGapTooLarge {
+                    checkpoint: *height,
+                    gap,
+                });
+            }
+        }
+        previous = Some(*height);
+    }
+
+    Ok(())
+}
+
 /// A handle to the sync pipeline's byte bound, shared by the syncer and the inbound block
 /// downloader.
 ///
@@ -83,6 +142,9 @@ impl PipelineBudget {
                 released: watch::Sender::new(()),
             })
         });
+        if let Some(bound) = &bound {
+            bound.export_metrics(0);
+        }
 
         Self { bound }
     }

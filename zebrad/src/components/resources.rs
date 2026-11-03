@@ -367,12 +367,14 @@ impl BudgetSettings {
     }
 }
 
-/// Returns the derivation inputs `config` sets: the cores the node uses, whether it mines, and
-/// its full-verification concurrency.
+/// Returns the derivation inputs `config` sets: the cores the node uses, whether it mines, its
+/// version 2 endpoint and checkpoint sync engine, and its full-verification concurrency.
 pub fn plan_inputs(config: &ZebradConfig) -> PlanInputs {
     PlanInputs {
         cores: node_cores(config),
         mining: config.mining.miner_address.is_some() || config.mining.internal_miner,
+        v2_enabled: config.network.v2_listen_addr.is_some(),
+        v2_checkpoint_sync: config.sync.v2_checkpoint_sync,
         full_verify_concurrency_limit: config.sync.full_verify_concurrency_limit,
         ..PlanInputs::default()
     }
@@ -384,6 +386,57 @@ pub fn node_cores(config: &ZebradConfig) -> usize {
         0 => available_parallelism().map_or(1, usize::from),
         threads => threads,
     }
+}
+
+// The network opens at least this many outbound version 2 connections for the checkpoint sync
+// engine, and the plan's network floor pays for them, so the engine can reach its peer minimum.
+const _: () = assert!(
+    crate::components::checkpoint_sync::scheduler::MIN_ENGINE_PEERS
+        <= zebra_network::MIN_V2_SYNC_OUTBOUND_CONNECTIONS
+);
+
+/// Returns `engine` bounded by `plan`, or unchanged without a budget.
+///
+/// The checkpoint sync engine replaces the legacy syncer's downloads while it runs, so its
+/// lookahead is limited to the sync pipeline's share. A peer it stops streaming from keeps the
+/// connection receive window the network share priced. A peer it streams from gets an equal part of
+/// the lookahead, at least that priced window: its receive window only holds block ranges the engine
+/// requested, which the lookahead already charges.
+pub fn checkpoint_sync_engine_config(
+    mut engine: crate::components::checkpoint_sync::EngineConfig,
+    plan: &MemoryPlan,
+) -> crate::components::checkpoint_sync::EngineConfig {
+    let Some(pipeline_bytes) = plan.sync.pipeline_bytes else {
+        return engine;
+    };
+
+    let lookahead_bytes = engine
+        .lookahead_bytes
+        .min(pipeline_bytes)
+        .max(crate::components::sync::MIN_V2_LOOKAHEAD_BYTES);
+    if lookahead_bytes < engine.lookahead_bytes {
+        tracing::info!(
+            configured = engine.lookahead_bytes,
+            limited = lookahead_bytes,
+            "limiting sync.v2_lookahead_bytes to the memory budget's sync pipeline share"
+        );
+    }
+    engine.lookahead_bytes = lookahead_bytes;
+
+    let priced_window = plan.network.quic.connection_receive_window;
+    engine.deselected_receive_window = engine.deselected_receive_window.min(priced_window);
+
+    let streamed_peers = engine
+        .target_peers
+        .max(crate::components::checkpoint_sync::scheduler::MIN_ENGINE_PEERS);
+    let lookahead_share =
+        u32::try_from(lookahead_bytes / u64::try_from(streamed_peers).unwrap_or(u64::MAX))
+            .unwrap_or(u32::MAX);
+    engine.selected_receive_window = engine
+        .selected_receive_window
+        .min(lookahead_share.max(priced_window));
+
+    engine
 }
 
 /// Returns the refusal of a node at a tip-only budget that needs initial sync (D15).
@@ -437,7 +490,7 @@ pub fn startup_summary(
          rocksdb={} (pinned_metadata {}, write_buffers {}, per_cf {}, block_cache {}, \
          charged_cfs {}) \
          pipeline={} (download_concurrency {}, queued_blocks {} MiB) \
-         non_finalized={} (resident target {} MiB, index_clone_factor {}, not enforced) \
+         non_finalized={} (resident target {} MiB, index_clone_factor {}, early finalization, 100-block floor) \
          network={} (peers {peers}, quic {}/{}/{} MiB) \
          mempool={tx_cost_limit} \
          rpc={} proposal cache \

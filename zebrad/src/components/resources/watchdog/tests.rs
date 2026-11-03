@@ -2,7 +2,7 @@
 
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -275,6 +275,83 @@ fn switches_to_tip_only_at_the_last_checkpoint() {
     assert_eq!(actions.new_plan, None, "the profile changes once");
 }
 
+/// The runtime profile change applies the new pipeline ceiling, non-finalized target, and RocksDB
+/// limits together.
+#[tokio::test]
+async fn profile_change_resizes_pipeline_database_and_non_finalized_target() {
+    let _init_guard = zebra_test::init();
+    let settings = two_gib_settings();
+    let (watchdog, plan) = watchdog(Some(settings.clone()), Height(1_000));
+    let initial_limit = plan
+        .borrow()
+        .sync
+        .pipeline_bytes
+        .expect("the initial sync plan has a pipeline bound");
+    let expected_plan = settings
+        .plan(Profile::TipOnly)
+        .expect("2 GiB covers the tip-only floors")
+        .0;
+    let expected_limit = expected_plan
+        .sync
+        .pipeline_bytes
+        .expect("the tip-only plan has a pipeline bound");
+    let expected_resident = expected_plan
+        .state
+        .non_finalized_resident_bytes
+        .expect("the tip-only plan has a resident target");
+    assert_ne!(initial_limit, expected_limit);
+
+    let budget =
+        crate::components::sync::PipelineBudget::new(crate::components::sync::SyncMemoryLimits {
+            pipeline_bytes: Some(initial_limit),
+        });
+    let observed_budget = budget.clone();
+    let resized = Arc::new(AtomicBool::new(false));
+    let resize_hook = resized.clone();
+    let resident = Arc::new(AtomicU64::new(0));
+    let resident_hook = resident.clone();
+    let (pressure_sender, _pressure_receiver) = watch::channel(MemoryPressure::Normal);
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(1_000));
+    let watchdog = watchdog.with_pipeline_budget(budget);
+
+    let task = tokio::spawn(run_with_timing(
+        watchdog,
+        pressure_sender,
+        tip,
+        super::StateMemorySample::default,
+        move |limits| {
+            resize_hook.store(true, Ordering::SeqCst);
+            resident_hook.store(
+                limits
+                    .non_finalized_resident_bytes
+                    .expect("a budgeted plan has a resident target"),
+                Ordering::SeqCst,
+            );
+            async {}
+        },
+        Duration::from_millis(5),
+        Duration::from_millis(50),
+    ));
+
+    let changed = tokio::time::timeout(Duration::from_secs(1), async {
+        while observed_budget.limit() == Some(initial_limit) || !resized.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await;
+    task.abort();
+    let _ = task.await;
+
+    assert!(
+        changed.is_ok(),
+        "the profile change updates the pipeline, database, and resident target"
+    );
+    assert_eq!(observed_budget.limit(), Some(expected_limit));
+    assert!(resized.load(Ordering::SeqCst));
+    assert_eq!(resident.load(Ordering::SeqCst), expected_resident);
+}
+
 /// RocksDB's memory above its share of the plan is reported once per crossing (P10).
 #[test]
 fn reports_rocksdb_crossing_its_share_once() {
@@ -299,6 +376,60 @@ fn reports_rocksdb_crossing_its_share_once() {
     assert_eq!(
         watchdog.observe(rocksdb(share)).rocksdb_over_plan,
         Some(false)
+    );
+}
+
+/// The sync pipeline's usage counts the checkpoint sync engine's lookahead charge with the legacy
+/// syncer's, and crossing its share of the plan is reported once per crossing.
+#[test]
+fn reports_the_pipeline_and_engine_charge_crossing_its_share_once() {
+    let _init_guard = zebra_test::init();
+    let (watchdog, plan) = watchdog(Some(two_gib_settings()), Height(1_000));
+    let share = plan.borrow().shares.get(Component::Pipeline);
+    let legacy = crate::components::sync::PipelineBudget::new(plan.borrow().sync);
+    let engine = crate::components::checkpoint_sync::engine::Charged::default();
+    let mut watchdog = watchdog
+        .with_pipeline_budget(legacy.clone())
+        .with_engine_charged(engine.clone());
+    let now = Instant::now();
+
+    assert_eq!(watchdog.pipeline_usage_bytes(), 0);
+    assert_eq!(watchdog.observe(sample(now, GIB)).pipeline_over_plan, None);
+
+    let _legacy_charge = legacy.charge(MIB);
+    engine.store(share - MIB, Ordering::Relaxed);
+    assert_eq!(watchdog.pipeline_usage_bytes(), share);
+    assert_eq!(watchdog.observe(sample(now, GIB)).pipeline_over_plan, None);
+
+    engine.store(share, Ordering::Relaxed);
+    assert_eq!(watchdog.pipeline_usage_bytes(), share + MIB);
+    assert_eq!(
+        watchdog.observe(sample(now, GIB)).pipeline_over_plan,
+        Some(true)
+    );
+    assert_eq!(watchdog.observe(sample(now, GIB)).pipeline_over_plan, None);
+
+    engine.store(0, Ordering::Relaxed);
+    assert_eq!(
+        watchdog.observe(sample(now, GIB)).pipeline_over_plan,
+        Some(false)
+    );
+}
+
+/// Without a budget, the engine's charge is still read but never compared to a plan.
+#[test]
+fn without_a_budget_the_pipeline_charge_is_not_compared() {
+    let _init_guard = zebra_test::init();
+    let (watchdog, _plan) = watchdog(None, Height(1_000));
+    let engine = crate::components::checkpoint_sync::engine::Charged::new(GIB.into());
+    let mut watchdog = watchdog.with_engine_charged(engine);
+
+    assert_eq!(watchdog.pipeline_usage_bytes(), GIB);
+    assert_eq!(
+        watchdog
+            .observe(sample(Instant::now(), GIB))
+            .pipeline_over_plan,
+        None
     );
 }
 
@@ -380,7 +511,7 @@ async fn a_blocked_sample_is_reused_across_timeouts() {
                 std::thread::park_timeout(Duration::from_millis(1));
             }
             finishes.fetch_add(1, Ordering::SeqCst);
-            zebra_state::RocksDbMemorySample::default()
+            super::StateMemorySample::default()
         }
     };
 

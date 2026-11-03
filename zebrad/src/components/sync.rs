@@ -65,7 +65,7 @@ use budget::PipelineAdmission;
 use downloads::Downloads;
 use hedge::SuccessHedge;
 
-pub(crate) use budget::{compute_downloaded_block_charge, OverLimit};
+pub(crate) use budget::{check_checkpoint_gaps, compute_downloaded_block_charge, OverLimit};
 pub use budget::{PipelineBudget, SyncMemoryLimits, MAX_CHECKPOINT_CHARGE_RATIO};
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
@@ -518,6 +518,7 @@ impl Config {
             lookahead_bytes,
             min_peer_rate: self.v2_min_peer_rate,
             target_peers,
+            ..EngineConfig::default()
         }
     }
 }
