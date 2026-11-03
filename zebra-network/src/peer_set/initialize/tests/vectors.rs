@@ -3076,19 +3076,23 @@ async fn v2_dialer_skips_banned_initial_peers() {
     dialer_task.abort();
 }
 
-/// A banned configured peer does not hold its outbound slot while it waits for the reconnection
-/// delay: with one slot, the live peer listed after it is dialled at once.
+/// A banned configured peer takes no outbound slot while it waits for the reconnection delay:
+/// with one slot, the live peer listed after it is dialled at once, and only the peer listed
+/// after that one is logged as waiting for a slot: not the banned peer, which is deferred, and
+/// not the live peer, which holds the slot.
 #[tokio::test]
-async fn v2_dialer_frees_banned_initial_peer_slot_at_once() {
-    let _init_guard = zebra_test::init();
+#[tracing_test::traced_test]
+async fn v2_dialer_gives_banned_initial_peer_no_slot() {
+    // No `zebra_test::init()`: `traced_test` installs the subscriber that records the logs.
     if zebra_test::net::zebra_skip_network_tests() {
         return;
     }
 
     // The banned peer is on another loopback address, so the ban does not cover the live peer.
-    // It is never dialled, so nothing needs to listen there.
+    // It is never dialled, so nothing needs to listen there, nor at the waiting peer's address,
+    // which never gets the slot.
     let banned_ip = Ipv4Addr::new(127, 0, 0, 2);
-    let live_addr = free_udp_addr();
+    let [live_addr, waiting_addr] = free_udp_addrs();
     let banned_addr = SocketAddr::new(banned_ip.into(), live_addr.port());
     let mut bans = crate::BanList::default();
     bans.ban(banned_ip.into());
@@ -3096,11 +3100,11 @@ async fn v2_dialer_frees_banned_initial_peer_slot_at_once() {
 
     let (mut live_rx, live_task) = spawn_v2_node(v2_test_config(live_addr, &[]), no_bans());
 
-    // The banned peer is listed first, so it gets the only slot first. With the production
+    // The banned peer is listed first, so it is offered the only slot first. With the production
     // reconnection delay, a slot held while the banned peer waits would not free in this test.
     let dialer_config = Config {
         peerset_initial_target_size: 1,
-        ..v2_test_config(any_udp_addr(), &[banned_addr, live_addr])
+        ..v2_test_config(any_udp_addr(), &[banned_addr, live_addr, waiting_addr])
     };
     assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
     let (_dialer_rx, dialer_task) = spawn_v2_node_with_delay(
@@ -3113,6 +3117,27 @@ async fn v2_dialer_frees_banned_initial_peer_slot_at_once() {
         .await
         .expect("the live configured peer is dialled while the banned one waits")
         .expect("the listener is running");
+
+    // Once a round of dials ends, the dialer logs each host with addresses that wait for a slot,
+    // in the configured order, so the waiting peer's log comes after any for the two before it.
+    let waiting_log = |host: &SocketAddr| {
+        format!("wait for a connection to fail or end before they are dialled host={host} ")
+    };
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, async {
+        while !logs_contain(&waiting_log(&waiting_addr)) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the peer that has no slot is logged as waiting for one");
+    assert!(
+        !logs_contain(&waiting_log(&banned_addr)),
+        "the banned peer is deferred, so it does not wait for a slot"
+    );
+    assert!(
+        !logs_contain(&waiting_log(&live_addr)),
+        "the live peer holds the slot"
+    );
 
     live_task.abort();
     dialer_task.abort();
@@ -3364,11 +3389,11 @@ fn v2_initial_peer_slots_late_host_waits_for_a_free_slot() {
 
     slots.add_host([late_host]);
     assert_eq!(slots.take_next(now), None, "the only slot is taken");
-    assert!(!slots.holds_slot(&late_host));
+    assert!(slots.waits_for_slot(&late_host));
 
     slots.free(&early_host[0]);
     assert_eq!(slots.take_next(now), Some(late_host));
-    assert!(slots.holds_slot(&late_host));
+    assert!(!slots.waits_for_slot(&late_host));
 }
 
 /// A slot is kept free for each configured host that has not resolved yet, so an early host
@@ -3420,10 +3445,11 @@ fn v2_initial_peer_slots_defer_addresses_that_were_not_dialled() {
     assert_eq!(slots.take_next(now), None, "both slots are taken");
     assert_eq!(slots.next_deferral_end(), None);
 
-    // The banned address is not dialled: its slot goes to the waiting host at once.
+    // The banned address is not dialled: its slot goes to the waiting host at once, and it does
+    // not wait for a slot itself.
     slots.defer(banned, deferred_until);
     assert_eq!(slots.next_deferral_end(), Some(deferred_until));
-    assert!(!slots.holds_slot(&banned));
+    assert!(!slots.waits_for_slot(&banned));
     assert_eq!(slots.take_next(now), Some(waiting));
 
     // The waiting host's connection ends: the banned address would be next in turn, but it is
