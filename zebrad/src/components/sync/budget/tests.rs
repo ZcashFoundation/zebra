@@ -1,6 +1,11 @@
 //! Tests for the sync pipeline's byte bound (design §4.2, §6.1 "Pipeline (B)").
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    mem::{size_of, size_of_val},
+    sync::Arc,
+    time::Duration,
+};
 
 use chrono::DateTime;
 use futures::stream::StreamExt;
@@ -8,11 +13,12 @@ use indexmap::IndexSet;
 use tokio::time::Instant;
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block, Height, MAX_BLOCK_BYTES},
     chain_tip::mock::MockChainTip,
-    parameters::checkpoint::list::CheckpointList,
+    parameters::{checkpoint::list::CheckpointList, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{LockTime, Transaction},
+    transaction::{self, LockTime, Transaction},
     transparent,
 };
 use zebra_network::{self as zn, InventoryResponse::Available};
@@ -847,17 +853,13 @@ async fn full_size_oldest_checkpoint_range_is_admitted_and_drains() {
         .expect("draining the oldest range admits the next range");
 }
 
-/// The retained-charge ratio stays below the documented adversarial maximum for the three block
-/// shapes that maximize decoded transaction structures relative to their wire bytes.
+/// Large and minimal block charges match their wire bytes and decoded representation exactly.
+/// These are fixture regressions, not a universal charge/wire ceiling.
 #[test]
-fn adversarial_block_charge_ratios_stay_below_the_documented_maximum() {
+fn adversarial_block_charges_match_representation() {
     let _init_guard = zebra_test::init();
 
-    // Many minimal transactions are the dominant shape at about 36 times their wire bytes with the
-    // current decoded `Transaction` representation. Leave headroom for representation changes.
-    const MAX_ADVERSARIAL_CHARGE_RATIO: u64 = 40;
-
-    let shapes = [
+    let large_shapes = [
         ("many transactions", large_multi_transaction_block()),
         ("many inputs", large_single_transaction_block_many_inputs()),
         (
@@ -865,25 +867,163 @@ fn adversarial_block_charge_ratios_stay_below_the_documented_maximum() {
             large_single_transaction_block_many_outputs(),
         ),
     ];
-
-    for (shape, block) in shapes {
+    for (shape, block) in large_shapes {
         let wire = u64::try_from(block.zcash_serialized_size())
             .expect("serialized block sizes fit in u64");
         assert!((MAX_BLOCK_BYTES - 100..=MAX_BLOCK_BYTES).contains(&wire));
+        assert_block_charge_matches_representation(shape, &block);
+    }
 
-        let charge = downloaded_block_charge(&block);
+    for (shape, block, _transaction_wire) in minimal_transaction_blocks() {
+        assert_block_charge_matches_representation(shape, &block);
+    }
+}
+
+/// Empty and minimal transactions regress their exact wire sizes and per-transaction charge ratios.
+/// Invalid-but-deserializable transactions matter because charging precedes semantic rejection.
+#[test]
+fn minimal_transaction_shapes_regress_per_transaction_charge_ratios() {
+    let _init_guard = zebra_test::init();
+
+    for (shape, transaction, expected_wire) in minimal_transactions() {
+        let wire = u64::try_from(transaction.zcash_serialized_size())
+            .expect("serialized transaction sizes fit in u64");
+        assert_eq!(wire, expected_wire, "{shape} wire size");
+
+        let charge = transaction_slot_charge(&transaction);
         let ratio_thousandths = charge.saturating_mul(1000) / wire;
         tracing::info!(
             shape,
             wire,
             charge,
             ratio_thousandths,
-            "adversarial retained-charge ratio"
+            "minimal transaction retained-charge ratio"
         );
+
+        #[cfg(target_pointer_width = "64")]
         assert!(
-            charge <= wire.saturating_mul(MAX_ADVERSARIAL_CHARGE_RATIO),
-            "{shape} charge {charge} exceeds {MAX_ADVERSARIAL_CHARGE_RATIO} times {wire} wire bytes",
+            ratio_thousandths > 40_000,
+            "{shape} must regress the former 40 times fixture claim"
         );
+    }
+}
+
+/// Checks a block's charge against its fixed terms, vector/hash slots, and bundle elements.
+fn assert_block_charge_matches_representation(shape: &str, block: &Block) {
+    let mut expected = block
+        .zcash_serialized_size()
+        .saturating_add(size_of::<Block>())
+        .saturating_add(size_of::<block::Header>())
+        .saturating_add(
+            block
+                .transactions
+                .capacity()
+                .saturating_mul(size_of::<Arc<Transaction>>()),
+        )
+        .saturating_add(
+            block
+                .transactions
+                .len()
+                .saturating_mul(size_of::<transaction::Hash>()),
+        );
+    for transaction in &block.transactions {
+        expected = expected.saturating_add(decoded_transaction_charge(transaction));
+    }
+    let expected = u64::try_from(expected).expect("block representation charges fit in u64");
+    let actual = downloaded_block_charge(block);
+    assert_eq!(actual, expected, "{shape} representation charge");
+
+    let wire =
+        u64::try_from(block.zcash_serialized_size()).expect("serialized block sizes fit in u64");
+    let ratio_thousandths = actual.saturating_mul(1000) / wire;
+    tracing::info!(
+        shape,
+        wire,
+        charge = actual,
+        ratio_thousandths,
+        "adversarial retained-charge ratio"
+    );
+}
+
+/// Returns the transaction struct and its decoded bundle elements, excluding its Arc/hash slots.
+fn decoded_transaction_charge(transaction: &Transaction) -> usize {
+    let mut bytes = size_of_val(transaction);
+    if let Some(bundle) = transaction.transparent_bundle() {
+        bytes = bytes
+            .saturating_add(size_of_val(bundle.vin.as_slice()))
+            .saturating_add(size_of_val(bundle.vout.as_slice()));
+    }
+    if let Some(bundle) = transaction.sprout_bundle() {
+        bytes = bytes.saturating_add(size_of_val(bundle.joinsplits.as_slice()));
+    }
+    if let Some(bundle) = transaction.sapling_bundle() {
+        bytes = bytes
+            .saturating_add(size_of_val(bundle.shielded_spends()))
+            .saturating_add(size_of_val(bundle.shielded_outputs()));
+    }
+    for action in transaction
+        .orchard_actions()
+        .chain(transaction.ironwood_actions())
+    {
+        bytes = bytes.saturating_add(size_of_val(action));
+    }
+    bytes
+}
+
+/// Returns a transaction's decoded charge plus its block vector and transaction-hash slots.
+fn transaction_slot_charge(transaction: &Transaction) -> u64 {
+    let charge = decoded_transaction_charge(transaction)
+        .saturating_add(size_of::<Arc<Transaction>>())
+        .saturating_add(size_of::<transaction::Hash>());
+    u64::try_from(charge).expect("transaction representation charges fit in u64")
+}
+
+/// Returns blocks containing each empty or minimal transaction and its expected wire size.
+fn minimal_transaction_blocks() -> [(&'static str, Block, u64); 3] {
+    minimal_transactions()
+        .map(|(shape, transaction, wire)| (shape, block_with_transaction(transaction), wire))
+}
+
+/// Returns empty V1/V5 and minimal one-input/one-output V1 transactions and their wire sizes.
+fn minimal_transactions() -> [(&'static str, Transaction, u64); 3] {
+    let empty_v1 = Transaction::test_v1(Vec::new(), Vec::new(), LockTime::unlocked());
+    let empty_v5 = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::unlocked(),
+        Height(0),
+    );
+    let minimal_v1 = Transaction::test_v1(
+        vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: transaction::Hash([0; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[]),
+            sequence: 0,
+        }],
+        vec![transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Script::new(&[]),
+        }],
+        LockTime::unlocked(),
+    );
+
+    // The current V5 codec needs 25 bytes: version/group, header, and empty bundle counts.
+    [
+        ("empty V1", empty_v1, 10),
+        ("empty V5", empty_v5, 25),
+        ("minimal V1", minimal_v1, 60),
+    ]
+}
+
+/// Returns a test block containing one transaction.
+fn block_with_transaction(transaction: Transaction) -> Block {
+    let (header, _) = test_block_header();
+    Block {
+        header: header.into(),
+        transactions: vec![Arc::new(transaction)],
     }
 }
 
