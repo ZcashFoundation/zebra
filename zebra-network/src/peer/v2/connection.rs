@@ -32,7 +32,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_util::codec::FramedRead;
-use tower::Service;
+use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedTxId};
@@ -259,11 +259,51 @@ impl Overloads {
 }
 
 /// The inbound service, with the connection's record of the overloads the
-/// peer's requests cause.
+/// peer's requests and announcements cause.
 #[derive(Clone)]
 struct Inbound<'a, S> {
     service: S,
     overloads: &'a Overloads,
+}
+
+/// Why an inbound service call failed, as the connection acts on it.
+enum ServiceFailure {
+    /// Close the connection: the inbound service has shut down, or the
+    /// connection's overload policy dropped the connection for the call's
+    /// overload or timeout; `Event` says which.
+    Close(Event),
+    /// The call failed with this error, and the connection stays open.
+    Failed(BoxError),
+}
+
+impl<S> Inbound<'_, S>
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+{
+    /// Calls the inbound service, counting the call's overload or timeout
+    /// towards closing the connection.
+    ///
+    /// # Security
+    ///
+    /// The inbound service is wrapped in buffer, load-shed, and timeout
+    /// layers by the caller. Overloads and timeouts count towards closing
+    /// the connection, as on the legacy connection, and the load-shed layer
+    /// is always ready, so a readiness error means the inbound service has
+    /// shut down: close the connection, as the legacy connection does.
+    async fn call(&mut self, request: Request) -> Result<Response, ServiceFailure> {
+        let command = request.command();
+        if self.service.ready().await.is_err() {
+            tracing::debug!(command, "inbound service shut down, closing the connection");
+            return Err(ServiceFailure::Close(Event::ServiceShutdown));
+        }
+        self.service
+            .call(request)
+            .await
+            .map_err(|error| match self.overloads.record(&error) {
+                Some(event) => ServiceFailure::Close(event),
+                None => ServiceFailure::Failed(error),
+            })
+    }
 }
 
 /// The error slot entry for a connection closed with `code`.

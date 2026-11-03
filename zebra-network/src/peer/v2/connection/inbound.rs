@@ -22,7 +22,7 @@ use std::{
 
 use quinn::{RecvStream, SendStream};
 use tokio::sync::Semaphore;
-use tower::{Service, ServiceExt};
+use tower::Service;
 
 use zebra_chain::{
     block::{self, Block},
@@ -47,7 +47,7 @@ use crate::{
     BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
-use super::{refuse_stream, Event, Events, Inbound, Overloads};
+use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
 /// How many of one peer's request streams may be served at once.
 ///
@@ -297,37 +297,23 @@ where
 /// Calls the inbound service, mapping its failures to stream refusals, or,
 /// when the connection's overload policy drops the connection or the
 /// inbound service has shut down, to a close.
-async fn call_service<S>(inbound: Inbound<'_, S>, request: Request) -> Result<Response, Outcome>
+async fn call_service<S>(mut inbound: Inbound<'_, S>, request: Request) -> Result<Response, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
-    let Inbound {
-        mut service,
-        overloads,
-    } = inbound;
-    // # Security
-    //
-    // The inbound service is wrapped in buffer, load-shed, and timeout layers by the caller.
-    // A refused stream tells the peer to try elsewhere; overloads and timeouts also count
-    // towards closing the connection, as on the legacy connection.
-    //
-    // The load-shed layer is always ready, so a readiness error means the inbound service has
-    // shut down: close the connection, as the legacy connection does.
-    if service.ready().await.is_err() {
-        return Err(Outcome::Close(Event::ServiceShutdown));
-    }
-    service.call(request).await.map_err(|error| {
-        if let Some(event) = overloads.record(&error) {
-            return Outcome::Close(event);
+    inbound.call(request).await.map_err(|failure| match failure {
+        ServiceFailure::Close(event) => Outcome::Close(event),
+        // A refused stream tells the peer to try elsewhere.
+        ServiceFailure::Failed(error) => {
+            if error.is::<tower::load_shed::error::Overloaded>()
+                || error.is::<tower::timeout::error::Elapsed>()
+            {
+                tracing::debug!(%error, "inbound service overloaded, refusing request stream");
+            } else {
+                tracing::info!(%error, "error processing peer request, refusing request stream");
+            }
+            Outcome::Refuse(ErrorCode::Refused)
         }
-        if error.is::<tower::load_shed::error::Overloaded>()
-            || error.is::<tower::timeout::error::Elapsed>()
-        {
-            tracing::debug!(%error, "inbound service overloaded, refusing request stream");
-        } else {
-            tracing::info!(%error, "error processing peer request, refusing request stream");
-        }
-        Outcome::Refuse(ErrorCode::Refused)
     })
 }
 

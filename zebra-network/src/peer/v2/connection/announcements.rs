@@ -11,7 +11,7 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_util::codec::FramedRead;
-use tower::{Service, ServiceExt};
+use tower::Service;
 
 use zebra_chain::transaction::UnminedTxId;
 
@@ -31,7 +31,7 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::{refuse_stream, Event, Events, Inbound, Overloads};
+use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
 /// How many announcement batches may wait to be written before new ones are
 /// dropped (draft: announcements are best-effort under backpressure).
@@ -457,17 +457,12 @@ where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
     let command = request.command();
-    let Ok(service) = inbound_service.service.ready().await else {
-        // The load-shed layer is always ready, so a readiness error means the inbound service
-        // has shut down: close the connection, as the legacy connection does.
-        tracing::debug!(command, "inbound service shut down, closing the connection");
-        return Err(Handled::Close(Event::ServiceShutdown));
-    };
-    if let Err(error) = service.call(request).await {
-        tracing::debug!(%error, command, "inbound service rejected announcement");
-        if let Some(event) = inbound_service.overloads.record(&error) {
-            return Err(Handled::Close(event));
+    match inbound_service.call(request).await {
+        Ok(_response) => Ok(()),
+        Err(ServiceFailure::Close(event)) => Err(Handled::Close(event)),
+        Err(ServiceFailure::Failed(error)) => {
+            tracing::debug!(%error, command, "inbound service rejected announcement");
+            Ok(())
         }
     }
-    Ok(())
 }
