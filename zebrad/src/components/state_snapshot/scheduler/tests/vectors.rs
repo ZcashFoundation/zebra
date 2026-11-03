@@ -1871,12 +1871,12 @@ async fn a_slow_peer_is_stalled_below_the_rate_floor() {
     }
 }
 
-/// In the end-game, the piece of a peer below a quarter of the median rate
-/// is downloaded again, whole and independently, by an idle fast peer; the
-/// first download to verify wins and the slow one is cancelled, with no
+/// In the end-game, a peer below a quarter of the median rate loses its piece
+/// to an idle fast peer, which downloads it whole and independently; the slow
+/// peer's download is cancelled as soon as the piece changes hands, with no
 /// penalty.
 #[tokio::test(start_paused = true)]
-async fn the_end_game_duplicates_the_piece_of_a_slow_peer() {
+async fn the_end_game_takes_the_piece_of_a_slow_peer() {
     let _init_guard = zebra_test::init();
 
     let fast = Behavior {
@@ -1895,9 +1895,9 @@ async fn the_end_game_duplicates_the_piece_of_a_slow_peer() {
     outcome.assert_complete();
     assert!(outcome.blamed.is_empty());
 
-    // The slow peer's first two 1 MiB answers, at 10.24 s, give its rate; the duplicate takes
-    // 40 ms.
-    assert!(outcome.elapsed < secs(11), "{:?}", outcome.elapsed);
+    // The slow peer's first two 1 MiB answers, at 10.24 s, give its rate; the fast peer then
+    // downloads the piece in 40 ms.
+    assert_eq!(outcome.elapsed, ms(10_280));
     let duplicates: Vec<&Call> = [0, 1]
         .into_iter()
         .flat_map(|peer| outcome.calls_of_for(peer, 2))
@@ -1907,10 +1907,65 @@ async fn the_end_game_duplicates_the_piece_of_a_slow_peer() {
     assert_eq!(duplicates[0].length, 4 * MIB);
     assert_eq!(duplicates[0].start, ms(10_240));
 
-    // The slow peer was cancelled, not stalled.
+    // The piece changed hands as soon as the slow peer's first answer gave its rate: its other
+    // first sub-range was cancelled then, not when the duplicate verified, and it was not stalled.
     let slow_calls = outcome.calls_of(2);
+    assert_eq!(slow_calls.len(), 2, "{slow_calls:?}");
     assert!(slow_calls.iter().all(|call| call.hash == outcome.hash(2)));
-    assert!(slow_calls.iter().any(|call| call.dropped));
+    let cancelled: Vec<&&Call> = slow_calls.iter().filter(|call| call.dropped).collect();
+    assert_eq!(cancelled.len(), 1, "{slow_calls:?}");
+    assert_eq!(cancelled[0].end, ms(10_240));
+}
+
+/// In the end-game, a slow peer's piece goes only to an idle peer that is not
+/// below a quarter of the median itself: a peer that just lost its own piece
+/// does not take another slow peer's, which waits for a fast peer to be idle.
+#[tokio::test(start_paused = true)]
+async fn the_end_game_does_not_give_a_piece_to_a_slow_peer() {
+    let _init_guard = zebra_test::init();
+
+    let fast = Behavior {
+        rate: Some((100 * MIB).into()),
+        ..Behavior::default()
+    };
+    // Fast, but held up for 20 s by every request that starts after 20 ms, so it is busy when
+    // the slow peers' rates become known.
+    let held_up = Behavior {
+        rate: Some((100 * MIB).into()),
+        phases: vec![(ms(20), secs(20))],
+        ..Behavior::default()
+    };
+    let slow = Behavior {
+        rate: Some((200 * KIB).into()),
+        ..Behavior::default()
+    };
+    // The fast peers take the 1 MiB pieces, 10 ms each, the slow peers the 4 MiB ones.
+    let mut sizes = vec![MIB, MIB, 4 * MIB, 4 * MIB];
+    sizes.extend([MIB; 60]);
+    let outcome = Scenario::new(objects(&sizes), vec![fast, held_up, slow.clone(), slow])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    assert!(outcome.blamed.is_empty());
+
+    // At 10.24 s both slow peers are below a quarter of the median. The first loses its piece to
+    // the idle fast peer; the second keeps its piece for now, since the only idle peer left is the
+    // first slow peer, and loses it to the fast peer once that is idle again, 40 ms later.
+    let taken: Vec<&Call> = outcome.calls_of_for(0, 2);
+    assert_eq!(taken.len(), 1, "{taken:?}");
+    assert_eq!(taken[0].start, ms(10_240));
+    assert!(
+        outcome.calls_of_for(2, 3).is_empty(),
+        "{:?}",
+        outcome.calls_of(2)
+    );
+    let taken: Vec<&Call> = outcome.calls_of_for(0, 3);
+    assert_eq!(taken.len(), 1, "{taken:?}");
+    assert_eq!(taken[0].start, ms(10_280));
+    assert!(outcome.calls_of_for(1, 3).is_empty(), "{:?}", outcome.calls);
+    // The held-up peer's 1 MiB piece ends the run.
+    assert_eq!(outcome.elapsed, ms(20_030));
 }
 
 /// In the end-game, a peer slower than the others, but above a quarter of the
