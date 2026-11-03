@@ -15,6 +15,7 @@ use crate::{components::mempool, config::ZebradConfig};
 pub mod config;
 pub mod detect;
 pub mod plan;
+pub mod watchdog;
 
 #[cfg(test)]
 mod tests;
