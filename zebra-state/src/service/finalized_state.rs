@@ -60,7 +60,7 @@ mod tests;
 #[allow(unused_imports)]
 pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 #[allow(unused_imports)]
-pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
+pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, RocksDbMemoryLimits, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
@@ -151,6 +151,20 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     SNAPSHOT_BASE,
 ];
 
+/// The large column families that only the read path (RPCs and peer requests) point-reads.
+///
+/// Under a memory budget, the SST index and filter blocks of these column families are charged
+/// to the block cache ([`RocksDbMemoryLimits::charge_index_and_filter_cfs`]), because a cache
+/// miss there costs an RPC a filter re-read, not the block commit path. Every other column
+/// family keeps its index and filter blocks pinned on the heap, where the state writer's
+/// point-reads of nullifiers, UTXOs, transaction locations, balances and hashes find them.
+pub const READ_PATH_COLUMN_FAMILIES: &[&str] = &[
+    "tx_by_loc",
+    "tx_loc_by_transparent_addr_loc",
+    "utxo_loc_by_transparent_addr_loc",
+    "block_header_by_height",
+];
+
 /// The finalized part of the chain state, stored in the db.
 ///
 /// `rocksdb` allows concurrent writes through a shared reference,
@@ -194,32 +208,80 @@ pub struct FinalizedState {
 impl FinalizedState {
     /// Returns an on-disk database instance for `config`, `network`, and `elastic_db`.
     /// If there is no existing database, creates a new database on disk.
+    ///
+    /// The database is opened with today's memory options. [`FinalizedState::new_with_limits`]
+    /// bounds its memory.
     pub fn new(
         config: &Config,
         network: &Network,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
     ) -> Result<Self, StateInitError> {
-        Self::new_with_debug(
+        Self::new_with_limits(
+            config,
+            network,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            &RocksDbMemoryLimits::default(),
+        )
+    }
+
+    /// Returns an on-disk database instance like [`FinalizedState::new`], with the database's
+    /// memory bounded by `limits`.
+    ///
+    /// [`RocksDbMemoryLimits::default()`] opens the database with today's options.
+    pub fn new_with_limits(
+        config: &Config,
+        network: &Network,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+        limits: &RocksDbMemoryLimits,
+    ) -> Result<Self, StateInitError> {
+        Self::new_with_debug_and_limits(
             config,
             network,
             false,
             #[cfg(feature = "elasticsearch")]
             enable_elastic_db,
             false,
+            limits,
         )
     }
 
-    /// Returns an on-disk database instance with the supplied production and debug settings.
+    /// Returns an on-disk database instance with the supplied production and debug settings,
+    /// opened with today's memory options.
     /// If there is no existing database, creates a new database on disk.
     ///
     /// This method is intended for use in tests.
-    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn new_with_debug(
         config: &Config,
         network: &Network,
         debug_skip_format_upgrades: bool,
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
+    ) -> Result<Self, StateInitError> {
+        Self::new_with_debug_and_limits(
+            config,
+            network,
+            debug_skip_format_upgrades,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            read_only,
+            &RocksDbMemoryLimits::default(),
+        )
+    }
+
+    /// Returns an on-disk database instance like [`FinalizedState::new_with_debug`], with the
+    /// database's memory bounded by `limits`.
+    /// If there is no existing database, creates a new database on disk.
+    ///
+    /// [`RocksDbMemoryLimits::default()`] opens the database with today's options.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn new_with_debug_and_limits(
+        config: &Config,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+        read_only: bool,
+        limits: &RocksDbMemoryLimits,
     ) -> Result<Self, StateInitError> {
         #[cfg(feature = "elasticsearch")]
         let elastic_db = if enable_elastic_db {
@@ -248,7 +310,7 @@ impl FinalizedState {
             None
         };
 
-        let db = ZebraDb::new(
+        let db = ZebraDb::new_with_limits(
             config,
             STATE_DATABASE_KIND,
             &state_database_format_version_in_code(),
@@ -258,6 +320,7 @@ impl FinalizedState {
                 .iter()
                 .map(ToString::to_string),
             read_only,
+            limits,
         )?;
 
         #[cfg(feature = "elasticsearch")]

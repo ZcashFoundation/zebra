@@ -1,0 +1,9 @@
+project: zebra-state
+kind: Added
+body: >-
+  Added `RocksDbMemoryLimits`, which bounds the state database's memtable total, per-column-family
+  memtable shape, block cache size and index/filter charging on the read-path column families
+  (`READ_PATH_COLUMN_FAMILIES`), and `FinalizedState::new_with_limits` and
+  `ZebraDb::new_with_limits` to open the database with those bounds. The default limits keep
+  today's database options.
+time: 2026-11-06T11:34:00Z
