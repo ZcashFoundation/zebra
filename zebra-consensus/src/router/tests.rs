@@ -2,7 +2,13 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
@@ -55,8 +61,13 @@ fn init_preloads_halo2_keys_without_waiting() {
                     _ => panic!("unexpected state request during initialization"),
                 })
             });
-            let read_state = tower::service_fn(|_: zs::ReadRequest| async {
-                Err::<zs::ReadResponse, BoxError>("unexpected read during initialization".into())
+            let read_state = tower::service_fn(|request: zs::ReadRequest| async move {
+                Ok::<_, BoxError>(match request {
+                    zs::ReadRequest::HistoryCapabilities => {
+                        zs::ReadResponse::HistoryCapabilities(zs::HistoryCapabilities::default())
+                    }
+                    _ => panic!("unexpected read during initialization"),
+                })
             });
             let (_test_router, _test_transaction, test_handles, _, _) =
                 init_test(Config::default(), &Network::Mainnet, state, read_state).await;
@@ -572,4 +583,73 @@ async fn state_checkpoint_validation_starts_at_the_snapshot_window() {
     })
     .await
     .expect("the test finishes in time");
+}
+
+/// Snapshot metadata that an archive default would lose.
+fn snapshot_history_capabilities() -> zs::HistoryCapabilities {
+    let base = zs::SnapshotBase {
+        window_start: Height(41),
+        height: Height(42),
+        block_hash: block::Hash([1; 32]),
+        manifest: zebra_chain::state_snapshot::ObjectHash([2; 32]),
+        deferred_checks: 0,
+    };
+    zs::HistoryCapabilities {
+        lowest_retained_height: Height(41),
+        lowest_known_height: Height(41),
+        snapshot_base: Some(base),
+    }
+}
+
+/// A local capability-read error is retried, and the eventual snapshot floor and marker are kept.
+#[tokio::test(start_paused = true)]
+async fn history_capability_errors_are_retried_without_archive_fallback() {
+    let expected = snapshot_history_capabilities();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let read_state = tower::service_fn(move |request| {
+        let attempts = attempts.clone();
+        async move {
+            assert!(matches!(request, zs::ReadRequest::HistoryCapabilities));
+            if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err("injected history read failure".into())
+            } else {
+                Ok::<_, BoxError>(zs::ReadResponse::HistoryCapabilities(expected))
+            }
+        }
+    });
+
+    let history = tokio::time::timeout(
+        Duration::from_secs(60),
+        read_history_capabilities(&read_state),
+    )
+    .await
+    .expect("the retry finishes in time");
+    assert_eq!(history, expected);
+}
+
+/// A timed-out capability read is also retried, rather than starting checkpoint validation with
+/// archive assumptions.
+#[tokio::test(start_paused = true)]
+async fn history_capability_timeouts_are_retried_without_archive_fallback() {
+    let expected = snapshot_history_capabilities();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let read_state = tower::service_fn(move |request| {
+        let attempts = attempts.clone();
+        async move {
+            assert!(matches!(request, zs::ReadRequest::HistoryCapabilities));
+            if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                std::future::pending::<Result<zs::ReadResponse, BoxError>>().await
+            } else {
+                Ok(zs::ReadResponse::HistoryCapabilities(expected))
+            }
+        }
+    });
+
+    let history = tokio::time::timeout(
+        Duration::from_secs(60),
+        read_history_capabilities(&read_state),
+    )
+    .await
+    .expect("the retry finishes in time");
+    assert_eq!(history, expected);
 }
