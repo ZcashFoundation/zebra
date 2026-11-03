@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Updated the `pulldown-cmark` build dependency (reached through `prost-build`) to 0.13.6, which
+  resolves RUSTSEC-2026-0433; it is only used while generating gRPC code at build time.
+time: 2026-11-03T11:54:59Z
