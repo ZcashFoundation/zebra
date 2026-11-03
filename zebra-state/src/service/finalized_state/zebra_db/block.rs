@@ -45,7 +45,7 @@ use crate::{
         zebra_db::{metrics::block_precommit_metrics, spentness::SpentnessWriter, ZebraDb},
         FromDisk, IntoDisk, RawBytes,
     },
-    HashOrHeight,
+    HashOrHeight, HistoryCapabilities,
 };
 
 #[cfg(feature = "indexer")]
@@ -337,8 +337,25 @@ impl ZebraDb {
 
     /// Classifies missing transaction bytes without treating a torn secondary view as pruned.
     fn missing_body_error(&self, height: Height) -> Option<BlockReadError> {
+        self.missing_history_error(height, |history| history.has_block_body(height))
+    }
+
+    /// Classifies a missing header of an indexed transaction's block: a database imported from
+    /// a state snapshot carries the index of every transaction with an unspent output, but no
+    /// headers below its window (DESIGN §7).
+    fn missing_header_error(&self, height: Height) -> Option<BlockReadError> {
+        self.missing_history_error(height, |history| history.knows_block(height))
+    }
+
+    /// Classifies missing block data as unavailable when `available` says the history does not
+    /// cover `height`, and otherwise as corrupt on a primary or torn on a secondary.
+    fn missing_history_error(
+        &self,
+        height: Height,
+        available: impl FnOnce(HistoryCapabilities) -> bool,
+    ) -> Option<BlockReadError> {
         match self.history_capabilities() {
-            Ok(history) if height > Height::MIN && height < history.lowest_retained_height => {
+            Ok(history) if !available(history) => {
                 return Some(BlockReadError::BlockBodyUnavailable { height });
             }
             Err(crate::StateInitError::HistoryRead { source, .. })
@@ -423,7 +440,8 @@ impl ZebraDb {
 
     /// Returns a known transaction, its height, and its block time, or `None` for an unknown hash.
     ///
-    /// Missing bytes below the retained-body floor return
+    /// Missing bytes below the retained-body floor, and indexed transactions below the window of
+    /// a database imported from a state snapshot, return
     /// [`BlockReadError::BlockBodyUnavailable`]. Missing retained bytes or metadata return
     /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
     #[allow(clippy::unwrap_in_result)]
@@ -436,11 +454,7 @@ impl ZebraDb {
         };
         let height = location.height;
         let Some(header) = self.block_header(height.into()) else {
-            return if self.db.is_read_only() {
-                Ok(None)
-            } else {
-                Err(BlockReadError::CorruptBlock { height })
-            };
+            return self.missing_header_error(height).map_or(Ok(None), Err);
         };
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
         let Some(tx) = self.db.zs_get(&tx_by_loc, &location) else {
