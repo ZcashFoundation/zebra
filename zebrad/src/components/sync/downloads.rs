@@ -238,9 +238,9 @@ where
     //
     /// Sender that is set to `true` when the downloader is past the lookahead limit.
     /// This is based on the downloaded block height and the state tip height.
-    past_lookahead_limit_sender: Arc<std::sync::Mutex<watch::Sender<bool>>>,
+    past_lookahead_limit_sender: Arc<watch::Sender<bool>>,
 
-    /// Receiver for `past_lookahead_limit_sender`, which is used to avoid accessing the mutex.
+    /// Receiver for `past_lookahead_limit_sender`, which tasks read before deciding to send.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
     // Internal downloads state
@@ -356,9 +356,7 @@ where
             latest_chain_tip,
             lookahead_limit,
             max_checkpoint_height,
-            past_lookahead_limit_sender: Arc::new(std::sync::Mutex::new(
-                past_lookahead_limit_sender,
-            )),
+            past_lookahead_limit_sender: Arc::new(past_lookahead_limit_sender),
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
@@ -528,9 +526,8 @@ where
 
                         // Set the watched value to true, since we're over the limit.
                         //
-                        // It is ok to block here, because we're going to pause new downloads anyway.
-                        // But if Zebra is shutting down, ignore the send error.
-                        let _ = past_lookahead_limit_sender.lock().expect("thread panicked while holding the past_lookahead_limit_sender mutex guard").send(true);
+                        // If Zebra is shutting down, ignore the send error.
+                        let _ = past_lookahead_limit_sender.send(true);
                     } else {
                         debug!(
                             ?hash,
@@ -547,10 +544,10 @@ where
                     metrics::counter!("sync.max.height.limit.paused.count").increment(1);
                 } else if block_height <= lookahead_reset_height && past_lookahead_limit_receiver.cloned_watch_data() {
                     // Reset the watched value to false, since we're well under the limit.
-                    // We need to block here, because if we don't the syncer can hang.
+                    // We need to send here, because if we don't the syncer can hang.
 
                     // But if Zebra is shutting down, ignore the send error.
-                    let _ = past_lookahead_limit_sender.lock().expect("thread panicked while holding the past_lookahead_limit_sender mutex guard").send(false);
+                    let _ = past_lookahead_limit_sender.send(false);
                     metrics::counter!("sync.max.height.limit.reset.count").increment(1);
 
                     metrics::counter!("sync.max.height.limit.reset.attempt.count").increment(1);
@@ -736,13 +733,8 @@ where
 
         // Set the lookahead limit to false, since we're empty (so we're under the limit).
         //
-        // It is ok to block here, because we're doing a reset and sleep anyway.
-        // But if Zebra is shutting down, ignore the send error.
-        let _ = self
-            .past_lookahead_limit_sender
-            .lock()
-            .expect("thread panicked while holding the past_lookahead_limit_sender mutex guard")
-            .send(false);
+        // If Zebra is shutting down, ignore the send error.
+        let _ = self.past_lookahead_limit_sender.send(false);
     }
 
     /// Returns whether an enclosing timeout cancelled a wait for network capacity, and forgets
