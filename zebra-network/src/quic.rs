@@ -35,12 +35,15 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants::HANDSHAKE_TIMEOUT,
-    protocol::v2::{
-        constants::{
-            alpn_protocol_id, MAX_RECORD_PAYLOAD_LEN, MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT,
-            MIN_UNIDIRECTIONAL_STREAMS,
+    protocol::{
+        external::types::PeerServices,
+        v2::{
+            constants::{
+                alpn_protocol_id, MAX_RECORD_PAYLOAD_LEN, MIN_BIDIRECTIONAL_STREAMS,
+                MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
+            },
+            types::ErrorCode,
         },
-        types::ErrorCode,
     },
 };
 
@@ -115,6 +118,33 @@ impl Windows {
         // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
         send: 3 * MAX_RECORD_PAYLOAD_LEN as u64,
     };
+
+    /// The windows of a node that serves synchronization artifacts through
+    /// `get-object` (DESIGN.md §5, "Server"): the default receive windows,
+    /// and a send window of 8 MiB, so that the node's eight concurrent
+    /// object streams can each have a 1 MiB chunk in flight beside its other
+    /// responses.
+    ///
+    /// # Security
+    ///
+    /// The send window still bounds what slow peers keep pinned per
+    /// connection, as [`Windows::DEFAULT`] describes; a serving node accepts
+    /// 2 MiB more of it.
+    pub const SERVING: Windows = Windows {
+        send: 8 << 20,
+        ..Windows::DEFAULT
+    };
+
+    /// The windows of a node advertising `services`: [`Windows::SERVING`]
+    /// when they include `NODE_SYNC_ARTIFACTS`, [`Windows::DEFAULT`]
+    /// otherwise.
+    pub fn for_services(services: PeerServices) -> Windows {
+        if services.contains(PeerServices::NODE_SYNC_ARTIFACTS) {
+            Windows::SERVING
+        } else {
+            Windows::DEFAULT
+        }
+    }
 }
 
 // The parameters above meet the draft's minimums; checked at compile time.
@@ -238,9 +268,18 @@ pub(crate) fn client_config_with_receive_windows(
     client_config(alpn, windows).expect("the client configuration builds")
 }
 
-/// Binds an endpoint for `network` on `addr`; must be called inside a Tokio
-/// runtime, which drives the socket. The server identity is generated here
-/// and lives as long as the endpoint.
+/// Binds an endpoint for `network` on `addr`, with [`Windows::DEFAULT`] as
+/// its connections' flow-control windows; see [`bind_with_windows`], which
+/// the node uses, with the windows for its services.
+#[cfg(test)]
+pub fn bind(network: &Network, addr: SocketAddr) -> Result<Endpoint, EndpointError> {
+    bind_with_windows(network, addr, Windows::DEFAULT)
+}
+
+/// Binds an endpoint for `network` on `addr`, with `windows` as its
+/// connections' flow-control windows; must be called inside a Tokio runtime,
+/// which drives the socket. The server identity is generated here and lives
+/// as long as the endpoint.
 ///
 /// The network is fixed when the endpoint is bound, so every connection it
 /// opens or accepts negotiates the same ALPN identifier, and rustls refuses
@@ -253,24 +292,34 @@ pub(crate) fn client_config_with_receive_windows(
 ///
 /// If called outside a Tokio runtime: tokio panics when the socket is
 /// registered with the runtime.
-pub fn bind(network: &Network, addr: SocketAddr) -> Result<Endpoint, EndpointError> {
+pub fn bind_with_windows(
+    network: &Network,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
     let alpn = alpn_protocol_id(network).ok_or_else(|| EndpointError::NoAlpnIdentifier {
         network: network.clone(),
     })?;
-    let server = server_config(alpn, &rcgen::PKCS_ED25519, Windows::DEFAULT)?;
-    let client = client_config(alpn, Windows::DEFAULT)?;
+    let server = server_config(alpn, &rcgen::PKCS_ED25519, windows)?;
+    new_endpoint(alpn, Some(server), addr, windows)
+}
+
+/// Binds an endpoint on `addr` that dials with `windows` and offers `alpn`,
+/// and accepts connections with `server` if it is given.
+fn new_endpoint(
+    alpn: &'static [u8],
+    server: Option<ServerConfig>,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
+    let client = client_config(alpn, windows)?;
 
     let socket = std::net::UdpSocket::bind(addr).map_err(EndpointError::Bind)?;
     let mut endpoint_config = EndpointConfig::default();
     // QUIC version 1 only (RFC 9000); quinn's default also accepts the pre-standard draft versions.
     endpoint_config.supported_versions(vec![0x0000_0001]);
-    let mut endpoint = Endpoint::new(
-        endpoint_config,
-        Some(server),
-        socket,
-        Arc::new(TokioRuntime),
-    )
-    .map_err(EndpointError::Bind)?;
+    let mut endpoint = Endpoint::new(endpoint_config, server, socket, Arc::new(TokioRuntime))
+        .map_err(EndpointError::Bind)?;
     endpoint.set_default_client_config(client);
     Ok(endpoint)
 }

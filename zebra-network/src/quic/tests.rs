@@ -12,6 +12,8 @@ use rustls::{
 
 use zebra_chain::parameters::{testnet, Network};
 
+use crate::protocol::external::types::PeerServices;
+
 use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, Windows};
 
 /// Every loopback exchange finishes in well under this.
@@ -50,6 +52,40 @@ fn transport_config_caps_the_send_window() {
     let send_window = Windows::DEFAULT.send;
     assert!(
         config.contains(&format!("send_window: {send_window},")),
+        "got {config}"
+    );
+}
+
+/// A node that advertises `NODE_SYNC_ARTIFACTS` gets the serving windows: an
+/// 8 MiB send window and the default receive windows. Any other node gets
+/// the defaults.
+#[test]
+fn serving_nodes_get_a_larger_send_window() {
+    let serving = Windows::for_services(
+        PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS,
+    );
+    assert_eq!(serving, Windows::SERVING);
+    assert_eq!(serving.send, 8 << 20);
+    assert_eq!(serving.stream_receive, Windows::DEFAULT.stream_receive);
+    assert_eq!(
+        serving.connection_receive,
+        Windows::DEFAULT.connection_receive
+    );
+    assert_ne!(serving.send, Windows::DEFAULT.send);
+
+    assert_eq!(
+        Windows::for_services(PeerServices::NODE_NETWORK),
+        Windows::DEFAULT
+    );
+    assert_eq!(
+        Windows::for_services(PeerServices::empty()),
+        Windows::DEFAULT
+    );
+
+    // The window reaches the transport configuration.
+    let config = format!("{:?}", transport_config(Windows::SERVING));
+    assert!(
+        config.contains(&format!("send_window: {},", Windows::SERVING.send)),
         "got {config}"
     );
 }

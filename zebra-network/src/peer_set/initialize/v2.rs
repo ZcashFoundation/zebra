@@ -282,7 +282,9 @@ where
         relay: true,
     };
 
-    let endpoint = match quic::bind(&config.network, listen_addr) {
+    // A node that serves snapshot objects gets the larger send window (DESIGN.md §5, "Server").
+    let windows = quic::Windows::for_services(identity.services);
+    let endpoint = match quic::bind_with_windows(&config.network, listen_addr, windows) {
         Ok(endpoint) => endpoint,
         Err(error) => panic!(
             "Opening the version 2 (QUIC) Zcash protocol endpoint {listen_addr:?} failed: \
