@@ -225,6 +225,11 @@ S::Future: Send + 'static,
 - All external waits need timeouts (network, state, channels)
 - Prefer `tokio::sync::watch` over `Mutex` for shared async state
 - Prefer freshness tracking ("time since last change") to detect stalls
+- A change that adds or alters a protocol on `std` atomics, `Mutex`/`RwLock`, `Arc`
+  strong counts or OS-thread hand-offs needs a loom model in that module's
+  `loom_tests.rs`, with a `#[should_panic]` negative control for each memory-ordering
+  claim; see `book/src/dev/loom-testing.md`. tokio channels, `watch`, `Semaphore` and
+  actor designs are not loom material: keep `start_paused` tests for those.
 
 ### Security
 
@@ -255,6 +260,10 @@ cargo nextest run
 cargo nextest run -p zebrad
 
 # Zebrad test category and GCP profile examples are maintained in zebrad/tests/main.rs.
+
+# Loom models (only built with the cfg; the `loom` profile selects them; same flags as CI)
+RUSTFLAGS="--cfg zebra_loom -C debug-assertions" cargo nextest run --profile loom --release --lib \
+  -p zebra-consensus -p zebra-state -p zebra-network
 ```
 
 ## Metrics & Observability
