@@ -81,10 +81,31 @@ pub(super) const RESPONSE_BYTES_LIMIT: usize = 1_000_000;
 /// One wire request is one legacy `getdata` message's worth of lookups, which
 /// the legacy connection answers with one inbound service call. Batching
 /// keeps a response to a few calls: a `get-blocks` request of
-/// [`MAX_BLOCKS_PER_REQUEST`](crate::protocol::v2::constants::MAX_BLOCKS_PER_REQUEST) missing hashes takes 8, and a `get-tx` request
+/// [`MAX_BLOCKS_PER_REQUEST`](crate::protocol::v2::constants::MAX_BLOCKS_PER_REQUEST) missing hashes takes 12, and a `get-tx` request
 /// of [`MAX_TX_LOOKUPS_PER_RESPONSE`] missing IDs takes 7; the rest of the
 /// limit is for lookups the inbound service answers in part.
 pub(super) const MAX_LOOKUP_CALLS_PER_RESPONSE: usize = 16;
+
+/// How many block hashes of a `get-blocks` request the first inbound service
+/// call looks up; each call the inbound service answers in full doubles the
+/// next one, up to [`BLOCK_LOOKUP_CHUNK`].
+///
+/// # Security
+///
+/// Blocks differ in size by three orders of magnitude, and every block a call
+/// returns is held until the response ends, whether or not the byte budget
+/// lets it be sent. The network layer bounds that read and memory
+/// amplification on its own, whatever inbound service it serves: `zebrad`'s
+/// stops reading at its own byte limit (`GETDATA_SENT_BYTES_LIMIT`) after the
+/// first block of a call, but a generic inbound service may answer every
+/// hash. A first call of one hash answers a request for large blocks with the
+/// one block the budget allows and reads nothing else, and the doubling keeps
+/// a request for small or missing blocks to a few calls. The bound is by
+/// count: the sizes of a call's blocks are unknown before it is made, so a
+/// request that puts small blocks before large ones can still have
+/// [`BLOCK_LOOKUP_CHUNK`] blocks read for one that is sent, once per request;
+/// only the inbound service can bound a call by bytes.
+const FIRST_BLOCK_LOOKUP: usize = 1;
 
 /// The most block hashes of a `get-blocks` request looked up in one inbound
 /// service call: the inbound service's legacy `getdata` block limit
@@ -394,9 +415,10 @@ where
 
 /// Serves a `get-blocks` request, answering each hash in request order.
 ///
-/// The hashes are looked up in request order, [`BLOCK_LOOKUP_CHUNK`]
-/// distinct hashes per inbound service call (see [`LookupCalls`] for how a
-/// call the inbound service answers in part changes the next one), and the
+/// The hashes are looked up in request order, starting with
+/// [`FIRST_BLOCK_LOOKUP`] distinct hashes per inbound service call and
+/// doubling up to [`BLOCK_LOOKUP_CHUNK`] (see [`LookupCalls`] for how a call
+/// the inbound service answers in part changes the next one), and the
 /// entries are written in request order as their answers arrive. An entry is
 /// written as not found only when the inbound service said so. The response
 /// is finished early, which the draft allows, and the requester re-requests
@@ -420,7 +442,7 @@ where
 {
     // `Some(block)` is available, `None` was reported missing.
     let mut answered: HashMap<block::Hash, Option<Arc<Block>>> = HashMap::new();
-    let mut calls = LookupCalls::new(BLOCK_LOOKUP_CHUNK);
+    let mut calls = LookupCalls::new(FIRST_BLOCK_LOOKUP);
     let mut sent: usize = 0;
 
     'entries: for (index, hash) in request.hashes.iter().enumerate() {

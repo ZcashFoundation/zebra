@@ -2456,11 +2456,11 @@ fn all_missing_service(calls: Arc<std::sync::atomic::AtomicUsize>) -> TestServic
 
 /// One `get-blocks` or `get-tx` request makes a few batched inbound service
 /// calls, however many entries it asks for: a maximum request of missing
-/// blocks takes one call per 16 hashes, a maximum request of missing
-/// transactions takes 7 calls for the 25,000 IDs it looks up, and an
-/// inbound service that answers one key per call is asked at most
-/// `MAX_LOOKUP_CALLS_PER_RESPONSE` times, after which the response finishes
-/// early with the entries already written.
+/// blocks takes 12 calls, as its lookups grow from one hash to 16 a call, a
+/// maximum request of missing transactions takes 7 calls for the 25,000 IDs
+/// it looks up, and an inbound service that answers one key per call is
+/// asked at most `MAX_LOOKUP_CALLS_PER_RESPONSE` times, after which the
+/// response finishes early with the entries already written.
 #[tokio::test]
 async fn batch_requests_make_few_lookup_calls() {
     let _init_guard = zebra_test::init();
@@ -2489,7 +2489,7 @@ async fn batch_requests_make_few_lookup_calls() {
         assert!(entries
             .iter()
             .all(|entry| matches!(entry, ObjectResult::NotFound)));
-        assert_eq!(take_calls(), max_blocks / 16);
+        assert_eq!(take_calls(), 12);
 
         let max_txs = crate::protocol::v2::constants::MAX_TXS_PER_REQUEST;
         let txrefs: Vec<_> = (0..max_txs)
@@ -2532,6 +2532,112 @@ async fn batch_requests_make_few_lookup_calls() {
         for (entry, hash) in entries.iter().zip(&small) {
             assert!(matches!(entry, ObjectResult::Found(block) if block.hash() == *hash));
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An inbound service that knows `blocks`, reports every other hash
+/// missing, and records how many hashes each block lookup asks for on
+/// `batch_sizes`.
+fn recording_block_service(
+    blocks: Vec<Arc<Block>>,
+    batch_sizes: tokio::sync::mpsc::UnboundedSender<usize>,
+) -> TestService {
+    let blocks = Arc::new(blocks);
+    BoxCloneService::new(service_fn(move |request: Request| {
+        let blocks = blocks.clone();
+        let batch_sizes = batch_sizes.clone();
+        async move {
+            Ok::<Response, BoxError>(match request {
+                Request::BlocksByHash(hashes) => {
+                    let _ = batch_sizes.send(hashes.len());
+                    Response::Blocks(
+                        hashes
+                            .into_iter()
+                            .map(|hash| match blocks.iter().find(|b| b.hash() == hash) {
+                                Some(block) => InventoryResponse::Available((block.clone(), None)),
+                                None => InventoryResponse::Missing(hash),
+                            })
+                            .collect(),
+                    )
+                }
+                _ => Response::Nil,
+            })
+        }
+    }))
+}
+
+/// A `get-blocks` response looks up one hash in its first inbound service
+/// call, and doubles the lookup after each call the inbound service answers
+/// in full, up to 16 hashes: a maximum request of missing hashes takes 12
+/// calls, and a request whose first block fills the byte budget has that
+/// block alone looked up, not 16 blocks for the one it is sent.
+#[tokio::test]
+async fn block_lookups_grow_from_one_hash() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let blocks = vector_blocks();
+        let (batch_sizes_tx, mut batch_sizes_rx) = tokio::sync::mpsc::unbounded_channel();
+        let service = recording_block_service(blocks.clone(), batch_sizes_tx);
+        let raw = raw_peer_node_with(&network, Some(service)).await;
+        // The lookups are all recorded before the response finishes.
+        let mut take_batch_sizes = || {
+            let mut sizes = Vec::new();
+            while let Ok(size) = batch_sizes_rx.try_recv() {
+                sizes.push(size);
+            }
+            sizes
+        };
+
+        let max_blocks = crate::protocol::v2::constants::MAX_BLOCKS_PER_REQUEST;
+        let made_up: Vec<_> = (0..max_blocks)
+            .map(|index| {
+                let mut hash = [0xEE; 32];
+                // The index of a 128-hash request fits in 8 bytes.
+                hash[..8].copy_from_slice(&(index as u64).to_le_bytes());
+                block::Hash(hash)
+            })
+            .collect();
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: made_up.clone(),
+        });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let entries = read_objects::<_, Block>(&mut recv, max_blocks)
+            .await
+            .expect("a well-formed response");
+        assert_eq!(entries.len(), max_blocks, "every hash is answered");
+        assert_eq!(
+            take_batch_sizes(),
+            [1, 2, 4, 8, 16, 16, 16, 16, 16, 16, 16, 1],
+            "the lookups double up to 16 hashes a call"
+        );
+
+        // A block larger than the budget first: the response is that block alone, and so is
+        // the lookup.
+        let large = blocks
+            .iter()
+            .max_by_key(|block| entry_len(block))
+            .expect("vector blocks")
+            .clone();
+        assert!(entry_len(&large) > RESPONSE_BYTES_LIMIT);
+        let mut hashes = made_up;
+        hashes[0] = large.hash();
+        let request = WireRequest::Blocks(GetBlocks { hashes });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let entries = read_objects::<_, Block>(&mut recv, max_blocks)
+            .await
+            .expect("a well-formed response that finishes early");
+        assert!(
+            matches!(&entries[..], [ObjectResult::Found(found)] if found.hash() == large.hash())
+        );
+        assert_eq!(
+            take_batch_sizes(),
+            [1],
+            "only the block that is sent is looked up"
+        );
     })
     .await
     .expect("the test completes well within the timeout");
