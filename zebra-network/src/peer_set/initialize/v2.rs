@@ -75,6 +75,54 @@ struct Shared<S, C> {
     connection_params: ConnectionParams<S>,
 }
 
+impl<S, C> Shared<S, C>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    /// Returns what the connections of `endpoint` share, and the sender the listener keeps the
+    /// open inbound connections up to date with.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        config: &Config,
+        endpoint: quinn::Endpoint,
+        identity: LocalIdentity,
+        inbound_service: S,
+        inv_collector: broadcast::Sender<InventoryChange>,
+        latest_chain_tip: C,
+        misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
+        reconnection_delay: Duration,
+        inbound_interval: Duration,
+    ) -> (Self, watch::Sender<OpenInbound>) {
+        let (open_inbound_tx, open_inbound) = watch::channel(OpenInbound::new());
+        let shared = Shared {
+            network: config.network.clone(),
+            inbound_limit: config.v2_inbound_connection_limit(),
+            max_connections_per_ip: config.max_connections_per_ip,
+            reconnection_delay,
+            inbound_interval,
+            open_inbound,
+            nonces: NonceRegistry::spawn(config.peerset_total_connection_limit()),
+            minimum_peer_version: MinimumPeerVersion::new(latest_chain_tip, &config.network),
+            // TODO: report version 2 peers to the address book once it records each address's
+            // transport; today the legacy crawler would dial such an entry over TCP.
+            connection_params: ConnectionParams {
+                inbound_service,
+                inv_collector,
+                genesis_hash: config.network.genesis_hash(),
+                misbehavior: MisbehaviorScores::spawn(
+                    misbehavior_tx,
+                    config.peerset_total_connection_limit(),
+                ),
+            },
+            endpoint,
+            identity,
+        };
+        (shared, open_inbound_tx)
+    }
+}
+
 /// The version 2 endpoint this process opened, kept so that shutdown can close it.
 ///
 /// A node opens at most one. Tests that open several keep only the first, and never close it
@@ -198,30 +246,17 @@ where
 
     // The peer set's own limit includes both of these, so it has room for every v2 connection.
     let outbound_limit = config.v2_outbound_connection_limit();
-    let (open_inbound_tx, open_inbound) = watch::channel(OpenInbound::new());
-    let shared = Shared {
-        network: config.network.clone(),
-        inbound_limit: config.v2_inbound_connection_limit(),
-        max_connections_per_ip: config.max_connections_per_ip,
-        reconnection_delay,
-        inbound_interval,
-        open_inbound,
-        nonces: NonceRegistry::spawn(config.peerset_total_connection_limit()),
-        minimum_peer_version: MinimumPeerVersion::new(latest_chain_tip, &config.network),
-        // TODO: report version 2 peers to the address book once it records each address's
-        // transport; today the legacy crawler would dial such an entry over TCP.
-        connection_params: ConnectionParams {
-            inbound_service,
-            inv_collector,
-            genesis_hash: config.network.genesis_hash(),
-            misbehavior: MisbehaviorScores::spawn(
-                misbehavior_tx,
-                config.peerset_total_connection_limit(),
-            ),
-        },
+    let (shared, open_inbound_tx) = Shared::new(
+        &config,
         endpoint,
         identity,
-    };
+        inbound_service,
+        inv_collector,
+        latest_chain_tip,
+        misbehavior_tx,
+        reconnection_delay,
+        inbound_interval,
+    );
 
     // One task for both. The listener runs for the life of the peer set, so its exit is fatal,
     // like the legacy listener's; the peer set aborts the task on shutdown. The dialer returns once
