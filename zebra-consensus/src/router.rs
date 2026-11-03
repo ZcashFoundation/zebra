@@ -69,9 +69,11 @@ mod tests;
 /// memory, but missing slots can significantly slow down Zebra.
 const VERIFIER_BUFFER_BOUND: usize = 5;
 
-/// How long initialization waits for the state's history capabilities, which are a few point
-/// reads, before assuming a complete history.
+/// How long initialization waits for each read of the state's history capabilities.
 const HISTORY_CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long initialization waits before retrying a failed history-capability read.
+const HISTORY_CAPABILITIES_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// The block verifier router routes requests to either the checkpoint verifier or the
 /// semantic block verifier, depending on the maximum checkpoint height.
@@ -476,33 +478,7 @@ where
     // A state imported from a snapshot knows no blocks between genesis and its window start, and
     // may still owe the chain a check of its snapshot block hash (DESIGN §2, §7). Both the
     // checkpoint validation task and the checkpoint verifier need to know.
-    let history = match tokio::time::timeout(
-        HISTORY_CAPABILITIES_TIMEOUT,
-        read_state_service
-            .clone()
-            .oneshot(zs::ReadRequest::HistoryCapabilities),
-    )
-    .await
-    {
-        Ok(Ok(zs::ReadResponse::HistoryCapabilities(history))) => history,
-        Ok(Ok(response)) => {
-            unreachable!("unexpected response type: {response:?} to a history capabilities request")
-        }
-        Ok(Err(error)) => {
-            tracing::warn!(
-                ?error,
-                "failed to read the state's history capabilities: assuming a complete history"
-            );
-            zs::HistoryCapabilities::default()
-        }
-        Err(_elapsed) => {
-            tracing::warn!(
-                ?HISTORY_CAPABILITIES_TIMEOUT,
-                "timed out reading the state's history capabilities: assuming a complete history"
-            );
-            zs::HistoryCapabilities::default()
-        }
-    };
+    let history = read_history_capabilities(&read_state_service).await;
 
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
@@ -654,6 +630,50 @@ where
         max_checkpoint_height,
         prepared_blocks,
     )
+}
+
+/// Reads the state's history capabilities, retrying local errors and timeouts instead of treating a
+/// potentially snapshot-imported database as an archive.
+async fn read_history_capabilities<ReadState>(
+    read_state_service: &ReadState,
+) -> zs::HistoryCapabilities
+where
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
+{
+    loop {
+        match tokio::time::timeout(
+            HISTORY_CAPABILITIES_TIMEOUT,
+            read_state_service
+                .clone()
+                .oneshot(zs::ReadRequest::HistoryCapabilities),
+        )
+        .await
+        {
+            Ok(Ok(zs::ReadResponse::HistoryCapabilities(history))) => return history,
+            Ok(Ok(response)) => {
+                unreachable!(
+                    "unexpected response type: {response:?} to a history capabilities request"
+                )
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    ?error,
+                    "failed to read the state's history capabilities; retrying"
+                );
+            }
+            Err(_elapsed) => {
+                tracing::warn!(
+                    ?HISTORY_CAPABILITIES_TIMEOUT,
+                    "timed out reading the state's history capabilities; retrying"
+                );
+            }
+        }
+        tokio::time::sleep(HISTORY_CAPABILITIES_RETRY_DELAY).await;
+    }
 }
 
 /// Parses the checkpoint list for `network` and `config`.
