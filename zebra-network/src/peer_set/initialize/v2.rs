@@ -408,6 +408,10 @@ where
 /// being dialled. A host's addresses also take turns, so the slot an address frees after its
 /// connection failed or ended can go to another address of the same host.
 ///
+/// An address that was not dialled, because it is banned or already connected to this node,
+/// frees its slot at once, so another address can use the slot, and is not offered a slot again
+/// until its deferral passed, so it is not retried every time a slot is free.
+///
 /// A slot is kept free for each configured host that has not resolved yet, as long as only a
 /// host that already holds a slot could take it, so a host that resolves late still gets a slot
 /// without ending a live connection. Connections that stay up keep their slots, so when there
@@ -421,6 +425,9 @@ pub(super) struct InitialPeerSlots {
     hosts: Vec<(IndexSet<PeerSocketAddr>, usize)>,
     /// The addresses that hold a slot, each with the index of the host it holds the slot for.
     in_slots: IndexMap<PeerSocketAddr, usize>,
+    /// The addresses that are not offered a slot before the given time, because they were not
+    /// dialled when they last held one.
+    deferred: HashMap<PeerSocketAddr, Instant>,
     /// The host whose turn it is among the hosts with the fewest addresses in slots, modulo the
     /// number of hosts.
     next_host: usize,
@@ -436,6 +443,7 @@ impl InitialPeerSlots {
             limit,
             hosts: Vec::new(),
             in_slots: IndexMap::new(),
+            deferred: HashMap::new(),
             next_host: 0,
             unresolved_hosts: 0,
         }
@@ -464,10 +472,27 @@ impl InitialPeerSlots {
         self.in_slots.shift_remove(addr);
     }
 
+    /// Frees the slot that `addr` holds, if any, and does not offer `addr` a slot again before
+    /// `until`: the address was not dialled, so another address can use the slot meanwhile.
+    pub(super) fn defer(&mut self, addr: PeerSocketAddr, until: Instant) {
+        self.in_slots.shift_remove(&addr);
+        self.deferred.insert(addr, until);
+    }
+
+    /// Returns the earliest time a deferred address is offered a slot again, if any address is
+    /// deferred.
+    pub(super) fn next_deferral_end(&self) -> Option<Instant> {
+        self.deferred.values().min().copied()
+    }
+
     /// Gives a free slot to the next address to dial and returns it, or returns `None` if every
-    /// slot is taken, every address already holds one, or the free slots are kept for the hosts
-    /// that have not resolved yet.
-    pub(super) fn take_next(&mut self) -> Option<PeerSocketAddr> {
+    /// slot is taken, every address already holds one or is deferred at `now`, or the free slots
+    /// are kept for the hosts that have not resolved yet.
+    pub(super) fn take_next(&mut self, now: Instant) -> Option<PeerSocketAddr> {
+        // Always, so that a passed deferral does not keep its address out of the next slot that
+        // frees, and `next_deferral_end` does not return a time that has passed.
+        self.deferred.retain(|_, until| *until > now);
+
         if self.in_slots.len() >= self.limit || self.hosts.is_empty() {
             return None;
         }
@@ -478,7 +503,7 @@ impl InitialPeerSlots {
         }
 
         // The first host in turn order with the fewest addresses in slots, among the hosts that
-        // have an address without one, and that host's next address without one.
+        // have an address without one that is not deferred, and that host's next such address.
         let mut chosen: Option<(usize, usize)> = None;
         for offset in 0..self.hosts.len() {
             let host = (self.next_host + offset) % self.hosts.len();
@@ -488,7 +513,10 @@ impl InitialPeerSlots {
             let (addrs, next_addr) = &self.hosts[host];
             if let Some(index) = (0..addrs.len())
                 .map(|offset| (next_addr + offset) % addrs.len())
-                .find(|&index| !self.in_slots.contains_key(&addrs[index]))
+                .find(|&index| {
+                    let addr = &addrs[index];
+                    !self.in_slots.contains_key(addr) && !self.deferred.contains_key(addr)
+                })
             {
                 chosen = Some((host, index));
             }
@@ -521,7 +549,10 @@ impl InitialPeerSlots {
 ///
 /// The outbound slots are shared between the configured hosts as
 /// [`InitialPeerSlots`] describes, and an address frees its slot once its
-/// connection failed or ended and the reconnection delay passed.
+/// connection failed or ended and the reconnection delay passed. An address
+/// that is not dialled, because it is banned or already connected to this
+/// node, frees its slot at once, and is offered one again after the
+/// reconnection delay.
 ///
 /// Resolution runs here rather than in `start`, so a slow or failing DNS
 /// lookup does not delay peer set initialization. Returns once there are no
@@ -546,7 +577,7 @@ async fn keep_initial_peers_connected<S, C>(
     // on every attempt, for the progress bar and logs only.
     let mut active_outbound_connections =
         ActiveConnectionCounter::new_counter_with(outbound_limit, "Outbound v2 Connections");
-    let mut attempts: JoinSet<PeerSocketAddr> = JoinSet::new();
+    let mut attempts: JoinSet<Attempt> = JoinSet::new();
     let mut slots = InitialPeerSlots::new(outbound_limit);
     slots.set_unresolved_hosts(hosts.len());
     let mut unresolved = hosts;
@@ -560,6 +591,9 @@ async fn keep_initial_peers_connected<S, C>(
         .is_ok_and(|local_addr| local_addr.is_ipv4());
     // Resolve straight away, then retry whatever did not resolve after the reconnection delay.
     let mut resolve_at = pin!(tokio::time::sleep(Duration::ZERO));
+    // Fires when the earliest deferral ends, so the address is offered a slot again then. It is
+    // reset after every round of dials, and only polled while an address is deferred.
+    let mut deferral_ends = pin!(tokio::time::sleep(Duration::ZERO));
 
     loop {
         tokio::select! {
@@ -596,17 +630,27 @@ async fn keep_initial_peers_connected<S, C>(
             }
             // An attempt returns after its connection ended, or failed, and the reconnection
             // delay has passed, so its slot is free for the next address, which can be the same.
+            // An attempt that did not dial returns at once, and its slot is free for the next
+            // address, but its own address is not offered one until the delay has passed.
             Some(finished) = attempts.join_next(), if !attempts.is_empty() => {
                 // Drain the finished attempt's notifications.
                 active_outbound_connections.update_count();
-                if let Ok(addr) = finished.panic_if_task_has_panicked() {
-                    slots.free(&addr);
+                match finished.panic_if_task_has_panicked() {
+                    Ok(Attempt::Ended(addr)) => slots.free(&addr),
+                    Ok(Attempt::Skipped(addr)) => slots.defer(
+                        addr,
+                        Instant::now() + with_jitter(shared.reconnection_delay),
+                    ),
+                    // A cancelled attempt has no address to free, and the dialer cancels none.
+                    Err(_cancelled) => {}
                 }
             }
+            // A deferred address is offered a slot again once its delay has passed.
+            () = &mut deferral_ends, if slots.next_deferral_end().is_some() => {}
             else => return,
         }
 
-        while let Some(addr) = slots.take_next() {
+        while let Some(addr) = slots.take_next(Instant::now()) {
             attempts.spawn(
                 connect_once(
                     shared.clone(),
@@ -620,6 +664,9 @@ async fn keep_initial_peers_connected<S, C>(
             active_outbound_connections.update_count();
             // Space out connection attempts, like the legacy initial peer dialer.
             tokio::time::sleep(constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL).await;
+        }
+        if let Some(ends_at) = slots.next_deferral_end() {
+            deferral_ends.as_mut().reset(ends_at);
         }
 
         // Each host resolves successfully once, so this logs once per host.
@@ -641,26 +688,36 @@ async fn keep_initial_peers_connected<S, C>(
     }
 }
 
+/// How a connection attempt to a configured peer ended.
+enum Attempt {
+    /// The peer was dialled, and its connection failed or ended, and the reconnection delay has
+    /// passed since: its address can take a slot again at once.
+    Ended(PeerSocketAddr),
+    /// The peer was not dialled, because its IP is banned or it is already connected to this
+    /// node: its slot is free at once, but its address is not offered one again until the
+    /// reconnection delay has passed.
+    Skipped(PeerSocketAddr),
+}
+
 /// Connects to one configured peer and waits until the connection ends, or
 /// the attempt fails, then waits the reconnection delay plus jitter and
-/// returns the address, so its slot can go to the next address to dial.
+/// returns, so its slot can go to the next address to dial.
 ///
 /// If the peer already has an inbound connection to this node, does not dial
 /// it: version 2 connections leave from the listening port, so both
 /// connections would have the same peer set key and per-IP slot, and the peer
-/// set would drop one of them, at each end independently. Waits for that
-/// connection to end, or the reconnection delay, instead.
-///
-/// If the peer's IP is banned, does not dial it either, so a misbehaving
-/// configured peer is not reconnected: waits the reconnection delay and
-/// returns, and the ban is checked again on the next attempt.
+/// set would drop one of them, at each end independently. If the peer's IP is
+/// banned, does not dial it either, so a misbehaving configured peer is not
+/// reconnected. Returns at once in both cases, so the slot does not wait with
+/// the peer, and the dialer checks the peer again after the reconnection
+/// delay.
 async fn connect_once<S, C>(
     shared: Shared<S, C>,
     addr: PeerSocketAddr,
     tracker: ConnectionTracker,
     bans_receiver: watch::Receiver<BanList>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
-) -> PeerSocketAddr
+) -> Attempt
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -673,28 +730,15 @@ where
     // attempt without waiting for the ban list to change.
     if bans_receiver.borrow().is_banned(addr.ip()) {
         tracing::debug!(?addr, "initial v2 peer is banned, not dialling it");
-        // No connection is attempted, so its slot is free while this waits.
-        drop(tracker);
-        tokio::time::sleep(with_jitter(reconnection_delay)).await;
-        return addr;
+        return Attempt::Skipped(addr);
     }
 
-    let mut open_inbound = shared.open_inbound.clone();
-    if open_inbound.borrow().contains_key(&addr) {
+    if shared.open_inbound.borrow().contains_key(&addr) {
         tracing::debug!(
             ?addr,
             "initial v2 peer is already connected to us, not dialling it"
         );
-        // No connection is attempted, so its slot is free while this waits.
-        drop(tracker);
-        // An error means the listener has exited, which ends the whole task anyway.
-        let _ = tokio::time::timeout(
-            reconnection_delay,
-            open_inbound.wait_for(|open| !open.contains_key(&addr)),
-        )
-        .await;
-        tokio::time::sleep(with_jitter(reconnection_delay)).await;
-        return addr;
+        return Attempt::Skipped(addr);
     }
 
     let (exit_tx, exit_rx) = oneshot::channel();
@@ -737,7 +781,7 @@ where
     }
 
     tokio::time::sleep(with_jitter(reconnection_delay)).await;
-    addr
+    Attempt::Ended(addr)
 }
 
 /// Returns `delay` plus a random jitter of up to a quarter of it, so two nodes that dropped each

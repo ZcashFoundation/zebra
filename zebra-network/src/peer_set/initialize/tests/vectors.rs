@@ -3073,6 +3073,48 @@ async fn v2_dialer_skips_banned_initial_peers() {
     dialer_task.abort();
 }
 
+/// A banned configured peer does not hold its outbound slot while it waits for the reconnection
+/// delay: with one slot, the live peer listed after it is dialled at once.
+#[tokio::test]
+async fn v2_dialer_frees_banned_initial_peer_slot_at_once() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // The banned peer is on another loopback address, so the ban does not cover the live peer.
+    // It is never dialled, so nothing needs to listen there.
+    let banned_ip = Ipv4Addr::new(127, 0, 0, 2);
+    let live_addr = free_udp_addr();
+    let banned_addr = SocketAddr::new(banned_ip.into(), live_addr.port());
+    let mut bans = crate::BanList::default();
+    bans.ban(banned_ip.into());
+    let (_bans_tx, bans_rx) = watch::channel(bans);
+
+    let (mut live_rx, live_task) = spawn_v2_node(v2_test_config(live_addr, &[]), no_bans());
+
+    // The banned peer is listed first, so it gets the only slot first. With the production
+    // reconnection delay, a slot held while the banned peer waits would not free in this test.
+    let dialer_config = Config {
+        peerset_initial_target_size: 1,
+        ..v2_test_config(any_udp_addr(), &[banned_addr, live_addr])
+    };
+    assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
+    let (_dialer_rx, dialer_task) = spawn_v2_node_with_delay(
+        dialer_config,
+        bans_rx,
+        constants::MIN_PEER_RECONNECTION_DELAY,
+    );
+
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, live_rx.next())
+        .await
+        .expect("the live configured peer is dialled while the banned one waits")
+        .expect("the listener is running");
+
+    live_task.abort();
+    dialer_task.abort();
+}
+
 /// The version 2 listener refuses connections over its share of the inbound limit.
 #[tokio::test]
 async fn v2_listener_refuses_connections_over_inbound_limit() {
@@ -3185,6 +3227,7 @@ async fn v2_dialer_moves_on_from_unreachable_initial_peer() {
 #[test]
 fn v2_initial_peer_slots_go_to_each_host_before_any_second_address() {
     let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
 
     let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
     let late_host = test_v2_addr(4);
@@ -3192,15 +3235,15 @@ fn v2_initial_peer_slots_go_to_each_host_before_any_second_address() {
     slots.add_host(early_host);
     slots.add_host([late_host]);
 
-    let dialled = [slots.take_next(), slots.take_next()];
+    let dialled = [slots.take_next(now), slots.take_next(now)];
     assert_eq!(dialled, [Some(early_host[0]), Some(late_host)]);
-    assert_eq!(slots.take_next(), None, "both slots are taken");
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
 
     // With more slots than hosts, the early host's other addresses fill them.
     let mut slots = v2::InitialPeerSlots::new(4);
     slots.add_host(early_host);
     slots.add_host([late_host]);
-    let dialled: HashSet<_> = std::iter::from_fn(|| slots.take_next()).collect();
+    let dialled: HashSet<_> = std::iter::from_fn(|| slots.take_next(now)).collect();
     assert_eq!(dialled.len(), 4);
     assert!(dialled.contains(&late_host));
 }
@@ -3210,6 +3253,7 @@ fn v2_initial_peer_slots_go_to_each_host_before_any_second_address() {
 #[test]
 fn v2_initial_peer_slots_rotate_freed_slots() {
     let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
 
     let (first, second) = (test_v2_addr(1), test_v2_addr(2));
 
@@ -3217,42 +3261,47 @@ fn v2_initial_peer_slots_rotate_freed_slots() {
     let mut slots = v2::InitialPeerSlots::new(1);
     slots.add_host([first]);
     slots.add_host([second]);
-    assert_eq!(slots.take_next(), Some(first));
-    assert_eq!(slots.take_next(), None);
+    assert_eq!(slots.take_next(now), Some(first));
+    assert_eq!(slots.take_next(now), None);
     slots.free(&first);
-    assert_eq!(slots.take_next(), Some(second));
+    assert_eq!(slots.take_next(now), Some(second));
     slots.free(&second);
-    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(now), Some(first));
 
     // One host with two addresses and one slot: the slot alternates between its addresses.
     let mut slots = v2::InitialPeerSlots::new(1);
     slots.add_host([first, second]);
-    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(now), Some(first));
     slots.free(&first);
-    assert_eq!(slots.take_next(), Some(second));
+    assert_eq!(slots.take_next(now), Some(second));
     slots.free(&second);
-    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(now), Some(first));
 
     // One address: it takes the slot again once it freed it.
     let mut slots = v2::InitialPeerSlots::new(2);
     slots.add_host([first]);
-    assert_eq!(slots.take_next(), Some(first));
-    assert_eq!(slots.take_next(), None, "an address holds at most one slot");
+    assert_eq!(slots.take_next(now), Some(first));
+    assert_eq!(
+        slots.take_next(now),
+        None,
+        "an address holds at most one slot"
+    );
     slots.free(&first);
-    assert_eq!(slots.take_next(), Some(first));
+    assert_eq!(slots.take_next(now), Some(first));
 }
 
 /// An address that two configured hosts resolve to holds at most one slot.
 #[test]
 fn v2_initial_peer_slots_dial_a_shared_address_once() {
     let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
 
     let shared = test_v2_addr(1);
     let mut slots = v2::InitialPeerSlots::new(2);
     slots.add_host([shared]);
     slots.add_host([shared]);
-    assert_eq!(slots.take_next(), Some(shared));
-    assert_eq!(slots.take_next(), None);
+    assert_eq!(slots.take_next(now), Some(shared));
+    assert_eq!(slots.take_next(now), None);
 }
 
 /// A host that resolves after the slots are full waits for a slot to free, and then gets it
@@ -3260,19 +3309,20 @@ fn v2_initial_peer_slots_dial_a_shared_address_once() {
 #[test]
 fn v2_initial_peer_slots_late_host_waits_for_a_free_slot() {
     let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
 
     let early_host = [test_v2_addr(1), test_v2_addr(2)];
     let late_host = test_v2_addr(3);
     let mut slots = v2::InitialPeerSlots::new(1);
     slots.add_host(early_host);
-    assert_eq!(slots.take_next(), Some(early_host[0]));
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
 
     slots.add_host([late_host]);
-    assert_eq!(slots.take_next(), None, "the only slot is taken");
+    assert_eq!(slots.take_next(now), None, "the only slot is taken");
     assert!(!slots.holds_slot(&late_host));
 
     slots.free(&early_host[0]);
-    assert_eq!(slots.take_next(), Some(late_host));
+    assert_eq!(slots.take_next(now), Some(late_host));
     assert!(slots.holds_slot(&late_host));
 }
 
@@ -3281,29 +3331,79 @@ fn v2_initial_peer_slots_late_host_waits_for_a_free_slot() {
 #[test]
 fn v2_initial_peer_slots_keep_a_slot_for_each_unresolved_host() {
     let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
 
     let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
     let late_host = test_v2_addr(4);
     let mut slots = v2::InitialPeerSlots::new(2);
     slots.set_unresolved_hosts(1);
     slots.add_host(early_host);
-    assert_eq!(slots.take_next(), Some(early_host[0]));
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
     assert_eq!(
-        slots.take_next(),
+        slots.take_next(now),
         None,
         "the last free slot is kept for the unresolved host"
     );
 
     slots.set_unresolved_hosts(0);
     slots.add_host([late_host]);
-    assert_eq!(slots.take_next(), Some(late_host));
-    assert_eq!(slots.take_next(), None, "both slots are taken");
+    assert_eq!(slots.take_next(now), Some(late_host));
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
 
     // With more unresolved hosts than free slots, each resolved host still gets one slot.
     let mut slots = v2::InitialPeerSlots::new(1);
     slots.set_unresolved_hosts(2);
     slots.add_host(early_host);
-    assert_eq!(slots.take_next(), Some(early_host[0]));
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
+}
+
+/// An address that was not dialled frees its slot at once, so the next host in turn gets it, and
+/// is not offered a slot again until its deferral passed, even while a slot is free.
+#[test]
+fn v2_initial_peer_slots_defer_addresses_that_were_not_dialled() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+    let deferred_until = now + Duration::from_secs(60);
+
+    let (banned, live, waiting) = (test_v2_addr(1), test_v2_addr(2), test_v2_addr(3));
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([banned]);
+    slots.add_host([live]);
+    slots.add_host([waiting]);
+    assert_eq!(slots.take_next(now), Some(banned));
+    assert_eq!(slots.take_next(now), Some(live));
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
+    assert_eq!(slots.next_deferral_end(), None);
+
+    // The banned address is not dialled: its slot goes to the waiting host at once.
+    slots.defer(banned, deferred_until);
+    assert_eq!(slots.next_deferral_end(), Some(deferred_until));
+    assert!(!slots.holds_slot(&banned));
+    assert_eq!(slots.take_next(now), Some(waiting));
+
+    // The waiting host's connection ends: the banned address would be next in turn, but it is
+    // not offered the free slot before its deferral passed, so the slot goes to the waiting host.
+    slots.free(&waiting);
+    assert_eq!(slots.take_next(now), Some(waiting));
+
+    // Once its deferral passed, the banned address is dialled again in turn.
+    slots.free(&waiting);
+    assert_eq!(slots.take_next(deferred_until), Some(banned));
+    assert_eq!(slots.next_deferral_end(), None);
+
+    // A deferred address is not offered a free slot even when it is the only address without one.
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([banned]);
+    slots.add_host([live]);
+    assert_eq!(slots.take_next(now), Some(banned));
+    assert_eq!(slots.take_next(now), Some(live));
+    slots.defer(banned, deferred_until);
+    assert_eq!(
+        slots.take_next(now),
+        None,
+        "the only free address is deferred"
+    );
+    assert_eq!(slots.take_next(deferred_until), Some(banned));
 }
 
 /// The initial version 2 peers resolve by host, so each host's addresses stay together and share
@@ -3507,6 +3607,18 @@ fn spawn_v2_node(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
+    spawn_v2_node_with_delay(config, bans_receiver, V2_TEST_RECONNECTION_DELAY)
+}
+
+/// [`spawn_v2_node`], redialling configured peers after `reconnection_delay` plus jitter.
+fn spawn_v2_node_with_delay(
+    config: Config,
+    bans_receiver: watch::Receiver<crate::BanList>,
+    reconnection_delay: Duration,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
     let (peerset_tx, peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
     let (inv_collector, _) = broadcast::channel(16);
     // These tests do not check misbehavior reports; a closed channel drops them.
@@ -3520,7 +3632,7 @@ fn spawn_v2_node(
         bans_receiver,
         misbehavior_tx,
         peerset_tx,
-        V2_TEST_RECONNECTION_DELAY,
+        reconnection_delay,
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
     )
     .expect("version 2 test configs listen");
