@@ -12,7 +12,7 @@ use rustls::{
 
 use zebra_chain::parameters::{testnet, Network};
 
-use super::{bind, connect, tls, ConnectError, EndpointError};
+use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, SEND_WINDOW};
 
 /// Every loopback exchange finishes in well under this.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,6 +42,17 @@ async fn accept_one(endpoint: &Endpoint) -> Result<Connection, quinn::Connection
 
 /// Neither configuration permits 0-RTT. These are the rustls defaults; the
 /// draft makes them a MUST, so this test pins them.
+/// Each connection's send buffer is capped at [`SEND_WINDOW`], not quinn's
+/// larger default.
+#[test]
+fn transport_config_caps_the_send_window() {
+    let config = format!("{:?}", transport_config());
+    assert!(
+        config.contains(&format!("send_window: {SEND_WINDOW},")),
+        "got {config}"
+    );
+}
+
 #[test]
 fn configurations_disable_early_data() {
     let server = tls::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");

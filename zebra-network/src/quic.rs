@@ -76,6 +76,24 @@ const STREAM_RECEIVE_WINDOW: u32 = (2 * MAX_RECORD_PAYLOAD_LEN) as u32;
 /// for the bulk stream types.
 const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
 
+/// The most bytes this node keeps buffered for sending on one connection,
+/// across all its streams, until the peer acknowledges them: 6 MiB, about
+/// two of the largest responses this node sends (a `get-blocks` response is
+/// at most a 1 MB byte budget plus one 2 MiB block), or two maximum-size
+/// announcement records with room to spare.
+///
+/// # Security
+///
+/// A peer that grants flow-control credit but acknowledges or reads slowly
+/// keeps what this node wrote buffered here. With quinn's 10 MB default, the
+/// requests a peer can repeat cheaply every request deadline could keep
+/// that much pinned per connection; the request deadline bounds how long
+/// one response holds its objects, and this bounds the bytes it has
+/// written. A connection's response memory is at most this window plus
+/// the objects of the requests being served.
+// `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
+const SEND_WINDOW: u64 = 3 * MAX_RECORD_PAYLOAD_LEN as u64;
+
 // The parameters above meet the draft's minimums; checked at compile time.
 const _: () = {
     assert!(KEEP_ALIVE_INTERVAL.as_millis() * 2 <= MIN_IDLE_TIMEOUT.as_millis());
@@ -141,6 +159,7 @@ fn transport_config() -> TransportConfig {
         .keep_alive_interval(Some(KEEP_ALIVE_INTERVAL))
         .stream_receive_window(VarInt::from_u32(STREAM_RECEIVE_WINDOW))
         .receive_window(VarInt::from_u32(CONNECTION_RECEIVE_WINDOW))
+        .send_window(SEND_WINDOW)
         // The draft does not use datagrams: do not advertise them, and buffer none.
         .datagram_receive_buffer_size(None)
         .datagram_send_buffer_size(0)
