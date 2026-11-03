@@ -42,7 +42,7 @@ use crate::{
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::check,
-    CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
+    CheckpointVerifiedBlock, Config, SnapshotBase, StateInitError, ValidateContextError,
 };
 
 pub mod column_family;
@@ -365,6 +365,68 @@ impl FinalizedState {
         result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
     }
 
+    /// Runs the checks a state snapshot import deferred to the first commit above the snapshot
+    /// height `H` (DESIGN §2), and returns the marker to write with the block when one of them
+    /// is discharged.
+    ///
+    /// Block `H + 1`'s `hashBlockCommitments` is
+    /// `BLAKE2b-256("ZcashBlockCommit", history_root(H) ‖ authDataRoot(H + 1) ‖ [0u8; 32])`, so
+    /// recomputing it verifies the snapshot's history tree: a mismatch rejects the block like any
+    /// other invalid commitment. A checkpoint-verified `H + 1` was hash-chained from the next
+    /// checkpoint back to `hash(H)` by the checkpoint verifier, which discharges a deferred
+    /// `hash(H)` check; a semantically verified one leaves it pending.
+    fn deferred_snapshot_checks(
+        &self,
+        finalized: &FinalizedBlock,
+        checkpoint_verified: bool,
+    ) -> Result<Option<SnapshotBase>, ValidateContextError> {
+        let Some(base) = self
+            .db
+            .snapshot_base()
+            .filter(|base| base.deferred_checks != 0)
+            .filter(|base| base.height.next().ok() == Some(finalized.height))
+        else {
+            return Ok(None);
+        };
+        let mut checked = base;
+        if base.has_deferred(SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS) {
+            // The finalized tip is `H`, so its history tree is this block's parent tree.
+            check::block_commitment_is_valid_for_chain_history(
+                finalized.block.clone(),
+                &self.network(),
+                &self.db.history_tree(),
+                None,
+            )
+            .map_err(|error| {
+                tracing::error!(
+                    snapshot_height = ?base.height,
+                    snapshot_hash = ?base.block_hash,
+                    block_hash = ?finalized.hash,
+                    ?error,
+                    "state snapshot: the block after the snapshot height does not commit to the \
+                     snapshot's history tree, so the snapshot's trees are invalid"
+                );
+                error
+            })?;
+            checked.deferred_checks &= !SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
+            tracing::info!(
+                snapshot_height = ?base.height,
+                block_hash = ?finalized.hash,
+                "state snapshot: verified the block after the snapshot height against the \
+                 snapshot's history tree"
+            );
+        }
+        if checkpoint_verified && base.has_deferred(SnapshotBase::DEFERRED_BLOCK_HASH) {
+            checked.deferred_checks &= !SnapshotBase::DEFERRED_BLOCK_HASH;
+            tracing::info!(
+                snapshot_height = ?base.height,
+                snapshot_hash = ?base.block_hash,
+                "state snapshot: the checkpoint chain anchors to the snapshot block hash"
+            );
+        }
+        Ok((checked != base).then_some(checked))
+    }
+
     /// Immediately commit a `finalized` block to the finalized state.
     ///
     /// This can be called either by the non-finalized state (when finalizing
@@ -402,6 +464,7 @@ impl FinalizedState {
         source: &str,
         spentness: Option<&mut SpentnessWriter>,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        let checkpoint_verified = matches!(finalizable_block, FinalizableBlock::Checkpoint { .. });
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
@@ -559,12 +622,14 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
+        let snapshot_base = self.deferred_snapshot_checks(&finalized, checkpoint_verified)?;
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
             &self.network(),
             source,
             spentness,
+            snapshot_base,
         );
 
         if result.is_ok() {

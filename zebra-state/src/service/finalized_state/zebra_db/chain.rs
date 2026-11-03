@@ -226,6 +226,18 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
+    // Snapshot base methods
+
+    /// Replaces the snapshot base marker, which records the checks a snapshot import deferred.
+    ///
+    /// The batch must be written to the database by the caller.
+    pub(crate) fn update_snapshot_base(&mut self, db: &ZebraDb, base: &SnapshotBase) {
+        let _ = db
+            .snapshot_base_cf()
+            .with_batch_for_writing(self)
+            .zs_insert(&(), base);
+    }
+
     // History tree methods
 
     /// Updates the history tree for the tip, if it is not empty.

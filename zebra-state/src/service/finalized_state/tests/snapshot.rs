@@ -10,9 +10,12 @@ use zebra_chain::{
 use super::super::{DiskWriteBatch, FinalizedState, TransactionLocation, WriteDisk};
 use crate::{
     service::{non_finalized_state::Chain, read},
-    tests::snapshot_db::{
-        append, carve, commit_child, config, open, snapshot_state, spend_coinbase_of, write_marker,
-        Coinbase, RETENTION,
+    tests::{
+        snapshot_db::{
+            append, carve, commit_child, config, open, snapshot_state, spend_coinbase_of,
+            write_marker, Coinbase, RETENTION,
+        },
+        FakeChainHelper,
     },
     BlockReadError, HistoryCapabilities, SnapshotBase, StateInitError,
 };
@@ -174,6 +177,112 @@ fn reads_below_the_snapshot_window_are_unavailable() {
     assert_eq!(
         read::spent_outputs_for_block(no_chain, &state.db, spending.hash().into()).unwrap(),
         Some(HashMap::new())
+    );
+}
+
+/// Builds a snapshot database with both deferred checks pending, and the valid block `H + 1`.
+fn snapshot_with_deferred_checks(
+    cache_dir: std::path::PathBuf,
+) -> (FinalizedState, SnapshotBase, Arc<zebra_chain::block::Block>) {
+    use crate::tests::snapshot_db::{child, tip_history_root};
+
+    let (state, base) = snapshot_state(
+        cache_dir,
+        TIP,
+        WINDOW_START,
+        Coinbase::Branched,
+        SnapshotBase::DEFERRED_BLOCK_HASH | SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS,
+    );
+    let tip = state.db.tip_block().unwrap().unwrap();
+    let successor = child(
+        &tip,
+        tip_history_root(&state.db),
+        Coinbase::Branched,
+        vec![],
+    );
+    (state, base, successor)
+}
+
+#[test]
+fn checkpoint_commit_above_the_snapshot_discharges_both_deferred_checks() {
+    use crate::{CheckpointVerifiedBlock, ValidateContextError};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (mut state, base, successor) = snapshot_with_deferred_checks(cache.path().to_path_buf());
+
+    // A successor that does not commit to the snapshot's history tree is rejected, and the
+    // marker keeps both checks pending.
+    let tampered = successor.clone().set_block_commitment([0xaa; 32]);
+    let error = state
+        .commit_finalized_direct(
+            CheckpointVerifiedBlock::from(tampered).into(),
+            None,
+            "deferred snapshot checks test",
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.inner(),
+            crate::CommitBlockError::ValidateContextError(inner)
+                if matches!(**inner, ValidateContextError::InvalidBlockCommitment(_))
+        ),
+        "unexpected error: {error}"
+    );
+    assert_eq!(state.db.finalized_tip_height(), Some(base.height));
+    assert_eq!(state.db.snapshot_base(), Some(base));
+
+    // The valid successor commits, verifying the history tree and, because the checkpoint
+    // verifier anchored it to `hash(H)`, the snapshot block hash too.
+    state
+        .commit_finalized_direct(
+            CheckpointVerifiedBlock::from(successor.clone()).into(),
+            None,
+            "deferred snapshot checks test",
+        )
+        .unwrap();
+    let discharged = SnapshotBase {
+        deferred_checks: 0,
+        ..base
+    };
+    assert_eq!(state.db.finalized_tip_height(), Some(Height(TIP + 1)));
+    assert_eq!(state.db.snapshot_base(), Some(discharged));
+    assert_eq!(
+        state.db.history_capabilities().unwrap().snapshot_base,
+        Some(discharged)
+    );
+
+    // Later commits leave the marker alone.
+    commit_child(&mut state, Coinbase::Branched, vec![]);
+    assert_eq!(state.db.snapshot_base(), Some(discharged));
+}
+
+#[test]
+fn contextual_commit_above_the_snapshot_leaves_the_block_hash_check_pending() {
+    use crate::{arbitrary::Prepare, service::non_finalized_state::NonFinalizedState};
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (mut state, base, successor) = snapshot_with_deferred_checks(cache.path().to_path_buf());
+
+    let mut non_finalized = NonFinalizedState::new(&crate::tests::snapshot_db::network());
+    non_finalized
+        .commit_new_chain(successor.prepare(), &state.db)
+        .unwrap();
+    state
+        .commit_finalized_direct(
+            non_finalized.finalize(),
+            None,
+            "deferred snapshot checks test",
+        )
+        .unwrap();
+    assert_eq!(state.db.finalized_tip_height(), Some(Height(TIP + 1)));
+    assert_eq!(
+        state.db.snapshot_base(),
+        Some(SnapshotBase {
+            deferred_checks: SnapshotBase::DEFERRED_BLOCK_HASH,
+            ..base
+        })
     );
 }
 

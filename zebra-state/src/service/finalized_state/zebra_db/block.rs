@@ -45,7 +45,7 @@ use crate::{
         zebra_db::{metrics::block_precommit_metrics, spentness::SpentnessWriter, ZebraDb},
         FromDisk, IntoDisk, RawBytes,
     },
-    HashOrHeight, HistoryCapabilities,
+    HashOrHeight, HistoryCapabilities, SnapshotBase,
 };
 
 #[cfg(feature = "indexer")]
@@ -607,6 +607,9 @@ impl ZebraDb {
     /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from computing the block's chain value balance change or
     ///   from applying the change to the chain value balance
+    ///
+    /// `snapshot_base` is written in the block's batch when the commit discharged a check that
+    /// a state snapshot import deferred, so the marker and the block land atomically.
     #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn write_block(
         &mut self,
@@ -615,6 +618,7 @@ impl ZebraDb {
         network: &Network,
         source: &str,
         spentness: Option<&mut SpentnessWriter>,
+        snapshot_base: Option<SnapshotBase>,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -776,6 +780,9 @@ impl ZebraDb {
             self.finalized_value_pool(),
             prev_note_commitment_trees,
         )?;
+        if let Some(base) = snapshot_base {
+            batch.update_snapshot_base(self, &base);
+        }
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
