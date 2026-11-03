@@ -26,8 +26,8 @@ use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
 use rocksdb::{
-    Cache, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions, WriteBufferManager,
-    DEFAULT_COLUMN_FAMILY_NAME,
+    statistics::Ticker, Cache, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions,
+    WriteBufferManager, DEFAULT_COLUMN_FAMILY_NAME,
 };
 use semver::Version;
 use zebra_chain::{
@@ -77,6 +77,86 @@ const MIB: u64 = 1024 * 1024;
 /// A size this process cannot address is no bound at all, so it saturates.
 fn memory_size(bytes: u64) -> usize {
     usize::try_from(bytes).unwrap_or(usize::MAX)
+}
+
+/// Converts a memory size RocksDB's getters return into the `u64` the limits and gauges use.
+fn memory_bytes(size: usize) -> u64 {
+    u64::try_from(size).unwrap_or(u64::MAX)
+}
+
+/// A sample of the database's memory use and write stalls, read from RocksDB.
+///
+/// [`DiskDb::export_metrics`] exports it as gauges, zebrad compares it with its memory plan,
+/// and the memory limit tests assert on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RocksDbMemorySample {
+    /// The heap memory of the open table readers, summed over the column families
+    /// (`rocksdb.estimate-table-readers-mem`). It includes the index and filter blocks that are
+    /// not charged to the block cache, which stay pinned for the process lifetime.
+    pub table_readers_bytes: u64,
+
+    /// The memtables waiting to be flushed, summed over the column families
+    /// (`rocksdb.num-immutable-mem-table`).
+    pub immutable_memtables: u64,
+
+    /// The column families with a flush pending (`rocksdb.mem-table-flush-pending`).
+    pub memtable_flush_pending: u64,
+
+    /// The block cache shared by Zebra's column families.
+    pub block_cache: Option<BlockCacheSample>,
+
+    /// The write buffer manager, when the database was opened with one.
+    pub write_buffer_manager: Option<WriteBufferManagerSample>,
+
+    /// True while RocksDB has stopped every write (`rocksdb.is-write-stopped`).
+    ///
+    /// A stop blocks the single write queue, which is the state writer thread.
+    pub write_stopped: bool,
+
+    /// The rate writes are being delayed to, in bytes per second, or 0 when writes are not
+    /// delayed (`rocksdb.actual-delayed-write-rate`).
+    pub delayed_write_rate: u64,
+
+    /// The statistics tickers, when the limits collect statistics.
+    pub statistics: Option<RocksDbStatisticsSample>,
+}
+
+/// The block cache's usage and capacity, read through one of Zebra's column families.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlockCacheSample {
+    /// The bytes in the cache (`rocksdb.block-cache-usage`).
+    pub usage_bytes: u64,
+
+    /// The bytes pinned in the cache by open iterators and pinned index and filter blocks
+    /// (`rocksdb.block-cache-pinned-usage`).
+    pub pinned_bytes: u64,
+
+    /// The cache capacity (`rocksdb.block-cache-capacity`), which is not a strict limit.
+    pub capacity_bytes: u64,
+}
+
+/// The write buffer manager's usage against its total.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WriteBufferManagerSample {
+    /// The memtable memory the manager counts, mutable and immutable.
+    pub usage_bytes: u64,
+
+    /// The total the manager flushes above. Advisory: the usage can exceed it while a flush
+    /// runs.
+    pub total_bytes: u64,
+}
+
+/// The statistics tickers behind the cache and stall gauges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RocksDbStatisticsSample {
+    /// The total time writers have been stalled, in microseconds (`rocksdb.stall.micros`).
+    pub stall_micros: u64,
+
+    /// The index and filter block cache hits of the charged column families.
+    pub index_and_filter_cache_hits: u64,
+
+    /// The index and filter block cache misses of the charged column families.
+    pub index_and_filter_cache_misses: u64,
 }
 
 /// Memory bounds for the finalized state's RocksDB database.
@@ -842,6 +922,7 @@ impl DiskDb {
         let mut total_size_on_disk = 0;
         let mut total_live_size_on_disk = 0;
         let mut total_size_in_mem = 0;
+        let mut total_table_readers_size: u64 = 0;
         let db: &Arc<DB> = &self.db;
         let mut column_families_log_string = String::from("");
 
@@ -864,6 +945,12 @@ impl DiskDb {
                 .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
                 .unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
+            let table_readers_size = db
+                .property_int_value_cf(cf_handle, "rocksdb.estimate-table-readers-mem")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            total_table_readers_size = total_table_readers_size.saturating_add(table_readers_size);
 
             write!(
                 column_families_log_string,
@@ -887,6 +974,11 @@ impl DiskDb {
         info!(
             "Total Database Memory Size: {}",
             human_bytes::human_bytes(total_size_in_mem as f64)
+        );
+        // The `as f64` conversion is exact: table reader memory is far below 2^53 bytes.
+        info!(
+            "Total Table Readers Memory Size: {}",
+            human_bytes::human_bytes(total_table_readers_size as f64)
         );
     }
 
@@ -955,8 +1047,45 @@ impl DiskDb {
             metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
         }
 
-        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
-            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
+        // Memory and write stall metrics. The `as f64` conversions are exact: these are byte
+        // and item counts far below 2^53.
+        let sample = self.memory_sample();
+        metrics::gauge!("zebra.state.rocksdb.table_readers_bytes")
+            .set(sample.table_readers_bytes as f64);
+        metrics::gauge!("zebra.state.rocksdb.immutable_memtables")
+            .set(sample.immutable_memtables as f64);
+        metrics::gauge!("zebra.state.rocksdb.memtable_flush_pending")
+            .set(sample.memtable_flush_pending as f64);
+        metrics::gauge!("zebra.state.rocksdb.write_stopped").set(if sample.write_stopped {
+            1.0
+        } else {
+            0.0
+        });
+        metrics::gauge!("zebra.state.rocksdb.delayed_write_rate")
+            .set(sample.delayed_write_rate as f64);
+
+        if let Some(cache) = sample.block_cache {
+            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes")
+                .set(cache.usage_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.block_cache_pinned_bytes")
+                .set(cache.pinned_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.block_cache_capacity_bytes")
+                .set(cache.capacity_bytes as f64);
+        }
+
+        if let Some(manager) = sample.write_buffer_manager {
+            metrics::gauge!("zebra.state.rocksdb.write_buffer_usage_bytes")
+                .set(manager.usage_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.write_buffer_total_bytes")
+                .set(manager.total_bytes as f64);
+        }
+
+        if let Some(statistics) = sample.statistics {
+            metrics::counter!("zebra.state.rocksdb.block_cache_index_filter", "result" => "hit")
+                .absolute(statistics.index_and_filter_cache_hits);
+            metrics::counter!("zebra.state.rocksdb.block_cache_index_filter", "result" => "miss")
+                .absolute(statistics.index_and_filter_cache_misses);
+            metrics::counter!("zebra.state.rocksdb.stall_micros").absolute(statistics.stall_micros);
         }
 
         // Level-by-level file counts (RocksDB typically has up to 7 levels)
@@ -1714,6 +1843,81 @@ impl DiskDb {
         info!(?limits, "applied new memory limits to the state database");
 
         Ok(())
+    }
+
+    /// Returns a sample of the database's memory use and write stalls.
+    ///
+    /// Every value is read from RocksDB's properties, the shared memory objects and, when the
+    /// limits collect them, the statistics tickers.
+    pub(crate) fn memory_sample(&self) -> RocksDbMemorySample {
+        let db: &Arc<DB> = &self.db;
+        let property = |name: &str| db.property_int_value(name).ok().flatten().unwrap_or(0);
+        let property_cf = |cf: &rocksdb::ColumnFamily, name: &str| {
+            db.property_int_value_cf(cf, name)
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+        };
+
+        let mut sample = RocksDbMemorySample::default();
+        let column_families = self.column_family_names();
+
+        for cf_name in column_families {
+            let Some(cf) = db.cf_handle(cf_name) else {
+                continue;
+            };
+
+            sample.table_readers_bytes = sample
+                .table_readers_bytes
+                .saturating_add(property_cf(cf, "rocksdb.estimate-table-readers-mem"));
+            sample.immutable_memtables = sample
+                .immutable_memtables
+                .saturating_add(property_cf(cf, "rocksdb.num-immutable-mem-table"));
+            sample.memtable_flush_pending = sample
+                .memtable_flush_pending
+                .saturating_add(property_cf(cf, "rocksdb.mem-table-flush-pending"));
+        }
+
+        // On a newly created database, rust-rocksdb opens the unused `default` column family
+        // with RocksDB's own options and its own cache, because it is not on disk yet; it only
+        // gets Zebra's options from the next open. So the cache Zebra's column families share
+        // is read through one of them.
+        sample.block_cache = column_families
+            .iter()
+            .find(|cf_name| *cf_name != DEFAULT_COLUMN_FAMILY_NAME)
+            .and_then(|cf_name| db.cf_handle(cf_name))
+            .map(|cf| BlockCacheSample {
+                usage_bytes: property_cf(cf, "rocksdb.block-cache-usage"),
+                pinned_bytes: property_cf(cf, "rocksdb.block-cache-pinned-usage"),
+                capacity_bytes: property_cf(cf, "rocksdb.block-cache-capacity"),
+            });
+
+        sample.write_buffer_manager =
+            self.database_options
+                .write_buffer_manager
+                .as_ref()
+                .map(|manager| WriteBufferManagerSample {
+                    usage_bytes: memory_bytes(manager.get_usage()),
+                    total_bytes: memory_bytes(manager.get_buffer_size()),
+                });
+
+        sample.write_stopped = property("rocksdb.is-write-stopped") != 0;
+        sample.delayed_write_rate = property("rocksdb.actual-delayed-write-rate");
+
+        sample.statistics = self.database_options.limits.collects_statistics().then(|| {
+            let options = &self.database_options.options;
+            let ticker = |ticker| options.get_ticker_count(ticker);
+
+            RocksDbStatisticsSample {
+                stall_micros: ticker(Ticker::StallMicros),
+                index_and_filter_cache_hits: ticker(Ticker::BlockCacheIndexHit)
+                    .saturating_add(ticker(Ticker::BlockCacheFilterHit)),
+                index_and_filter_cache_misses: ticker(Ticker::BlockCacheIndexMiss)
+                    .saturating_add(ticker(Ticker::BlockCacheFilterMiss)),
+            }
+        });
+
+        sample
     }
 
     /// Returns the `Path` where the files used by this database are located.
