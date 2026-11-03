@@ -37,7 +37,10 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread::{self, ScopedJoinHandle},
 };
 
@@ -186,6 +189,7 @@ pub(crate) fn export_with_window(
         store,
         height,
         window_start,
+        cancelled: AtomicBool::new(false),
     };
     let components = exporter.export_components()?;
 
@@ -464,6 +468,10 @@ struct Exporter<'a> {
     height: Height,
     /// The first height of the window, `L`.
     window_start: Height,
+    /// Set when a component fails, so the other components stop scanning: the
+    /// export cannot finish, and a refusal known in seconds must not wait for
+    /// hours of reads.
+    cancelled: AtomicBool,
 }
 
 impl Exporter<'_> {
@@ -471,17 +479,21 @@ impl Exporter<'_> {
     /// manifest entries in [`ComponentId::ALL`] order.
     ///
     /// The transaction index components wait for the UTXO set, whose
-    /// transaction locations below the window select their rows.
+    /// transaction locations below the window select their rows. The first
+    /// component to fail stops the others, and its error is returned.
     fn export_components(&self) -> Result<Vec<ComponentManifest>, SnapshotError> {
         let mut results = BTreeMap::new();
         let mut below_window = 0;
 
         thread::scope(|scope| {
-            let utxos = scope.spawn(|| self.utxos());
+            let utxos = scope.spawn(|| self.run(|| self.utxos()));
             let independent: Vec<_> = ComponentId::ALL
                 .into_iter()
                 .filter(|component| !Self::needs_utxos(*component))
-                .map(|component| (component, scope.spawn(move || self.component(component))))
+                .map(|component| {
+                    let handle = scope.spawn(move || self.run(|| self.component(component)));
+                    (component, handle)
+                })
                 .collect();
 
             match join(utxos) {
@@ -494,11 +506,11 @@ impl Exporter<'_> {
                     let locations = Arc::new(locations);
                     let hash_by_tx_loc = {
                         let locations = Arc::clone(&locations);
-                        scope.spawn(move || self.hash_by_tx_loc(&locations))
+                        scope.spawn(move || self.run(|| self.hash_by_tx_loc(&locations)))
                     };
                     let tx_loc_by_hash = {
                         let locations = Arc::clone(&locations);
-                        scope.spawn(move || self.tx_loc_by_hash(&locations))
+                        scope.spawn(move || self.run(|| self.tx_loc_by_hash(&locations)))
                     };
                     results.insert(ComponentId::HashByTxLoc, join(hash_by_tx_loc));
                     results.insert(ComponentId::TxLocByHash, join(tx_loc_by_hash));
@@ -514,24 +526,36 @@ impl Exporter<'_> {
         });
 
         // A failed UTXO set stops the transaction index, so its error is reported first, then the
-        // first failure in component order.
-        let utxos = results
-            .remove(&ComponentId::Utxos)
-            .expect("the UTXO set is always exported")?;
-        results.insert(ComponentId::Utxos, Ok(utxos));
-
+        // first failure in component order. A component that stopped because another failed is
+        // not the failure.
         let mut manifests = BTreeMap::new();
-        for component in ComponentId::ALL {
-            let manifest = results
-                .remove(&component)
-                .expect("every component is exported when the UTXO set is")?;
-            info!(
-                %component,
-                entries = manifest.entry_count,
-                pieces = manifest.pieces.len(),
-                "exported a state snapshot component"
-            );
-            manifests.insert(component, manifest);
+        let mut error: Option<SnapshotError> = None;
+        for component in std::iter::once(ComponentId::Utxos).chain(ComponentId::ALL) {
+            let Some(result) = results.remove(&component) else {
+                continue;
+            };
+            match result {
+                Ok(manifest) => {
+                    info!(
+                        %component,
+                        entries = manifest.entry_count,
+                        pieces = manifest.pieces.len(),
+                        "exported a state snapshot component"
+                    );
+                    manifests.insert(component, manifest);
+                }
+                Err(failure) => {
+                    if error
+                        .as_ref()
+                        .is_none_or(|error| matches!(error, SnapshotError::Cancelled))
+                    {
+                        error = Some(failure);
+                    }
+                }
+            }
+        }
+        if let Some(error) = error {
+            return Err(error);
         }
 
         Self::check_transaction_index(&manifests, below_window)?;
@@ -620,9 +644,25 @@ impl Exporter<'_> {
         }
     }
 
+    /// Runs `export` for one component, stopping the other components if it
+    /// fails.
+    fn run<T>(
+        &self,
+        export: impl FnOnce() -> Result<T, SnapshotError>,
+    ) -> Result<T, SnapshotError> {
+        export().inspect_err(|_| self.cancel())
+    }
+
+    /// Stops the other components' scans: a component failed, so the export
+    /// cannot finish.
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
     /// Calls `row` with each row of the column family `cf` from `from`
     /// (inclusive) to `to` (exclusive), in key order, stopping at its first
-    /// error.
+    /// error, which stops the other components too, or with
+    /// [`SnapshotError::Cancelled`] once another component has failed.
     fn scan(
         &self,
         cf: &'static str,
@@ -637,11 +677,14 @@ impl Exporter<'_> {
 
         iter.seek_to_first();
         while let (Some(key), Some(value)) = (iter.key(), iter.value()) {
-            row(key, value)?;
+            if self.cancelled.load(Ordering::Relaxed) {
+                return Err(SnapshotError::Cancelled);
+            }
+            row(key, value).inspect_err(|_| self.cancel())?;
             iter.next();
         }
         // An iterator reports read errors here, not by ending early.
-        iter.status()?;
+        iter.status().inspect_err(|_| self.cancel())?;
 
         Ok(())
     }
