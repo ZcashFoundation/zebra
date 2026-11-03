@@ -213,6 +213,10 @@ pub(crate) struct StateService {
     max_finalized_queue_height: f64,
 }
 
+/// How long a proposal check waits for the writer or another check to release the prepared chain,
+/// before cloning the published best chain instead.
+const PROPOSAL_PREPARED_WAIT: Duration = Duration::from_millis(20);
+
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
@@ -2220,19 +2224,32 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                // Push onto the prepared chain, replayed to the current tip, instead of cloning
+                // the published best chain. The pushed chain is then prepared for a commit of
+                // this proposal, or for the next proposal.
+                latest_non_finalized_state
+                    .take_prepared_as_spare(Instant::now() + PROPOSAL_PREPARED_WAIT);
                 let hash = semantically_verified.hash;
-                write::validate_and_commit_non_finalized(
+                if let Err(error) = write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
-                )?;
+                ) {
+                    // A spare that the failed validation did not use stays available.
+                    if let Some(spare) = latest_non_finalized_state.remove_spare() {
+                        latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(spare));
+                    }
+                    return Err(error.into());
+                }
 
-                let contextual = latest_non_finalized_state
-                    .find_chain(|chain| chain.contains_block_hash(hash))
-                    .expect("successful proposal validation inserted its block")
+                let chain = latest_non_finalized_state
+                    .remove_chain_with_tip(hash)
+                    .expect("successful proposal validation inserted its block");
+                let contextual = chain
                     .block(hash.into())
                     .expect("the selected chain contains the proposal")
                     .clone();
+                latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(chain));
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 
