@@ -12,7 +12,7 @@ use rustls::{
 
 use zebra_chain::parameters::{testnet, Network};
 
-use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, SEND_WINDOW};
+use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, Windows};
 
 /// Every loopback exchange finishes in well under this.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,13 +42,14 @@ async fn accept_one(endpoint: &Endpoint) -> Result<Connection, quinn::Connection
 
 /// Neither configuration permits 0-RTT. These are the rustls defaults; the
 /// draft makes them a MUST, so this test pins them.
-/// Each connection's send buffer is capped at [`SEND_WINDOW`], not quinn's
-/// larger default.
+/// Each connection's send buffer is capped at the [`Windows`] send window,
+/// not quinn's larger default.
 #[test]
 fn transport_config_caps_the_send_window() {
-    let config = format!("{:?}", transport_config());
+    let config = format!("{:?}", transport_config(Windows::DEFAULT));
+    let send_window = Windows::DEFAULT.send;
     assert!(
-        config.contains(&format!("send_window: {SEND_WINDOW},")),
+        config.contains(&format!("send_window: {send_window},")),
         "got {config}"
     );
 }
@@ -113,7 +114,12 @@ async fn ecdsa_p256_peer_certificates_are_accepted() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let server = Endpoint::server(
-            super::server_config(b"zcash/regtest", &rcgen::PKCS_ECDSA_P256_SHA256).expect("valid"),
+            super::server_config(
+                b"zcash/regtest",
+                &rcgen::PKCS_ECDSA_P256_SHA256,
+                Windows::DEFAULT,
+            )
+            .expect("valid"),
             loopback(),
         )
         .expect("binds");
@@ -139,7 +145,12 @@ async fn other_signature_schemes_are_rejected() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let server = Endpoint::server(
-            super::server_config(b"zcash/regtest", &rcgen::PKCS_ECDSA_P384_SHA384).expect("valid"),
+            super::server_config(
+                b"zcash/regtest",
+                &rcgen::PKCS_ECDSA_P384_SHA384,
+                Windows::DEFAULT,
+            )
+            .expect("valid"),
             loopback(),
         )
         .expect("binds");
