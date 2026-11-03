@@ -24,8 +24,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, MAX_ADDRS_IN_MESSAGE, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
+        self, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
+        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -411,8 +411,12 @@ impl Handler {
                         .iter()
                         .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
+                // Truncate rather than reject: zcashd can add one extra hash to a full
+                // 500-hash response, and a peer can always send 500 junk hashes anyway.
                 Handler::Finished(Ok(Response::BlockHashes(
-                    block_hashes(&items[..]).collect(),
+                    block_hashes(&items[..])
+                        .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
+                        .collect(),
                 )))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
