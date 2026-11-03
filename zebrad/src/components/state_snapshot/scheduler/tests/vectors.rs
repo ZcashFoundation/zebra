@@ -97,6 +97,10 @@ struct Behavior {
     /// Refuses every request.
     refuse: bool,
 
+    /// Refuses a request that arrives while another of the peer's requests is
+    /// in flight, as a server whose request slots are taken does.
+    refuse_when_busy: bool,
+
     /// Refuses the requests that start in these windows of time since the
     /// test started.
     refusing: Vec<(Duration, Duration)>,
@@ -280,19 +284,25 @@ struct CallGuard {
 
     /// The request, as it will be logged.
     call: Call,
+
+    /// Another of the peer's requests was in flight when this one arrived.
+    busy: bool,
 }
 
 impl CallGuard {
     /// Starts logging a request to `peer`.
     fn start(peer: &FakePeer, hash: ObjectHash, offset: u64, length: u32) -> Self {
+        let mut busy = false;
         for counters in [&peer.counters, &peer.all] {
             let in_flight = counters.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             counters
                 .max_in_flight
                 .fetch_max(in_flight, Ordering::SeqCst);
+            busy = in_flight > 1;
         }
         CallGuard {
             peer: peer.clone(),
+            busy,
             call: Call {
                 peer: peer.index,
                 hash,
@@ -358,6 +368,7 @@ impl FakePeer {
         }
         let call_start = guard.call.start;
         if behavior.refuse
+            || (behavior.refuse_when_busy && guard.busy)
             || behavior
                 .refusing
                 .iter()
@@ -1090,7 +1101,8 @@ async fn a_failed_connection_excludes_the_peer() {
 }
 
 /// A peer that refuses every request backs off for 1 second, doubling up to
-/// 30 seconds, and is never excluded or blamed.
+/// 30 seconds, and is never excluded or blamed. It keeps its piece until its
+/// backoff reaches 30 seconds, then gives it up to the other peer.
 #[tokio::test(start_paused = true)]
 async fn a_refusing_peer_backs_off_without_penalty() {
     let _init_guard = zebra_test::init();
@@ -1110,10 +1122,51 @@ async fn a_refusing_peer_backs_off_without_penalty() {
 
     outcome.assert_complete();
     assert!(outcome.blamed.is_empty());
-    let starts: Vec<Duration> = outcome.calls_of(0).iter().map(|call| call.start).collect();
+    let calls = outcome.calls_of(0);
+    let starts: Vec<Duration> = calls.iter().map(|call| call.start).collect();
     let gaps: Vec<Duration> = starts.windows(2).map(|pair| pair[1] - pair[0]).collect();
     assert!(gaps.len() >= 7, "{starts:?}");
     assert_eq!(gaps[..7], [1, 2, 4, 8, 16, 30, 30].map(secs), "{starts:?}");
+
+    // The same piece is asked for until the sixth refusal, at 31 s, reaches the longest backoff;
+    // the other peer downloads it then, and the next piece is asked for after the rest.
+    assert!(calls[..6].iter().all(|call| call.hash == calls[0].hash));
+    assert_ne!(calls[6].hash, calls[0].hash);
+    let taken_over = outcome
+        .calls
+        .iter()
+        .find(|call| call.peer == 1 && call.hash == calls[0].hash)
+        .expect("the other peer downloads the piece");
+    assert_eq!(taken_over.start, secs(32));
+}
+
+/// A refusal is a busy signal: the peer keeps its piece and the sub-range in
+/// flight with the refused one, and is asked for the refused sub-range again
+/// after its backoff, with no penalty.
+#[tokio::test(start_paused = true)]
+async fn a_refused_sub_range_keeps_the_peers_piece() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        latency: ms(100),
+        refuse_when_busy: true,
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[2 * MIB]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    // At 0.1 s one 1 MiB sub-range is delivered and the other refused; the peer rests for 1 s,
+    // then is asked for the refused sub-range alone.
+    let calls = outcome.calls_of(0);
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    let delivered: usize = calls.iter().filter_map(|call| call.delivered).sum();
+    assert_eq!(
+        delivered,
+        usize::try_from(2 * MIB).expect("fits"),
+        "nothing is asked for twice"
+    );
+    assert_eq!(calls[2].start, ms(1_100));
+    assert_eq!(outcome.elapsed, ms(1_200));
 }
 
 /// An answer ends a peer's run of refusals, so its next refusal backs it off
@@ -1636,6 +1689,33 @@ async fn a_slow_peer_is_stalled_across_small_pieces() {
     assert_eq!(starts, [0, 4, 8, 12, 16, 20, 24, 28, 32, 94, 98].map(secs));
     assert!(outcome.calls[8].dropped);
     assert_eq!(outcome.elapsed, secs(102));
+}
+
+/// The rest after a refusal pauses a slow peer's slow window: the time it is
+/// not asked for anything does not count towards the 30 seconds.
+#[tokio::test(start_paused = true)]
+async fn a_refusals_rest_does_not_count_as_slow() {
+    let _init_guard = zebra_test::init();
+
+    // 100 KiB in 4 s is 25 KiB/s; the request at 12 s is refused, at 16 s.
+    let slow = Behavior {
+        latency: secs(4),
+        refusing: vec![(secs(12), secs(13))],
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[100 * KIB; 10]), vec![slow])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    // Below the floor from 4 s, paused from 16 s to 17 s, so stalled at 35 s rather than 34 s,
+    // during the eighth piece, which it downloads again after resting until 95 s.
+    let starts: Vec<Duration> = outcome.calls.iter().map(|call| call.start).collect();
+    assert_eq!(
+        starts,
+        [0, 4, 8, 12, 17, 21, 25, 29, 33, 95, 99, 103].map(secs)
+    );
+    assert_eq!(outcome.elapsed, secs(107));
 }
 
 /// The time a slow peer spends without a download, here waiting to ask again
