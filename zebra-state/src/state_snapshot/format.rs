@@ -812,7 +812,15 @@ impl<R: Read> PieceReader<R> {
     /// Reads a canonical CompactSize, or `None` if the stream ends before it.
     fn compact_size_or_end(&mut self, what: &'static str) -> Result<Option<u64>, FormatError> {
         let mut bytes = [0u8; 9];
-        if self.reader.read(&mut bytes[..1])? == 0 {
+        // The first byte is read on its own, to tell the end of the stream from a record. An
+        // interrupted read is retried, as `read_exact` retries it for the other bytes.
+        let read = loop {
+            match self.reader.read(&mut bytes[..1]) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => break result?,
+            }
+        };
+        if read == 0 {
             return Ok(None);
         }
         let encoded_len = match bytes[0] {
