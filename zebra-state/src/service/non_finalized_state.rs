@@ -6,7 +6,10 @@ use std::{
     collections::{BTreeSet, HashMap},
     mem,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -795,9 +798,10 @@ impl NonFinalizedState {
     ///
     /// The note commitment tree updates take most of a shielded block's commit, and only need the
     /// parent chain's tip trees, so they start first, on this thread. The checks and reads, the
-    /// chain clone, and the other chain updates run on rayon threads at the same time. The history
-    /// tree update needs the new tree roots, so it runs after them. The commit returns the same
-    /// result as running these steps in series: the first error in that order.
+    /// chain clone, and the other chain updates run on rayon threads at the same time. A check that
+    /// precedes the tree update cancels it if that check fails. The history tree update needs the
+    /// new tree roots, so it runs after them. The commit returns the same result as running these
+    /// steps in series: the first error in that order.
     #[tracing::instrument(
         level = "debug",
         skip(self, finalized_state, new_chain, prepared),
@@ -826,6 +830,7 @@ impl NonFinalizedState {
         let mut non_tree_result = None;
         let mut tree_result = None;
         let mut tree_duration = Duration::ZERO;
+        let cancel_tree_update = AtomicBool::new(false);
 
         // Keep the commit's span on the checks and reads, which used to run on this thread.
         let span = tracing::Span::current();
@@ -834,29 +839,44 @@ impl NonFinalizedState {
         let spawned_at = Instant::now();
         rayon::in_place_scope_fifo(|scope| {
             scope.spawn_fifo(|_scope| {
-                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
+                let result = check::block_commitment_is_valid_for_chain_history(
                     block.clone(),
                     network,
                     &parent_history_tree,
                     None,
-                ));
+                );
+                if result.is_err() {
+                    cancel_tree_update.store(true, Ordering::Release);
+                }
+                block_commitment_result = Some(result);
             });
 
             scope.spawn_fifo(|_scope| {
-                non_tree_result = Some(span.in_scope(|| {
+                let result = span.in_scope(|| {
                     Self::validate_and_update_except_trees(
                         network,
                         new_chain,
                         prepared,
                         finalized_state,
                         spawned_at,
+                        &cancel_tree_update,
                     )
-                }));
+                });
+                if result.is_err() {
+                    cancel_tree_update.store(true, Ordering::Release);
+                    #[cfg(test)]
+                    tests::record_early_check_failure();
+                }
+                non_tree_result = Some(result);
             });
 
             // The costliest tree updates run on this thread, and the rest on rayon threads.
             let phase_start = Instant::now();
-            tree_result = Some(trees.update_trees_parallel(&block));
+            #[cfg(test)]
+            tests::wait_for_early_check_failure_before_tree_update();
+            tree_result = Some(trees.update_trees_parallel_with_cancel(&block, || {
+                cancel_tree_update.load(Ordering::Acquire)
+            }));
             tree_duration = phase_start.elapsed();
         });
 
@@ -874,7 +894,10 @@ impl NonFinalizedState {
         } = non_tree_result.expect("scope has finished")?;
         block_commitment_result.expect("scope has finished")?;
         sprout_anchor_result?;
-        tree_result.expect("scope has finished")?;
+        assert!(
+            tree_result.expect("scope has finished")?,
+            "tree updates are cancelled only by an error returned above"
+        );
         chain_updates_result?;
 
         // The history tree commits to the new tree roots.
@@ -995,6 +1018,7 @@ impl NonFinalizedState {
     /// Runs the parts of a block commit that don't need its note commitment trees: the checks and
     /// reads before the chain update, the Sprout anchor checks, the parent chain clone, and the
     /// chain updates other than the trees. `spawned_at` is when the job running this was spawned.
+    /// A failed Sprout anchor check sets `cancel_tree_update`, because it precedes the tree update.
     ///
     /// Returns the first error of the checks before the chain update. The Sprout anchor and chain
     /// update results come later in the commit's error order, so they are returned in the
@@ -1010,6 +1034,7 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
         spawned_at: Instant,
+        cancel_tree_update: &AtomicBool,
     ) -> Result<NonTreeUpdate, ValidateContextError> {
         let pickup = spawned_at.elapsed();
 
@@ -1031,6 +1056,9 @@ impl NonFinalizedState {
             contextual.transaction_hashes.clone(),
             contextual.height,
         );
+        if sprout_anchor_result.is_err() {
+            cancel_tree_update.store(true, Ordering::Release);
+        }
 
         // We're pretty sure the new block is valid, so clone the inner chain if needed.
         let phase_start = Instant::now();

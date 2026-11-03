@@ -589,6 +589,34 @@ fn transparent_spend_error_precedes_tree_error() {
 }
 
 #[test]
+fn transparent_spend_rejection_skips_note_tree_updates() {
+    let _init_guard = zebra_test::init();
+
+    let mut test = BeforeOrchardBlock::new();
+    test.spend_transparent_input();
+    super::arm_early_check_failure_gate();
+    zebra_chain::parallel::tree::NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+
+    let result = test.commit(true);
+    super::disarm_early_check_failure_gate();
+
+    assert!(
+        matches!(
+            result,
+            Err(ValidateContextError::DuplicateTransparentSpend { .. })
+        ),
+        "{result:?}",
+    );
+    assert_eq!(
+        zebra_chain::parallel::tree::NOTE_COMMITMENT_TREE_UPDATE_COUNT_FOR_TESTS
+            .load(std::sync::atomic::Ordering::Relaxed,),
+        0,
+        "a contextual rejection before the tree phase must skip note tree updates",
+    );
+}
+
+#[test]
 fn anchor_error_precedes_tree_error() {
     let _init_guard = zebra_test::init();
 

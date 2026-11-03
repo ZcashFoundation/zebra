@@ -4,4 +4,6 @@ body: >-
   Changed `NoteCommitmentTrees::update_trees_parallel` to run the costliest pool's note commitment
   tree updates on the calling thread while the other pools run on the thread pool, so a block commit
   can overlap its other work with the tree updates; the resulting trees and roots are unchanged.
+  Added `update_trees_parallel_with_cancel` for speculative callers that need to stop remaining tree
+  work when an earlier validation step fails.
 time: 2026-11-03T13:05:21Z
