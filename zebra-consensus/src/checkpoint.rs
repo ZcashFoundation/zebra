@@ -64,6 +64,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
+
 pub use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 
 /// An unverified block, which is in the queue for checkpoint verification.

@@ -101,6 +101,9 @@ jubjub = "0.11"
 lazy_static = "1.4"
 libzcash_script = "0.2"
 log = "0.4.27"
+# Permutation testing of std synchronization protocols; only built with
+# RUSTFLAGS="--cfg zebra_loom -C debug-assertions", see book/src/dev/loom-testing.md.
+loom = { version = "0.7.2", features = ["checkpoint", "futures"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 mset = "0.1"
