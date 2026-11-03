@@ -135,10 +135,10 @@ fn state_config(cache_dir: &Path) -> Config {
 }
 
 /// Opens the state in `config` for writing, without format checks.
-fn open_state(config: &Config) -> FinalizedState {
+fn open_state(config: &Config, network: &Network) -> FinalizedState {
     FinalizedState::new_with_debug(
         config,
-        &Network::Mainnet,
+        network,
         true,
         #[cfg(feature = "elasticsearch")]
         false,
@@ -149,9 +149,9 @@ fn open_state(config: &Config) -> FinalizedState {
 
 /// Writes `blocks` to a new state in `cache_dir`, with the running format
 /// version, and returns its config.
-fn new_state(cache_dir: &Path, blocks: &[Arc<Block>]) -> Config {
+fn new_state(cache_dir: &Path, network: &Network, blocks: &[Arc<Block>]) -> Config {
     let config = state_config(cache_dir);
-    let mut state = open_state(&config);
+    let mut state = open_state(&config, network);
     for block in blocks {
         state
             .commit_finalized_direct(block.clone().into(), None, "state snapshot export tests")
@@ -159,19 +159,23 @@ fn new_state(cache_dir: &Path, blocks: &[Arc<Block>]) -> Config {
     }
     drop(state);
 
-    write_version(&config, &state_database_format_version_in_code());
+    write_version(&config, network, &state_database_format_version_in_code());
     config
 }
 
 /// Writes `version` as the format version of the state in `config`.
-fn write_version(config: &Config, version: &Version) {
-    write_state_database_format_version_to_disk(config, version, &Network::Mainnet)
+fn write_version(config: &Config, network: &Network, version: &Version) {
+    write_state_database_format_version_to_disk(config, version, network)
         .expect("writes the version file");
 }
 
 /// Applies `change` to the state in `config` in one batch.
-fn change_state(config: &Config, change: impl FnOnce(&FinalizedState, &mut DiskWriteBatch)) {
-    let state = open_state(config);
+fn change_state(
+    config: &Config,
+    network: &Network,
+    change: impl FnOnce(&FinalizedState, &mut DiskWriteBatch),
+) {
+    let state = open_state(config, network);
     let mut batch = DiskWriteBatch::new();
     change(&state, &mut batch);
     state.db.write_batch(batch).expect("writes the batch");
@@ -227,10 +231,14 @@ fn height_of(bytes: &[u8]) -> u32 {
 /// Reads the snapshot `manifest` back from `store`: checks every piece's hash
 /// and size, reads its records with the strict piece reader, and returns the
 /// manifest and the records of each component.
-fn read_snapshot(store: &ArtifactStore, manifest: ObjectHash) -> (Manifest, Rows) {
+fn read_snapshot(
+    store: &ArtifactStore,
+    network: &Network,
+    manifest: ObjectHash,
+) -> (Manifest, Rows) {
     assert!(store.contains_verified(manifest).expect("readable"));
     let bytes = std::fs::read(store.object_path(manifest)).expect("the manifest is stored");
-    let manifest = Manifest::decode(&bytes, &Network::Mainnet).expect("the manifest is valid");
+    let manifest = Manifest::decode(&bytes, network).expect("the manifest is valid");
 
     let mut components = BTreeMap::new();
     for component in &manifest.components {
@@ -270,8 +278,8 @@ fn read_snapshot(store: &ArtifactStore, manifest: ObjectHash) -> (Manifest, Rows
 /// window from `window_start` ships, from full scans of the state: the
 /// selection rules written out directly, independently of the exporter's
 /// merge joins and targeted reads.
-fn expected_rows(config: &Config, window_start: Height) -> Rows {
-    let state = open_state(config);
+fn expected_rows(config: &Config, network: &Network, window_start: Height) -> Rows {
+    let state = open_state(config, network);
 
     let in_window = |height: u32| height == 0 || (window_start.0..=TIP.0).contains(&height);
     let unspent: BTreeSet<Vec<u8>> = cf_rows(&state, "utxo_by_out_loc")
@@ -445,7 +453,7 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
 
     let dir = tempfile::tempdir().expect("creates a temporary directory");
     let blocks = test_chain();
-    let config = new_state(&dir.path().join("cache"), &blocks);
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &blocks);
     let store = ArtifactStore::at(dir.path().join("store"));
 
     let commitment = export_with_window(&config, &Network::Mainnet, TIP, WINDOW_START, &store)
@@ -453,7 +461,7 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
     assert_eq!(commitment.height, TIP);
     assert_eq!(commitment.block_hash, blocks[14].hash());
 
-    let (manifest, exported) = read_snapshot(&store, commitment.manifest);
+    let (manifest, exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
     assert_eq!(manifest.genesis_hash, Network::Mainnet.genesis_hash());
     assert_eq!(manifest.height, TIP);
     assert_eq!(manifest.block_hash, commitment.block_hash);
@@ -466,13 +474,13 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
     assert_eq!(manifest.parameters_hash, None);
 
     // Every component ships exactly the rows the selection rules name.
-    let expected = expected_rows(&config, WINDOW_START);
+    let expected = expected_rows(&config, &Network::Mainnet, WINDOW_START);
     for component in ComponentId::ALL {
         assert_eq!(exported[&component], expected[&component], "{component}");
     }
 
     // A fresh state's values are already canonical.
-    let state = open_state(&config);
+    let state = open_state(&config, &Network::Mainnet);
     for component in ComponentId::ALL
         .into_iter()
         .filter(|c| c.is_canonicalized())
@@ -549,14 +557,14 @@ fn export_ships_the_trees_the_format_checks_and_the_window_read() {
 
     let network = Network::Mainnet;
     let dir = tempfile::tempdir().expect("creates a temporary directory");
-    let config = new_state(&dir.path().join("cache"), &test_chain());
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &test_chain());
 
     // The test chain has no shielded notes, so give the pools tree rows: Sapling changes at 2, 3,
     // 5, 11 and 13 with a subtree ending at 3, and Orchard changes at 6 only. The genesis trees
     // are valid trees for every row.
     let height_key = |height: u32| Height(height).as_bytes().to_vec();
     let subtree = |end_height: u32| [height_key(end_height), vec![0x11; 32]].concat();
-    change_state(&config, |state, batch| {
+    change_state(&config, &Network::Mainnet, |state, batch| {
         for (cf, heights) in [
             ("sapling_note_commitment_tree", &[2, 3, 5, 11, 13][..]),
             ("orchard_note_commitment_tree", &[6][..]),
@@ -578,9 +586,9 @@ fn export_ships_the_trees_the_format_checks_and_the_window_read() {
     let store = ArtifactStore::at(dir.path().join("store"));
     let commitment =
         export_with_window(&config, &network, TIP, WINDOW_START, &store).expect("exports");
-    let (_manifest, exported) = read_snapshot(&store, commitment.manifest);
+    let (_manifest, exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
 
-    let expected = expected_rows(&config, WINDOW_START);
+    let expected = expected_rows(&config, &Network::Mainnet, WINDOW_START);
     for component in ComponentId::ALL {
         assert_eq!(exported[&component], expected[&component], "{component}");
     }
@@ -600,7 +608,7 @@ fn export_ships_the_trees_the_format_checks_and_the_window_read() {
     assert_eq!(exported[&ComponentId::SaplingSubtrees].len(), 1);
 
     // A subtree whose end height has no tree is refused.
-    change_state(&config, |state, batch| {
+    change_state(&config, &Network::Mainnet, |state, batch| {
         insert(
             state,
             batch,
@@ -623,16 +631,16 @@ fn export_state_snapshot_ships_every_block_of_a_short_chain() {
     let _init_guard = zebra_test::init();
 
     let dir = tempfile::tempdir().expect("creates a temporary directory");
-    let config = new_state(&dir.path().join("cache"), &test_chain());
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &test_chain());
     let store = ArtifactStore::at(dir.path().join("store"));
 
     // The chain is shorter than the window, so the window starts at block 1.
     let commitment =
         export_state_snapshot(&config, &Network::Mainnet, TIP, &store).expect("exports");
-    let (manifest, exported) = read_snapshot(&store, commitment.manifest);
+    let (manifest, exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
     assert_eq!(manifest.window_start, Height(1));
 
-    let expected = expected_rows(&config, Height(1));
+    let expected = expected_rows(&config, &Network::Mainnet, Height(1));
     for component in ComponentId::ALL {
         assert_eq!(exported[&component], expected[&component], "{component}");
     }
@@ -648,9 +656,11 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     let blocks = test_chain();
     let history_tree = heartwood_history_tree();
 
-    // Database A is written in the current encodings, with a history tree.
-    let current = new_state(&dir.path().join("current"), &blocks);
-    change_state(&current, |state, batch| {
+    // Database A is written in the current encodings, with a history tree, and with address
+    // balances whose `received` totals are zero, which the layout before the total also holds.
+    let balances_cf = "balance_by_transparent_addr";
+    let current = new_state(&dir.path().join("current"), &Network::Mainnet, &blocks);
+    change_state(&current, &Network::Mainnet, |state, batch| {
         insert(
             state,
             batch,
@@ -658,13 +668,24 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
             &[],
             &HistoryTreeParts::from(&history_tree).as_bytes(),
         );
+        let balances = cf_rows(state, balances_cf);
+        assert!(!balances.is_empty(), "the test chain has address balances");
+        for (key, value) in balances {
+            insert(
+                state,
+                batch,
+                balances_cf,
+                &key,
+                &[&value[..16], &[0; 8]].concat(),
+            );
+        }
     });
 
     // Database B holds the same state with the legacy encodings the state still reads: narrower
     // value pools and block info, a history tree with pre-NU6.3 entries, and trees without
     // cached roots.
-    let legacy = new_state(&dir.path().join("legacy"), &blocks);
-    let source = open_state(&legacy);
+    let legacy = new_state(&dir.path().join("legacy"), &Network::Mainnet, &blocks);
+    let source = open_state(&legacy, &Network::Mainnet);
     let pools = cf_rows(&source, "tip_chain_value_pool");
     let block_info = cf_rows(&source, "block_info");
     let trees: Vec<(&str, BTreeMap<Vec<u8>, Vec<u8>>)> = [
@@ -679,7 +700,7 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     .collect();
     drop(source);
 
-    change_state(&legacy, |state, batch| {
+    change_state(&legacy, &Network::Mainnet, |state, batch| {
         for (key, value) in &pools {
             // The newer pools are empty in this chain, so the older layouts hold the same value.
             assert!(value[48..].iter().all(|byte| *byte == 0));
@@ -711,6 +732,10 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
             &[],
             &legacy_history_tree_bytes(&history_tree),
         );
+        // Before the `received` total, address balances were the balance and the location.
+        for (key, value) in cf_rows(state, balances_cf) {
+            insert(state, batch, balances_cf, &key, &value[..16]);
+        }
 
         // Formats before 1.4.0 keyed the Sprout tip tree by the heights it changed at, and the
         // state reads the last of those rows, so the earlier row is never read.
@@ -726,7 +751,7 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     });
 
     // The rewrites took effect.
-    let source = open_state(&legacy);
+    let source = open_state(&legacy, &Network::Mainnet);
     assert!(cf_rows(&source, "tip_chain_value_pool")
         .values()
         .all(|value| value.len() == 48));
@@ -736,9 +761,14 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     assert!(cf_rows(&source, "sprout_note_commitment_tree")
         .keys()
         .all(|key| key.len() == 3));
+    assert!(cf_rows(&source, balances_cf)
+        .values()
+        .all(|value| value.len() == 16));
     assert_eq!(
         source.db.sprout_tree_for_tip(),
-        open_state(&current).db.sprout_tree_for_tip(),
+        open_state(&current, &Network::Mainnet)
+            .db
+            .sprout_tree_for_tip(),
         "the state reads the same Sprout tip tree from both databases",
     );
     drop(source);
@@ -770,12 +800,65 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
         "exports of the same state are identical whatever its encodings",
     );
 
-    // The history tree was shipped, so its canonicalization was exercised.
-    let (_manifest, exported) = read_snapshot(&legacy_store, from_legacy.manifest);
+    // The history tree and the address balances were shipped, so their canonicalization was
+    // exercised.
+    let (_manifest, exported) =
+        read_snapshot(&legacy_store, &Network::Mainnet, from_legacy.manifest);
     assert_eq!(
         exported[&ComponentId::HistoryTree],
         [(Vec::new(), HistoryTreeParts::from(&history_tree).as_bytes())],
     );
+    assert!(!exported[&ComponentId::AddressBalances].is_empty());
+    assert!(exported[&ComponentId::AddressBalances]
+        .iter()
+        .all(|(_key, value)| value.len() == 24 && value[16..] == [0; 8]));
+}
+
+/// A Regtest snapshot carries the network's parameters hash, so its manifest
+/// decodes on Regtest and nowhere else.
+#[test]
+fn regtest_exports_carry_the_parameters_hash() {
+    let _init_guard = zebra_test::init();
+
+    // Heartwood activates above the tip, so the fake blocks need no chain history commitment.
+    let network = Network::new_regtest(testnet::RegtestParameters {
+        activation_heights: testnet::ConfiguredActivationHeights {
+            heartwood: Some(100),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let dir = tempfile::tempdir().expect("creates a temporary directory");
+
+    // The Regtest genesis block, then fake blocks up to the tip.
+    let mut blocks = vec![zebra_chain::block::genesis::regtest_genesis_block()];
+    while blocks.len() <= usize::try_from(TIP.0).expect("fits") {
+        let child = blocks
+            .last()
+            .expect("the chain is not empty")
+            .make_fake_child();
+        blocks.push(child);
+    }
+    let config = new_state(&dir.path().join("cache"), &network, &blocks);
+    let store = ArtifactStore::at(dir.path().join("store"));
+
+    let commitment = export_state_snapshot(&config, &network, TIP, &store).expect("exports");
+    assert_eq!(commitment.height, TIP);
+    assert_eq!(commitment.block_hash, blocks[14].hash());
+
+    let (manifest, exported) = read_snapshot(&store, &network, commitment.manifest);
+    assert_eq!(manifest.genesis_hash, network.genesis_hash());
+    assert_eq!(manifest.window_start, Height(1));
+    assert!(manifest.parameters_hash.is_some());
+    assert_eq!(
+        manifest.parameters_hash,
+        network.state_snapshot_parameters_hash()
+    );
+    assert_eq!(exported[&ComponentId::HashByHeight].len(), 15);
+
+    // Without the parameters hash, a Mainnet manifest has a different layout.
+    let bytes = std::fs::read(store.object_path(commitment.manifest)).expect("stored");
+    assert!(Manifest::decode(&bytes, &Network::Mainnet).is_err());
 }
 
 /// The exporter writes the network's parameters hash into the manifest, and the
@@ -861,7 +944,7 @@ fn export_refuses_the_wrong_height_and_unreadable_formats() {
 
     let network = Network::Mainnet;
     let dir = tempfile::tempdir().expect("creates a temporary directory");
-    let config = new_state(&dir.path().join("cache"), &test_chain());
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &test_chain());
     let store = ArtifactStore::at(dir.path().join("store"));
 
     // The snapshot height must be the tip, above genesis.
@@ -890,21 +973,21 @@ fn export_refuses_the_wrong_height_and_unreadable_formats() {
     let running = state_database_format_version_in_code();
     let mut indexed = running.clone();
     indexed.build = semver::BuildMetadata::new("indexer").expect("valid metadata");
-    write_version(&config, &indexed);
+    write_version(&config, &Network::Mainnet, &indexed);
     assert_err!(
         export_with_window(&config, &network, TIP, WINDOW_START, &store),
         SnapshotError::SpendingIndex { disk_version } if *disk_version == indexed,
     );
 
     let migrating = Version::new(27, 0, 0);
-    write_version(&config, &migrating);
+    write_version(&config, &Network::Mainnet, &migrating);
     assert_err!(
         export_with_window(&config, &network, TIP, WINDOW_START, &store),
         SnapshotError::NeedsMigration { disk_version, .. } if *disk_version == migrating,
     );
 
     let newer = Version::new(running.major, running.minor + 1, 0);
-    write_version(&config, &newer);
+    write_version(&config, &Network::Mainnet, &newer);
     assert_err!(
         export_with_window(&config, &network, TIP, WINDOW_START, &store),
         SnapshotError::NewerFormat { disk_version, .. } if *disk_version == newer,
@@ -914,7 +997,7 @@ fn export_refuses_the_wrong_height_and_unreadable_formats() {
     assert!(!store.objects_dir().exists());
 
     // The running format exports.
-    write_version(&config, &running);
+    write_version(&config, &Network::Mainnet, &running);
     export_with_window(&config, &network, TIP, WINDOW_START, &store).expect("exports");
 }
 
@@ -925,11 +1008,11 @@ fn export_refuses_a_state_pruned_above_the_window() {
     let network = Network::Mainnet;
     let dir = tempfile::tempdir().expect("creates a temporary directory");
     let blocks = test_chain();
-    let config = new_state(&dir.path().join("cache"), &blocks);
+    let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &blocks);
     let store = ArtifactStore::at(dir.path().join("store"));
 
     // Prune the bodies of blocks 1 to 10, as the pruning worker does.
-    change_state(&config, |state, batch| {
+    change_state(&config, &Network::Mainnet, |state, batch| {
         for (key, _value) in cf_rows(state, "tx_by_loc") {
             if (1..=10).contains(&height_of(&key)) {
                 delete(state, batch, "tx_by_loc", &key);
@@ -946,7 +1029,7 @@ fn export_refuses_a_state_pruned_above_the_window() {
     // A window that starts at the first retained body exports.
     let commitment =
         export_with_window(&config, &network, TIP, Height(11), &store).expect("exports");
-    let (manifest, _exported) = read_snapshot(&store, commitment.manifest);
+    let (manifest, _exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
     assert_eq!(manifest.window_start, Height(11));
 }
 
@@ -978,8 +1061,14 @@ fn export_refuses_missing_and_contradictory_rows() {
     ];
 
     for (index, (cf, key, component)) in cases.into_iter().enumerate() {
-        let config = new_state(&dir.path().join(format!("cache-{index}")), &blocks);
-        change_state(&config, |state, batch| delete(state, batch, cf, &key));
+        let config = new_state(
+            &dir.path().join(format!("cache-{index}")),
+            &Network::Mainnet,
+            &blocks,
+        );
+        change_state(&config, &Network::Mainnet, |state, batch| {
+            delete(state, batch, cf, &key)
+        });
 
         let store = ArtifactStore::at(dir.path().join(format!("store-{index}")));
         assert_err!(
@@ -990,8 +1079,8 @@ fn export_refuses_missing_and_contradictory_rows() {
 
     // A malformed key in place of a missing row is refused too: the row count is right, but each
     // key must be the next height.
-    let config = new_state(&dir.path().join("cache-key"), &blocks);
-    change_state(&config, |state, batch| {
+    let config = new_state(&dir.path().join("cache-key"), &Network::Mainnet, &blocks);
+    change_state(&config, &Network::Mainnet, |state, batch| {
         let value = cf_rows(state, "block_info")[&height_key(13)].clone();
         delete(state, batch, "block_info", &height_key(12));
         let malformed = [height_key(12), vec![0]].concat();
@@ -1012,8 +1101,8 @@ fn export_refuses_missing_and_contradictory_rows() {
     );
 
     // A set row with a value, as a spending index stores for nullifiers, is refused.
-    let config = new_state(&dir.path().join("cache-set"), &blocks);
-    change_state(&config, |state, batch| {
+    let config = new_state(&dir.path().join("cache-set"), &Network::Mainnet, &blocks);
+    change_state(&config, &Network::Mainnet, |state, batch| {
         insert(
             state,
             batch,
@@ -1037,8 +1126,12 @@ fn export_refuses_missing_and_contradictory_rows() {
     );
 
     // A state whose genesis block is not the network's is refused before any row is read.
-    let config = new_state(&dir.path().join("cache-genesis"), &blocks);
-    change_state(&config, |state, batch| {
+    let config = new_state(
+        &dir.path().join("cache-genesis"),
+        &Network::Mainnet,
+        &blocks,
+    );
+    change_state(&config, &Network::Mainnet, |state, batch| {
         insert(state, batch, "hash_by_height", &height_key(0), &[0x22; 32]);
     });
     let store = ArtifactStore::at(dir.path().join("store-genesis"));
@@ -1053,8 +1146,8 @@ fn export_refuses_missing_and_contradictory_rows() {
 
     // The state reads the value pools only from the `()` key, so a row under another key is
     // refused rather than shipped in its place.
-    let config = new_state(&dir.path().join("cache-pools"), &blocks);
-    change_state(&config, |state, batch| {
+    let config = new_state(&dir.path().join("cache-pools"), &Network::Mainnet, &blocks);
+    change_state(&config, &Network::Mainnet, |state, batch| {
         let value = cf_rows(state, "tip_chain_value_pool")[&Vec::new()].clone();
         delete(state, batch, "tip_chain_value_pool", &[]);
         insert(
@@ -1080,8 +1173,8 @@ fn export_refuses_missing_and_contradictory_rows() {
     );
 
     // A tree with a wrong cached root is refused, rather than shipped or silently fixed.
-    let config = new_state(&dir.path().join("cache-tree"), &blocks);
-    change_state(&config, |state, batch| {
+    let config = new_state(&dir.path().join("cache-tree"), &Network::Mainnet, &blocks);
+    change_state(&config, &Network::Mainnet, |state, batch| {
         let rows = cf_rows(state, "sapling_note_commitment_tree");
         let (key, value) = rows.iter().next().expect("the genesis tree");
         let mut wrong = value.clone();
