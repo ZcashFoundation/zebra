@@ -82,6 +82,9 @@ struct Behavior {
     /// The most bytes one answer carries, as a responder that finishes early.
     cap: Option<u32>,
 
+    /// Answers every other request with data, from the first, with one byte.
+    short_every_other: bool,
+
     /// Never answers.
     hang: bool,
 
@@ -164,6 +167,9 @@ struct Counters {
     /// When the peer's link has sent every answer so far, in microseconds
     /// since the test started.
     link_free_at: AtomicU64,
+
+    /// The answers with data a peer that shortens every other one has given.
+    answers: AtomicUsize,
 }
 
 impl Counters {
@@ -329,6 +335,15 @@ impl FakePeer {
         if let Some(cap) = behavior.cap {
             let cap = usize::try_from(cap).expect("a u32 fits in a usize on supported targets");
             end = end.min(start.saturating_add(cap));
+        }
+        if behavior.short_every_other
+            && self
+                .counters
+                .answers
+                .fetch_add(1, Ordering::SeqCst)
+                .is_multiple_of(2)
+        {
+            end = end.min(start.saturating_add(1));
         }
         let mut data = object[start..end].to_vec();
         if behavior.overdeliver {
@@ -1333,6 +1348,48 @@ async fn an_empty_piece_needs_no_peer() {
         .calls
         .iter()
         .all(|call| call.hash != outcome.hash(0)));
+}
+
+/// An answer of fewer than 64 KiB is not a short answer when it is all that
+/// was asked for: a peer that downloads small pieces is never stalled.
+#[tokio::test(start_paused = true)]
+async fn small_pieces_are_not_short_answers() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        latency: ms(100),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[1000; 10]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    // One piece at a time, each in one answer, with no rest.
+    assert_eq!(outcome.calls.len(), 10, "{:?}", outcome.calls);
+    assert_eq!(outcome.elapsed, secs(1));
+}
+
+/// Only short answers in a row stall a peer: one whose short answers
+/// alternate with full ones keeps its piece.
+#[tokio::test(start_paused = true)]
+async fn short_answers_stall_only_in_a_row() {
+    let _init_guard = zebra_test::init();
+
+    let peer = Behavior {
+        latency: ms(100),
+        short_every_other: true,
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects(&[4 * MIB]), vec![peer]).run().await;
+
+    outcome.assert_complete();
+    let short = outcome
+        .calls
+        .iter()
+        .filter(|call| call.delivered == Some(1))
+        .count();
+    assert!(short >= 3, "{:?}", outcome.calls);
+    assert!(outcome.calls.iter().all(|call| !call.dropped));
+    assert!(outcome.elapsed < secs(60), "{:?}", outcome.elapsed);
 }
 
 /// A peer that finishes every answer early with fewer bytes than the
