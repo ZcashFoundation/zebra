@@ -281,30 +281,35 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        // TODO: do DNS and disk in parallel if startup speed becomes important
-        let dns_peers =
-            Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
+        let hostnames = self.initial_peer_hostnames().iter().cloned().collect();
 
         if self.network.is_regtest() {
             // Only return local peer addresses and skip loading the peer cache on Regtest.
-            dns_peers
+            return Config::resolve_peers(&hostnames, true)
+                .await
                 .into_iter()
                 .filter(PeerSocketAddr::is_localhost)
-                .collect()
-        } else {
-            // Ignore disk errors because the cache is optional and the method already logs them.
-            let disk_peers = self.load_peer_cache().await.unwrap_or_default();
-
-            dns_peers.into_iter().chain(disk_peers).collect()
+                .collect();
         }
+
+        // Load the disk cache first, so that failing DNS can't stop Zebra using cached peers.
+        // Ignore disk errors because the cache is optional and the method already logs them.
+        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+
+        let dns_peers = Config::resolve_peers(&hostnames, disk_peers.is_empty()).await;
+
+        dns_peers.into_iter().chain(disk_peers).collect()
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
     /// timeout of a few seconds on each DNS request.
     ///
-    /// If DNS resolution fails or times out for all peers, continues retrying
-    /// until at least one peer is found.
-    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<PeerSocketAddr> {
+    /// If DNS resolution fails or times out for all peers, and `retry_until_found` is true,
+    /// continues retrying until at least one peer is found.
+    async fn resolve_peers(
+        peers: &HashSet<String>,
+        retry_until_found: bool,
+    ) -> HashSet<PeerSocketAddr> {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
@@ -329,17 +334,25 @@ impl Config {
                 .concat()
                 .await;
 
-            if peer_addresses.is_empty() {
-                tracing::info!(
-                    ?peers,
-                    ?peer_addresses,
-                    "empty peer list after DNS resolution, retrying after {} seconds",
-                    DNS_LOOKUP_TIMEOUT.as_secs(),
-                );
-                tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
-            } else {
+            if !peer_addresses.is_empty() {
                 return peer_addresses;
             }
+
+            if !retry_until_found {
+                tracing::info!(
+                    ?peers,
+                    "empty peer list after DNS resolution, using the cached peers",
+                );
+                return peer_addresses;
+            }
+
+            tracing::info!(
+                ?peers,
+                ?peer_addresses,
+                "empty peer list after DNS resolution, retrying after {} seconds",
+                DNS_LOOKUP_TIMEOUT.as_secs(),
+            );
+            tokio::time::sleep(DNS_LOOKUP_TIMEOUT).await;
         }
     }
 

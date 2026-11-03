@@ -182,6 +182,25 @@ pub const FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT: Duration = Duration::from_millis(
 /// don't synchronise with other crawls.
 pub const DEFAULT_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_secs(61);
 
+/// The minimum time between re-adds of the initial peers, while the peer crawler has
+/// no outbound connections and no candidates ready to dial.
+///
+/// Each re-add resolves the DNS seeders and reloads the disk cache, and lets failed
+/// initial peers be attempted again after [`MIN_PEER_RECONNECTION_DELAY`].
+///
+/// # Security
+///
+/// This interval bounds the DNS query rate of a node that can't connect to any peers,
+/// regardless of the configured
+/// [`crawl_new_peer_interval`](crate::config::Config.crawl_new_peer_interval).
+pub const MIN_INITIAL_PEER_RECOVERY_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// The maximum time a re-add of the initial peers waits for them to be resolved and loaded.
+///
+/// Without cached peers, DNS resolution retries until it finds a peer, so this stops a
+/// re-add from running until the next one. It allows one retry of every DNS seeder.
+pub const INITIAL_PEER_RECOVERY_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// The peer address disk cache update interval.
 ///
 /// This should be longer than [`DEFAULT_CRAWL_NEW_PEER_INTERVAL`],
