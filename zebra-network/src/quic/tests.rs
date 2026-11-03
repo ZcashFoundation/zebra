@@ -14,7 +14,9 @@ use zebra_chain::parameters::{testnet, Network};
 
 use crate::protocol::external::types::PeerServices;
 
-use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, Windows};
+use super::{
+    bind, client_endpoint, connect, tls, transport_config, ConnectError, EndpointError, Windows,
+};
 
 /// Every loopback exchange finishes in well under this.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -88,6 +90,57 @@ fn serving_nodes_get_a_larger_send_window() {
         config.contains(&format!("send_window: {},", Windows::SERVING.send)),
         "got {config}"
     );
+}
+
+/// The bootstrap's windows widen only the receive side, and reach the
+/// transport configuration.
+#[test]
+fn bootstrap_windows_widen_the_receive_side() {
+    assert_eq!(Windows::BOOTSTRAP.stream_receive, 8 << 20);
+    assert_eq!(Windows::BOOTSTRAP.connection_receive, 16 << 20);
+    assert_eq!(Windows::BOOTSTRAP.send, Windows::DEFAULT.send);
+
+    let config = format!("{:?}", transport_config(Windows::BOOTSTRAP));
+    assert!(
+        config.contains(&format!(
+            "stream_receive_window: {},",
+            Windows::BOOTSTRAP.stream_receive
+        )) && config.contains(&format!(
+            "receive_window: {},",
+            Windows::BOOTSTRAP.connection_receive
+        )),
+        "got {config}"
+    );
+}
+
+/// A client-only endpoint dials peers like a bound one, but accepts no
+/// connections: a peer that dials it gets no handshake and times out.
+#[tokio::test]
+async fn client_endpoints_dial_but_do_not_accept() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let server = bind_loopback(&network);
+        let server_addr = server.local_addr().expect("bound");
+        let client = client_endpoint(&network, loopback(), Windows::BOOTSTRAP)
+            .expect("client-only loopback endpoints bind");
+        let client_addr = client.local_addr().expect("bound");
+
+        let (outbound, inbound) = tokio::join!(connect(&client, server_addr), accept_one(&server));
+        outbound.expect("a client-only endpoint connects");
+        inbound.expect("the server accepts");
+
+        let error = connect(&server, client_addr)
+            .await
+            .expect_err("a client-only endpoint accepts no connections");
+        assert!(
+            matches!(error, ConnectError::Timeout | ConnectError::Handshake(_)),
+            "got {error:?}"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
 }
 
 #[test]

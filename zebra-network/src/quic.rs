@@ -135,6 +135,22 @@ impl Windows {
         ..Windows::DEFAULT
     };
 
+    /// The windows of a state-snapshot bootstrap's client-only endpoint
+    /// (DESIGN.md §5, "Bootstrap dialer"): 8 MiB per stream and 16 MiB per
+    /// connection of receive window, so that an object download from a
+    /// distant peer is not capped by flow control, and the default send
+    /// window, since the bootstrap only sends small requests.
+    ///
+    /// The transport draft recommends at least 16 MiB per stream and 64 MiB
+    /// per connection for bulk synchronization ("Bulk Transfer Performance");
+    /// the design keeps the bootstrap's eight peers within a few hundred MiB
+    /// of buffers instead, and downloads from several peers at once.
+    pub const BOOTSTRAP: Windows = Windows {
+        stream_receive: 8 << 20,
+        connection_receive: 16 << 20,
+        ..Windows::DEFAULT
+    };
+
     /// The windows of a node advertising `services`: [`Windows::SERVING`]
     /// when they include `NODE_SYNC_ARTIFACTS`, [`Windows::DEFAULT`]
     /// otherwise.
@@ -302,6 +318,30 @@ pub fn bind_with_windows(
     })?;
     let server = server_config(alpn, &rcgen::PKCS_ED25519, windows)?;
     new_endpoint(alpn, Some(server), addr, windows)
+}
+
+/// Binds a client-only endpoint for `network` on `addr`, with `windows` as
+/// its connections' flow-control windows: it dials peers like one from
+/// [`bind_with_windows`], but has no server configuration, so it accepts no
+/// connections and presents no certificate. Must be called inside a Tokio
+/// runtime, which drives the socket.
+///
+/// A state-snapshot bootstrap dials its peers from one, before the node's
+/// own endpoint exists (DESIGN.md §5, "Bootstrap dialer").
+///
+/// # Panics
+///
+/// If called outside a Tokio runtime: tokio panics when the socket is
+/// registered with the runtime.
+pub fn client_endpoint(
+    network: &Network,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
+    let alpn = alpn_protocol_id(network).ok_or_else(|| EndpointError::NoAlpnIdentifier {
+        network: network.clone(),
+    })?;
+    new_endpoint(alpn, None, addr, windows)
 }
 
 /// Binds an endpoint on `addr` that dials with `windows` and offers `alpn`,
