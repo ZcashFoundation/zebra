@@ -4293,7 +4293,13 @@ fn spawn_v2_node(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
-    spawn_v2_node_with_delay(config, bans_receiver, V2_TEST_RECONNECTION_DELAY)
+    spawn_v2_node_with(
+        config,
+        PeerServices::NODE_NETWORK,
+        bans_receiver,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+    )
 }
 
 /// [`spawn_v2_node`], redialling configured peers after `reconnection_delay` plus jitter.
@@ -4305,8 +4311,9 @@ fn spawn_v2_node_with_delay(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
-    spawn_v2_node_with_connected_peers(
+    spawn_v2_node_with(
         config,
+        PeerServices::NODE_NETWORK,
         bans_receiver,
         ConnectedPeers::unconnected(),
         reconnection_delay,
@@ -4323,12 +4330,52 @@ fn spawn_v2_node_with_connected_peers(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
+    spawn_v2_node_with(
+        config,
+        PeerServices::NODE_NETWORK,
+        bans_receiver,
+        connected_peers,
+        reconnection_delay,
+    )
+}
+
+/// [`spawn_v2_node`], advertising `local_services` to its peers.
+fn spawn_v2_node_with_services(
+    config: Config,
+    local_services: PeerServices,
+    bans_receiver: watch::Receiver<crate::BanList>,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
+    spawn_v2_node_with(
+        config,
+        local_services,
+        bans_receiver,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+    )
+}
+
+/// [`spawn_v2_node`] with every parameter: the services it advertises, the addresses its dialer
+/// skips, and the delay before it redials a configured peer.
+fn spawn_v2_node_with(
+    config: Config,
+    local_services: PeerServices,
+    bans_receiver: watch::Receiver<crate::BanList>,
+    connected_peers: ConnectedPeers,
+    reconnection_delay: Duration,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
     let (peerset_tx, peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
     let (inv_collector, _) = broadcast::channel(16);
     // These tests do not check misbehavior reports; a closed channel drops them.
     let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
     let task = v2::start_with_intervals(
         config,
+        local_services,
         service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
         inv_collector,
         NoChainTip,
@@ -4343,6 +4390,39 @@ fn spawn_v2_node_with_connected_peers(
     .expect("version 2 test configs listen");
 
     (peerset_rx, task)
+}
+
+/// A version 2 `init` record advertises the configured services, so a pruned node advertises
+/// limited service instead of `NODE_NETWORK`, and never the legacy-only early relay bit.
+#[tokio::test]
+async fn v2_init_records_advertise_the_configured_services() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) =
+        spawn_v2_node(v2_test_config(listener_addr, &[]), no_bans());
+    // A syncing dialer requires `NODE_NETWORK` from the peers it dials, so the pruned node dials.
+    let pruned = Config {
+        experimental_early_block_relay: true,
+        ..v2_test_config(any_udp_addr(), &[listener_addr])
+    };
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node_with_services(pruned, PeerServices::NODE_NETWORK_LIMITED, no_bans());
+
+    let (_addr, client) = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the pruned node connects")
+        .expect("the listener is running");
+    assert_eq!(
+        client.connection_info.remote.services(),
+        PeerServices::NODE_NETWORK_LIMITED
+    );
+
+    listener_task.abort();
+    dialer_task.abort();
 }
 
 /// An empty ban list.

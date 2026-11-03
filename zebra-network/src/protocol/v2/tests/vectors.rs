@@ -408,8 +408,8 @@ fn init_record_golden_vector_round_trips() {
     assert_eq!(init.encode().as_ref(), wire.as_slice());
     assert_eq!(decode_record(&wire).expect("valid"), Some(init.clone()));
 
-    // Bit 10 (`NODE_NETWORK_LIMITED` in the draft) and bit 40, neither known to Zebra: a 9-byte
-    // CompactSize after the kind and version bytes, kept rather than truncated.
+    // Bit 10 (`NODE_NETWORK_LIMITED`) and bit 40, which no flag defines: a 9-byte CompactSize
+    // after the kind and version bytes, kept rather than truncated.
     let services = PeerServices::from_bits_retain((1 << 10) | (1 << 40));
     let with_unknown_bits = InitRecord {
         services,
@@ -1271,7 +1271,7 @@ fn addr_response_pins_layout_and_limit() {
     // Unknown service bits are discarded when a record is read, as the shared legacy `addrv2`
     // reader does, so they are not relayed (the draft's "Service Flags" says they SHOULD be).
     let mut unknown_bits = vec![1];
-    unknown_bits.extend_from_slice(&[0x00, 0x00, 0x00, 0x60, 0xFD, 0x01, 0x04]);
+    unknown_bits.extend_from_slice(&[0x00, 0x00, 0x00, 0x60, 0xFD, 0x01, 0x08]);
     unknown_bits.extend_from_slice(&[0x01, 0x04, 203, 0, 113, 7]);
     unknown_bits.extend_from_slice(&8233u16.to_be_bytes());
     let decoded = decode_addr_response(&unknown_bits).expect("valid");
@@ -1426,9 +1426,9 @@ fn addr_record_pins_layout_and_skips_unsupported() {
         Some(meta.clone())
     );
 
-    // Unknown service bits are discarded, as in `get-addr` responses.
+    // Unknown service bits are discarded, as in `get-addr` responses: bit 11 is not a known flag.
     let mut unknown_bits = expected.clone();
-    unknown_bits.splice(4..5, [0xFD, 0x01, 0x04]);
+    unknown_bits.splice(4..5, [0xFD, 0x01, 0x08]);
     assert_eq!(
         decode_addr_record(&unknown_bits).expect("valid"),
         Some(meta)

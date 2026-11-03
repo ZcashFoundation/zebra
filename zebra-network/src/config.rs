@@ -335,15 +335,33 @@ pub struct Config {
 }
 
 impl Config {
-    /// Applies configured experimental services to the caller's base service capabilities.
+    /// Applies configured experimental services to the caller's base service capabilities, for
+    /// `version` messages and this node's own address advertisements.
     ///
-    /// Leaves out `NODE_SYNC_ARTIFACTS`, which ZIP 204 does not define for legacy peers.
+    /// Leaves out `NODE_NETWORK_LIMITED` and `NODE_SYNC_ARTIFACTS`, which ZIP 204 does not define
+    /// for legacy peers.
     pub(crate) fn advertised_services(&self, mut services: PeerServices) -> PeerServices {
-        services.remove(PeerServices::NODE_SYNC_ARTIFACTS);
+        services.remove(PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS);
         services.set(
             PeerServices::NODE_EARLY_BLOCK_RELAY,
             self.experimental_early_block_relay,
         );
+        services
+    }
+
+    /// Returns the services advertised in version 2 `init` records: the caller's base service
+    /// capabilities, including `NODE_NETWORK_LIMITED` and `NODE_SYNC_ARTIFACTS`.
+    ///
+    /// A node with an [`object_source`](Self::object_source) serves `get-object` requests, so it
+    /// also advertises `NODE_SYNC_ARTIFACTS`: it answers the objects its index holds, and every
+    /// other object as not found (draft, "`get-object`").
+    ///
+    /// Leaves out early block relay, which is a legacy-only experiment.
+    pub(crate) fn v2_advertised_services(&self, services: PeerServices) -> PeerServices {
+        let mut services = services - PeerServices::NODE_EARLY_BLOCK_RELAY;
+        if self.object_source.is_some() {
+            services.insert(PeerServices::NODE_SYNC_ARTIFACTS);
+        }
         services
     }
 

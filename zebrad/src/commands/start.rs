@@ -175,6 +175,8 @@ fn check_tcp_slow_start_after_idle() {
 #[cfg(not(target_os = "linux"))]
 fn check_tcp_slow_start_after_idle() {}
 
+// A syncing pruned node keeps at least as many recent bodies as limited service promises.
+
 impl StartCmd {
     /// Extra time Zebra waits for the zcashd-compat supervisor task beyond the
     /// child's `shutdown_grace_period`. The supervisor's `terminate_child` waits
@@ -358,6 +360,10 @@ impl StartCmd {
     }
 
     /// Returns base services, disabling archive service and sidecars when pruning may occur.
+    ///
+    /// A pruned node that retains at least `NODE_NETWORK_LIMITED_BLOCKS` recent blocks advertises
+    /// limited service instead, which only version 2 peers are told about. Pruning keeps at least
+    /// the configured retention of recent bodies, so the advertisement holds while the node syncs.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
@@ -370,6 +376,15 @@ impl StartCmd {
                 ));
             }
             services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+            if config
+                .state
+                .prune_blocks_older_than
+                .is_some_and(|retention| {
+                    retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+                })
+            {
+                services.insert(zebra_network::types::PeerServices::NODE_NETWORK_LIMITED);
+            }
         }
         Ok(services)
     }

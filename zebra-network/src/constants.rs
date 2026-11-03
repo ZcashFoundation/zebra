@@ -85,6 +85,11 @@ pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
 pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
 
+/// The number of most recent blocks a node advertising
+/// [`NODE_NETWORK_LIMITED`](crate::types::PeerServices::NODE_NETWORK_LIMITED) can serve, about
+/// two days of blocks (draft version 2 protocol, "Service Flags").
+pub const NODE_NETWORK_LIMITED_BLOCKS: u32 = 2_304;
+
 /// The maximum number of peers we will add to the address book after each `getaddr` request.
 pub const PEER_ADDR_RESPONSE_LIMIT: usize =
     DEFAULT_PEERSET_INITIAL_TARGET_SIZE * OUTBOUND_PEER_LIMIT_MULTIPLIER / 2;

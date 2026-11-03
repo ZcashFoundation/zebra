@@ -1,0 +1,8 @@
+project: zebra-network
+kind: Added
+body: >-
+  Added `PeerServices::NODE_NETWORK_LIMITED` and `constants::NODE_NETWORK_LIMITED_BLOCKS` from the
+  draft version 2 protocol. Version 2 `init` records advertise the services passed to `init`, so a
+  pruned node can advertise limited service; legacy `version` messages and this node's own address
+  advertisements leave that bit out.
+time: 2026-11-03T01:54:59.799111482Z

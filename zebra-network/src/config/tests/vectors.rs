@@ -15,8 +15,68 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    types::PeerServices,
     Config, ObjectIndex, ObjectSource,
 };
+
+/// Limited service and artifact serving are version 2 flags, and early block relay is a
+/// legacy-only experiment.
+#[test]
+fn advertised_services_depend_on_the_protocol() {
+    let config = Config {
+        experimental_early_block_relay: true,
+        ..Config::default()
+    };
+    let pruned = PeerServices::NODE_NETWORK_LIMITED;
+    assert_eq!(
+        config.advertised_services(pruned),
+        PeerServices::NODE_EARLY_BLOCK_RELAY
+    );
+    assert_eq!(
+        config.v2_advertised_services(pruned),
+        PeerServices::NODE_NETWORK_LIMITED
+    );
+    let serving = PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS;
+    assert_eq!(
+        config.advertised_services(serving),
+        PeerServices::NODE_EARLY_BLOCK_RELAY
+    );
+    assert_eq!(config.v2_advertised_services(serving), serving);
+
+    let archive = Config::default();
+    assert_eq!(
+        archive.advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+    assert_eq!(
+        archive.v2_advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+    let archive_serving = PeerServices::NODE_NETWORK | PeerServices::NODE_SYNC_ARTIFACTS;
+    assert_eq!(
+        archive.advertised_services(archive_serving),
+        PeerServices::NODE_NETWORK
+    );
+    assert_eq!(
+        archive.v2_advertised_services(archive_serving),
+        archive_serving
+    );
+
+    // A node with an object source serves `get-object`, so version 2 peers see the bit.
+    let (_sender, source) = ObjectSource::channel(Arc::new(ObjectIndex::new()));
+    let source_config = Config {
+        object_source: Some(source),
+        ..Config::default()
+    };
+    assert_eq!(
+        source_config.v2_advertised_services(PeerServices::NODE_NETWORK),
+        archive_serving
+    );
+    assert_eq!(
+        source_config.advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+}
 
 /// The objects a node serves are runtime-only: a config never writes them, a config file that
 /// names them is rejected, and two configs are equal only if they watch the same object index.
