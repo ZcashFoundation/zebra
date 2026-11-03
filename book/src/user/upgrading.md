@@ -202,6 +202,14 @@ genesis. To restore the backup:
 
 Roll back direct readers to builds for the older format at the same time.
 
+## Zebra 7.1.0
+
+- **Peer set size.** The default `[network] peerset_initial_target_size`
+  rises from 25 to 250, so a node with the default configuration can hold up
+  to 2,000 peer connections instead of 200, and uses more bandwidth, memory,
+  and file descriptors; see [open file limit](requirements.md#open-file-limit).
+  Set `peerset_initial_target_size = 25` to keep the previous limits.
+
 ## Zebra 7.0.0
 
 - **NU7.** Mainnet activates NU7 at height 3,543,405; 6.x releases cannot

@@ -621,7 +621,7 @@ where
         let mut locked_nonces = nonces.lock().await;
 
         // Duplicate nonces are very rare, because they require a 64-bit random number collision,
-        // and the nonce set is limited to a few hundred entries.
+        // and the nonce set is limited to a few thousand entries.
         let is_unique_nonce = locked_nonces.insert(local_nonce);
         if !is_unique_nonce {
             return Err(HandshakeError::LocalDuplicateNonce);
@@ -638,8 +638,10 @@ where
         // This is a tradeoff between:
         // - avoiding memory denial of service attacks which make large numbers of connections,
         //   for example, 100 failed inbound connections takes 1 second.
-        // - memory usage: 16 bytes per `Nonce`, 3.2 kB for 200 nonces
-        // - collision probability: two hundred 64-bit nonces have a very low collision probability
+        // - memory usage: 16 bytes per `Nonce`, 32 kB for the 2,000 nonces allowed by the default
+        //   connection limits
+        // - collision probability: two thousand 64-bit nonces have a very low collision
+        //   probability, about 1 in 10^13
         //   <https://en.wikipedia.org/wiki/Birthday_problem#Probability_of_a_shared_birthday_(collision)>
         while locked_nonces.len() > config.peerset_total_connection_limit() {
             locked_nonces.shift_remove_index(0);

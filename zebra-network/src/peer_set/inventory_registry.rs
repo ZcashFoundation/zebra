@@ -62,10 +62,12 @@ pub const MAX_INV_PER_MAP: usize = 1000;
 /// Since the inventory registry is an efficiency optimisation, which falls back to a
 /// random peer, we only need to track a small number of peers per inv for available inventory.
 ///
-/// But we want to be able to track missing inventory for almost all our peers,
+/// But we want to be able to track missing inventory for many of our peers,
 /// so we only query a few peers for inventory that is genuinely missing from the network.
+/// With the default connection limits, this covers a small fraction of the connected peers,
+/// so requests for inventory that is missing from more peers fall back to random peers.
 //
-// TODO: split this into available (25) and missing (70)
+// TODO: split this into a small available limit and a larger missing limit
 pub const MAX_PEERS_PER_INV: usize = 70;
 
 /// A peer inventory status, which tracks a hash for both available and missing inventory.
@@ -175,8 +177,9 @@ impl InventoryChange {
         // Don't send more hashes than we're going to store.
         // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
         //
-        //  This limits known memory denial of service attacks to:
-        // `1000 hashes * 200 peers/channel capacity * 32-64 bytes = up to 12 MB`
+        // The channel capacity is the total connection limit, so with the default connection
+        // limits, this limits known memory denial of service attacks to:
+        // `1000 hashes * 2,000 peers/channel capacity * 32-64 bytes = up to 128 MB`
         hashes.truncate(MAX_INV_PER_MAP);
 
         let hashes = hashes.try_into().ok();

@@ -9,7 +9,7 @@ only for an idle node at the chain tip. See
 | Resource | Consumers | Capacity planning |
 | --- | --- | --- |
 | CPU | Proof and signature verification, transaction execution, database compaction, and RPC requests | Reserve capacity for synchronization and client traffic; see [CPU worker configuration](config.md#sync). |
-| RAM | Blocks awaiting verification, recent non-finalized chains, the mempool, proof parameters, and RocksDB caches and write buffers | Account for all processes and container memory limits. Reducing synchronization concurrency reduces the number of in-flight blocks; the mempool cost limit is not a process-wide memory limit. |
+| RAM | Blocks awaiting verification, recent non-finalized chains, the mempool, proof parameters, RocksDB caches and write buffers, and peer connection buffers | Account for all processes and container memory limits. Reducing synchronization concurrency reduces the number of in-flight blocks; the mempool cost limit is not a process-wide memory limit. Each peer connection can buffer up to 2 MiB of message data in each direction, so budget for the connections allowed by `[network] peerset_initial_target_size` (2,000 by default); see [open file limit](#open-file-limit). |
 | Disk | Blocks, transactions, state indexes, recent-state backups, and configured log files | Keep free space for chain growth, database compaction, and upgrades. Account separately for snapshots and other services. |
 | Network | Initial block download, new blocks and transactions, peer discovery, and responses to peer or RPC requests | Allow sustained outbound connectivity. Upload demand depends on the peers and clients served by the node. |
 
@@ -84,3 +84,28 @@ Configure the [P2P listener and advertised address](config.md#network), then
 permit its [port](run.md#ports) through the firewall and publish it when
 [running in Docker](docker.md#p2p-networking). Do not expose management
 endpoints merely to make peer-to-peer networking reachable.
+
+## Open file limit
+
+Each peer connection holds one file descriptor. The default
+`[network] peerset_initial_target_size` of `250` allows up to 750 outbound and
+1,250 inbound connections, 2,000 in total, and RocksDB table files, log files,
+and RPC connections need descriptors too. At startup, Zebra raises its soft
+open file limit to 1,024 if it is lower and the hard limit allows, leaves a
+higher limit unchanged, and lets the database hold up to half of the limit
+open. A limit of 1,024 leaves about 490 descriptors for sockets, so new
+connections fail with `Too many open files` once the node is well connected.
+
+Set the soft limit to at least 4,096 before starting Zebra; 8,192 leaves room
+for handshakes in progress, RPC clients, and log files:
+
+```sh
+ulimit -n 8192
+zebrad start
+```
+
+For a systemd service, set `LimitNOFILE=8192` in its `[Service]` section. For
+Docker, pass `--ulimit nofile=8192:8192` to `docker run`, or set `ulimits` on
+the Compose service; see [Docker](docker.md#p2p-networking). To use fewer
+descriptors instead, lower `[network] peerset_initial_target_size`; see the
+[configuration reference](config.md#network).

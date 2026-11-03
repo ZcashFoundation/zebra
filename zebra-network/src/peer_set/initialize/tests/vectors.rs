@@ -70,6 +70,19 @@ const CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_millis(100
 /// The deadline for every test connection to be handshaken or rejected by the listener.
 const LISTENER_TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The peer set target size for the `listener_peer_limit_large_*` tests.
+///
+/// Those tests open `peerset_inbound_connection_limit() * 2 + 1` real TCP connections, which the
+/// listener accepts [`MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS`] apart. With the production
+/// default of 250 peers, that is 2,501 connections and over 60 seconds, longer than
+/// [`LISTENER_TEST_TIMEOUT`]. So these tests use the previous default of 25 peers, which is
+/// 251 connections, and `config::tests::vectors::default_peer_connection_limits` pins the
+/// production default.
+///
+/// The `crawler_peer_limit_default_*` tests use fake peers and fake connections, so they run with
+/// the production default in a few seconds.
+const LISTENER_TEST_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
+
 /// The amount of time to run zcashd-compat listener tests.
 const ZCASHD_COMPAT_LISTENER_TEST_DURATION: Duration = Duration::from_millis(500);
 
@@ -693,7 +706,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
         }
     });
 
-    // The initial target size is multiplied by 1.5 to give the actual limit.
+    // The outbound connection limit is `OUTBOUND_PEER_LIMIT_MULTIPLIER` times the target size.
     let (config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(None, success_stay_open_outbound_connector).await;
 
@@ -781,7 +794,10 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
     // Add enough candidates for the initial fill and the replacement dials.
     let candidate_count = outbound_limit * 2 + 1;
     for address_number in 0..candidate_count {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let [high, low] = u16::try_from(address_number)
+            .expect("test peer counts are below the 65,536 distinct fake addresses")
+            .to_be_bytes();
+        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, high, low).into(), 1);
         let addr = MetaAddr::new_gossiped_meta_addr(
             addr.into(),
             PeerServices::NODE_NETWORK,
@@ -1671,9 +1687,9 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
     }
 }
 
-/// Test the listener with the default inbound peer limit, and a handshaker that always errors.
+/// Test the listener with a large inbound peer limit, and a handshaker that always errors.
 #[tokio::test]
-async fn listener_peer_limit_default_handshake_error() {
+async fn listener_peer_limit_large_handshake_error() {
     let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
@@ -1684,8 +1700,12 @@ async fn listener_peer_limit_default_handshake_error() {
     let error_inbound_handshaker =
         service_fn(|_| async { Err("test inbound handshaker always returns errors".into()) });
 
-    let (_config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(None, None, error_inbound_handshaker).await;
+    let (_config, mut peerset_rx) = spawn_inbound_listener_with_peer_limit(
+        LISTENER_TEST_PEERSET_INITIAL_TARGET_SIZE,
+        None,
+        error_inbound_handshaker,
+    )
+    .await;
 
     let peer_result = peerset_rx.try_recv();
     assert!(
@@ -1696,10 +1716,10 @@ async fn listener_peer_limit_default_handshake_error() {
     );
 }
 
-/// Test the listener with the default inbound peer limit,
+/// Test the listener with a large inbound peer limit,
 /// and a handshaker that returns success then disconnects the peer.
 #[tokio::test]
-async fn listener_peer_limit_default_handshake_ok_then_drop() {
+async fn listener_peer_limit_large_handshake_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
@@ -1725,7 +1745,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
         });
 
     let (config, mut peerset_rx) = spawn_inbound_listener_with_peer_limit(
-        None,
+        LISTENER_TEST_PEERSET_INITIAL_TARGET_SIZE,
         usize::MAX,
         success_disconnect_inbound_handshaker,
     )
@@ -1750,10 +1770,10 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
     );
 }
 
-/// Test the listener with the default inbound peer limit,
+/// Test the listener with a large inbound peer limit,
 /// and a handshaker that returns success then holds the peer open.
 #[tokio::test]
-async fn listener_peer_limit_default_handshake_ok_stay_open() {
+async fn listener_peer_limit_large_handshake_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
     // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
@@ -1787,9 +1807,12 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
             }
         });
 
-    let (config, mut peerset_rx) =
-        spawn_inbound_listener_with_peer_limit(None, None, success_stay_open_inbound_handshaker)
-            .await;
+    let (config, mut peerset_rx) = spawn_inbound_listener_with_peer_limit(
+        LISTENER_TEST_PEERSET_INITIAL_TARGET_SIZE,
+        None,
+        success_stay_open_inbound_handshaker,
+    )
+    .await;
 
     let mut peer_change_count: usize = 0;
     loop {
@@ -2194,9 +2217,10 @@ async fn add_initial_peers_deadlock() {
     // `PEERSET_INITIAL_TARGET_SIZE`.
     let mut peers = IndexSet::new();
     for address_number in 0..PEER_COUNT {
-        peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
-        );
+        let [high, low] = u16::try_from(address_number)
+            .expect("test peer counts are below the 65,536 distinct fake addresses")
+            .to_be_bytes();
+        peers.insert(SocketAddr::new(Ipv4Addr::new(127, 1, high, low).into(), 1).to_string());
     }
 
     // This test might fail on machines with no configured IPv4 addresses
@@ -2387,7 +2411,10 @@ where
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
     for address_number in 0..over_limit_peers {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+        let [high, low] = u16::try_from(address_number)
+            .expect("test peer counts are below the 65,536 distinct fake addresses")
+            .to_be_bytes();
+        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, high, low).into(), 1);
         let addr = MetaAddr::new_gossiped_meta_addr(
             addr.into(),
             PeerServices::NODE_NETWORK,
@@ -2667,9 +2694,10 @@ where
     // initial peers.
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
-        peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
-        );
+        let [high, low] = u16::try_from(address_number)
+            .expect("test peer counts are below the 65,536 distinct fake addresses")
+            .to_be_bytes();
+        peers.insert(SocketAddr::new(Ipv4Addr::new(127, 1, high, low).into(), 1).to_string());
     }
 
     // This address isn't actually bound - it just gets passed to the address book.

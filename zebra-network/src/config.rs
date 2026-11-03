@@ -181,7 +181,11 @@ pub struct Config {
     /// The initial target size for the peer set.
     ///
     /// Also used to limit the number of inbound and outbound connections made by Zebra,
-    /// and the size of the cached peer list.
+    /// and the number of initial peers chosen from the DNS seeders and the peer cache.
+    ///
+    /// The default is 250 peers, which allows 750 outbound and 1,250 inbound connections.
+    /// Each connection uses a file descriptor and some memory and bandwidth, so the process
+    /// open file limit must be at least 4,096 when using the default.
     ///
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
@@ -240,9 +244,10 @@ impl Config {
     ///
     /// We assume that Zebra nodes have at least 10 Mbps bandwidth.
     /// Therefore, a maximum-sized block can take up to 2 seconds to
-    /// download. So the initial outbound peer set adds up to 100 seconds worth
-    /// of blocks to the queue. If Zebra has reached its outbound peer limit,
-    /// that adds an extra 200 seconds of queued blocks.
+    /// download. So the default initial outbound peer set of 250 peers adds up to
+    /// 500 seconds worth of blocks to the queue. If Zebra has reached its default
+    /// outbound peer limit of 750 peers, that adds an extra 1,000 seconds of queued
+    /// blocks.
     ///
     /// But the peer set for slow nodes is typically much smaller, due to
     /// the handshake RTT timeout. And Zebra responds to inbound request
@@ -592,8 +597,9 @@ impl Default for Config {
             // The default peerset target size should be large enough to ensure
             // nodes have a reliable set of peers.
             //
-            // But Zebra should only make a small number of initial outbound connections,
-            // so that idle peers don't use too many connection slots.
+            // But each initial outbound connection uses an inbound connection slot on
+            // the remote peer, so the default is a tradeoff between peer diversity and
+            // the connection slots Zebra uses on the rest of the network.
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
         }

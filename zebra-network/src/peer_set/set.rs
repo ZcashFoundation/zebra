@@ -75,10 +75,10 @@
 //! to isolated peers and increases the chance of an eclipse attack on some peers of the network.
 //!
 //! Zebra does not gradually migrate its peers as it approaches an activation height. This is
-//! because Zebra by default can connect to up to 75 peers, as can be seen in [`Config::default`].
-//! Since this is a lot larger than the 8 peers Zcashd connects to, an eclipse attack becomes a lot
-//! more costly to execute, and the probability of an abrupt network partition that isolates peers
-//! is lower.
+//! because Zebra by default can connect to up to 750 outbound peers, three times the default
+//! [`Config::peerset_initial_target_size`] (see [`Config::default`]). Since this is a lot larger
+//! than the 8 peers Zcashd connects to, an eclipse attack becomes a lot more costly to execute,
+//! and the probability of an abrupt network partition that isolates peers is lower.
 //!
 //! Even if a Zebra node is manually configured to connect to a smaller number
 //! of peers, the [`AddressBook`][2] is configured to hold a large number of

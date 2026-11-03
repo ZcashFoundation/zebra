@@ -1,0 +1,11 @@
+project: zebrad
+kind: Changed
+body: >-
+  Raised the default `[network] peerset_initial_target_size` from 25 to 250 peers,
+  so a node with the default configuration can hold up to 750 outbound and 1,250
+  inbound connections, 2,000 in total. Bandwidth and memory use grow with the number
+  of connected peers, and each connection holds a file descriptor, so set the process
+  open file limit to at least 4,096 before starting (`ulimit -n 8192`, systemd
+  `LimitNOFILE=8192`, or Docker `--ulimit nofile=8192:8192`), or set
+  `peerset_initial_target_size = 25` to keep the previous limits.
+time: 2026-11-03T06:25:00Z
