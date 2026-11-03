@@ -1102,19 +1102,20 @@ where
         self.shutdown_async(error).await;
     }
 
-    /// Release demoted source capacity before waiting for peer-controlled writes.
+    /// Keep a source slot until its disabling message is sent or the connection fails.
     async fn set_compact_receive(&mut self, permit: Option<tokio::sync::OwnedSemaphorePermit>) {
-        self.compact_receive_permit = permit;
         let result = self
             .peer_tx
             .send(Message::SendCompact {
-                high_bandwidth: self.compact_receive_permit.is_some(),
+                high_bandwidth: permit.is_some(),
                 version: 1,
             })
             .await;
         if let Err(error) = result {
-            self.compact_receive_permit = None;
+            drop(permit);
             self.fail_with(error).await;
+        } else {
+            self.compact_receive_permit = permit;
         }
     }
 
@@ -2047,6 +2048,9 @@ where
     /// If the connection has errored already, re-use the original error.
     /// Otherwise, fail the connection with `error`.
     async fn shutdown_async(&mut self, error: impl Into<SharedPeerError>) {
+        // A failed connection cannot receive announcements, even if closing its sink stalls.
+        self.compact_receive_permit = None;
+
         // Close async channels first, so other tasks can start shutting down.
         // There's nothing we can do about errors while shutting down, and some errors are expected.
         //
