@@ -1765,7 +1765,18 @@ async fn misbehaving_responses_close_and_ban_at_the_threshold() {
                 );
             }
 
+            // The penalty is applied before the client gets its error, so the report, if any,
+            // has already been sent.
+            let report = raw.node.misbehavior_rx.try_recv();
             if is_last {
+                let report = report.expect("the peer is reported for banning");
+                assert_eq!(report.score, crate::constants::MAX_PEER_MISBEHAVIOR_SCORE);
+                assert!(report.addr.ip().is_loopback(), "got {report:?}");
+                assert!(
+                    report.reason.contains("not a contiguous chain"),
+                    "got {report:?}"
+                );
+
                 let close = raw.connection.closed().await;
                 assert!(
                     matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
@@ -1773,6 +1784,10 @@ async fn misbehaving_responses_close_and_ban_at_the_threshold() {
                     "got {close:?}"
                 );
             } else {
+                assert!(
+                    report.is_err(),
+                    "reply {index}: nothing is reported below the threshold"
+                );
                 call(&mut raw.node.client, Request::Ping(Default::default()))
                     .await
                     .unwrap_or_else(|error| panic!("reply {index}: the client fails: {error}"));
@@ -1780,24 +1795,8 @@ async fn misbehaving_responses_close_and_ban_at_the_threshold() {
                     raw.connection.close_reason().is_none(),
                     "reply {index}: the connection stays open below the threshold"
                 );
-                assert!(
-                    raw.node.misbehavior_rx.try_recv().is_err(),
-                    "reply {index}: nothing is reported below the threshold"
-                );
             }
         }
-
-        let report = raw
-            .node
-            .misbehavior_rx
-            .try_recv()
-            .expect("the peer is reported for banning");
-        assert_eq!(report.score, crate::constants::MAX_PEER_MISBEHAVIOR_SCORE);
-        assert!(report.addr.ip().is_loopback(), "got {report:?}");
-        assert!(
-            report.reason.contains("not a contiguous chain"),
-            "got {report:?}"
-        );
     })
     .await
     .expect("the test completes well within the timeout");

@@ -96,21 +96,22 @@ impl Drop for ResponseGuard {
 }
 
 /// Drives one client request to completion and answers the client, holding
-/// `_permit`, one of the connection's [`MAX_OUTBOUND_REQUEST_STREAMS`], until
-/// it ends.
+/// `permit`, one of the connection's [`MAX_OUTBOUND_REQUEST_STREAMS`], until
+/// its streams end.
 ///
 /// If the client stops waiting for the response, the request is abandoned:
 /// its streams are cancelled with `CANCELLED` and the client is not
 /// answered.
 ///
-/// A misbehaving response adds to the peer's score in `misbehavior`; once the
-/// score reaches the ban threshold, the connection is closed with
-/// `MISBEHAVIOR` (draft, "Misbehavior and Banning").
+/// A misbehaving response adds to the peer's score in `misbehavior` before the
+/// client gets its error; once the score reaches the ban threshold, the
+/// connection is closed with `MISBEHAVIOR` (draft, "Misbehavior and
+/// Banning").
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn drive(
     request: Request,
     tx: MustUseClientResponseSender,
-    _permit: OwnedSemaphorePermit,
+    permit: OwnedSemaphorePermit,
     connection: Connection,
     transient_addr: Option<PeerSocketAddr>,
     genesis_hash: block::Hash,
@@ -146,6 +147,8 @@ pub(super) async fn drive(
         drop(guard.0.take());
         return;
     };
+    // The request's streams ended with `work`, so the slot is free for the next request.
+    drop(permit);
 
     match result {
         Ok(response) => {
@@ -177,32 +180,33 @@ pub(super) async fn drive(
                 Failure::Violation { reason, code } => Some((reason.clone(), *code)),
                 _ => None,
             };
-            let misbehavior_reason = match &failure {
-                Failure::Misbehavior(reason) => Some(reason.clone()),
+
+            // Draft, "Misbehavior and Banning": a misbehaving response is discarded and penalized,
+            // and the connection stays open until the peer's score reaches the ban threshold. The
+            // score is kept by peer group, so it survives reconnections. It is applied before the
+            // client is answered, so a caller that sees the error also sees the penalty: any ban
+            // report has already been sent.
+            let ban = match (&failure, transient_addr) {
+                (Failure::Misbehavior(reason), Some(addr)) => misbehavior
+                    .penalize(addr, RESPONSE_MISBEHAVIOR_PENALTY, reason.clone())
+                    .await
+                    .then(|| reason.clone()),
                 _ => None,
             };
+
             guard.send(Err(failure.into()));
             if let Some((reason, code)) = violation {
                 send_event(&events, Event::Violation { reason, code }).await;
             }
-
-            // Draft, "Misbehavior and Banning": a misbehaving response is discarded and penalized,
-            // and the connection stays open until the peer's score reaches the ban threshold. The
-            // score is kept by peer group, so it survives reconnections.
-            if let (Some(reason), Some(addr)) = (misbehavior_reason, transient_addr) {
-                if misbehavior
-                    .penalize(addr, RESPONSE_MISBEHAVIOR_PENALTY, reason.clone())
-                    .await
-                {
-                    send_event(
-                        &events,
-                        Event::Violation {
-                            reason,
-                            code: ErrorCode::Misbehavior,
-                        },
-                    )
-                    .await;
-                }
+            if let Some(reason) = ban {
+                send_event(
+                    &events,
+                    Event::Violation {
+                        reason,
+                        code: ErrorCode::Misbehavior,
+                    },
+                )
+                .await;
             }
         }
     }
