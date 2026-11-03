@@ -98,7 +98,8 @@ pub struct Config {
     /// enabling pruning; startup refuses to move them automatically. New pruning state starts
     /// isolated. Disabling pruning keeps that directory and succeeds only while all bodies remain.
     /// After deletion, restore an archive snapshot or fully resync in a separate cache directory.
-    /// Normal RocksDB compaction reclaims space eventually, not immediately after deletion.
+    /// Catch-up pruning compacts deleted bodies after clearing the backlog;
+    /// normal RocksDB compaction handles ongoing deletion.
     ///
     /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
     pub prune_blocks_older_than: Option<u32>,

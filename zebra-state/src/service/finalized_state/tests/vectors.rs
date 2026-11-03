@@ -243,7 +243,14 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
 
     let mut batch = crate::DiskWriteBatch::new();
     let error = batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
         .unwrap_err();
     assert_eq!(
         error.to_string(),
@@ -380,7 +387,14 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
     assert!(!state.db.history_capabilities().unwrap().is_pruned());
     let mut batch = crate::DiskWriteBatch::new();
     let error = batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
         .unwrap_err();
     assert!(error
         .to_string()
