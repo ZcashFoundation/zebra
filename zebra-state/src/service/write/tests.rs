@@ -20,13 +20,7 @@ fn populated_state() -> (NonFinalizedState, FinalizedState, Arc<Block>, Arc<Bloc
     let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
     let child = root.make_fake_child().set_work(10);
     let mut state = NonFinalizedState::new(&network);
-    let finalized = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .unwrap();
+    let finalized = FinalizedState::new(&Config::ephemeral(), &network).unwrap();
     finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
     state
         .commit_new_chain(root.clone().prepare(), &finalized)

@@ -71,15 +71,7 @@ fn custom_genesis_unspendable_outputs_survive_reopen() {
         cache_dir: cache.path().to_path_buf(),
         ..Config::default()
     };
-    let open = || {
-        FinalizedState::new(
-            &config,
-            &network,
-            #[cfg(feature = "elasticsearch")]
-            false,
-        )
-        .unwrap()
-    };
+    let open = || FinalizedState::new(&config, &network).unwrap();
     let mut state = open();
     state
         .commit_finalized_direct(
@@ -199,10 +191,6 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         )
         .unwrap(),
         debug_stop_at_height: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_db: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_blocks: vec![],
     };
     state
         .db
@@ -267,13 +255,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
 
     // Disabling cleanup is not a rollback backup: startup moves the v28 directory to v29.
     config.delete_old_database = false;
-    let mut state = FinalizedState::new(
-        &config,
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .unwrap();
+    let mut state = FinalizedState::new(&config, &network).unwrap();
     timeout(Duration::from_secs(30), async {
         while !state.db.finished_format_upgrades() {
             state.db.check_for_panics();

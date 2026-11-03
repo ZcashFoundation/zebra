@@ -120,10 +120,6 @@ criteria = "safe-to-deploy"
 version = "1.9.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.async-compression]]
-version = "0.4.42"
-criteria = "safe-to-deploy"
-
 [[exemptions.async-trait]]
 version = "0.1.88"
 criteria = "safe-to-deploy"
@@ -295,14 +291,6 @@ version = "4.6.7"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.compression-codecs]]
-version = "0.4.38"
-criteria = "safe-to-deploy"
-
-[[exemptions.compression-core]]
-version = "0.4.32"
-criteria = "safe-to-deploy"
 
 [[exemptions.config]]
 version = "0.15.22"
@@ -493,10 +481,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ed25519-zebra]]
 version = "4.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.elasticsearch]]
-version = "8.17.0-alpha.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.encode_unicode]]

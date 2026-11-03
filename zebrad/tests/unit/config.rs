@@ -1162,11 +1162,11 @@ fn config_env_unknown_sensitive_key_errors() {
 }
 
 #[test]
-fn config_env_elasticsearch_password_errors() {
+fn config_env_password_key_errors() {
     let env = EnvGuard::new();
 
-    // This key may or may not exist depending on features. It should be filtered regardless.
-    env.set_var("ZEBRA_STATE__ELASTICSEARCH_PASSWORD", "topsecret");
+    // Keys ending in `password` are rejected even when no such field exists
+    env.set_var("ZEBRA_RPC__PASSWORD", "topsecret");
 
     let result = ZebradConfig::load(None);
     assert!(result.is_err(), "Sensitive env key should cause an error");

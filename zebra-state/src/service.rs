@@ -326,13 +326,7 @@ impl StateService {
             let network = network.clone();
             tokio::task::spawn_blocking(move || {
                 let timer = CodeTimer::start();
-                let finalized_state = FinalizedState::new(
-                    &config,
-                    &network,
-                    #[cfg(feature = "elasticsearch")]
-                    true,
-                )
-                .expect(
+                let finalized_state = FinalizedState::new(&config, &network).expect(
                     "opening the read-write finalized state database failed; check that the \
                      state cache directory is writable and not locked by another Zebra instance, \
                      and that there is free disk space",
@@ -2017,14 +2011,7 @@ pub fn init_read_only(
     ),
     StateInitError,
 > {
-    let finalized_state = FinalizedState::new_with_debug(
-        &config,
-        network,
-        true,
-        #[cfg(feature = "elasticsearch")]
-        false,
-        true,
-    )?;
+    let finalized_state = FinalizedState::new_with_debug(&config, network, true, true)?;
     let (non_finalized_state_sender, non_finalized_state_receiver) =
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 
