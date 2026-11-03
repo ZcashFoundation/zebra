@@ -151,6 +151,10 @@ async fn cache_proposal(
     let (contextual, wire, retained_bytes) = AbortOnDropHandle::new({
         let block = block.clone();
         tokio::task::spawn_blocking(move || {
+            // A proposal from the template updater is built as a decoded block, so it has no
+            // wire bytes yet. Encode it once here, off the submission path, so that
+            // `PreparedBlockCache::reuse` can match a submission by decoding only its header
+            // and comparing the rest of its bytes, without decoding or encoding transactions.
             let wire: Arc<[u8]> = block
                 .zcash_serialize_to_vec()
                 .expect("verified blocks serialize")
