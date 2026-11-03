@@ -6,11 +6,12 @@
 //! component. So [`run()`] keeps current work ready in a [`TemplateCache`], and the RPC checks
 //! that its parent is still the tip or the current proof-of-work checked candidate.
 //!
-//! Every served template is either coinbase-only or a build that passed proposal validation. A
-//! transaction-bearing build is staged until [`validate_templates()`] accepts it, and miners keep
-//! the coinbase-only work for that parent in the meantime. So a solved block that changes only the
-//! nonce and Equihash solution reuses the cached verdict in `submitblock`, instead of waiting for
-//! transaction and contextual verification.
+//! Every transaction-bearing template is validated as a block proposal, so a solved block that
+//! changes only the nonce and Equihash solution reuses the cached verdict in `submitblock`,
+//! instead of waiting for transaction and contextual verification. The first such template for a
+//! tip is served while its check runs, rather than leaving miners on coinbase-only work; a later
+//! build for the same tip is staged until [`validate_templates()`] accepts it, so the work miners
+//! already hold stays served until its replacement is as ready.
 //!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
 //! only serves the current tip or a proof-of-work checked parent under verification. Early work
@@ -198,6 +199,17 @@ impl TemplateCache {
             .is_some_and(|template| template.previous_block_hash == tip_hash)
     }
 
+    /// Returns `true` if the served template extends `tip_hash` and has transactions.
+    fn holds_full_tip(&self, tip_hash: block::Hash) -> bool {
+        self.served
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.template.as_ref())
+            .is_some_and(|template| {
+                template.previous_block_hash == tip_hash && !template.transactions.is_empty()
+            })
+    }
+
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
         self.served.borrow().is_none()
@@ -264,8 +276,9 @@ impl TemplateCache {
 
     /// Stages a transaction-bearing build for validation.
     ///
-    /// The build is served once [`validate_templates()`] accepts it; the previously served work
-    /// for its parent remains available until then. Coinbase-only work uses [`Self::publish()`].
+    /// [`validate_templates()`] serves the build once it accepts it, unless it is already served;
+    /// the previously served work for its parent remains available until then. Coinbase-only work
+    /// uses [`Self::publish()`].
     fn stage(&self, template: BlockTemplateResponse) {
         debug_assert!(
             !template.transactions.is_empty(),
@@ -280,6 +293,18 @@ impl TemplateCache {
     /// parent can still be in validation, so a build only replaces work for its own parent, or
     /// fills a cache without work. Returns whether the build was published.
     fn promote(&self, template: Arc<BlockTemplateResponse>) -> bool {
+        // Work served ahead of its validation is already in place: don't wake long polls for it.
+        if self
+            .served
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.template.as_ref())
+            .is_some_and(|served| {
+                served.long_poll_id == template.long_poll_id && served.cur_time == template.cur_time
+            })
+        {
+            return true;
+        }
         self.served.send_if_modified(|state| {
             let previous = state.as_ref().and_then(|state| state.template.as_ref());
             if previous.is_some_and(|previous| {
@@ -365,6 +390,15 @@ impl TemplateCache {
         let mut template = (**template).clone();
         template.cur_time = cur_time;
         template.max_time = max_time;
+        // The header time is part of a proposal's identity, so a narrowed time has no cached
+        // verdict yet. Stage the narrowed work once; its validation replaces the served work.
+        if !template.transactions.is_empty()
+            && self.staged.borrow().as_ref().is_none_or(|staged| {
+                staged.long_poll_id != template.long_poll_id || staged.cur_time != cur_time
+            })
+        {
+            self.stage(template.clone());
+        }
         Some(Arc::new(template))
     }
 }
@@ -674,12 +708,17 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     was_failing = false;
                 }
 
-                // Coinbase-only work needs no validation. A transaction-bearing build is served
-                // once its proposal validates, so a solved block can reuse that verdict.
+                // Coinbase-only work needs no validation. The first transaction-bearing build
+                // for a tip is served at once, so miners don't mine empty blocks while it is
+                // validated in the background; a later build for the same tip replaces it only
+                // once validated, so a solve of the served work reuses a verdict.
                 if template.transactions.is_empty() {
                     cache.publish(template);
-                } else {
+                } else if cache.holds_full_tip(template.previous_block_hash) {
                     cache.stage(template);
+                } else {
+                    cache.stage(template.clone());
+                    cache.publish(template);
                 }
                 Some(mempool_tx_ids)
             }
@@ -860,10 +899,17 @@ async fn validate_templates(
             );
             match proposal {
                 Ok(block) => {
-                    verifier
-                        .clone()
-                        .oneshot(VerifyRequest::CheckProposal(Arc::new(block)))
-                        .await
+                    match tokio::time::timeout(
+                        super::PROPOSAL_CHECK_TIMEOUT,
+                        verifier
+                            .clone()
+                            .oneshot(VerifyRequest::CheckProposal(Arc::new(block))),
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(elapsed) => Err(elapsed.into()),
+                    }
                 }
                 Err(error) => Err(error.into()),
             }
