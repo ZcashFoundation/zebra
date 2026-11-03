@@ -30,6 +30,11 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network};
 
+/// Dialling version 2 peers for a state-snapshot bootstrap, before the peer set exists.
+pub(super) mod bootstrap;
+
+pub use bootstrap::BootstrapPeers;
+
 use crate::{
     connection_metrics::{
         record_connection_attempt_finished, record_connection_attempt_started,
