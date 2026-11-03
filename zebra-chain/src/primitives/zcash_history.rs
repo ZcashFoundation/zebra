@@ -236,6 +236,19 @@ impl<V: Version> Tree<V> {
         // always exist.
         V::hash(self.inner.root_node().expect("must have root node").data()).into()
     }
+
+    /// Returns the node data of the tree's root: the combination of its peaks,
+    /// whose `end_*` fields are those of the rightmost peak (ZIP 221).
+    pub fn root_node_data(&self) -> V::NodeData
+    where
+        V::NodeData: Clone,
+    {
+        self.inner
+            .root_node()
+            .expect("a tree is built from at least one peak, and combining peaks leaves a root")
+            .data()
+            .clone()
+    }
 }
 
 impl<V: zcash_history::Version> std::fmt::Debug for Tree<V> {

@@ -33,6 +33,9 @@ pub enum HistoryTreeError {
 
     #[error("I/O error: {0}")]
     IOError(#[from] io::Error),
+
+    #[error("invalid history tree peak: {0}")]
+    InvalidPeak(&'static str),
 }
 
 impl PartialEq for HistoryTreeError {
@@ -44,6 +47,28 @@ impl PartialEq for HistoryTreeError {
 }
 
 impl Eq for HistoryTreeError {}
+
+/// The `end_*` fields of a history tree's rightmost peak: the roots the tree
+/// commits to after its last block (ZIP 221, ZIP 258).
+///
+/// Internal nodes carry the `end_*` fields of their rightmost leaf, so these
+/// are also the fields of the tree's root node, and of its last leaf.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct HistoryPeak {
+    /// The height of the last block in the tree.
+    pub end_height: Height,
+
+    /// The Sapling note commitment tree root after the last block.
+    pub end_sapling_root: [u8; 32],
+
+    /// The Orchard note commitment tree root after the last block, for the
+    /// NU5-onward node versions (V2 and V3); `None` for a pre-NU5 tree.
+    pub end_orchard_root: Option<[u8; 32]>,
+
+    /// The Ironwood note commitment tree root after the last block, for the
+    /// NU6.3-onward node version (ZIP 258 V3); `None` before NU6.3.
+    pub end_ironwood_root: Option<[u8; 32]>,
+}
 
 /// The inner [Tree] in one of its supported versions.
 #[derive(Debug)]
@@ -399,6 +424,54 @@ impl NonEmptyHistoryTree {
             InnerHistoryTree::OrchardOnward(tree) => tree.hash(),
             InnerHistoryTree::IronwoodOnward(tree) => tree.hash(),
         }
+    }
+
+    /// Returns the `end_*` fields of the tree's rightmost peak, read from the
+    /// root node, whose `end_*` fields are the rightmost peak's by
+    /// construction.
+    ///
+    /// Returns an error if the peak's end height is not a valid block height.
+    pub fn last_peak(&self) -> Result<HistoryPeak, HistoryTreeError> {
+        let (end_height, end_sapling_root, end_orchard_root, end_ironwood_root) = match &self.inner
+        {
+            InnerHistoryTree::PreOrchard(tree) => {
+                let data = tree.root_node_data();
+                (data.end_height, data.end_sapling_root, None, None)
+            }
+            InnerHistoryTree::OrchardOnward(tree) => {
+                let data = tree.root_node_data();
+                (
+                    data.v1.end_height,
+                    data.v1.end_sapling_root,
+                    Some(data.end_orchard_root),
+                    None,
+                )
+            }
+            InnerHistoryTree::IronwoodOnward(tree) => {
+                let data = tree.root_node_data();
+                (
+                    data.v2.v1.end_height,
+                    data.v2.v1.end_sapling_root,
+                    Some(data.v2.end_orchard_root),
+                    Some(data.end_ironwood_root),
+                )
+            }
+        };
+
+        let end_height = u32::try_from(end_height)
+            .ok()
+            .map(Height)
+            .filter(|height| *height <= Height::MAX)
+            .ok_or(HistoryTreeError::InvalidPeak(
+                "the end height is above the maximum block height",
+            ))?;
+
+        Ok(HistoryPeak {
+            end_height,
+            end_sapling_root,
+            end_orchard_root,
+            end_ironwood_root,
+        })
     }
 
     /// Return the peaks of the tree.
