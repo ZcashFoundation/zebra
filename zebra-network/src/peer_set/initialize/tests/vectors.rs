@@ -3218,6 +3218,84 @@ fn v2_initial_peer_slots_dial_a_shared_address_once() {
     assert_eq!(slots.take_next(), None);
 }
 
+/// A host that resolves after the slots are full waits for a slot to free, and then gets it
+/// before the hosts that already hold one.
+#[test]
+fn v2_initial_peer_slots_late_host_waits_for_a_free_slot() {
+    let _init_guard = zebra_test::init();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2)];
+    let late_host = test_v2_addr(3);
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(), Some(early_host[0]));
+
+    slots.add_host([late_host]);
+    assert_eq!(slots.take_next(), None, "the only slot is taken");
+    assert!(!slots.holds_slot(&late_host));
+
+    slots.free(&early_host[0]);
+    assert_eq!(slots.take_next(), Some(late_host));
+    assert!(slots.holds_slot(&late_host));
+}
+
+/// A slot is kept free for each configured host that has not resolved yet, so an early host
+/// with many addresses cannot fill every slot before a later host resolves.
+#[test]
+fn v2_initial_peer_slots_keep_a_slot_for_each_unresolved_host() {
+    let _init_guard = zebra_test::init();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
+    let late_host = test_v2_addr(4);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.set_unresolved_hosts(1);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(), Some(early_host[0]));
+    assert_eq!(
+        slots.take_next(),
+        None,
+        "the last free slot is kept for the unresolved host"
+    );
+
+    slots.set_unresolved_hosts(0);
+    slots.add_host([late_host]);
+    assert_eq!(slots.take_next(), Some(late_host));
+    assert_eq!(slots.take_next(), None, "both slots are taken");
+
+    // With more unresolved hosts than free slots, each resolved host still gets one slot.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.set_unresolved_hosts(2);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(), Some(early_host[0]));
+}
+
+/// The initial version 2 peers resolve by host, so each host's addresses stay together and share
+/// its turns for the outbound slots, and an address is never counted for the wrong host.
+#[tokio::test]
+async fn v2_initial_peers_resolve_by_host() {
+    let _init_guard = zebra_test::init();
+
+    let hosts: IndexSet<String> = ["127.0.0.1:8233", "127.0.0.2:8234"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let (resolved, unresolved) = Config::resolve_initial_v2_peers(&hosts).await;
+
+    assert!(unresolved.is_empty());
+    let resolved: Vec<_> = resolved
+        .into_iter()
+        .map(|(host, addrs)| (host, addrs.into_iter().collect::<Vec<_>>()))
+        .collect();
+    let expected: Vec<_> = hosts
+        .iter()
+        .map(|host| {
+            let addr: SocketAddr = host.parse().expect("the test hosts are socket addresses");
+            (host.clone(), vec![PeerSocketAddr::from(addr)])
+        })
+        .collect();
+    assert_eq!(resolved, expected);
+}
+
 /// A distinct version 2 peer address for the slot tests, which never connect to it.
 fn test_v2_addr(port: u16) -> PeerSocketAddr {
     SocketAddr::new(Ipv4Addr::new(203, 0, 113, 1).into(), port).into()

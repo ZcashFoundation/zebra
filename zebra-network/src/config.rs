@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 use serde::{de, Deserialize, Deserializer};
 use tokio::fs;
 
@@ -172,6 +172,13 @@ pub struct Config {
     /// A host name that does not resolve is retried after the reconnection
     /// delay. Once it resolves, Zebra keeps using that address until it
     /// restarts.
+    ///
+    /// The outbound version 2 connection slots are shared between the hosts:
+    /// each host gets a slot before any host gets a second one, and a slot is
+    /// kept free for each host that has not resolved yet. Connections that stay
+    /// up keep their slots, so with more hosts than slots, the hosts that
+    /// resolve first get them, and the others wait for a connection to fail or
+    /// end.
     pub initial_v2_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
@@ -365,12 +372,12 @@ impl Config {
         }
     }
 
-    /// Resolves the configured version 2 initial peer `hosts`, in configuration
-    /// order: the addresses, and the hosts that did not resolve, for the caller
-    /// to retry.
+    /// Resolves the configured version 2 initial peer `hosts`: the addresses of
+    /// each host that resolved, by host in configuration order, and the hosts
+    /// that did not resolve, for the caller to retry.
     pub(crate) async fn resolve_initial_v2_peers(
         hosts: &IndexSet<String>,
-    ) -> (IndexSet<PeerSocketAddr>, IndexSet<String>) {
+    ) -> (IndexMap<String, IndexSet<PeerSocketAddr>>, IndexSet<String>) {
         let lookups = hosts.iter().map(|host| async move {
             // `MAX_SINGLE_SEED_PEER_DNS_RETRIES` is 0: one lookup per host, like the seed peers.
             let addrs = Config::resolve_host(host, MAX_SINGLE_SEED_PEER_DNS_RETRIES).await;
@@ -379,13 +386,13 @@ impl Config {
             }
             (host, addrs)
         });
-        let mut resolved = IndexSet::new();
+        let mut resolved = IndexMap::new();
         let mut unresolved = IndexSet::new();
         for (host, addrs) in futures::future::join_all(lookups).await {
             if addrs.is_empty() {
                 unresolved.insert(host.clone());
             } else {
-                resolved.extend(addrs);
+                resolved.insert(host.clone(), addrs.into_iter().collect());
             }
         }
         (resolved, unresolved)

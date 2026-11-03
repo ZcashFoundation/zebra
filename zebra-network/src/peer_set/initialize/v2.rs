@@ -396,6 +396,11 @@ where
 /// turns, so a host that resolves to many addresses cannot keep the other configured hosts from
 /// being dialled. A host's addresses also take turns, so the slot an address frees after its
 /// connection failed or ended can go to another address of the same host.
+///
+/// A slot is kept free for each configured host that has not resolved yet, as long as only a
+/// host that already holds a slot could take it, so a host that resolves late still gets a slot
+/// without ending a live connection. Connections that stay up keep their slots, so when there
+/// are more hosts than slots, the hosts that resolve first get them, and the others wait.
 #[derive(Debug)]
 pub(super) struct InitialPeerSlots {
     /// The number of slots.
@@ -405,8 +410,12 @@ pub(super) struct InitialPeerSlots {
     hosts: Vec<(IndexSet<PeerSocketAddr>, usize)>,
     /// The addresses that hold a slot, each with the index of the host it holds the slot for.
     in_slots: IndexMap<PeerSocketAddr, usize>,
-    /// The host whose turn it is among the hosts with the fewest addresses in slots.
+    /// The host whose turn it is among the hosts with the fewest addresses in slots, modulo the
+    /// number of hosts.
     next_host: usize,
+    /// The number of configured hosts that have not resolved yet, each of which keeps a slot
+    /// free from the hosts that already hold one.
+    unresolved_hosts: usize,
 }
 
 impl InitialPeerSlots {
@@ -417,7 +426,18 @@ impl InitialPeerSlots {
             hosts: Vec::new(),
             in_slots: IndexMap::new(),
             next_host: 0,
+            unresolved_hosts: 0,
         }
+    }
+
+    /// Keeps a slot free for each of `count` configured hosts that have not resolved yet.
+    pub(super) fn set_unresolved_hosts(&mut self, count: usize) {
+        self.unresolved_hosts = count;
+    }
+
+    /// Returns `true` if `addr` holds a slot.
+    pub(super) fn holds_slot(&self, addr: &PeerSocketAddr) -> bool {
+        self.in_slots.contains_key(addr)
     }
 
     /// Adds a resolved host's `addrs`, after the hosts that already resolved.
@@ -434,7 +454,8 @@ impl InitialPeerSlots {
     }
 
     /// Gives a free slot to the next address to dial and returns it, or returns `None` if every
-    /// slot is taken, or every address already holds one.
+    /// slot is taken, every address already holds one, or the free slots are kept for the hosts
+    /// that have not resolved yet.
     pub(super) fn take_next(&mut self) -> Option<PeerSocketAddr> {
         if self.in_slots.len() >= self.limit || self.hosts.is_empty() {
             return None;
@@ -463,10 +484,19 @@ impl InitialPeerSlots {
         }
         let (host, index) = chosen?;
 
+        // The chosen host has the fewest slots, so if it holds one, every host that could take
+        // this slot does.
+        let free_slots = self.limit - self.in_slots.len();
+        if host_slots[host] > 0 && free_slots <= self.unresolved_hosts {
+            return None;
+        }
+
         let (addrs, next_addr) = &mut self.hosts[host];
         let addr = addrs[index];
         *next_addr = (index + 1) % addrs.len();
-        self.next_host = (host + 1) % self.hosts.len();
+        // Taken modulo the number of hosts when it is used, so a host added after this one, which
+        // has had no turn yet, is next.
+        self.next_host = host + 1;
         self.in_slots.insert(addr, host);
 
         Some(addr)
@@ -503,7 +533,10 @@ async fn keep_initial_peers_connected<S, C>(
         ActiveConnectionCounter::new_counter_with(outbound_limit, "Outbound v2 Connections");
     let mut attempts: JoinSet<PeerSocketAddr> = JoinSet::new();
     let mut slots = InitialPeerSlots::new(outbound_limit);
+    slots.set_unresolved_hosts(hosts.len());
     let mut unresolved = hosts;
+    // The hosts that resolved in this round, with their addresses, to log any that wait for a slot.
+    let mut newly_resolved: Vec<(String, IndexSet<PeerSocketAddr>)> = Vec::new();
     // quinn refuses to send to an IPv6 address from an IPv4 socket, so such a peer could never be
     // reached; an IPv6 endpoint sends to IPv4 peers as IPv4-mapped addresses.
     let endpoint_is_ipv4 = shared
@@ -516,30 +549,32 @@ async fn keep_initial_peers_connected<S, C>(
     loop {
         tokio::select! {
             () = &mut resolve_at, if !unresolved.is_empty() => {
-                // One lookup per host, so each host's addresses stay together.
-                let lookups = unresolved.iter().map(|host| async move {
-                    let host: IndexSet<String> = [host.clone()].into_iter().collect();
-                    Config::resolve_initial_v2_peers(&host).await
-                });
-                let mut still_unresolved = IndexSet::new();
-                for (addrs, host_unresolved) in futures::future::join_all(lookups).await {
-                    still_unresolved.extend(host_unresolved);
-                    // Each host resolves successfully once, so this warns once per address.
-                    slots.add_host(addrs.into_iter().filter(|addr| {
-                        let unreachable = endpoint_is_ipv4 && addr.is_ipv6();
-                        if unreachable {
-                            tracing::warn!(
-                                ?addr,
-                                "the version 2 endpoint is bound to an IPv4 address, so it \
-                                 cannot dial this IPv6 initial v2 peer, skipping it. Hint: set \
-                                 the network v2_listen_addr config to an IPv6 address such as \
-                                 [::]:8233 to reach IPv6 peers"
-                            );
-                        }
-                        !unreachable
-                    }));
-                }
+                let (resolved, still_unresolved) =
+                    Config::resolve_initial_v2_peers(&unresolved).await;
                 unresolved = still_unresolved;
+                slots.set_unresolved_hosts(unresolved.len());
+                for (host, addrs) in resolved {
+                    // Each host resolves successfully once, so this warns once per address.
+                    let addrs: IndexSet<PeerSocketAddr> = addrs
+                        .into_iter()
+                        .filter(|addr| {
+                            let unreachable = endpoint_is_ipv4 && addr.is_ipv6();
+                            if unreachable {
+                                tracing::warn!(
+                                    ?addr,
+                                    "the version 2 endpoint is bound to an IPv4 address, so it \
+                                     cannot dial this IPv6 initial v2 peer, skipping it. Hint: \
+                                     set the network v2_listen_addr config to an IPv6 address \
+                                     such as [::]:8233 to reach IPv6 peers"
+                                );
+                            }
+                            !unreachable
+                        })
+                        .collect();
+                    // Each host's addresses are added together, so they share its turns.
+                    slots.add_host(addrs.iter().copied());
+                    newly_resolved.push((host, addrs));
+                }
                 resolve_at
                     .as_mut()
                     .reset(Instant::now() + shared.reconnection_delay);
@@ -569,6 +604,23 @@ async fn keep_initial_peers_connected<S, C>(
             active_outbound_connections.update_count();
             // Space out connection attempts, like the legacy initial peer dialer.
             tokio::time::sleep(constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL).await;
+        }
+
+        // Each host resolves successfully once, so this logs once per host.
+        for (host, addrs) in newly_resolved.drain(..) {
+            let waiting: Vec<_> = addrs
+                .iter()
+                .filter(|addr| !slots.holds_slot(addr))
+                .collect();
+            if !waiting.is_empty() {
+                tracing::info!(
+                    %host,
+                    ?waiting,
+                    limit = outbound_limit,
+                    "the outbound v2 connection slots are taken, so these initial v2 peer \
+                     addresses wait for a connection to fail or end before they are dialled"
+                );
+            }
         }
     }
 }

@@ -57,7 +57,11 @@ peers are not recorded there (see below).
   dialled. When the configured hosts resolve to more addresses than the
   outbound version 2 limit, each host gets a connection before any host gets a
   second one, and a failed or closed connection's slot goes to the next host
-  or address in turn.
+  or address in turn. Zebra keeps a slot free for each configured host that
+  has not resolved yet, so a host that resolves late still gets one, but a host
+  that never resolves leaves its slot unused. Connections that stay up keep
+  their slots, so if there are more configured hosts than slots, the hosts that
+  resolve first get them, and the others wait for a connection to fail or end.
 - Serving and requesting headers, blocks, and transactions. Zebra answers
   block and transaction requests in request order, up to about 1 MB per
   response.
