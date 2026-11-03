@@ -31,6 +31,7 @@ mod decoded_size;
 mod early_relay;
 mod mempool_reuse;
 mod nu7;
+mod retained_charge;
 
 /// Shielded transactions must reach the transaction verifier before transparent transactions.
 #[tokio::test]
