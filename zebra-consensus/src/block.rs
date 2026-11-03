@@ -264,7 +264,12 @@ impl PreparedBlockCache {
             .unwrap_or_else(|| DecodedBlock::deserialize(bytes))
     }
 
-    fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
+    /// Decodes a block only if its complete wire bytes match a validated proposal, as
+    /// [`Self::deserialize()`] does on a hit.
+    ///
+    /// A hit parses the header and compares the transaction bytes, which is cheap enough to run
+    /// inline; a miss returns `None` without decoding, so the caller can decode off the executor.
+    pub fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
         if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
             || self.0.borrow().is_empty()
         {
@@ -923,15 +928,25 @@ where
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
 
-            // Keep early work alive while the remaining checks and state commit run.
-            let _mining_candidate = if request.is_proposal() {
+            // Announce early work on this block. Its guard is awaited after the commit, so the
+            // announcement does not delay the commit and the work stays alive while it runs.
+            let mining_candidate = if request.is_proposal() {
                 None
             } else {
-                state_service
-                    .clone()
-                    .oneshot(zs::Request::MiningCandidate(block.clone()))
-                    .await
-                    .ok()
+                let mut state_service = state_service.clone();
+                match state_service.ready().await {
+                    Ok(state_service) => {
+                        Some(state_service.call(zs::Request::MiningCandidate(block.clone())))
+                    }
+                    Err(_) => None,
+                }
+            };
+            // Dropping the guard withdraws the work, so it is held until the commit finishes.
+            let hold_mining_candidate = async {
+                match mining_candidate {
+                    Some(announcement) => announcement.await.ok(),
+                    None => None,
+                }
             };
 
             if let Some(cached) = cached {
@@ -955,7 +970,8 @@ where
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
                 };
-                let result = state_service.oneshot(commit).await;
+                let (result, _mining_candidate) =
+                    tokio::join!(state_service.oneshot(commit), hold_mining_candidate);
                 metrics::histogram!(
                     "zebra.consensus.block.phase.duration_seconds",
                     "phase" => "state_commit"
@@ -1208,12 +1224,18 @@ where
             };
 
             let phase_start = Instant::now();
-            let result = state_service
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::StateService { source, hash })?
-                .call(commit)
-                .await;
+            let (result, _mining_candidate) = tokio::join!(
+                async {
+                    state_service
+                        .ready()
+                        .await
+                        .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                        .call(commit)
+                        .await
+                        .map_err(|source| map_commit_error(source, hash))
+                },
+                hold_mining_candidate
+            );
             metrics::histogram!(
                 "zebra.consensus.block.phase.duration_seconds",
                 "phase" => "state_commit"
@@ -1226,7 +1248,7 @@ where
                     Ok(hash)
                 }
 
-                Err(source) => Err(map_commit_error(source, hash)),
+                Err(error) => Err(error),
 
                 _ => unreachable!("wrong response for semantic block commit"),
             }

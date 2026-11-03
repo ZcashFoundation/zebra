@@ -3321,13 +3321,22 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        let prepared_blocks = self.prepared_blocks.clone();
-        let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
-            Some(cache) => cache.deserialize(&block_bytes),
-            None => zebra_consensus::DecodedBlock::deserialize(&block_bytes),
-        })
-        .await
-        .expect("block deserialization reports malformed input as an error rather than panicking");
+        // A solved template that matches a validated proposal only parses its header and compares
+        // its bytes, which is cheap enough to run inline. Anything else is decoded off the executor.
+        let decoded = match self
+            .prepared_blocks
+            .as_ref()
+            .and_then(|cache| cache.reuse(&block_bytes))
+        {
+            Some(decoded) => Ok(decoded),
+            None => tokio::task::spawn_blocking(move || {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            })
+            .await
+            .expect(
+                "block deserialization reports malformed input as an error rather than panicking",
+            ),
+        };
         let decoded = match decoded {
             Ok(decoded) => decoded,
             Err(error) => {
