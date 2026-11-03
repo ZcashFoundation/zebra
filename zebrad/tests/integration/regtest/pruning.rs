@@ -139,6 +139,33 @@ async fn pruning_preserves_spends_across_restart() -> Result<()> {
             .await
             .map_err(|err| eyre!(err))?;
         assert_eq!(indexed["tx"], json!([coinbase.hash().to_string()]));
+        // Field queries of index-backed fields keep working on pruned history, and body fields
+        // fail like the verbosity levels that need the body.
+        let indexed_fields: Value = client
+            .json_result_from_call("getblock", r#"["1",["tx","nTx","size"]]"#)
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert_eq!(
+            indexed_fields,
+            json!({
+                "hash": early.hash().to_string(),
+                "size": early.zcash_serialized_size(),
+                "nTx": 1,
+                "tx": [coinbase.hash().to_string()],
+            })
+        );
+        for fields in [r#"["hex"]"#, r#"["authdataroot"]"#, r#"["txdetails"]"#] {
+            let response: Value = serde_json::from_str(
+                &client
+                    .text_from_call("getblock", format!(r#"["1",{fields}]"#))
+                    .await?,
+            )?;
+            assert_eq!(response["error"]["code"], -32603, "{fields}");
+            assert_eq!(
+                response["error"]["message"], "Block not available (pruned data)",
+                "{fields}"
+            );
+        }
         let unspent: Value = client
             .json_result_from_call("gettxout", &output_params)
             .await
