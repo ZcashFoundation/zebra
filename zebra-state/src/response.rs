@@ -27,8 +27,8 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 use crate::{ReadRequest, Request};
 
 use crate::{
-    service::read::AddressUtxos, ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation,
-    WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
+    service::read::AddressUtxos, ContextuallyVerifiedBlock, NonFinalizedState, SnapshotBase,
+    TransactionLocation, WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
 };
 
 #[cfg(test)]
@@ -42,12 +42,24 @@ pub struct HistoryCapabilities {
     /// Genesis remains available even when the suffix starts above it. Unknown blocks are not
     /// made available by this boundary, and missing bodies within the suffix indicate corruption.
     pub lowest_retained_height: block::Height,
+
+    /// The first non-genesis height whose block the database knows at all, by hash and header:
+    /// the snapshot window start of a database imported from a state snapshot, or zero.
+    ///
+    /// Genesis is always known. Below this height there are no blocks, only the validation
+    /// state the snapshot carried.
+    pub lowest_known_height: block::Height,
+
+    /// The state snapshot the database was imported from, if any.
+    pub snapshot_base: Option<SnapshotBase>,
 }
 
 impl Default for HistoryCapabilities {
     fn default() -> Self {
         Self {
             lowest_retained_height: block::Height::MIN,
+            lowest_known_height: block::Height::MIN,
+            snapshot_base: None,
         }
     }
 }

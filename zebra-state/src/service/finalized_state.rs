@@ -84,6 +84,9 @@ pub(crate) use disk_format::{
     transparent::AddressBalanceLocation,
 };
 
+// The state snapshot exporter refuses databases that need a migration.
+pub(crate) use disk_format::upgrade::can_read_without_migration;
+
 /// Minimum Sapling, Orchard and Ironwood note commitments in a checkpoint block for its note
 /// commitment tree update to run alongside its history commitment check.
 const OVERLAP_COMMITMENT_THRESHOLD: usize = 32;

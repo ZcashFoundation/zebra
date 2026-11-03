@@ -88,6 +88,7 @@ pub use service::{
     finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
     ReadStateService,
 };
+pub use state_snapshot::SnapshotBase;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]

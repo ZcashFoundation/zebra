@@ -1293,6 +1293,8 @@ impl DiskDb {
             } else {
                 location.height
             },
+            lowest_known_height: Height::MIN,
+            snapshot_base: None,
         })
     }
 

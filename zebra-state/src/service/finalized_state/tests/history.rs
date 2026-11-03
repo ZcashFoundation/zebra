@@ -615,6 +615,7 @@ async fn read_only_capability_requests_do_not_mutate_history() {
             init_read_only(config.clone(), &Network::Mainnet).unwrap();
         let expected = HistoryCapabilities {
             lowest_retained_height: Height(2),
+            ..HistoryCapabilities::default()
         };
         assert_eq!(
             reader

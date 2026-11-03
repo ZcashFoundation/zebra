@@ -379,6 +379,21 @@ impl ZebraDb {
         self.db.try_catch_up_with_primary()
     }
 
+    /// Returns a raw iterator over the column family `cf_name` that reads with
+    /// `options`, or `None` if the database has no such column family.
+    ///
+    /// The state snapshot exporter copies rows through it without decoding them.
+    pub(crate) fn raw_iterator(
+        &self,
+        cf_name: &str,
+        options: rocksdb::ReadOptions,
+    ) -> Option<
+        rocksdb::DBRawIteratorWithThreadMode<'_, crate::service::finalized_state::disk_db::DB>,
+    > {
+        let cf = self.db.cf_handle(cf_name)?;
+        Some(self.db.raw_iterator_cf_opt(&cf, options))
+    }
+
     /// Spawns a blocking task to try catching up with the primary DB instance.
     pub async fn spawn_try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         let db = self.clone();
