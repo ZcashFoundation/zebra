@@ -23,7 +23,10 @@ use crate::{
         v2::{
             connection::{
                 announcements::AnnouncementWriter,
-                inbound::{INBOUND_REQUEST_CONCURRENCY, RESPONSE_BYTES_LIMIT},
+                inbound::{
+                    INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
+                    RESPONSE_BYTES_LIMIT,
+                },
                 outbound::{RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
                 spawn_connection, ConnectionParams,
             },
@@ -1027,6 +1030,9 @@ async fn failed_lookups_part_way_finish_the_response_early() {
 /// subset the inbound service answers each lookup with, up to the byte
 /// budget; short IDs are not found, and a repeated reference counts against
 /// the budget each time.
+///
+/// The inbound service answers 64 IDs per lookup, so the request's few
+/// hundred IDs fit in the response's lookup calls.
 #[tokio::test]
 async fn get_tx_answers_in_request_order_within_the_byte_budget() {
     let _init_guard = zebra_test::init();
@@ -1034,7 +1040,7 @@ async fn get_tx_answers_in_request_order_within_the_byte_budget() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let blocks = vector_blocks();
-        let raw = raw_peer_node_with(&network, Some(subset_service(blocks.clone(), 3))).await;
+        let raw = raw_peer_node_with(&network, Some(subset_service(blocks.clone(), 64))).await;
 
         // Distinct transactions, small enough to fit the budget, each followed by unknown IDs, so
         // the request spans more than one lookup chunk.
@@ -2426,6 +2432,109 @@ async fn unanswered_lookups_end_at_the_request_deadline() {
             raw.connection.close_reason().is_none(),
             "the connection stays open"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An inbound service that reports every block and transaction missing, as
+/// the inbound service does for inventory it does not have, and counts its
+/// lookup calls.
+fn all_missing_service(calls: Arc<std::sync::atomic::AtomicUsize>) -> TestService {
+    BoxCloneService::new(service_fn(move |request: Request| {
+        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        async move {
+            Ok::<Response, BoxError>(match request {
+                Request::BlocksByHash(hashes) => {
+                    Response::Blocks(hashes.into_iter().map(InventoryResponse::Missing).collect())
+                }
+                Request::TransactionsById(ids) => Response::Transactions(
+                    ids.into_iter().map(InventoryResponse::Missing).collect(),
+                ),
+                _ => Response::Nil,
+            })
+        }
+    }))
+}
+
+/// One `get-blocks` or `get-tx` request makes a few batched inbound service
+/// calls, however many entries it asks for: a maximum request of missing
+/// blocks takes one call per 16 hashes, a maximum request of missing
+/// transactions takes 7 calls for the 25,000 IDs it looks up, and an
+/// inbound service that answers one key per call is asked at most
+/// `MAX_LOOKUP_CALLS_PER_RESPONSE` times, after which the response finishes
+/// early with the entries already written.
+#[tokio::test]
+async fn batch_requests_make_few_lookup_calls() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let raw = raw_peer_node_with(&network, Some(all_missing_service(calls.clone()))).await;
+        let take_calls = || calls.swap(0, std::sync::atomic::Ordering::SeqCst);
+
+        let max_blocks = crate::protocol::v2::constants::MAX_BLOCKS_PER_REQUEST;
+        let hashes: Vec<_> = (0..max_blocks)
+            .map(|index| {
+                let mut hash = [0xEE; 32];
+                // The index of a 128-hash request fits in 8 bytes.
+                hash[..8].copy_from_slice(&(index as u64).to_le_bytes());
+                block::Hash(hash)
+            })
+            .collect();
+        let request = WireRequest::Blocks(GetBlocks { hashes });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let entries = read_objects::<_, Block>(&mut recv, max_blocks)
+            .await
+            .expect("a well-formed response");
+        assert_eq!(entries.len(), max_blocks, "every hash is answered");
+        assert!(entries
+            .iter()
+            .all(|entry| matches!(entry, ObjectResult::NotFound)));
+        assert_eq!(take_calls(), max_blocks / 16);
+
+        let max_txs = crate::protocol::v2::constants::MAX_TXS_PER_REQUEST;
+        let txrefs: Vec<_> = (0..max_txs)
+            .map(|index| {
+                let mut hash = [0xCD; 32];
+                // The index of a 50,000-reference request fits in 8 bytes.
+                hash[..8].copy_from_slice(&(index as u64).to_le_bytes());
+                TxRef::Txid(transaction::Hash(hash))
+            })
+            .collect();
+        let request = WireRequest::Tx(GetTx { txrefs });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let entries = read_objects::<_, Transaction>(&mut recv, max_txs)
+            .await
+            .expect("a well-formed response that finishes early");
+        let looked_up: usize = MAX_TX_INV_IN_SENT_MESSAGE.try_into().expect("fits");
+        assert_eq!(entries.len(), looked_up, "the looked up IDs are answered");
+        assert!(entries
+            .iter()
+            .all(|entry| matches!(entry, ObjectResult::NotFound)));
+        assert_eq!(take_calls(), 7);
+
+        // One block per call: the response stops at the call limit.
+        let blocks = vector_blocks();
+        let raw = raw_peer_node_with(&network, Some(subset_service(blocks.clone(), 1))).await;
+        let small: Vec<_> = blocks
+            .iter()
+            .filter(|block| entry_len(block) < 20_000)
+            .map(|block| block.hash())
+            .collect();
+        assert!(small.len() > MAX_LOOKUP_CALLS_PER_RESPONSE);
+        let request = WireRequest::Blocks(GetBlocks {
+            hashes: small.clone(),
+        });
+        let mut recv = raw_request(&raw.connection, &request).await;
+        let entries = read_objects::<_, Block>(&mut recv, small.len())
+            .await
+            .expect("a well-formed response that finishes early");
+        assert!(!entries.is_empty() && entries.len() <= MAX_LOOKUP_CALLS_PER_RESPONSE);
+        for (entry, hash) in entries.iter().zip(&small) {
+            assert!(matches!(entry, ObjectResult::Found(block) if block.hash() == *hash));
+        }
     })
     .await
     .expect("the test completes well within the timeout");

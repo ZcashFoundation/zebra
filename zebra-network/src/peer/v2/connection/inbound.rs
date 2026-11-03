@@ -70,19 +70,40 @@ pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 /// budget can still be sent, but only on its own.
 pub(super) const RESPONSE_BYTES_LIMIT: usize = 1_000_000;
 
-/// How many distinct transaction IDs of a `get-tx` request are looked up in
-/// one inbound service call.
+/// How many inbound service calls one `get-blocks` or `get-tx` response
+/// makes, after which the response is finished early.
+///
+/// # Security
+///
+/// One wire request is one legacy `getdata` message's worth of lookups, which
+/// the legacy connection answers with one inbound service call. Batching
+/// keeps a response to a few calls: a `get-blocks` request of
+/// [`MAX_BLOCKS_PER_REQUEST`](crate::protocol::v2::constants::MAX_BLOCKS_PER_REQUEST) missing hashes takes 8, and a `get-tx` request
+/// of [`MAX_TX_LOOKUPS_PER_RESPONSE`] missing IDs takes 7; the rest of the
+/// limit is for lookups the inbound service answers in part.
+pub(super) const MAX_LOOKUP_CALLS_PER_RESPONSE: usize = 16;
+
+/// The most block hashes of a `get-blocks` request looked up in one inbound
+/// service call: the inbound service's legacy `getdata` block limit
+/// (`GETDATA_MAX_BLOCK_COUNT` in `zebrad`), above which it ignores hashes.
+const BLOCK_LOOKUP_CHUNK: usize = 16;
+
+/// How many distinct transaction IDs of a `get-tx` request the first inbound
+/// service call looks up; each call the inbound service answers in full
+/// doubles the next one, up to the IDs left under
+/// [`MAX_TX_LOOKUPS_PER_RESPONSE`].
 ///
 /// Chunks are requested in request order, so the transactions near the
 /// start of the request, which the byte budget lets through, are looked up
 /// first, and the inbound service's own byte limit rarely leaves part of a
-/// chunk out.
+/// small chunk out.
 const TX_LOOKUP_CHUNK: usize = 256;
 
 /// How many distinct transaction IDs one `get-tx` response looks up, after
 /// which the response is finished early: the inbound service's legacy
 /// `getdata` limit.
-const MAX_TX_LOOKUPS_PER_RESPONSE: u64 = MAX_TX_INV_IN_SENT_MESSAGE;
+// `MAX_TX_INV_IN_SENT_MESSAGE` is 25,000, which fits in any `usize`.
+const MAX_TX_LOOKUPS_PER_RESPONSE: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 
 /// Serves one bidirectional stream the peer opened.
 ///
@@ -358,13 +379,17 @@ where
 
 /// Serves a `get-blocks` request, answering each hash in request order.
 ///
-/// Each hash is looked up on its own, so the entries are written in request
-/// order as their answers arrive. An entry is written as not found only when
-/// the inbound service said so. The response is finished early, which the
-/// draft allows, and the requester re-requests the remainder:
-/// - at the first hash the inbound service left out of its answer, rather
-///   than claim the block is missing,
-/// - once [`RESPONSE_BYTES_LIMIT`] bytes of entries have been written, and
+/// The hashes are looked up in request order, [`BLOCK_LOOKUP_CHUNK`]
+/// distinct hashes per inbound service call (see [`LookupCalls`] for how a
+/// call the inbound service answers in part changes the next one), and the
+/// entries are written in request order as their answers arrive. An entry is
+/// written as not found only when the inbound service said so. The response
+/// is finished early, which the draft allows, and the requester re-requests
+/// the remainder:
+/// - once [`RESPONSE_BYTES_LIMIT`] bytes of entries have been written,
+/// - when the next hash is still unanswered after
+///   [`MAX_LOOKUP_CALLS_PER_RESPONSE`] calls, rather than claim the block is
+///   missing, and
 /// - when a lookup fails after some entries were written, so the requester
 ///   keeps them.
 ///
@@ -380,49 +405,38 @@ where
 {
     // `Some(block)` is available, `None` was reported missing.
     let mut answered: HashMap<block::Hash, Option<Arc<Block>>> = HashMap::new();
+    let mut calls = LookupCalls::new(BLOCK_LOOKUP_CHUNK);
     let mut sent: usize = 0;
 
-    for hash in &request.hashes {
+    'entries: for (index, hash) in request.hashes.iter().enumerate() {
         if sent >= RESPONSE_BYTES_LIMIT {
             break;
         }
 
-        if !answered.contains_key(hash) {
-            let response = match call_service(
-                service.clone(),
-                Request::BlocksByHash([*hash].into_iter().collect()),
-            )
-            .await
-            {
-                Ok(response) => response,
+        while !answered.contains_key(hash) {
+            let Some(limit) = calls.next(BLOCK_LOOKUP_CHUNK) else {
+                break 'entries;
+            };
+            let batch = next_batch(
+                request.hashes[index..].iter().copied().map(Some),
+                &answered,
+                limit,
+            );
+            match lookup_blocks(service.clone(), &batch, &mut answered).await {
+                Ok(count) => calls.answered(batch.len(), count),
                 // Entries are already written: finish early so the requester keeps them.
                 Err(Outcome::Refuse(code)) if sent > 0 => {
                     tracing::debug!(%code, "block lookup failed part way, finishing early");
-                    break;
+                    break 'entries;
                 }
                 Err(error) => return Err(error),
-            };
-            if let Response::Blocks(blocks) = response {
-                for block in blocks {
-                    match block {
-                        InventoryResponse::Available((block, _)) if block.hash() == *hash => {
-                            answered.insert(*hash, Some(block));
-                        }
-                        InventoryResponse::Missing(missing) if missing == *hash => {
-                            answered.entry(*hash).or_insert(None);
-                        }
-                        // Not what was asked for: ignored.
-                        _ => {}
-                    }
-                }
             }
         }
 
         let entry = match answered.get(hash) {
             Some(Some(block)) => ObjectResult::Found(block.clone()),
             Some(None) => ObjectResult::NotFound,
-            // Left out of the response: stop here rather than claim it is missing.
-            None => break,
+            None => unreachable!("the lookup loop only ends once the hash is answered"),
         };
         sent = sent.saturating_add(write_entry(send, &entry).await?);
     }
@@ -433,28 +447,27 @@ where
 ///
 /// Short ID references need compact block state this node does not keep, so
 /// they are answered as not found, as the draft allows. The other references
-/// are looked up in request order, [`TX_LOOKUP_CHUNK`] distinct IDs at a
-/// time, and an ID the inbound service left out of a chunk's answer is
-/// looked up again on its own. The response is finished early, as for
-/// blocks, at the first ID the inbound service leaves out of that single
-/// lookup, once [`RESPONSE_BYTES_LIMIT`] bytes of entries have been written,
-/// after [`MAX_TX_LOOKUPS_PER_RESPONSE`] distinct IDs have been looked up,
-/// and when a lookup fails after some entries were written, so the requester
-/// keeps them. A repeated reference is answered again from its first answer,
-/// and each copy counts against the byte budget.
+/// are looked up in request order, starting with [`TX_LOOKUP_CHUNK`]
+/// distinct IDs per inbound service call (see [`LookupCalls`]). The response
+/// is finished early, as for blocks, when the next ID is still unanswered
+/// after [`MAX_LOOKUP_CALLS_PER_RESPONSE`] calls or after
+/// [`MAX_TX_LOOKUPS_PER_RESPONSE`] distinct IDs have been looked up, once
+/// [`RESPONSE_BYTES_LIMIT`] bytes of entries have been written, and when a
+/// lookup fails after some entries were written, so the requester keeps
+/// them. A repeated reference is answered again from its first answer, and
+/// each copy counts against the byte budget.
 async fn serve_txs<S>(send: &mut SendStream, request: GetTx, service: S) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone,
 {
     // `Some(transaction)` is available, `None` was reported missing.
     let mut answered: HashMap<UnminedTxId, Option<Arc<Transaction>>> = HashMap::new();
-    // The references before this index have all been looked up, or are short IDs.
-    let mut looked_up_to = 0;
+    let mut calls = LookupCalls::new(TX_LOOKUP_CHUNK);
     let mut sent: usize = 0;
-    // Distinct IDs sent to the inbound service, including single-ID retries.
-    let mut lookups: u64 = 0;
+    // Distinct IDs sent to the inbound service, including IDs looked up again.
+    let mut lookups: usize = 0;
 
-    for (index, txref) in request.txrefs.iter().enumerate() {
+    'entries: for (index, txref) in request.txrefs.iter().enumerate() {
         if sent >= RESPONSE_BYTES_LIMIT {
             break;
         }
@@ -462,56 +475,25 @@ where
         let entry = match txref.unmined_id() {
             None => ObjectResult::NotFound,
             Some(id) => {
-                if !answered.contains_key(&id) && index >= looked_up_to {
-                    if lookups >= MAX_TX_LOOKUPS_PER_RESPONSE {
-                        break;
-                    }
-                    // The next chunk: distinct IDs not yet answered, in request order, within the
-                    // lookup limit.
-                    let chunk_limit = TX_LOOKUP_CHUNK.min(
-                        usize::try_from(MAX_TX_LOOKUPS_PER_RESPONSE - lookups)
-                            .unwrap_or(usize::MAX),
+                while !answered.contains_key(&id) {
+                    let remaining = MAX_TX_LOOKUPS_PER_RESPONSE.saturating_sub(lookups);
+                    let Some(limit) = calls.next(remaining) else {
+                        break 'entries;
+                    };
+                    let batch = next_batch(
+                        request.txrefs[index..]
+                            .iter()
+                            .map(|txref| txref.unmined_id()),
+                        &answered,
+                        limit,
                     );
-                    let mut chunk = HashSet::new();
-                    looked_up_to = index;
-                    for later in &request.txrefs[index..] {
-                        if chunk.len() >= chunk_limit {
-                            break;
-                        }
-                        looked_up_to += 1;
-                        if let Some(later_id) = later.unmined_id() {
-                            if !answered.contains_key(&later_id) {
-                                chunk.insert(later_id);
-                            }
-                        }
-                    }
-                    // `chunk` is bounded by `TX_LOOKUP_CHUNK`, so this widening is lossless.
-                    lookups += chunk.len() as u64;
-                    match lookup_txs(service.clone(), chunk, &mut answered).await {
-                        Ok(()) => {}
+                    lookups = lookups.saturating_add(batch.len());
+                    match lookup_txs(service.clone(), &batch, &mut answered).await {
+                        Ok(count) => calls.answered(batch.len(), count),
                         // Entries are already written: finish early so the requester keeps them.
                         Err(Outcome::Refuse(code)) if sent > 0 => {
                             tracing::debug!(%code, "transaction lookup failed part way, finishing early");
-                            break;
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                if !answered.contains_key(&id) {
-                    if lookups >= MAX_TX_LOOKUPS_PER_RESPONSE {
-                        break;
-                    }
-                    lookups += 1;
-                    // Left out of its chunk's answer, which the inbound service does when the
-                    // chunk's transactions exceed its own byte limit: it always answers a single
-                    // ID.
-                    match lookup_txs(service.clone(), [id].into_iter().collect(), &mut answered)
-                        .await
-                    {
-                        Ok(()) => {}
-                        Err(Outcome::Refuse(code)) if sent > 0 => {
-                            tracing::debug!(%code, "transaction lookup failed part way, finishing early");
-                            break;
+                            break 'entries;
                         }
                         Err(error) => return Err(error),
                     }
@@ -519,8 +501,7 @@ where
                 match answered.get(&id) {
                     Some(Some(transaction)) => ObjectResult::Found(transaction.clone()),
                     Some(None) => ObjectResult::NotFound,
-                    // Left out of the response: stop here rather than claim it is missing.
-                    None => break,
+                    None => unreachable!("the lookup loop only ends once the ID is answered"),
                 }
             }
         };
@@ -529,18 +510,119 @@ where
     Ok(())
 }
 
-/// Looks up `ids` in the inbound service and records each answer for an ID
-/// in `ids` in `answered`.
+/// The inbound service calls one response makes, and how many keys the next
+/// one asks for.
+///
+/// A call the inbound service answers in full doubles the next call's size,
+/// up to the caller's limit. A call it answers in part (an inbound service
+/// with response limits leaves keys out, in no particular order) sets the
+/// next call's size to the number of keys it did answer, at least one,
+/// which it can be expected to answer in full; the next call starts at the
+/// first unanswered key in request order, so entries keep being written.
+struct LookupCalls {
+    /// Calls made so far.
+    made: usize,
+    /// How many keys the next call asks for.
+    size: usize,
+}
+
+impl LookupCalls {
+    fn new(size: usize) -> Self {
+        LookupCalls { made: 0, size }
+    }
+
+    /// Counts a new call and returns how many keys it asks for, at most
+    /// `limit`; `None` once [`MAX_LOOKUP_CALLS_PER_RESPONSE`] calls have
+    /// been made or `limit` is zero, which finishes the response.
+    fn next(&mut self, limit: usize) -> Option<usize> {
+        if self.made >= MAX_LOOKUP_CALLS_PER_RESPONSE || limit == 0 {
+            return None;
+        }
+        self.made += 1;
+        Some(self.size.min(limit))
+    }
+
+    /// Sizes the next call after one that asked for `asked` keys and got
+    /// answers for `answered` of them.
+    fn answered(&mut self, asked: usize, answered: usize) {
+        self.size = if answered < asked {
+            answered.max(1)
+        } else {
+            self.size.saturating_mul(2)
+        };
+    }
+}
+
+/// The next lookup: up to `limit` distinct keys from `keys`, in order,
+/// skipping keys that are already answered and references without a key.
+fn next_batch<K, V>(
+    keys: impl IntoIterator<Item = Option<K>>,
+    answered: &HashMap<K, V>,
+    limit: usize,
+) -> HashSet<K>
+where
+    K: Copy + Eq + std::hash::Hash,
+{
+    let mut batch = HashSet::new();
+    for key in keys.into_iter().flatten() {
+        if batch.len() >= limit {
+            break;
+        }
+        if !answered.contains_key(&key) {
+            batch.insert(key);
+        }
+    }
+    batch
+}
+
+/// Looks up `hashes` in the inbound service, records each answer for a hash
+/// in `hashes` in `answered`, and returns how many of `hashes` were
+/// answered.
+async fn lookup_blocks<S>(
+    service: S,
+    hashes: &HashSet<block::Hash>,
+    answered: &mut HashMap<block::Hash, Option<Arc<Block>>>,
+) -> Result<usize, Outcome>
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+{
+    if hashes.is_empty() {
+        return Ok(0);
+    }
+    let response = call_service(service, Request::BlocksByHash(hashes.clone())).await?;
+    if let Response::Blocks(blocks) = response {
+        for block in blocks {
+            match block {
+                InventoryResponse::Available((block, _)) if hashes.contains(&block.hash()) => {
+                    answered.insert(block.hash(), Some(block));
+                }
+                InventoryResponse::Missing(hash) if hashes.contains(&hash) => {
+                    // An available copy of the same hash wins.
+                    answered.entry(hash).or_insert(None);
+                }
+                // Not what was asked for: ignored.
+                _ => {}
+            }
+        }
+    }
+    Ok(hashes
+        .iter()
+        .filter(|hash| answered.contains_key(hash))
+        .count())
+}
+
+/// Looks up `ids` in the inbound service, records each answer for an ID in
+/// `ids` in `answered`, and returns how many of `ids` were answered.
 async fn lookup_txs<S>(
     service: S,
-    ids: HashSet<UnminedTxId>,
+    ids: &HashSet<UnminedTxId>,
     answered: &mut HashMap<UnminedTxId, Option<Arc<Transaction>>>,
-) -> Result<(), Outcome>
+) -> Result<usize, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
     if ids.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let response = call_service(service, Request::TransactionsById(ids.clone())).await?;
     if let Response::Transactions(transactions) = response {
@@ -558,7 +640,7 @@ where
             }
         }
     }
-    Ok(())
+    Ok(ids.iter().filter(|id| answered.contains_key(id)).count())
 }
 
 /// Writes one `get-blocks` or `get-tx` response entry, and returns its
