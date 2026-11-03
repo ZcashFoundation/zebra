@@ -31,7 +31,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 use zebra_db::{
-    chain::{BLOCK_INFO, SNAPSHOT_BASE},
+    chain::BLOCK_INFO,
     spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
     sync_meta::SYNC_META_BY_HEIGHT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
@@ -73,16 +73,22 @@ pub use zebra_db::{
     ZebraDb,
 };
 
+// The state snapshot importer writes and checks a database below this module's API.
+pub(crate) use disk_format::{
+    block::{HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES},
+    chain::HistoryTreeParts,
+    transparent::OUTPUT_LOCATION_DISK_BYTES,
+    upgrade::{CancelFormatChange, DbFormatChange},
+};
+pub(crate) use zebra_db::chain::SNAPSHOT_BASE;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
 
 pub use disk_format::upgrade::restorable_db_versions;
 
 // The state snapshot format decodes and re-encodes these values.
-pub(crate) use disk_format::{
-    chain::{HistoryTreeParts, LegacyHistoryTreeParts},
-    transparent::AddressBalanceLocation,
-};
+pub(crate) use disk_format::{chain::LegacyHistoryTreeParts, transparent::AddressBalanceLocation};
 
 // The state snapshot exporter refuses databases that need a migration.
 pub(crate) use disk_format::upgrade::can_read_without_migration;

@@ -105,6 +105,22 @@ impl HistoryTreeParts {
 
         NonEmptyHistoryTree::from_cache(network, self.size, self.peaks, self.current_height)
     }
+
+    /// Returns the kind of network the tree is for.
+    pub(crate) fn network_kind(&self) -> NetworkKind {
+        self.network_kind
+    }
+
+    /// Returns the height of the last block in the tree.
+    pub(crate) fn current_height(&self) -> Height {
+        self.current_height
+    }
+
+    /// Returns the number of peaks in the tree, which is never zero for a tree
+    /// that [`Self::with_network`] can rebuild.
+    pub(crate) fn peak_count(&self) -> usize {
+        self.peaks.len()
+    }
 }
 
 impl From<&NonEmptyHistoryTree> for HistoryTreeParts {
