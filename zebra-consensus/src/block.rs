@@ -123,6 +123,8 @@ struct PreparedProposal {
     transaction_bytes: usize,
     block: Arc<block::Block>,
     contextual: Arc<zs::ContextuallyVerifiedBlock>,
+    /// The proposal's wire bytes, so a submission is compared without serializing again.
+    wire: Arc<[u8]>,
     retained_bytes: usize,
 }
 
@@ -143,13 +145,19 @@ async fn cache_proposal(
     transaction_bytes: usize,
     contextual: Box<zs::ContextuallyVerifiedBlock>,
 ) {
-    let (contextual, retained_bytes) =
-        AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
-            let retained_bytes = contextual.retained_bytes();
-            (contextual, retained_bytes)
-        }))
-        .await
-        .expect("proposal retention accounting uses saturating content-size arithmetic");
+    let (contextual, wire, retained_bytes) = AbortOnDropHandle::new({
+        let block = block.clone();
+        tokio::task::spawn_blocking(move || {
+            let wire: Arc<[u8]> = block
+                .zcash_serialize_to_vec()
+                .expect("verified blocks serialize")
+                .into();
+            let retained_bytes = contextual.retained_bytes().saturating_add(wire.len());
+            (contextual, wire, retained_bytes)
+        })
+    })
+    .await
+    .expect("proposal retention accounting uses saturating content-size arithmetic");
     proposals.send_modify(|proposals| {
         proposals.retain(|proposal| proposal.key != key);
         proposals.push_front(PreparedProposal {
@@ -157,6 +165,7 @@ async fn cache_proposal(
             transaction_bytes,
             block,
             contextual: Arc::from(contextual),
+            wire,
             retained_bytes,
         });
         let mut retained_bytes = 0usize;
@@ -264,33 +273,22 @@ impl PreparedBlockCache {
         let mut transactions = bytes;
         let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
         let normalized_header = normalized_proposal_header(&header);
-        let (block, matched) = {
+        let (block, matched, wire) = {
             let proposals = self.0.borrow();
             let proposal = proposals.iter().find(|proposal| {
                 proposal.transaction_bytes == transactions.len()
                     && normalized_proposal_header(&proposal.block.header) == normalized_header
             })?;
-            (proposal.block.clone(), Arc::downgrade(&proposal.contextual))
+            (
+                proposal.block.clone(),
+                Arc::downgrade(&proposal.contextual),
+                proposal.wire.clone(),
+            )
         };
 
         // Candidate selection is not authority to substitute different transaction bytes.
-        struct Compare<'a>(&'a [u8]);
-        impl Write for Compare<'_> {
-            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                self.0 = self
-                    .0
-                    .strip_prefix(bytes)
-                    .ok_or(io::ErrorKind::InvalidData)?;
-                Ok(bytes.len())
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let mut comparison = Compare(transactions);
-        block.transactions.zcash_serialize(&mut comparison).ok()?;
-        if !comparison.0.is_empty() {
+        let header_bytes = wire.len().checked_sub(transactions.len())?;
+        if wire.get(header_bytes..)? != transactions {
             return None;
         }
         let block = if *block.header == header {
@@ -718,21 +716,40 @@ where
             let result = async {
             let phase_start = Instant::now();
             let hash = block.hash();
-            // Check that this block is actually a new block.
-            tracing::trace!("checking that block is not already in state");
-            match state_service
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::KnownBlock(hash))
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
-                zs::Response::KnownBlock(Some(location)) => {
-                    return Err(BlockError::AlreadyInChain(hash, location).into())
+
+            // Exact decoder matches avoid hashing the body again, but only while the matched
+            // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
+            let decoded_match = match &request {
+                Request::CommitDecoded(decoded, _) => {
+                    decoded.matched.as_ref().and_then(|(entry, size)| {
+                        proposals
+                            .borrow()
+                            .iter()
+                            .find(|proposal| Arc::as_ptr(&proposal.contextual) == entry.as_ptr())
+                            .map(|proposal| (proposal.contextual.clone(), *size))
+                    })
                 }
-                zs::Response::KnownBlock(None) => {}
-                _ => unreachable!("wrong response to Request::KnownBlock"),
+                _ => None,
+            };
+
+            // Check that this block is actually a new block. A solved proposal skips this state
+            // round trip: its commit reports a duplicate hash or height itself.
+            if decoded_match.is_none() {
+                tracing::trace!("checking that block is not already in state");
+                match state_service
+                    .ready()
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                    .call(zs::Request::KnownBlock(hash))
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                {
+                    zs::Response::KnownBlock(Some(location)) => {
+                        return Err(BlockError::AlreadyInChain(hash, location).into())
+                    }
+                    zs::Response::KnownBlock(None) => {}
+                    _ => unreachable!("wrong response to Request::KnownBlock"),
+                }
             }
 
             tracing::trace!("performing block checks");
@@ -763,20 +780,6 @@ where
             })
             .await?;
 
-            // Exact decoder matches avoid hashing the body again, but only while the matched
-            // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
-            let decoded_match = match &request {
-                Request::CommitDecoded(decoded, _) => {
-                    decoded.matched.as_ref().and_then(|(entry, size)| {
-                        proposals
-                            .borrow()
-                            .iter()
-                            .find(|proposal| Arc::as_ptr(&proposal.contextual) == entry.as_ptr())
-                            .map(|proposal| (proposal.contextual.clone(), *size))
-                    })
-                }
-                _ => None,
-            };
             // Hash only when populating the cache or when an unmatched block could reuse it.
             let proposal_key = if decoded_match.is_none()
                 && (request.is_proposal() || {
@@ -884,7 +887,11 @@ where
             rejection_candidate = (!request.is_proposal()).then(|| block.clone());
             let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
                 && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
+            // A solved proposal is advertised through its validated-commit notification and
+            // commits within milliseconds, so early relay is not worth its state round trip.
+            let solved_proposal = cached.is_some() && !require_authentication;
             early_relay = if request.is_proposal()
+                || solved_proposal
                 || NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5
             {
                 None

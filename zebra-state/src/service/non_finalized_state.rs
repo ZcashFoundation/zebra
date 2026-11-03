@@ -609,14 +609,15 @@ impl NonFinalizedState {
     /// Returns a private copy of `chain` to extend, without the blocks kept by
     /// [`Self::finalize_keeping_best_chain`].
     ///
-    /// Replays the spare into the copy when it can, so a chain shared with read-state snapshots
-    /// isn't cloned, and keeps a shared `chain` as the next spare: readers release it once they
-    /// see the extension. A private chain, such as a new fork, is used directly.
+    /// Replays the spare into the copy when it can, waiting briefly for a reader to release it, so
+    /// a chain shared with read-state snapshots isn't cloned. Keeps a shared `chain` as the next
+    /// spare: readers release it once they see the extension. A private chain, such as a new
+    /// fork, is used directly.
     ///
     /// Callers must pass the best chain while it keeps finalized blocks, or a new empty chain.
     /// They clear `retained_finalized_height` once the extension replaces the best chain.
     fn private_copy(&mut self, chain: Arc<Chain>) -> Chain {
-        let (mut copy, retired) = match self.take_spare(&chain) {
+        let (mut copy, retired) = match self.take_spare_waiting(&chain) {
             Some(spare) => (spare, Some(chain)),
             None => match Arc::try_unwrap(chain) {
                 Ok(private_chain) => (private_chain, None),
@@ -729,6 +730,18 @@ impl NonFinalizedState {
         self.retained_finalized_height = None;
         self.update_metrics_for_committed_block(height, hash);
         Ok(())
+    }
+
+    /// Like [`Self::take_spare()`], but waits up to [`COMMIT_SPARE_WAIT`] for a reader to
+    /// release a spare that matches `target`, because that is far cheaper than cloning it.
+    fn take_spare_waiting(&mut self, target: &Chain) -> Option<Chain> {
+        if self.spare_matches(target) {
+            let deadline = Instant::now() + COMMIT_SPARE_WAIT;
+            while self.spare_is_shared() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        self.take_spare(target)
     }
 
     /// Locks the shared prepared chain.
@@ -1663,6 +1676,12 @@ impl Drop for NonFinalizedState {
         self.disable_metrics();
     }
 }
+
+/// How long a commit waits for a reader to release a matching spare before cloning the chain.
+///
+/// Readers hold a snapshot for one request, so a spare that is still shared when a block arrives
+/// is normally released within a few milliseconds.
+const COMMIT_SPARE_WAIT: Duration = Duration::from_millis(5);
 
 /// Returns `true` if `chain` is a version of `target`: both contain `target`'s root block, so
 /// popping `chain`'s extra tips and roots and pushing `target`'s later blocks makes them equal.
