@@ -1102,19 +1102,20 @@ where
         self.shutdown_async(error).await;
     }
 
-    /// Release demoted source capacity before waiting for peer-controlled writes.
+    /// Keep a source slot until its disabling message is sent or the connection closes.
     async fn set_compact_receive(&mut self, permit: Option<tokio::sync::OwnedSemaphorePermit>) {
-        self.compact_receive_permit = permit;
         let result = self
             .peer_tx
             .send(Message::SendCompact {
-                high_bandwidth: self.compact_receive_permit.is_some(),
+                high_bandwidth: permit.is_some(),
                 version: 1,
             })
             .await;
         if let Err(error) = result {
-            self.compact_receive_permit = None;
             self.fail_with(error).await;
+            self.compact_receive_permit = None;
+        } else {
+            self.compact_receive_permit = permit;
         }
     }
 

@@ -593,15 +593,28 @@ async fn failed_compact_advert_releases_fanout_before_stalled_close() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn compact_receive_demotion_releases_slot_before_write() {
+async fn compact_receive_demotion_holds_slot_until_write() {
     let _init_guard = zebra_test::init();
-    let (mut connection, _client, _inbound, _outbound, _errors) =
+    let (mut connection, _client, _inbound, mut outbound, _errors) =
         new_test_connection::<PanicAssertion>();
-    let slots = Arc::new(tokio::sync::Semaphore::new(1));
+    let slots = Arc::new(tokio::sync::Semaphore::new(3));
+    let _other_sources = slots.clone().try_acquire_many_owned(2).unwrap();
     connection.compact_receive_permit = Some(slots.clone().try_acquire_owned().unwrap());
     let demote = connection.set_compact_receive(None);
     tokio::pin!(demote);
     assert!(futures::poll!(&mut demote).is_pending());
+    assert!(
+        slots.clone().try_acquire_owned().is_err(),
+        "a fourth source must wait for the disabling write",
+    );
+    let ((), message) = tokio::join!(demote, outbound.next());
+    assert_eq!(
+        message,
+        Some(Message::SendCompact {
+            high_bandwidth: false,
+            version: 1,
+        }),
+    );
     assert_eq!(slots.available_permits(), 1);
 }
 
