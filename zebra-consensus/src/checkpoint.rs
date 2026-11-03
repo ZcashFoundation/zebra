@@ -923,9 +923,13 @@ where
     fn queue_block(
         &mut self,
         block: Arc<Block>,
+        retention: Option<zs::BlockRetentionToken>,
         notifications: Option<zs::MinedBlockNotifications>,
     ) -> Result<RequestBlock, VerifyCheckpointError> {
-        let block = self.check_block(block)?;
+        let mut block = self.check_block(block)?;
+        if let Some(retention) = retention {
+            block = block.with_retention(retention);
+        }
         let height = block.height;
         let hash = block.hash;
         let (tx, rx) = oneshot::channel();
@@ -1544,6 +1548,27 @@ where
         block: Arc<Block>,
         notifications: Option<zs::MinedBlockNotifications>,
     ) -> <Self as Service<Arc<Block>>>::Future {
+        self.verify_inner(block, None, notifications)
+    }
+
+    /// Verify a checkpointed block while jointly owning its pipeline guard.
+    #[instrument(name = "checkpoint", skip(self, block, retention, notifications))]
+    pub(crate) fn verify_with_retention(
+        &mut self,
+        block: Arc<Block>,
+        retention: zs::BlockRetentionToken,
+        notifications: Option<zs::MinedBlockNotifications>,
+    ) -> <Self as Service<Arc<Block>>>::Future {
+        self.verify_inner(block, Some(retention), notifications)
+    }
+
+    /// Queues a checkpointed body and returns its cancellation-independent verification receiver.
+    fn verify_inner(
+        &mut self,
+        block: Arc<Block>,
+        retention: Option<zs::BlockRetentionToken>,
+        notifications: Option<zs::MinedBlockNotifications>,
+    ) -> <Self as Service<Arc<Block>>>::Future {
         let mut requeued = false;
         while let Ok(CommitFailure { epoch, tip, child }) = self.reset_receiver.try_recv() {
             if epoch == self.epoch {
@@ -1561,7 +1586,7 @@ where
         if let FinalCheckpoint = self.previous_checkpoint_height() {
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
-        let req_block = match self.queue_block(block, notifications) {
+        let req_block = match self.queue_block(block, retention, notifications) {
             Ok(req_block) => req_block,
             Err(error) => return async { Err(error) }.boxed(),
         };
@@ -1627,6 +1652,7 @@ where
                 transaction_hashes: block.transaction_hashes.clone(),
                 received_time: block.received_time,
                 retained_charge: block.retained_charge,
+                retention: block.retention.clone(),
             };
             let commit = match notifications.clone() {
                 Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {

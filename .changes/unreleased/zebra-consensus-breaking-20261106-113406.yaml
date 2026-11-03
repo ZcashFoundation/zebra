@@ -1,0 +1,8 @@
+project: zebra-consensus
+kind: breaking
+body: >-
+  Added `CommitWithRetention` and `CommitEarlyRelayWithRetention` block verifier requests,
+  which carry a `BlockRetentionToken` through accepted checkpoint, semantic, and state commit
+  owners. Code with exhaustive matches on the verifier `Request` enum must handle the new
+  variants. Existing `Commit` and `CommitEarlyRelay` behavior is unchanged.
+time: 2026-11-06T11:34:06Z

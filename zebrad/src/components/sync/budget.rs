@@ -1,7 +1,7 @@
 //! The sync pipeline's memory limits, derived from the memory budget.
 //!
-//! With a byte bound, every block the syncer or the inbound block downloader holds between its
-//! download and the end of its verification is charged to one shared counter (design §4.2).
+//! With a byte bound, every block the syncer or the inbound block downloader holds is charged
+//! until its accepted owner commits, rejects, or evicts it (design §4.2).
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -23,6 +23,7 @@ use zebra_chain::{
     parameters::checkpoint::list::CheckpointList,
     transaction,
 };
+use zebra_state::BlockRetentionToken;
 
 #[cfg(test)]
 mod tests;
@@ -206,8 +207,8 @@ pub(crate) struct OverLimit {
 
 /// The charge of one downloaded block, released when it is dropped.
 ///
-/// Download tasks hold it until their block's verification ends, so every exit path releases it:
-/// success, failure, timeout, cancellation and the task being dropped.
+/// A [`BlockRetentionToken`] can jointly own this guard with accepted verifier and state owners,
+/// keeping it alive after the caller's download task ends.
 #[derive(Debug)]
 #[must_use = "the charge is released when the guard is dropped"]
 pub(crate) struct PipelineCharge {
@@ -425,7 +426,7 @@ impl PipelineAdmission {
             hash,
             budget: self.budget.clone(),
             events: self.events_tx.clone(),
-            charge: None,
+            retention: None,
         }
     }
 
@@ -569,8 +570,8 @@ fn oldest_range_is_fully_requested(
 
 /// A queued download's link to its downloader's [`PipelineAdmission`], held by its task.
 ///
-/// Dropping it releases the block's charge, then reports that the task finished, so every exit
-/// path of the task does both.
+/// Dropping it releases the task's token, then reports that the task finished. Accepted downstream
+/// owners can keep other clones of the block's charge alive after either event.
 #[derive(Debug)]
 pub(super) struct TrackedDownload {
     /// The downloaded block's hash.
@@ -583,13 +584,17 @@ pub(super) struct TrackedDownload {
     events: mpsc::UnboundedSender<PipelineEvent>,
 
     /// The block's charge, once it is downloaded.
-    charge: Option<PipelineCharge>,
+    retention: Option<BlockRetentionToken>,
 }
 
 impl TrackedDownload {
     /// Charges the block downloaded at `height` to the pipeline and reports it.
     pub(super) fn downloaded(&mut self, height: Height, bytes: u64) {
-        self.charge = self.budget.charge(bytes);
+        self.retention = self.budget.charge(bytes).map(|charge| {
+            BlockRetentionToken::new(charge).with_retained_charge(
+                usize::try_from(bytes).expect("the block charge was converted from usize"),
+            )
+        });
 
         // A reset or dropped downloader no longer counts this download.
         let _ = self.events.send(PipelineEvent::Downloaded {
@@ -598,12 +603,17 @@ impl TrackedDownload {
             bytes,
         });
     }
+
+    /// Returns a clone jointly owned with the block's verifier and state commit owners.
+    pub(super) fn retention(&self) -> Option<BlockRetentionToken> {
+        self.retention.clone()
+    }
 }
 
 impl Drop for TrackedDownload {
     fn drop(&mut self) {
-        // Release before reporting, so the downloader sees the lower charge with the report.
-        drop(self.charge.take());
+        // Release this task's token before reporting, without dropping any downstream clones.
+        drop(self.retention.take());
 
         // A reset or dropped downloader no longer counts this download.
         let _ = self

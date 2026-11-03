@@ -273,6 +273,12 @@ where
                     .verify(block, Some(notifications))
                     .map_err(Into::into)
                     .boxed(),
+                Request::CommitWithRetention(_, retention)
+                | Request::CommitEarlyRelayWithRetention(_, retention) => self
+                    .checkpoint
+                    .verify_with_retention(block, retention, None)
+                    .map_err(Into::into)
+                    .boxed(),
                 Request::Commit(_)
                 | Request::CommitEarlyRelay(_)
                 | Request::CommitDecoded(_, None) => {

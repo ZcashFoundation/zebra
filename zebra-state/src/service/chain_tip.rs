@@ -117,6 +117,7 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             transaction_hashes,
             received_time: _,
             retained_charge: _,
+            retention: _,
         } = prepared;
 
         Self {

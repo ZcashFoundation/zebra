@@ -1484,6 +1484,7 @@ impl Service<Request> for StateService {
                     transaction_hashes: contextual.transaction_hashes.clone(),
                     received_time: contextual.received_time,
                     retained_charge: Some(contextual.retained_charge),
+                    retention: contextual.retention.take(),
                 };
                 (
                     Request::CommitSemanticallyVerifiedBlock(prepared),

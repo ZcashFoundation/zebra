@@ -50,9 +50,9 @@ pub use error::{
     StateInitError, ValidateContextError,
 };
 pub use request::{
-    block_retained_charge, AwaitUtxoRequest, CheckpointVerifiedBlock, CommitAids,
-    CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest, MinedBlockNotifications,
-    ReadRequest, Request, SemanticallyVerifiedBlock,
+    block_retained_charge, AwaitUtxoRequest, BlockRetentionToken, CheckpointVerifiedBlock,
+    CommitAids, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
+    MinedBlockNotifications, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]

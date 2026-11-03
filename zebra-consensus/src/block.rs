@@ -839,9 +839,12 @@ where
             });
 
             // Cache hits already bind the Merkle root through exact bytes or the proposal key.
-            // On misses, bind the body before announcing early work and reuse these hashes below,
-            // and compute the block's memory charge once, off the async runtime and the state's
-            // block writer, so the state reuses it.
+            // On misses, bind the body before announcing early work and reuse these hashes below.
+            // Reuse the downloader's charge, or compute it once off the async runtime and the
+            // state's block writer, so the state reuses it too.
+            let retained_charge = request
+                .retention()
+                .and_then(|retention| retention.retained_charge());
             let transaction_hashes_and_charge = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
@@ -857,7 +860,8 @@ where
                     }
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
-                    let charge = zs::block_retained_charge(&block, &hashes);
+                    let charge = retained_charge
+                        .unwrap_or_else(|| zs::block_retained_charge(&block, &hashes));
                     Ok::<_, VerifyBlockError>((hashes, charge))
                 }).await?)
             } else {
@@ -897,8 +901,10 @@ where
 
             // Bound shielded work before output recovery or proof verification.
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
-            let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
-                && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
+            let require_authentication = matches!(
+                &request,
+                Request::CommitEarlyRelay(_) | Request::CommitEarlyRelayWithRetention(_, _)
+            ) && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
             early_relay = if request.is_proposal()
                 || NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5
             {
@@ -955,12 +961,19 @@ where
                 let phase_start = Instant::now();
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
+                if let Some(retention) = request.retention().cloned() {
+                    contextual = contextual.with_retention(retention);
+                }
                 let commit = match request {
                     Request::CommitMined(_, notifications)
                     | Request::CommitDecoded(_, Some(notifications)) => {
                         contextual.into_mined_request(notifications)
                     }
-                    Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, None) => {
+                    Request::Commit(_)
+                    | Request::CommitWithRetention(_, _)
+                    | Request::CommitEarlyRelay(_)
+                    | Request::CommitEarlyRelayWithRetention(_, _)
+                    | Request::CommitDecoded(_, None) => {
                         zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
@@ -1183,6 +1196,7 @@ where
                 transaction_hashes,
                 received_time: Some(received_time),
                 retained_charge: Some(retained_charge),
+                retention: request.retention().cloned(),
             };
 
             // Return early for proposal requests.
@@ -1220,7 +1234,11 @@ where
                     contextual: None,
                     notifications,
                 },
-                Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, None) => {
+                Request::Commit(_)
+                | Request::CommitWithRetention(_, _)
+                | Request::CommitEarlyRelay(_)
+                | Request::CommitEarlyRelayWithRetention(_, _)
+                | Request::CommitDecoded(_, None) => {
                     zs::Request::CommitSemanticallyVerifiedBlock(prepared_block)
                 }
                 Request::CheckProposal(_) => unreachable!("proposals return after validation"),

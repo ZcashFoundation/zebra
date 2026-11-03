@@ -508,7 +508,8 @@ impl WriteBlockWorkerTask {
                     };
 
                     // Try committing the block, but keep notifications until its context is published.
-                    let (checkpoint_verified, rsp_tx, _) = ordered_block;
+                    let (mut checkpoint_verified, rsp_tx, _) = ordered_block;
+                    let retention = checkpoint_verified.take_retention();
                     let height = checkpoint_verified.height;
                     let result = match finalized_state.commit_finalized_with_spentness(
                         checkpoint_verified,
@@ -563,6 +564,7 @@ impl WriteBlockWorkerTask {
                             Err(error)
                         }
                     };
+                    drop(retention);
                     drop(_context_update);
                     if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
                         permit.send((*hash, height));
@@ -609,7 +611,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some(((queued_child, rsp_tx, contextual, notifications), queued_at)) =
+            let Some(((mut queued_child, rsp_tx, contextual, notifications), queued_at)) =
                 queued_child_and_rsp_tx
             else {
                 update_latest_chain_channels(
@@ -627,6 +629,7 @@ impl WriteBlockWorkerTask {
 
             let child_hash = queued_child.hash;
             let child_height = queued_child.height;
+            let retention = queued_child.retention.take();
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
 
@@ -685,6 +688,7 @@ impl WriteBlockWorkerTask {
                 .record(phase_start.elapsed().as_secs_f64());
                 result
             };
+            drop(retention);
 
             if let Err(ref error) = result {
                 // If the block is invalid, mark any descendant blocks as rejected.
