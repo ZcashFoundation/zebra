@@ -408,12 +408,12 @@ where
     let mut headers: Vec<_> = if request.locator_hashes.is_empty() {
         // An empty locator asks for the single header `hash_stop` names. There is no
         // header-by-hash request, so fetch the block and keep its header.
-        let response = call_service(
+        let answer = call_service(
             service,
             Request::BlocksByHash([request.hash_stop].into_iter().collect()),
         )
         .await?;
-        match response {
+        match answer {
             Response::Blocks(blocks) => blocks
                 .into_iter()
                 .filter_map(|block| match block {
@@ -425,7 +425,7 @@ where
         }
     } else {
         let stop = (request.hash_stop != block::Hash([0; 32])).then_some(request.hash_stop);
-        let response = call_service(
+        let answer = call_service(
             service,
             Request::FindHeaders {
                 known_blocks: request.locator_hashes,
@@ -433,7 +433,7 @@ where
             },
         )
         .await?;
-        let mut headers: Vec<_> = match response {
+        let mut headers: Vec<_> = match answer {
             Response::BlockHeaders(headers) => {
                 headers.into_iter().map(|counted| counted.header).collect()
             }
