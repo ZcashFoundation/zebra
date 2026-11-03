@@ -40,7 +40,7 @@ use super::{
 mod tests;
 
 /// The length of a Bitcoin message header.
-const HEADER_LEN: usize = 24usize;
+pub(crate) const HEADER_LEN: usize = 24usize;
 
 /// The largest buffer reservation made while waiting for more body bytes.
 ///

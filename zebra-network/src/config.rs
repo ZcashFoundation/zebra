@@ -69,6 +69,59 @@ const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 /// See [`Config::v2_outbound_connection_limit`] and [`Config::v2_inbound_connection_limit`].
 const V2_CONNECTION_SHARE: usize = 2;
 
+/// The fewest outbound version 2 connections a node opens when it registers its version 2
+/// connections for the checkpoint sync engine ([`Config::v2_sync_peers`]): the engine streams
+/// blocks from at least two peers, so a small peer target must not leave it one outbound peer.
+pub const MIN_V2_SYNC_OUTBOUND_CONNECTIONS: usize = 2;
+
+/// How a node uses its version 2 endpoint, which sets how many version 2 connections its
+/// connection limits allow, and so what [`Config::buffered_request_bytes_for_target`] charges.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum V2Endpoint {
+    /// No version 2 endpoint: only legacy connections.
+    Disabled,
+
+    /// A version 2 endpoint: a share of each legacy connection limit, at least one connection of
+    /// each kind.
+    Enabled,
+
+    /// A version 2 endpoint whose connections the checkpoint sync engine streams from: like
+    /// [`V2Endpoint::Enabled`], with at least [`MIN_V2_SYNC_OUTBOUND_CONNECTIONS`] outbound.
+    CheckpointSync,
+}
+
+impl V2Endpoint {
+    /// The most outbound version 2 connections next to `legacy_outbound_limit` legacy ones.
+    pub fn outbound_limit(self, legacy_outbound_limit: usize) -> usize {
+        match self {
+            Self::Disabled => 0,
+            Self::Enabled => (legacy_outbound_limit / V2_CONNECTION_SHARE).max(1),
+            Self::CheckpointSync => {
+                (legacy_outbound_limit / V2_CONNECTION_SHARE).max(MIN_V2_SYNC_OUTBOUND_CONNECTIONS)
+            }
+        }
+    }
+
+    /// The most inbound version 2 connections next to `legacy_inbound_limit` legacy ones.
+    pub fn inbound_limit(self, legacy_inbound_limit: usize) -> usize {
+        match self {
+            Self::Disabled => 0,
+            Self::Enabled | Self::CheckpointSync => {
+                (legacy_inbound_limit / V2_CONNECTION_SHARE).max(1)
+            }
+        }
+    }
+
+    /// The fewest outbound version 2 connections the node aims for, when it has an endpoint.
+    fn min_outbound_target(self) -> usize {
+        match self {
+            Self::Disabled => 0,
+            Self::Enabled => 1,
+            Self::CheckpointSync => MIN_V2_SYNC_OUTBOUND_CONNECTIONS,
+        }
+    }
+}
+
 /// Public DNS seed endpoints, also used to isolate configured networks.
 const DEFAULT_MAINNET_PEERS: [&str; 5] = [
     "dnsseed.str4d.xyz:8233",
@@ -277,6 +330,10 @@ pub struct Config {
     /// If you have a slow network connection, and Zebra is having trouble
     /// syncing, try reducing the peer set size. You can also reduce the peer
     /// set size to reduce Zebra's bandwidth usage.
+    ///
+    /// When zebrad has a memory budget and this field is its default, zebrad derives the size
+    /// from the budget instead, and passes it to [`init_with_limits`](crate::init_with_limits)
+    /// in [`MemoryLimits`](crate::MemoryLimits).
     pub peerset_initial_target_size: usize,
 
     /// How frequently we attempt to crawl the network to discover new peer
@@ -365,6 +422,24 @@ impl Config {
         services
     }
 
+    /// Returns this config with `peerset_initial_target_size` replaced by `target_size`, a memory
+    /// budget's peer set target size.
+    ///
+    /// `None` keeps the configured size, and so does `Some(0)`, with a warning like the one for a
+    /// configured zero, because the peer set needs a target.
+    pub(crate) fn with_peerset_initial_target_size(mut self, target_size: Option<usize>) -> Self {
+        match target_size {
+            Some(0) => warn!(
+                configured = self.peerset_initial_target_size,
+                "the memory limits' peerset_initial_target_size should be greater than 0, \
+                 keeping the configured value instead"
+            ),
+            Some(target_size) => self.peerset_initial_target_size = target_size,
+            None => {}
+        }
+        self
+    }
+
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
     ///
@@ -412,29 +487,40 @@ impl Config {
         self.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER
     }
 
+    /// How this node uses its version 2 endpoint: none without `v2_listen_addr`, and the
+    /// checkpoint sync engine's when `v2_sync_peers` registers its connections.
+    pub fn v2_endpoint(&self) -> V2Endpoint {
+        match (self.v2_listen_addr, &self.v2_sync_peers) {
+            (None, _) => V2Endpoint::Disabled,
+            (Some(_), None) => V2Endpoint::Enabled,
+            (Some(_), Some(_)) => V2Endpoint::CheckpointSync,
+        }
+    }
+
     /// The maximum number of outbound version 2 connections that Zebra will open at the same
     /// time, on top of [`Self::peerset_outbound_connection_limit`]: a share of the legacy limit,
-    /// at least one, when `v2_listen_addr` is set, and zero otherwise.
+    /// at least one, when `v2_listen_addr` is set, and zero otherwise. With the checkpoint sync
+    /// engine, at least [`MIN_V2_SYNC_OUTBOUND_CONNECTIONS`].
     pub(crate) fn v2_outbound_connection_limit(&self) -> usize {
-        Self::v2_share_of(
-            self.v2_listen_addr,
-            self.peerset_outbound_connection_limit(),
-        )
+        self.v2_endpoint()
+            .outbound_limit(self.peerset_outbound_connection_limit())
     }
 
     /// The maximum number of inbound version 2 connections that Zebra will accept at the same
     /// time, on top of [`Self::peerset_inbound_connection_limit`]: a share of the legacy limit,
     /// at least one, when `v2_listen_addr` is set, and zero otherwise.
     pub(crate) fn v2_inbound_connection_limit(&self) -> usize {
-        Self::v2_share_of(self.v2_listen_addr, self.peerset_inbound_connection_limit())
+        self.v2_endpoint()
+            .inbound_limit(self.peerset_inbound_connection_limit())
     }
 
     /// The number of outbound version 2 connections Zebra makes to the version 2 peers it
-    /// discovers: a share of the initial target size, at least one, and at most
+    /// discovers: a share of the initial target size, at least one, or at least
+    /// [`MIN_V2_SYNC_OUTBOUND_CONNECTIONS`] with the checkpoint sync engine, and at most
     /// [`Self::v2_outbound_connection_limit`].
     pub(crate) fn v2_outbound_target(&self) -> usize {
         (self.peerset_initial_target_size / V2_CONNECTION_SHARE)
-            .max(1)
+            .max(self.v2_endpoint().min_outbound_target())
             .min(self.v2_outbound_connection_limit())
     }
 
@@ -475,16 +561,6 @@ impl Config {
         .then_some(v2_listen_addr)
     }
 
-    /// The version 2 share of `legacy_limit`: a configured endpoint always gets at least one
-    /// connection of each kind, whatever the legacy limits are.
-    fn v2_share_of(v2_listen_addr: Option<SocketAddr>, legacy_limit: usize) -> usize {
-        if v2_listen_addr.is_some() {
-            (legacy_limit / V2_CONNECTION_SHARE).max(1)
-        } else {
-            0
-        }
-    }
-
     /// The maximum number of inbound and outbound connections that Zebra will have
     /// at the same time, over both peer-to-peer protocols.
     ///
@@ -495,6 +571,65 @@ impl Config {
             + self.peerset_inbound_connection_limit()
             + self.v2_outbound_connection_limit()
             + self.v2_inbound_connection_limit()
+    }
+
+    /// Returns the request bytes that can be buffered by the connection limits derived from a
+    /// positive `target_size`, with the version 2 connections that `v2` allows.
+    ///
+    /// Each legacy connection, inbound or outbound, can reserve a maximum-size message body and its
+    /// next header: the codec decodes messages up to that size in both directions. Each version 2
+    /// connection, inbound or outbound, can finish reading the largest request body on each of its
+    /// two admitted request streams, because peers open request streams on both. Every version 2
+    /// connection also gets its configured QUIC receive and send windows. The connection receive
+    /// window covers all of its streams, so the per-stream window is not charged separately.
+    pub fn buffered_request_bytes_for_target(
+        target_size: usize,
+        v2: V2Endpoint,
+        quic: crate::QuicWindows,
+    ) -> u64 {
+        debug_assert!(target_size > 0, "peer targets are positive");
+
+        let legacy_inbound = target_size.saturating_mul(INBOUND_PEER_LIMIT_MULTIPLIER);
+        let legacy_outbound = target_size.saturating_mul(OUTBOUND_PEER_LIMIT_MULTIPLIER);
+        let legacy_connections = legacy_inbound.saturating_add(legacy_outbound);
+        let v2_connections = v2
+            .outbound_limit(legacy_outbound)
+            .saturating_add(v2.inbound_limit(legacy_inbound));
+
+        let to_u64 = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
+        let legacy_body = to_u64(
+            crate::protocol::external::MAX_PROTOCOL_MESSAGE_LEN
+                + crate::protocol::external::codec::HEADER_LEN,
+        );
+        let v2_body = to_u64(
+            crate::peer::v2::connection::INBOUND_REQUEST_CONCURRENCY
+                * crate::protocol::v2::request::max_body_len(
+                    crate::protocol::v2::types::StreamType::GetTx,
+                )
+                .expect("get-tx is a served request stream"),
+        );
+        let v2_transport =
+            u64::from(quic.connection_receive_window).saturating_add(quic.send_window);
+
+        to_u64(legacy_connections)
+            .saturating_mul(legacy_body)
+            .saturating_add(
+                to_u64(v2_connections).saturating_mul(v2_body.saturating_add(v2_transport)),
+            )
+    }
+
+    /// Returns the largest initial peer target whose [`Self::buffered_request_bytes_for_target`]
+    /// fits in `share_bytes`, or `None` when even one target does not fit.
+    pub fn peer_target_for_memory(
+        share_bytes: u64,
+        v2: V2Endpoint,
+        quic: crate::QuicWindows,
+    ) -> Option<usize> {
+        (1..=DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
+            .rev()
+            .find(|&target| {
+                Self::buffered_request_bytes_for_target(target, v2, quic) <= share_bytes
+            })
     }
 
     /// Returns the initial seed peer hostnames for the configured network.
