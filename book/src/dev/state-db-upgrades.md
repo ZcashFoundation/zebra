@@ -11,7 +11,7 @@ For deployment, direct-reader compatibility, and rollback, follow
 ## Format versions and paths
 
 The database format version is independent of Zebra and Rust crate versions.
-The current code implements [format **30.0.0**][constants]; Zebra 7.0.0
+The current code implements [format **30.1.0**][constants]; Zebra 7.0.0
 implements format 29.0.0:
 
 | Constant | Current value | Change requiring a bump |
@@ -24,7 +24,7 @@ A change that would otherwise be incompatible can use a minor bump only when
 all supported Zebra versions already contain the required compatibility code.
 The function `state_database_format_version_in_code()` returns the complete
 semantic version. Builds with the `indexer` feature return
-`30.0.0+indexer`; other builds return `30.0.0`.
+`30.1.0+indexer`; other builds return `30.1.0`.
 
 For persistent databases, the method `Config::db_path()` constructs this path:
 
@@ -40,7 +40,7 @@ this namespace. Databases for the same network with different minor or patch
 versions still use the same major-version directory.
 
 The file `version` inside the database directory records the full semantic
-version, for example `30.0.0` or `30.0.0+indexer`, without a trailing newline.
+version, for example `30.1.0` or `30.1.0+indexer`, without a trailing newline.
 The [version reader][config] also accepts the legacy `minor.patch` form and
 supplies the major version from the requested database path. If the file is
 absent but the directory exists, it reports `<major>.0.0`. If both are absent,
