@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Block and mempool transaction verification now precompute sighashes and build proof verification requests on blocking threads instead of the async task polling the checks, except for small transparent-only transactions.
+time: 2026-11-04T06:26:01.436952834+01:00
