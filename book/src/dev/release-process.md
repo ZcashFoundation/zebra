@@ -47,10 +47,10 @@ Follow the [upgrade and rollback requirements](../user/upgrading.md).
 
 ### Preview releases
 
-A beta version (`X.Y.Z-beta.0`) identifies a development prerelease; a release
-candidate (RC, `X.Y.Z-rc.0`) is selected for final testing. Package versions, tags,
-and versioned changelogs must agree. Use the normal Release PR and readiness
-process:
+Alpha (`X.Y.Z-alpha.0`) and beta (`X.Y.Z-beta.0`) versions identify development
+prereleases; a release candidate (RC, `X.Y.Z-rc.0`) is selected for final
+testing. Package versions, tags, and versioned changelogs must agree. Use the
+normal Release PR and readiness process:
 
 1. Agree on the candidate's scope and prerelease version. Check that the final
    Release PR manifests, dependency requirements, and versioned changelogs use
@@ -68,9 +68,10 @@ Publishing a GitHub prerelease does not deploy it to production. The
 [GCP deployment workflow][deploy-workflow] and
 [binary workflow][binary-workflow] handle `release: released` for
 `v`-prefixed tags: stable publication or promotion of a prerelease.
-Prereleases skip production deployment and stable Docker and binary
-distribution. Manual dispatch can still target production independently
-of the release channel.
+Prereleases skip production deployment and the automatic stable Docker and binary
+jobs; publish prerelease images and binaries separately, without moving stable tags
+such as `latest`. Manual dispatch can still target production independently of the
+release channel.
 
 ### Distribution tags
 
