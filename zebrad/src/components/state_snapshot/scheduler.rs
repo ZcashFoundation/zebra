@@ -1,4 +1,4 @@
-//! The piece download scheduler (design, §6.1).
+//! The piece download scheduler.
 //!
 //! One task owns every download: it assigns each piece to one peer, requests
 //! it in sub-ranges sized from the peer's measured rate, hashes the bytes as
@@ -51,8 +51,7 @@ mod tests;
 /// which keeps fewer requests in flight than the connection has streams for.
 const SUB_RANGE_DEADLINE_GRACE: Duration = Duration::from_secs(5);
 
-/// The limits of the scheduler (design, §6.1), with the design's values as
-/// the default.
+/// The limits of the scheduler, with their defaults.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchedulerConfig {
     /// The length of the first sub-range requested from a peer, before its
@@ -150,7 +149,7 @@ impl SchedulerConfig {
     /// Returns the length of the next sub-range for a peer that delivers one
     /// sub-range at `rate` bytes per second, or has not answered yet: its rate
     /// times [`Self::range_duration`], clamped to the shortest and longest
-    /// sub-range (design, §6.1 "Sub-ranges").
+    /// sub-range.
     fn range_len(&self, rate: Option<u64>) -> u32 {
         let len = match rate {
             None => self.initial_range_bytes,
@@ -173,7 +172,7 @@ impl SchedulerConfig {
     /// floor needs to deliver the bytes, if that is longer.
     ///
     /// The network layer's timeout always comes first, and gives back the
-    /// bytes received so far as a short answer (design, §5 "Requester"), as
+    /// bytes received so far as a short answer, as
     /// does the serving node's early FIN before it. This deadline only catches
     /// a service that never resolves; it must not cancel a stream the network
     /// layer is still reading, which would discard every byte received.
@@ -672,7 +671,7 @@ enum Answer {
 
     /// The request failed. The network layer reports a peer's `REFUSED`
     /// stream reset like any other failed request stream, so every failure but
-    /// a timeout is handled as a refusal (design, §6.1).
+    /// a timeout is handled as a refusal.
     Failed(BoxError),
 
     /// The request took longer than its deadline, or than the network
@@ -685,7 +684,7 @@ enum Answer {
 
 /// Returns whether `error` is the network layer's request timeout: the peer
 /// sent no answer before the connection's request deadline. That is a short
-/// answer of no bytes, not a refusal (design, §5 "Requester", §6.1 "Stalls").
+/// answer of no bytes, not a refusal.
 fn is_receive_timeout(error: &BoxError) -> bool {
     // A `SharedPeerError` hides its `PeerError`, but formats it as the error's own `Debug`, which
     // is how the peer set tells its errors apart too.
@@ -853,7 +852,7 @@ where
             blame,
         } = scheduler;
 
-        // Design, §6.1: at most 8 peers.
+        // at most 8 peers.
         peers.truncate(config.max_peers);
         let peers = peers
             .into_iter()
@@ -988,7 +987,7 @@ where
     /// Applies the rules that depend on time alone, and returns an error if
     /// the run must stop.
     fn maintain(&mut self, now: Instant) -> Result<(), SchedulerError> {
-        // Design, §6 "Failure handling": abort the piece phase if no piece verifies for 5 minutes.
+        // abort the piece phase if no piece verifies for 5 minutes.
         // A report counts too, so a slow receiver does not end a run whose pieces are all verified.
         if now >= after(self.last_progress, self.config.piece_phase_stall) {
             return Err(SchedulerError::Stalled(self.config.piece_phase_stall));
@@ -1009,7 +1008,7 @@ where
             peer.not_found.retain(|_, until| *until > now);
         }
 
-        // Design, §6.1 "Stalls": a peer whose rate stays below the floor for the slow window is
+        // A peer whose rate stays below the floor for the slow window is
         // stalled.
         for peer in 0..self.peers.len() {
             let slow_deadline = self.peers[peer].slow_deadline(self.config.slow_window);
@@ -1018,7 +1017,7 @@ where
             }
         }
 
-        // Design, §6 "Failure handling": abort if every peer is excluded.
+        // abort if every peer is excluded.
         if self.unverified > 0 && self.peers.iter().all(|peer| peer.excluded) {
             return Err(SchedulerError::NoPeers);
         }
@@ -1067,7 +1066,7 @@ where
     }
 
     /// Gives each idle peer the first pending piece it can serve that fits in
-    /// the budget (design, §6.1: each piece goes to one peer).
+    /// the budget. Each piece goes to one peer.
     fn assign(&mut self) {
         for peer in 0..self.peers.len() {
             if self.pending.is_empty() {
@@ -1094,8 +1093,7 @@ where
     /// In the end-game, when no piece is waiting for a peer, takes the piece of
     /// each peer below a quarter of the median rate away from it, with no
     /// penalty, and gives it whole to the fastest idle peer that is not below
-    /// that itself, as an independent download (design, §6.1 "Stalls"; sync
-    /// draft, "End-game duplication"). The slow peer's partial data is
+    /// that itself, as an independent end-game duplicate. The slow peer's partial data is
     /// discarded, so each download is by one peer and blame stays exact, and a
     /// piece changes hands this way at most once.
     fn reassign_slow_pieces(&mut self) {
@@ -1204,7 +1202,7 @@ where
     }
 
     /// Requests sub-ranges of download `id` from `peer`, up to the in-flight
-    /// limit (design, §6.1 "Sub-ranges").
+    /// limit.
     fn request_sub_ranges(&mut self, peer: usize, id: DownloadId) {
         let range_len = self
             .config
@@ -1255,8 +1253,7 @@ where
     }
 
     /// Hashes the bytes download `id` has queued on a blocking thread, unless
-    /// one already has its hasher (design, §6.1: each piece is hashed
-    /// incrementally as it arrives).
+    /// one already has its hasher. Each piece is hashed incrementally as it arrives.
     fn hash_queued(&mut self, id: DownloadId) {
         let Some(download) = self.downloads.get_mut(&id) else {
             return;
@@ -1377,7 +1374,7 @@ where
         };
         let (peer, piece) = (download.peer, download.piece);
 
-        // Design, §6.1: a size that differs from the manifest cancels that peer's request, with no
+        // a size that differs from the manifest cancels that peer's request, with no
         // penalty, since only the hash check settles which size is right (draft, "get-object").
         if size != u64::from(self.pieces[piece].size) {
             tracing::info!(
@@ -1458,7 +1455,7 @@ where
             }
             self.store_piece(piece, bytes);
         } else {
-            // Design, §6 "Failure handling": the peer delivered every byte of the piece, so the
+            // the peer delivered every byte of the piece, so the
             // mismatch is its fault (draft, "get-object").
             self.release(id);
             self.blame(peer, piece);
@@ -1511,7 +1508,7 @@ where
     /// Updates `peer`'s rate with an answer of `delivered` bytes, at `now`, to
     /// a sub-range of `length` bytes whose request had the peer's connection to
     /// itself for `elapsed`, and stalls the peer after too many short answers
-    /// in a row (design, §6.1 "Stalls"). Returns whether the peer is still
+    /// in a row. Returns whether the peer is still
     /// downloading.
     fn measure(
         &mut self,
@@ -1524,7 +1521,7 @@ where
         let config = &self.config;
         let state = &mut self.peers[peer];
 
-        // The rate is the peer's, not one sub-range's (design, §6.1 "Stalls"): its sub-ranges in
+        // The rate is the peer's, not one sub-range's: its sub-ranges in
         // flight share its connection, so each is measured over the time it had the connection
         // to itself.
         let rate = Rate::update(state.rate, delivered, elapsed);
@@ -1554,7 +1551,7 @@ where
 
     /// Takes `peer`'s piece away, to be downloaded whole by another peer with
     /// the partial data discarded, and rests the peer for the stall cooldown,
-    /// or excludes it once it has stalled too often (design, §6.1 "Stalls").
+    /// or excludes it once it has stalled too often.
     fn stall(&mut self, peer: usize, now: Instant, reason: &str) {
         self.release_peer(peer);
         let state = &mut self.peers[peer];
@@ -1583,7 +1580,7 @@ where
 
     /// Rests `peer` after a refused or failed request for the sub-range of
     /// `length` bytes at `offset`, for a backoff that doubles with each refusal
-    /// in a row, with no penalty (design, §6.1): the peer keeps its piece and
+    /// in a row, with no penalty: the peer keeps its piece and
     /// its other request in flight, its slow window pauses, and it is asked for
     /// the refused sub-range again after the rest, since `REFUSED` is how a
     /// server that has enough requests already says it is busy. Once the
@@ -1621,8 +1618,7 @@ where
     }
 
     /// Handles `peer` not having `piece`: it is not asked for the piece's
-    /// object again until the not-found backoff has passed (design, §6
-    /// "Failure handling").
+    /// object again until the not-found backoff has passed.
     fn not_found(&mut self, peer: usize, piece: usize, now: Instant) {
         self.release_peer(peer);
         let hash = self.pieces[piece].hash;
@@ -1635,7 +1631,7 @@ where
     }
 
     /// Blames and excludes `peer`, which delivered all of `piece` with the
-    /// wrong hash (design, §6 "Failure handling").
+    /// wrong hash.
     fn blame(&mut self, peer: usize, piece: usize) {
         let hash = self.pieces[piece].hash;
         let addr = self.peers[peer].addr;

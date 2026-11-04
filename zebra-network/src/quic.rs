@@ -120,10 +120,9 @@ impl Windows {
     };
 
     /// The windows of a node that serves synchronization artifacts through
-    /// `get-object` (DESIGN.md §5, "Server"): the default receive windows,
-    /// and a send window of 8 MiB, so that the node's eight concurrent
-    /// object streams can each have a 1 MiB chunk in flight beside its other
-    /// responses.
+    /// `get-object`: the default receive windows, and a send window of 8 MiB,
+    /// so that the node's eight concurrent object streams can each have a
+    /// 1 MiB chunk in flight beside its other responses.
     ///
     /// # Security
     ///
@@ -135,16 +134,15 @@ impl Windows {
         ..Windows::DEFAULT
     };
 
-    /// The windows of a state-snapshot bootstrap's client-only endpoint
-    /// (DESIGN.md §5, "Bootstrap dialer"): 8 MiB per stream and 16 MiB per
-    /// connection of receive window, so that an object download from a
-    /// distant peer is not capped by flow control, and the default send
-    /// window, since the bootstrap only sends small requests.
+    /// The windows of a state-snapshot bootstrap's client-only endpoint:
+    /// 8 MiB per stream and 16 MiB per connection of receive window, so that
+    /// an object download from a distant peer is not capped by flow control,
+    /// and the default send window, since the bootstrap only sends small requests.
     ///
     /// The transport draft recommends at least 16 MiB per stream and 64 MiB
     /// per connection for bulk synchronization ("Bulk Transfer Performance");
-    /// the design keeps the bootstrap's eight peers within a few hundred MiB
-    /// of buffers instead, and downloads from several peers at once.
+    /// these windows keep the bootstrap's eight peers within a few hundred MiB
+    /// of buffers instead, and downloads proceed from several peers at once.
     pub const BOOTSTRAP: Windows = Windows {
         stream_receive: 8 << 20,
         connection_receive: 16 << 20,
@@ -327,7 +325,7 @@ pub fn bind_with_windows(
 /// runtime, which drives the socket.
 ///
 /// A state-snapshot bootstrap dials its peers from one, before the node's
-/// own endpoint exists (DESIGN.md §5, "Bootstrap dialer").
+/// own endpoint exists.
 ///
 /// # Panics
 ///

@@ -113,6 +113,20 @@ v30-compatible `zebra-state` dependency that handles unavailable block bodies.
 Manually renaming or symlinking versioned directories bypasses the pruning
 safety boundary.
 
+### The v30.0-to-v30.1 upgrade
+
+Format 30.1 adds the `snapshot_base` column family. Existing v30 databases stay
+in the same directory; startup creates the family empty and rewrites no existing
+records. A snapshot import writes one marker containing the window start,
+snapshot height, block hash, manifest, and deferred chain checks.
+
+The minor version is backward-compatible only for state without that marker.
+Older 30.0.0 builds must not open snapshot-born state, and operators must not
+move it to v29, because those builds would treat its missing pre-window bodies
+as an archive. Direct readers need the same snapshot-aware history handling as
+the writer. See [Upgrading Zebra](../user/upgrading.md#zebra-710) for the
+operator rollback rules.
+
 ### Old-database cleanup
 
 When enabled, the [cleanup task][config] scans major-version directories under
@@ -199,9 +213,10 @@ witness even when it is older than the requested retention window.
 With `state.prune_blocks_older_than` set, one state-owned worker starts pruning
 after this gate opens, wakes at startup and on finalized-tip changes, and
 deletes at most 100 heights per batch. Only transaction bodies are deleted;
-genesis is retained. The retained floor is derived from transaction rows, with
-no new persisted marker or column family beyond the v30 format boundary. Normal
-RocksDB compaction reclaims disk space outside the commit path.
+genesis is retained. Ordinary pruning derives the retained floor from transaction
+rows and persists no new marker. A snapshot-imported database additionally uses
+the 30.1 `snapshot_base` marker to record its window start and import checks.
+Normal RocksDB compaction reclaims disk space outside the commit path.
 
 State copying inspects source availability and the target tip before opening a
 writable target. An unavailable source range requires an archive snapshot or
@@ -331,6 +346,7 @@ this is a table abbreviation, not a Rust type.
 | `ironwood_anchors` | `orchard::tree::Root` | `()` |
 | `ironwood_note_commitment_tree` | `block::Height` | `orchard::tree::NoteCommitmentTree` |
 | `ironwood_note_commitment_subtree` | `NoteCommitmentSubtreeIndex` | `NoteCommitmentSubtreeData<orchard::tree::Node>` |
+| `snapshot_base` | `()` | `SnapshotBase` |
 | `history_tree` | `()` | `HistoryTreeParts` |
 | `tip_chain_value_pool` | `()` | `ValueBalance<NonNegative>` |
 | `block_info` | `block::Height` | `BlockInfo` |

@@ -1,5 +1,5 @@
-//! Fixed test vectors for the decision rule: every condition of design §6,
-//! broken one at a time from a configuration that bootstraps.
+//! Fixed test vectors for the decision rule: every precondition is broken one
+//! at a time from a configuration that bootstraps.
 
 use std::path::Path;
 

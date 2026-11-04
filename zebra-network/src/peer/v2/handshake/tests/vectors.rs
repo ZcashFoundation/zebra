@@ -509,7 +509,7 @@ async fn run_handshake_requiring(
 }
 
 /// A state-snapshot bootstrap requires `NODE_SYNC_ARTIFACTS` of the peers it
-/// dials instead of `NODE_NETWORK` (DESIGN §5): while syncing, a pruned node
+/// dials instead of `NODE_NETWORK`: while syncing, a pruned node
 /// that serves snapshot objects is accepted by the bootstrap's handshake and
 /// declined by the normal dialer's, and a node that serves blocks but no
 /// objects is accepted by the normal dialer's and declined by the

@@ -1,4 +1,4 @@
-//! The decision rule (design, §6): whether `zebrad start` bootstraps from a
+//! The decision rule: whether `zebrad start` bootstraps from a
 //! state snapshot before it initializes the state.
 //!
 //! Every condition must hold, and the first that fails is logged once at
@@ -54,12 +54,12 @@ pub enum SkipReason {
     /// No commitment is pinned for the network or configured.
     NoCommitment,
 
-    /// The configured commitment is not allowed on this network (design, §2):
+    /// The configured commitment is not allowed on this network:
     /// it differs from the pinned one, and `[sync] unsafe_trust_state_snapshot`
     /// is off.
     CommitmentNotAllowed,
 
-    /// A precondition of the trust model (design, §2) does not hold.
+    /// A precondition of the trust model does not hold.
     PreconditionFailed(Precondition),
 
     /// Neither `[sync] state_snapshot_peers` nor `[network] initial_v2_peers`
@@ -73,7 +73,7 @@ pub enum SkipReason {
     Rejected,
 }
 
-/// The preconditions of the trust model (design, §2), which the decision rule
+/// The preconditions of the trust model, which the decision rule
 /// and the importer both check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Precondition {
@@ -129,7 +129,7 @@ impl fmt::Display for SkipReason {
 /// The first condition that fails is logged at info, except for snapshot
 /// sync being off, which is logged at debug because it is the default. The
 /// `[sync] unsafe_trust_state_snapshot` warning fires at every start the flag
-/// is on, whatever the decision (design, §2).
+/// is on, whatever the decision.
 pub fn should_bootstrap(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     if config.sync.unsafe_trust_state_snapshot {
         warn!(
@@ -154,7 +154,7 @@ pub fn should_bootstrap(config: &ZebradConfig, store: &ArtifactStore) -> Decisio
     decision
 }
 
-/// Evaluates the conditions of the decision rule in the design's order and
+/// Evaluates the conditions of the decision rule in their documented order and
 /// returns the first that fails.
 fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     let network = &config.network.network;
@@ -208,7 +208,7 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
 
 /// Returns the path of a state database the bootstrap must not overwrite: the
 /// running major version's directory, or the previous major version's when
-/// the running version restores it (design, §6).
+/// the running version restores it.
 ///
 /// Existence is probed by path, never by opening the database, because opening
 /// a missing database creates it. A directory that exists but holds no
@@ -246,7 +246,7 @@ fn existing_state_database(
     })
 }
 
-/// Returns the commitment to trust (design, §2): the configured one where it
+/// Returns the commitment to trust: the configured one where it
 /// is allowed, otherwise the pinned one.
 ///
 /// A configured commitment is allowed on Regtest and custom testnets, and on
@@ -296,7 +296,7 @@ fn select_commitment(
     }
 }
 
-/// Checks the preconditions of the trust model (design, §2) that hold or fail
+/// Checks the preconditions of the trust model that hold or fail
 /// on the configuration alone.
 ///
 /// The history tree at `H` is non-empty exactly when Heartwood is active at
