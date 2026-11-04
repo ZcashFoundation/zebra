@@ -1119,10 +1119,13 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
         !changes.take_changed(),
         "validating work that is already served must not wake long polls"
     );
-    assert!(next_work(&cache).is_none());
 
-    // A later build for the same parent waits for its check.
+    // A later build for the same parent waits for its check, without waking long polls.
     cache.update(full_template(1));
+    assert!(
+        !changes.take_changed(),
+        "queueing work for validation must not wake long polls"
+    );
     let later = next_work(&cache).expect("a later build waits for validation");
     assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &first)));
 
@@ -1147,7 +1150,6 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
         "replacing the served work wakes long polls"
     );
     assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &replacement)));
-    assert!(next_work(&cache).is_none());
 
     // Work for another parent, such as coinbase-only work after a tip change, drops the waiting
     // build, so its verdict cannot replace the new parent's work either.
@@ -1162,6 +1164,52 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
         *served_work(&cache).expect("the new parent's work is served"),
         other
     );
+}
+
+/// After a clock rollback narrows the served work's header time, the narrowed work is queued for
+/// validation once, so its verdict can replace the served work, unless the served work changed or
+/// a newer build is already waiting.
+#[test]
+fn narrowed_work_is_queued_once_unless_newer_work_waits() {
+    let network = Network::Mainnet;
+    let cache = TemplateCache::default();
+    let full = full_template(0);
+    let tip = full.previous_block_hash;
+    cache.update(full.clone());
+    let served = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut changes = cache.subscribe();
+
+    // Only a header time change needs a new verdict: narrowing `max_time` alone keeps the
+    // proposal's identity.
+    let now = full
+        .cur_time
+        .saturating_sub(Duration32::from_seconds(1))
+        .saturating_sub(Duration32::from_hours(2));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert_ne!(narrowed.cur_time, full.cur_time);
+    let queued = next_work(&cache).expect("narrowed work is queued for validation");
+    assert_eq!(queued, narrowed);
+    assert!(
+        !changes.take_changed(),
+        "queueing work for validation must not wake long polls"
+    );
+    cache.template_for_tip(tip, &network, now);
+    assert!(
+        next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &queued)),
+        "the same narrowed work is queued once"
+    );
+
+    // A newer build waiting to replace the served work is not displaced by narrowed older work.
+    let mut newer = full_template(1);
+    newer.long_poll_id.mempool_transaction_count += 1;
+    cache.update(newer);
+    let waiting = next_work(&cache).expect("a later build waits for validation");
+    let earlier = now.saturating_sub(Duration32::from_seconds(1));
+    cache.template_for_tip(tip, &network, earlier);
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &waiting)));
+    assert!(served_work(&cache).is_some_and(|current| Arc::ptr_eq(&current, &served)));
 }
 
 /// A build whose check finishes after newer work for the same parent was served, as when a
@@ -1377,8 +1425,6 @@ async fn later_builds_are_served_only_after_validation() {
                 .expect("the first build remains served during validation"),
             first
         );
-        // Staging the rebuild woke subscribers; only the rejection's effect matters here.
-        publications.take_changed();
         request.respond_error("rejected".into());
         assert!(
             tokio::time::timeout(Duration::from_millis(200), publications.changed())
