@@ -16,7 +16,9 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::disk_format::{
-    block::{TransactionIndex, TransactionLocation, TRANSACTION_LOCATION_DISK_BYTES},
+    block::{
+        TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT, TRANSACTION_LOCATION_DISK_BYTES,
+    },
     expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
 };
 
@@ -197,7 +199,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     /// the first [`transparent::Output`] sent to an address.
     ///
     /// The returned value has a zero initial balance and received balance.
-    pub(crate) fn new(first_output: OutputLocation) -> Self {
+    pub fn new(first_output: OutputLocation) -> Self {
         Self {
             balance: Amount::zero(),
             received: 0,
@@ -338,6 +340,16 @@ impl AddressBalanceLocationChange {
     /// See [`AddressBalanceLocationInner::new`] for more details.
     pub fn new(location: AddressLocation) -> Self {
         Self(AddressBalanceLocationInner::new(location))
+    }
+
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and
+    /// a dummy (all one bits) location. See `AddressBalanceLocationInner::add()`
+    /// for the rationale for using this dummy value.
+    pub fn empty() -> Self {
+        Self::new(AddressLocation::from_output_index(
+            TransactionLocation::from_index(MAX_ON_DISK_HEIGHT, u16::MAX),
+            u32::MAX,
+        ))
     }
 }
 

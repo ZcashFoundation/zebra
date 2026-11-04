@@ -133,74 +133,7 @@ pub struct HintedOutputs {
     pub spent: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
 }
 
-/// A hint artifact defect found while applying it. Always fatal: the writer
-/// stops, and the operator must delete the state and sync without hints.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-#[non_exhaustive]
-pub enum SpentnessError {
-    /// An input spends an output that is neither in its block, the live map,
-    /// nor the journal: an omitted bit was wrong, or a survivor was spent.
-    #[error(
-        "spentness hints: input at height {height:?} spends an output the artifact retains; \
-         delete the state and sync without hints"
-    )]
-    UnresolvedSpend {
-        /// The height of the spending block.
-        height: block::Height,
-    },
-
-    /// At `H`, the resolved count differs from the omitted count.
-    #[error(
-        "spentness hints: {omitted} omitted outputs, {resolved} resolved at the terminal \
-         height; delete the state and sync without hints"
-    )]
-    UnbalancedAtTerminal {
-        /// Outputs omitted below `H`.
-        omitted: u64,
-        /// Omitted outputs spent at or below `H`.
-        resolved: u64,
-    },
-
-    /// The artifact ran out of bits, or bits were left at `H`.
-    #[error("spentness hints: output ordinal {ordinal} is outside the artifact")]
-    Ordinal {
-        /// The ordinal.
-        ordinal: u64,
-    },
-
-    /// The artifact retains a genesis output, which is never in the UTXO set.
-    #[error("spentness hints: the artifact retains a genesis output")]
-    RetainedGenesisOutput,
-
-    /// The artifact's terminal height is above the max checkpoint height, so
-    /// blocks below it would be semantically verified against a UTXO set that
-    /// omits hinted outputs. A new sync ignores such an artifact.
-    #[error(
-        "spentness hints: the state has an incomplete hinted sync to height {terminal_height:?}, \
-         above the max checkpoint height {max_checkpoint_height:?}; enable checkpoint sync, or \
-         delete the state"
-    )]
-    TerminalAboveMaxCheckpoint {
-        /// The artifact's terminal height `H`.
-        terminal_height: block::Height,
-        /// The highest height this node checkpoint-verifies.
-        max_checkpoint_height: block::Height,
-    },
-
-    /// The database has an incomplete hinted construction, but the hints
-    /// receiver did not deliver its artifact: its sender was dropped, it sent
-    /// a different artifact, or nothing arrived within
-    /// `RESUME_ARTIFACT_TIMEOUT`.
-    #[error(
-        "spentness hints: the state has an incomplete hinted sync, but its artifact is not \
-         available; restart with spentness hints enabled, or delete the state"
-    )]
-    MissingArtifact,
-
-    /// The durable record, or the writer's inputs, disagree with the database.
-    #[error("spentness hints: inconsistent state: {0}")]
-    Inconsistent(&'static str),
-}
+pub use crate::error::SpentnessError;
 
 impl SpentnessWriter {
     /// Builds the writer state on the write task: resumes an `Applying`

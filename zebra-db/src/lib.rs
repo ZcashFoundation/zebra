@@ -7,10 +7,18 @@
 #![allow(unknown_lints)]
 #![allow(clippy::manual_is_multiple_of)]
 
+pub mod config;
+pub mod constants;
+#[allow(missing_docs)]
+pub mod error;
 mod request;
 mod response;
+pub mod service;
 pub mod state_snapshot;
 
+pub use config::{database_format_version_on_disk, Config, RedactedString};
+pub use constants::*;
+pub use error::*;
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 pub use request::{
@@ -18,4 +26,10 @@ pub use request::{
     Treestate,
 };
 pub use response::{HistoryCapabilities, KnownBlock};
+pub use service::finalized_state::{
+    FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
+    MAX_ON_DISK_HEIGHT,
+};
 pub use state_snapshot::SnapshotBase;
+
+pub use config::hidden::write_database_format_version_to_disk;
