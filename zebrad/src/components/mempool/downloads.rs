@@ -35,7 +35,7 @@ use std::{
 };
 
 use futures::{
-    future::TryFutureExt,
+    future::{self, TryFutureExt},
     ready,
     stream::{FuturesUnordered, Stream},
     FutureExt,
@@ -445,18 +445,24 @@ where
 
         let network = self.network.clone();
         let verifier = self.verifier.clone();
-        let mut state = self.state.clone();
+        let state = self.state.clone();
         let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
 
         let fut = async move {
-            // Don't download/verify if the transaction is already in the best chain.
-            Self::transaction_in_best_chain(&mut state, txid).await?;
+            // Look up the tip while checking that the transaction isn't already in the best chain.
+            // The known-ID result takes precedence, so a failed tip lookup never masks it.
+            let (in_best_chain, tip) = future::join(
+                Self::transaction_in_best_chain(&mut state.clone(), txid),
+                state.oneshot(zs::ReadRequest::Tip),
+            )
+            .await;
+            in_best_chain?;
 
             trace!(?txid, "transaction is not in best chain");
 
-            let (tip_height, next_height) = match state.oneshot(zs::ReadRequest::Tip).await {
+            let (tip_height, next_height) = match tip {
                 Ok(zs::ReadResponse::Tip(None)) => Ok((None, Height(0))),
                 Ok(zs::ReadResponse::Tip(Some((height, _hash)))) => {
                     let next_height =
