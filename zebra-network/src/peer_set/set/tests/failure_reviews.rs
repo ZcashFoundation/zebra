@@ -289,12 +289,18 @@ async fn connection_block_error_attribution(not_found: bool) {
     client_request.inv_collector = guard.inventory_sender().as_ref().cloned();
     client_request.transient_addr = Some(addrs[0]);
     let (mut client_tx, client_rx) = mpsc::channel(1);
+    let (_advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
     let (mut remote_tx, remote_rx) = mpsc::channel(1);
     let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
     let inbound: MockService<Request, Response, PanicAssertion> = MockService::build().finish();
     let connection = Connection::new(
         inbound,
-        client_rx,
+        (
+            client_rx,
+            advert_rx,
+            peer_set.minimum_peer_version.clone(),
+            peer_set.bans_receiver.clone(),
+        ),
         ErrorSlot::default(),
         outbound_tx.sink_map_err(|_| {
             SerializationError::from(std::io::Error::new(

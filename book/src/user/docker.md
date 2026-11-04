@@ -45,7 +45,7 @@ and build the image:
 ```shell
 docker build \
   --file docker/Dockerfile \
-  --build-arg FEATURES="default-release-binaries elasticsearch" \
+  --build-arg FEATURES="default-release-binaries internal-miner" \
   --target runtime \
   --tag zebra:local \
   .
@@ -69,7 +69,7 @@ For example, if you'd like to add an extra feature on top of the default release
 ```shell
 # Build with specific features
 docker build -f ./docker/Dockerfile --target runtime \
-    --build-arg FEATURES="default-release-binaries elasticsearch" \
+    --build-arg FEATURES="default-release-binaries internal-miner" \
     --tag zebra:custom-features .
 ```
 

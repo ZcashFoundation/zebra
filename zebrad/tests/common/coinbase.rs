@@ -18,7 +18,7 @@ use zebrad::components::With;
 
 use super::{
     config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::{ZebradTestDirExt, LAUNCH_DELAY},
+    launch::{wait_for_mempool_activation, ZebradTestDirExt},
     regtest::MiningRpcMethods,
 };
 
@@ -47,12 +47,11 @@ pub(crate) async fn regtest_coinbase() -> eyre::Result<()> {
             .with_config(&mut config)?
             .spawn_child(args!["start"])?;
 
-        tokio::time::sleep(LAUNCH_DELAY).await;
-
         let client = RpcRequestClient::new(read_listen_addr_from_logs(
             &mut zebrad,
             OPENED_RPC_ENDPOINT_MSG,
         )?);
+        wait_for_mempool_activation(&client).await?;
 
         for _ in 0..2 {
             let (mut block, height) = client.block_from_template(&net).await?;

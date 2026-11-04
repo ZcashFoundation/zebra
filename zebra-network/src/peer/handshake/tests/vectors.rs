@@ -9,6 +9,18 @@ use super::super::*;
 /// The timeout for each handshake test.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+#[test]
+fn serialization_error_metric_labels_ignore_details() {
+    for detail in ["first error detail", "second error detail"] {
+        let error = SerializationError::from(std::io::Error::other(detail));
+        assert_eq!(serialization_error_metric_label(&error), "io");
+        assert_eq!(
+            serialization_error_metric_label(&SerializationError::Parse(detail)),
+            "parse",
+        );
+    }
+}
+
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
 /// message advertising `remote_services`, then a verack.
 fn spawn_remote_peer(

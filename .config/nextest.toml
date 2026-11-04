@@ -1,7 +1,7 @@
 # Nextest configuration for Zebra
 #
 # Profiles:
-#   default       Local dev: runs unit + integration (excludes stateful + e2e)
+#   default       Local dev: runs unit + integration (excludes stateful, e2e, zcashd-compat)
 #   ci            PR CI: same scope, CI-tuned output
 #   ci-stateful   GCP: runs stateful tests selected by --filter-expr
 #   ci-e2e        GCP: runs E2E tests selected by --filter-expr
@@ -13,15 +13,24 @@ status-level = "pass"
 # Keep this 20-minute backstop in sync with profile.ci. In-test deadlines,
 # sequential phases, and cleanup need time to report failures before termination.
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+# The zcashd-compat suite needs a zcashd sidecar and passes without testing anything when
+# `TEST_ZCASHD_COMPAT` is unset, so it runs only under its own profiles.
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
 
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
+# Many of the slowest tests wait on timers or live peers rather than the CPU, so run 8 tests at a
+# time on the 4-CPU runners.
+test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+
+# Record retry attempts for the unit test job summary.
+[profile.ci.junit]
+path = "junit.xml"
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
@@ -98,8 +107,8 @@ test-group = 'serial-live-testnet'
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
 test-group = 'serial-live-testnet'
 
-# Force zcashd-compat integration tests serial in every profile, so a parallel
-# --run-ignored=all run cannot collide on their released RPC/P2P ports.
+# Force zcashd-compat integration tests serial in every profile, so an explicitly selected
+# parallel run cannot collide on their released RPC/P2P ports.
 [[profile.default.overrides]]
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
@@ -124,6 +133,11 @@ test-group = 'serial-live-mainnet'
 [[profile.ci.overrides]]
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
+
+# Start the slowest tests first, so they overlap the rest of the run instead of extending it.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::disconnects_from_misbehaving_peers) or test(=integration::network::synced_node_keeps_upstream_peer_connected) or test(=unit::config::persistent_mode_peer_cache) or test(=methods::types::get_block_template::tests::coinbase) or test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_(mainnet|testnet)$/)'
+priority = 100
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test

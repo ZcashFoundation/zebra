@@ -65,13 +65,14 @@ curl -fsSL https://raw.githubusercontent.com/ZcashFoundation/zebra/main/scripts/
 Choose **2) With Zcashd compatibility** at the first prompt, then one of the
 zcashd-compat modes:
 
-| Mode                      | What it does                                                             |
-|---------------------------|--------------------------------------------------------------------------|
-| `split-binary` (default)  | Downloads `zebrad` and the sidecar `zcashd`; prints two start commands  |
-| `supervised`              | Downloads `zebrad`; Zebra downloads hash-pinned `zcashd` at startup and supervises it |
-| `docker-split-containers` | Pulls the Zebra image and downloads the hash-pinned sidecar `zcashd`; prints two `docker run` commands, running `zcashd` from the Zebra image (`--zcashd-docker-image` uses your own image instead) |
-| `docker-supervised`       | Pulls the Zebra image; prints one supervised `docker run` command (Zebra downloads hash-pinned `zcashd` at first start unless the image vendors it) |
-| `build-from-source`       | Validates source trees and toolchains; prints build and start commands   |
+| Mode                     | What it does                                                             |
+|--------------------------|--------------------------------------------------------------------------|
+| `split-binary` (default) | Downloads `zebrad` and the sidecar `zcashd`; prints two start commands  |
+| `supervised`             | Downloads `zebrad`; Zebra downloads hash-pinned `zcashd` at startup and supervises it |
+| `build-from-source`      | Validates source trees and toolchains; prints build and start commands   |
+
+The installer has no Docker mode for zcashd-compat, and Zebra does not publish
+Docker images with the sidecar `zcashd`.
 
 The installer:
 
@@ -81,13 +82,9 @@ The installer:
 2. detects existing Zebra state directories and zcashd datadirs on mounted
    filesystems and offers them as defaults, so a migration continues from
    your synced data;
-3. downloads SHA256-pinned release binaries (or pulls pinned Docker images);
+3. downloads SHA256-pinned release binaries;
 4. bootstraps a minimal `zcash.conf` if none exists;
-5. for Docker modes, bind-mounts the Zebra state cache so it survives `--rm`
-   containers, and runs Zebra with `--network host` so the Zcash TCP P2P
-   listener binds on the host's real addresses (bridge NAT would advertise
-   an unreachable `172.17.0.x`);
-6. prints ready-to-copy start commands for the mode you chose.
+5. prints ready-to-copy start commands for the mode you chose.
 
 Every prompt has a matching flag for unattended runs, e.g.:
 
@@ -174,7 +171,7 @@ Zebra's embedded release manifest; use `zcashd_source = "path"` plus
 > [!WARNING]
 > The `embedded` source is **experimental**: it downloads a pinned `zcashd`
 > build from [ZcashFoundation/zcashd](https://github.com/ZcashFoundation/zcashd)
-> releases. The current `zebra-compat-v1.2.0` artifact is built by the
+> releases. The current `zebra-compat-v1.3.0` artifact is built by the
 > foundation's own CI from the `zcashd-compat` branch. Production deployments
 > that need stronger guarantees should still build the sidecar from source (or
 > otherwise verify it) and use `zcashd_source = "path"`.
@@ -237,8 +234,7 @@ block_gossip_peer_ips = ["10.0.0.2"]
 > `network.max_connections_per_ip` defaults to **1**, so the sidecar can lose
 > that single slot to a proxied public peer and silently never connect. Set
 > `ZEBRA_NETWORK__MAX_CONNECTIONS_PER_IP=8` (or similar) on a Dockerised
-> front — the installer's Docker modes do this for you — or attach the
-> sidecar to the container network directly.
+> front, or attach the sidecar to the container network directly.
 
 ### Verify the integration
 
@@ -391,12 +387,12 @@ shutdown_grace_period = "5m"
 ```
 
 All values can also be set through environment variables with the `ZEBRA_`
-prefix, e.g. `ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH=/usr/local/bin/zcashd`.
+prefix, e.g. `ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=embedded`.
 Because environment values cannot express TOML arrays, `zcashd_extra_args`
 also accepts a JSON array string:
 
 ```console
-ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]'
+ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=127.0.0.1","-rpcallowip=127.0.0.1"]'
 ```
 
 ## Hardware preflight (Linux)

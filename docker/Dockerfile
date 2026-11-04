@@ -61,7 +61,13 @@ ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 FROM deps AS tests
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
+# The tests run `cargo` again when the container starts, and zebrad reads SHORT_SHA at
+# compile time, so cargo rebuilds zebrad if the value differs from the image build. Keeping
+# it in the environment avoids that rebuild, which would drop the commit from zebrad's
+# version and its Sentry release name. Cargo treats an empty value as changed on every
+# build, so the build here and entrypoint.sh unset it when it's empty.
 ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA}
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
@@ -112,7 +118,7 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
-RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+RUN [ -n "${SHORT_SHA}" ] || unset SHORT_SHA; \
     cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
@@ -261,32 +267,3 @@ CMD ["zebrad"]
 # - with mining enabled using S-nomp and `nheqminer`.
 #
 # We can add further functionality to this stage for further purposes.
-
-# zcashd-compat runtime image: the runtime image plus the hash-pinned zcashd
-# wallet sidecar (and its RPC client) from the ZcashFoundation/zcashd
-# `zebra-compat` release, for the supervised sidecar configuration
-# (`zebrad start --zcashd-compat` with `manage_zcashd = true`).
-#
-# The sidecar release only ships x86_64 Linux binaries, so this stage is
-# amd64-only (CI already builds non-`runtime` targets for amd64 only).
-# Override the ARGs to bake in a different sidecar release.
-FROM runtime AS runtime-zcashd-compat
-
-ARG ZCASHD_COMPAT_ARCHIVE_URL="https://github.com/ZcashFoundation/zcashd/releases/download/zebra-compat-v1.2.0/zcashd-zebra-compat-v1.2.0-linux-x86_64.tar.gz"
-ARG ZCASHD_COMPAT_ARCHIVE_SHA256="a2d1d9a7cd4c766ea73990fcd17f370bc94eee738e50f1a3b97262db32f2bab7"
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# ca-certificates is needed for the HTTPS download: curl is installed above
-# with --no-install-recommends, which skips it.
-RUN apt-get -q update && \
-    apt-get -q install -y --no-install-recommends \
-    ca-certificates=20250419 \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/log/* /var/cache/ldconfig/aux-cache \
-    && curl -fsSL "${ZCASHD_COMPAT_ARCHIVE_URL}" -o /tmp/zcashd.tar.gz \
-    && echo "${ZCASHD_COMPAT_ARCHIVE_SHA256}  /tmp/zcashd.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/zcashd.tar.gz -C /tmp ./bin/zcashd ./bin/zcash-cli \
-    && install -m 0755 /tmp/bin/zcashd /tmp/bin/zcash-cli /usr/local/bin/ \
-    && rm -rf /tmp/zcashd.tar.gz /tmp/bin \
-    && /usr/local/bin/zcashd --version \
-    && /usr/local/bin/zcash-cli --version

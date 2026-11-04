@@ -122,10 +122,18 @@ impl fmt::Debug for Address {
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut bytes = io::Cursor::new(Vec::new());
-        let _ = self.zcash_serialize(&mut bytes);
+        match self {
+            // TEX addresses are Bech32m-encoded (ZIP 320), the inverse of the
+            // Bech32 branch of `FromStr`.
+            Address::Tex { .. } => f.write_str(&ZcashAddress::from(*self).encode()),
 
-        f.write_str(&bs58::encode(bytes.get_ref()).with_check().into_string())
+            Address::PayToScriptHash { .. } | Address::PayToPublicKeyHash { .. } => {
+                let mut bytes = io::Cursor::new(Vec::new());
+                let _ = self.zcash_serialize(&mut bytes);
+
+                f.write_str(&bs58::encode(bytes.get_ref()).with_check().into_string())
+            }
+        }
     }
 }
 
@@ -438,6 +446,68 @@ mod tests {
         let t_addr: Address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".parse().unwrap();
 
         assert_eq!(format!("{t_addr}"), "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd");
+    }
+
+    /// The validating key hash of the ZIP 320 test vector, whose TEX address
+    /// is [`TEX_MAINNET`] and whose P2PKH address is
+    /// `t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC`.
+    const TEX_KEY_HASH: &str = "8286bf790866805397e3a947640b77a43f0b43a5";
+
+    /// The ZIP 320 test vector: [`TEX_KEY_HASH`] with the Mainnet HRP.
+    const TEX_MAINNET: &str = "tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte";
+
+    /// [`TEX_KEY_HASH`] with the Testnet HRP.
+    const TEX_TESTNET: &str = "textest1s2rt77ggv6q989lr49rkgzmh5slsksa90ej7wz";
+
+    /// [`TEX_KEY_HASH`] with the Regtest HRP.
+    const TEX_REGTEST: &str = "texregtest1s2rt77ggv6q989lr49rkgzmh5slsksa990zqpk";
+
+    /// Parses a TEX address, checks its network kind and validating key hash,
+    /// and checks that `Display` gives the parsed string back.
+    fn check_tex_roundtrip(encoded: &str, network_kind: NetworkKind) {
+        let t_addr: Address = encoded.parse().expect("a valid TEX address");
+
+        let validating_key_hash: [u8; 20] = hex::decode(TEX_KEY_HASH)
+            .expect("valid hex")
+            .try_into()
+            .expect("20 bytes");
+        assert_eq!(t_addr, Address::from_tex(network_kind, validating_key_hash));
+
+        assert_eq!(format!("{t_addr}"), encoded);
+    }
+
+    #[test]
+    fn tex_mainnet() {
+        let _init_guard = zebra_test::init();
+
+        check_tex_roundtrip(TEX_MAINNET, NetworkKind::Mainnet);
+    }
+
+    #[test]
+    fn tex_testnet() {
+        let _init_guard = zebra_test::init();
+
+        check_tex_roundtrip(TEX_TESTNET, NetworkKind::Testnet);
+    }
+
+    #[test]
+    fn tex_regtest() {
+        let _init_guard = zebra_test::init();
+
+        check_tex_roundtrip(TEX_REGTEST, NetworkKind::Regtest);
+    }
+
+    /// A TEX address and the P2PKH address with the same key hash must not
+    /// display the same, and the P2PKH encoding is unchanged.
+    #[test]
+    fn tex_and_p2pkh_display_differently() {
+        let _init_guard = zebra_test::init();
+
+        let tex: Address = TEX_MAINNET.parse().expect("a valid TEX address");
+        let p2pkh = Address::from_pub_key_hash(NetworkKind::Mainnet, tex.hash_bytes());
+
+        assert_eq!(format!("{p2pkh}"), "t1VmmGiyjVNeCjxDZzg7vZmd99WyzVby9yC");
+        assert_ne!(format!("{tex}"), format!("{p2pkh}"));
     }
 
     #[test]

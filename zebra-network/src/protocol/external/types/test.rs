@@ -3,6 +3,38 @@
 use super::*;
 
 #[test]
+fn version_metric_labels_only_include_known_versions() {
+    let mut known = std::collections::BTreeSet::from([CURRENT_NETWORK_PROTOCOL_VERSION]);
+    for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
+        for upgrade in NetworkUpgrade::iter() {
+            #[cfg(zcash_unstable = "zfuture")]
+            if upgrade == ZFuture {
+                continue;
+            }
+
+            known.insert(Version::min_specified_for_upgrade(&network, upgrade));
+        }
+    }
+
+    for version in &known {
+        assert_eq!(version.metric_label(), version.to_string());
+    }
+
+    let lowest = known.first().expect("Zebra defines protocol versions").0;
+    let highest = known.last().expect("Zebra defines protocol versions").0;
+    for raw_version in (lowest - 1)..=(highest + 1) {
+        let version = Version(raw_version);
+        if !known.contains(&version) {
+            assert_eq!(version.metric_label(), "other");
+        }
+    }
+
+    for version in [Version(0), Version(u32::MAX)] {
+        assert_eq!(version.metric_label(), "other");
+    }
+}
+
+#[test]
 fn version_extremes_mainnet() {
     version_extremes(&Mainnet)
 }

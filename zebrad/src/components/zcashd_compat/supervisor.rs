@@ -1027,32 +1027,47 @@ mod tests {
     /// A child that ignores SIGTERM is force-killed only after the full grace
     /// period elapses.
     #[cfg(unix)]
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn terminate_child_kills_after_grace_period() {
-        use std::process::Stdio;
+        use std::{os::unix::process::ExitStatusExt, process::Stdio};
+
+        use tokio::io::{AsyncBufReadExt, BufReader};
 
         let mut child = tokio::process::Command::new("/bin/sh")
-            .args(["-c", "trap '' TERM; while read _; do :; done"])
+            .args(["-c", "trap '' TERM; echo ready; while read _; do :; done"])
             .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .expect("sh is available on unix test hosts");
 
-        // Give the shell a moment of real time to install the TERM trap before
-        // SIGTERM is sent; the paused clock only skips tokio timers.
-        tokio::task::yield_now().await;
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Keep stdin open so waiting for the child cannot end its read loop by closing the pipe.
+        let _stdin = child.stdin.take().expect("child stdin is piped");
+        let mut stdout =
+            BufReader::new(child.stdout.take().expect("child stdout is piped")).lines();
+        let ready = tokio::time::timeout(Duration::from_secs(30), stdout.next_line())
+            .await
+            .expect("child should install its TERM trap before the watchdog expires")
+            .expect("child readiness acknowledgement should be readable");
+        assert_eq!(ready.as_deref(), Some("ready"));
 
-        super::terminate_child(&mut child, Duration::from_secs(5))
+        // Pause only after the real child acknowledges that it has installed its TERM trap.
+        tokio::time::pause();
+        let start = tokio::time::Instant::now();
+        let grace_period = Duration::from_secs(5);
+
+        super::terminate_child(&mut child, grace_period)
             .await
             .expect("terminate_child should fall back to SIGKILL");
+        assert!(
+            start.elapsed() >= grace_period,
+            "child must receive the full grace period before SIGKILL"
+        );
 
         let status = child
             .try_wait()
-            .expect("child status should be queryable after terminate_child");
-        assert!(
-            status.is_some(),
-            "child must have been reaped after the SIGKILL fallback"
-        );
+            .expect("child status should be queryable after terminate_child")
+            .expect("child must have been reaped after the SIGKILL fallback");
+        assert_eq!(status.signal(), Some(nix::libc::SIGKILL));
     }
 }

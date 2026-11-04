@@ -8,13 +8,15 @@ If the diff or PR description is incomplete, ask questions before making strong 
 
 Before reviewing code quality, verify:
 
-- [ ] PR links to a pre-discussed issue
+- [ ] PR links to a pre-discussed issue that a Zebra team member acknowledged
 - [ ] PR description says what changes and why
 - [ ] Behavior changes have test evidence in the PR description or the diff
 - [ ] If AI tools were used, disclosure is present in the PR description
 - [ ] Merge Danger matches the diff: database format changes, publishing, deployments, and deleted infrastructure are one-way doors, and consensus, peer protocol, crate API, configuration, RPC, and metrics changes are two-way only until the next release
 
 If these are missing, note it in the review.
+
+Skip the issue check when the PR author is a member or owner of the ZcashFoundation organization. Maintainers set their own priorities and don't need prior issue discussion for their own work, so a missing issue link on their PRs is not a reason to withhold approval. The other checks still apply.
 
 ## Architecture Constraints
 

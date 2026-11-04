@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: The `Opened metrics endpoint` log line is now written after the `zebrad.build.info` metric is registered, so a scrape that waits for that line always sees the version metric.
-time: 2026-10-09T04:49:07.307469906+02:00

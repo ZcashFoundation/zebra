@@ -150,15 +150,8 @@ fn commit_chain(
         .zcash_deserialize_into::<Arc<Block>>()
         .expect("block should deserialize");
 
-    let mut state = FinalizedState::new_with_debug(
-        &Config::ephemeral(),
-        &Mainnet,
-        true,
-        #[cfg(feature = "elasticsearch")]
-        false,
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let mut state = FinalizedState::new_with_debug(&Config::ephemeral(), &Mainnet, true, false)
+        .expect("opening an ephemeral database should succeed");
 
     let mut tip = genesis.clone();
     let mut commit = |block: Arc<Block>| {

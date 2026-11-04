@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Changed
-body: 'Only retry peers that recently failed to return a block when no other peer might have it, whether the last-resort peer is ready or busy. Completed peer errors and response timeouts record failures; explicit missing responses and caller cancellations do not. Repeated failures refresh bounded cache recency, and failed advertisements do not enable speculative non-serving fallback. Failures belong to their connection, so a replacement inherits neither cached failures nor delayed predecessor errors ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).'
-time: 2026-09-24T00:38:27.544666125Z

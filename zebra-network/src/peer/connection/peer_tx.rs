@@ -32,6 +32,26 @@ where
             .map_err(Into::into)
     }
 
+    /// Recheck authorization after sink readiness, immediately before starting the local write.
+    pub async fn send_authorized(
+        &mut self,
+        msg: Message,
+        mut authorized: impl FnMut() -> bool,
+    ) -> Result<(), PeerError> {
+        tokio::time::timeout(REQUEST_TIMEOUT, async {
+            futures::future::poll_fn(|cx| std::pin::Pin::new(&mut self.inner).poll_ready(cx))
+                .await?;
+            if !authorized() {
+                return Err(PeerError::AdvertAuthorizationRevoked);
+            }
+            std::pin::Pin::new(&mut self.inner).start_send(msg)?;
+            self.inner.flush().await?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| PeerError::ConnectionSendTimeout)?
+    }
+
     /// Flush any remaining output and close this [`PeerTx`], if necessary.
     pub async fn close(&mut self) -> Result<(), SerializationError> {
         self.inner.close().await

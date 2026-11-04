@@ -28,11 +28,12 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
+use zebra_rpc::{queue::CHANNEL_AND_QUEUE_CAPACITY, server::OPENED_RPC_ENDPOINT_MSG};
 use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
     cached_state::future_blocks,
+    config::read_listen_addr_from_logs,
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc_with_opts},
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -116,30 +117,25 @@ pub async fn run() -> Result<()> {
     // Disable the non-finalized state backup so the node loads at the finalized tip: the
     // transactions taken from blocks above it are not already in the chain when we send them.
     let use_non_finalized_backup = false;
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc_with_opts(
-            network.clone(),
-            test_name,
-            test_type,
-            use_internet_connection,
-            use_non_finalized_backup,
-        )? {
-        zebrad_and_address
+    let mut zebrad = if let Some(zebrad) = spawn_zebrad_for_rpc_with_opts(
+        network.clone(),
+        test_name,
+        test_type,
+        use_internet_connection,
+        use_non_finalized_backup,
+    )? {
+        zebrad
     } else {
         // Skip the test, we don't have the required cached state
         return Ok(());
     };
 
-    let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
-
-    let zebrad_rpc_client = RpcRequestClient::new(zebra_rpc_address);
-
     tracing::info!(
         ?test_type,
-        ?zebra_rpc_address,
         "spawned isolated zebrad with shorter chain, waiting for zebrad to open its RPC port..."
     );
-    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
+    let zebra_rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    let zebrad_rpc_client = RpcRequestClient::new(zebra_rpc_address);
 
     tracing::info!(
         ?zebra_rpc_address,

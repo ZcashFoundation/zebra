@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: breaking
-body: 'Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.2, `zcash_transparent` to 0.11.0-pre.2 and `zcash_protocol` to 0.11.0-pre.1 ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784)).'
-time: 2026-10-16T12:00:00.000000000-03:00

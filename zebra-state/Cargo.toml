@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "15.0.0"
+version = "16.0.0"
 authors.workspace = true
 description = "State contextual verification and storage code for Zebra"
 license.workspace = true
@@ -34,13 +34,6 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
-# Experimental elasticsearch support
-elasticsearch = [
-    "dep:elasticsearch",
-    "dep:serde_json",
-    "zebra-chain/elasticsearch",
-]
-
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
@@ -72,19 +65,14 @@ tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
 
-# elasticsearch specific dependencies.
-# Security: avoid default dependency on openssl
-elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
-serde_json = { workspace = true, optional = true }
-
-zebra-node-services = { path = "../zebra-node-services", version = "12.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "14.0.0", features = ["async-error"] }
+zebra-node-services = { path = "../zebra-node-services", version = "13.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "4.0.0", optional = true }
+zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 derive-getters.workspace = true

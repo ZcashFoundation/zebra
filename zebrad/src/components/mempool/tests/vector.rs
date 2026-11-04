@@ -1551,20 +1551,16 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         panic!("wrong response from mempool to Queued request");
     };
 
-    let result_rx = results.remove(0).expect("should pass initial checks");
+    let mut result_rx = results.remove(0).expect("should pass initial checks");
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
-    // Wait for post-verification steps in mempool's Downloads
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // Drive the unbuffered mempool when its download task wakes us, until insertion completes.
+    let verification_result = futures::future::poll_fn(|cx| {
+        futures::ready!(mempool.poll_ready(cx)).expect("polling mempool should succeed");
+        result_rx.poll_unpin(cx)
+    });
 
-    // Note: Buffered services shouldn't be polled without being called.
-    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
-    mempool
-        .ready()
-        .await
-        .expect("polling mempool should succeed");
-
-    tokio::time::timeout(Duration::from_secs(10), result_rx)
+    tokio::time::timeout(Duration::from_secs(10), verification_result)
         .await
         .expect("should not time out")
         .expect("mempool tx verification result channel should not be closed")

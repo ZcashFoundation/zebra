@@ -63,10 +63,7 @@ pub const ONE_THIRD_DUST_THRESHOLD_RATE: u32 = 100;
 /// A particular transaction output reference.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
     ///
@@ -101,10 +98,7 @@ impl OutPoint {
 
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub enum Input {
     /// A reference to an output of a previous transaction.
     PrevOut {
@@ -323,10 +317,7 @@ impl Input {
 /// (just like receiving change).
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Deserialize))]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Serialize))]
 pub struct Output {
     /// Transaction value.
     // At https://en.bitcoin.it/wiki/Protocol_documentation#tx, this is an i64.

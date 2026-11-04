@@ -10,6 +10,37 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::*;
 
+#[test]
+fn download_verify_error_metric_labels_ignore_details() {
+    use zebra_consensus::error::TransactionError;
+
+    use TransactionDownloadVerifyError::*;
+
+    for detail in ["first error detail", "second error detail"] {
+        assert_eq!(
+            StateError(BoxError::from(detail).into()).metric_label(),
+            "state_error",
+        );
+        assert_eq!(
+            DownloadFailed(BoxError::from(detail).into()).metric_label(),
+            "download_failed",
+        );
+    }
+
+    for error in [
+        TransactionError::WrongVersion,
+        TransactionError::WrongConsensusBranchId,
+    ] {
+        let error = Invalid {
+            error,
+            advertiser_addr: None,
+            transaction_upgrade: None,
+            verification_height: Height(0),
+        };
+        assert_eq!(error.metric_label(), "invalid");
+    }
+}
+
 /// A directly pushed full transaction must consume the sending peer's
 /// per-peer admission budget, exactly like an advertised transaction ID, so
 /// a single peer cannot bypass [`MAX_INBOUND_CONCURRENCY_PER_PEER`] by

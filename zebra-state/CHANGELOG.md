@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.0.0] - 2026-10-22
+
+### Breaking Changes
+
+- `ReadRequest::TransactionIdsByAddresses` takes an optional `max_entries`, which bounds the address index scan and returns the first transaction IDs in chain order. `ZebraDb::{address_transaction_locations, address_tx_ids, partial_finalized_transparent_tx_ids}` take the same optional limit ([#10686](https://github.com/ZcashFoundation/zebra/issues/10686)).
+
+### Added
+
+- `MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS`, the fork limit on test networks, also available from `constants` ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+
+### Changed
+
+- Raised the MSRV to 1.89.
+
+### Fixed
+
+- The fork limit no longer evicts the chain just committed or the best chain, and equal-work ties evict the earliest-received chain. Test networks keep up to 100 forks instead of 10 ([#11133](https://github.com/ZcashFoundation/zebra/issues/11133)).
+- Removing one of two queued or sent blocks with the same transaction no longer drops their shared outputs from the UTXO caches. Thanks to @ouicate for the report ([#11619](https://github.com/ZcashFoundation/zebra/issues/11619)).
+- `check::utxo::transparent_spend()` computes each transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost at block commit.
+- Reject invalidating the root of the only non-finalized chain without changing state, and handle empty non-finalized state when updating chain-tip notifications ([#11536](https://github.com/ZcashFoundation/zebra/issues/11536)).
+
+### Security
+
+- After a checkpoint block fails to commit, the state no longer reports the blocks above the finalized tip as known, so they can be downloaded again ([GHSA-9hq5-pfgc-cx5h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-9hq5-pfgc-cx5h)).
+
 ## [15.0.0] - 2026-10-01
 
 ### Breaking Changes

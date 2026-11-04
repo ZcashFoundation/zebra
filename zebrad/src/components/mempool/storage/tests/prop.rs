@@ -2,10 +2,11 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{collections::HashSet, env, fmt::Debug, thread, time::Duration};
+use std::{collections::HashSet, env, fmt::Debug, time::Duration};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
+use tokio::time;
 
 use zebra_chain::{
     amount::Amount,
@@ -256,11 +257,20 @@ proptest! {
             rejection_template
         }).collect();
 
-        storage.reject(unique_ids[0], SameEffectsChainRejectionError::RandomlyEvicted.into());
-        thread::sleep(Duration::from_millis(11));
-        storage.reject(unique_ids[1], SameEffectsChainRejectionError::RandomlyEvicted.into());
+        let (runtime, _init_guard) = zebra_test::init_async();
+        runtime.block_on(async move {
+            time::pause();
 
-        prop_assert_eq!(storage.rejected_transaction_count(), 1);
+            storage.reject(unique_ids[0], SameEffectsChainRejectionError::RandomlyEvicted.into());
+            prop_assert!(storage.contains_rejected(&unique_ids[0]));
+            time::advance(Duration::from_millis(11)).await;
+            storage.reject(unique_ids[1], SameEffectsChainRejectionError::RandomlyEvicted.into());
+
+            prop_assert!(!storage.contains_rejected(&unique_ids[0]));
+            prop_assert!(storage.contains_rejected(&unique_ids[1]));
+            prop_assert_eq!(storage.rejected_transaction_count(), 1);
+            Ok::<_, TestCaseError>(())
+        })?;
     }
 }
 
@@ -1060,13 +1070,6 @@ impl MultipleTransactionRemovalTestInput {
 
 proptest! {
 
-    // Some tests need to sleep which makes tests slow, so use a single
-    // case. We also don't need multiple cases since proptest is just used
-    // to generate random TXIDs.
-    #![proptest_config(
-        proptest::test_runner::Config::with_cases(1)
-    )]
-
     /// Check if EvictionList limits the number of entries.
     #[test]
     fn eviction_list_size(
@@ -1110,19 +1113,29 @@ proptest! {
             rejection_template
         }).collect();
 
-        let mut e = EvictionList::new(2, Duration::from_millis(10));
-        e.insert(txids[0].mined_id());
-        thread::sleep(Duration::from_millis(11));
+        let (runtime, _init_guard) = zebra_test::init_async();
+        runtime.block_on(async move {
+            time::pause();
 
-        // First txid has expired, but list wasn't pruned yet.
-        // Make sure len() and contains_key() take that into account.
-        prop_assert!(!e.contains_key(&txids[0].mined_id()));
-        prop_assert_eq!(e.len(), 0);
+            let mut e = EvictionList::new(2, Duration::from_millis(10));
+            e.insert(txids[0].mined_id());
+            prop_assert!(e.contains_key(&txids[0].mined_id()));
+            time::advance(Duration::from_millis(10)).await;
+            prop_assert!(e.contains_key(&txids[0].mined_id()));
+            prop_assert_eq!(e.len(), 1);
+            time::advance(Duration::from_millis(1)).await;
 
-        e.insert(txids[1].mined_id());
-        prop_assert!(!e.contains_key(&txids[0].mined_id()));
-        prop_assert!(e.contains_key(&txids[1].mined_id()));
-        prop_assert_eq!(e.len(), 1);
+            // The first txid has expired, but the list has not been pruned yet.
+            // Both queries must account for expired entries.
+            prop_assert!(!e.contains_key(&txids[0].mined_id()));
+            prop_assert_eq!(e.len(), 0);
+
+            e.insert(txids[1].mined_id());
+            prop_assert!(!e.contains_key(&txids[0].mined_id()));
+            prop_assert!(e.contains_key(&txids[1].mined_id()));
+            prop_assert_eq!(e.len(), 1);
+            Ok::<_, TestCaseError>(())
+        })?;
     }
 
     /// Check if EvictionList removes old entries and computes length correctly
@@ -1131,13 +1144,7 @@ proptest! {
     fn eviction_list_time_mixed(
         mut rejection_template in any::<UnminedTxId>()
     ) {
-        // Eviction time (in ms) used in this test. If the value is too low it may cause
-        // this test to fail in slower systems.
         const EVICTION_TIME: u64 = 500;
-        // Time to wait (in ms) before adding transactions that should not expire
-        // after EVICTION_TIME.
-        // If should be a bit smaller than EVICTION_TIME, but with enough time to
-        // add 10 transactions to the list and still have time to spare before EVICTION_TIME.
         const BEFORE_EVICTION_TIME: u64 = 250;
 
         // Make unique IDs by converting the index to bytes, and writing it to each ID
@@ -1151,38 +1158,39 @@ proptest! {
             rejection_template
         }).collect();
 
-        let mut e = EvictionList::new(20, Duration::from_millis(EVICTION_TIME));
-        for txid in txids.iter().take(10) {
-            e.insert(txid.mined_id());
-        }
-        thread::sleep(Duration::from_millis(BEFORE_EVICTION_TIME));
-        // Add the next 10 before the eviction time to avoid a prune from
-        // happening.
-        for txid in txids.iter().skip(10) {
-            e.insert(txid.mined_id());
-        }
-        thread::sleep(Duration::from_millis(EVICTION_TIME - BEFORE_EVICTION_TIME + 1));
+        let (runtime, _init_guard) = zebra_test::init_async();
+        runtime.block_on(async move {
+            time::pause();
 
-        // At this point, the first 10 entries should be expired
-        // and the next 10 should not, and the list hasn't been pruned yet.
-        // Make sure len() and contains_key() take that into account.
-        // Note: if one of these fails, you may need to adjust EVICTION_TIME and/or
-        // BEFORE_EVICTION_TIME, see above.
-        for txid in txids.iter().take(10) {
-            prop_assert!(!e.contains_key(&txid.mined_id()));
-        }
-        for txid in txids.iter().skip(10) {
-            prop_assert!(e.contains_key(&txid.mined_id()));
-        }
-        prop_assert_eq!(e.len(), 10);
+            let mut e = EvictionList::new(20, Duration::from_millis(EVICTION_TIME));
+            for txid in txids.iter().take(10) {
+                e.insert(txid.mined_id());
+            }
+            time::advance(Duration::from_millis(BEFORE_EVICTION_TIME)).await;
+            // Add the next ten before any entries expire to avoid pruning the list.
+            for txid in txids.iter().skip(10) {
+                e.insert(txid.mined_id());
+            }
+            prop_assert_eq!(e.len(), 20);
+            time::advance(Duration::from_millis(EVICTION_TIME - BEFORE_EVICTION_TIME + 1)).await;
 
-        // Make sure all of them are expired
-        thread::sleep(Duration::from_millis(EVICTION_TIME + 1));
+            // The first ten entries have expired and the next ten have not.
+            // Both queries must account for expired entries before the list is pruned.
+            for txid in txids.iter().take(10) {
+                prop_assert!(!e.contains_key(&txid.mined_id()));
+            }
+            for txid in txids.iter().skip(10) {
+                prop_assert!(e.contains_key(&txid.mined_id()));
+            }
+            prop_assert_eq!(e.len(), 10);
 
-        for txid in txids.iter() {
-            prop_assert!(!e.contains_key(&txid.mined_id()));
-        }
-        prop_assert_eq!(e.len(), 0);
+            time::advance(Duration::from_millis(EVICTION_TIME + 1)).await;
+            for txid in txids.iter() {
+                prop_assert!(!e.contains_key(&txid.mined_id()));
+            }
+            prop_assert_eq!(e.len(), 0);
+            Ok::<_, TestCaseError>(())
+        })?;
     }
 
     /// Check if EvictionList panics if entries are added multiple times.

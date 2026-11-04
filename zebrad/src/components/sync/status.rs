@@ -3,7 +3,7 @@
 use tokio::sync::watch;
 use zebra_chain::chain_sync_status::ChainSyncStatus;
 
-use super::RecentSyncLengths;
+use super::{RecentSyncLengths, SyncDiagnostics};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod mock;
@@ -17,6 +17,7 @@ mod tests;
 pub struct SyncStatus {
     latest_sync_length: watch::Receiver<Vec<usize>>,
     is_regtest: bool,
+    diagnostics: watch::Receiver<SyncDiagnostics>,
 }
 
 impl SyncStatus {
@@ -38,6 +39,7 @@ impl SyncStatus {
         let status = SyncStatus {
             latest_sync_length,
             is_regtest: network.is_regtest(),
+            diagnostics: watch::channel(SyncDiagnostics::default()).1,
         };
 
         (status, recent_sync_lengths)
@@ -52,9 +54,23 @@ impl SyncStatus {
         let status = SyncStatus {
             latest_sync_length,
             is_regtest: false,
+            diagnostics: watch::channel(SyncDiagnostics::default()).1,
         };
 
         (status, recent_sync_lengths)
+    }
+
+    /// Reports the syncer state published on `diagnostics`.
+    pub(super) fn with_diagnostics(self, diagnostics: watch::Receiver<SyncDiagnostics>) -> Self {
+        Self {
+            diagnostics,
+            ..self
+        }
+    }
+
+    /// Returns the syncer state that explains a sync stall.
+    pub(crate) fn diagnostics(&self) -> SyncDiagnostics {
+        self.diagnostics.borrow().clone()
     }
 
     /// Wait until the synchronization is likely close to the tip.

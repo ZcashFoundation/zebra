@@ -27,7 +27,12 @@ find_cached_disk_image() {
     local disk_name
     local disk_search_pattern="${DISK_PREFIX}-${git_pattern}-v${LOCAL_STATE_VERSION}-${NETWORK}-${DISK_SUFFIX}"
 
-    disk_name=$(gcloud compute images list --filter="status=READY AND name~${disk_search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
+    # `set -e` does not apply inside the command substitutions that call this function,
+    # so a failed query must be returned explicitly, or it would look like "no image".
+    if ! disk_name=$(gcloud compute images list --filter="status=READY AND name~${disk_search_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1); then
+        echo "Failed to list ${git_source} disk images." >&2
+        return 1
+    fi
 
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     if [[ -n "${disk_name}" ]]; then
@@ -55,7 +60,9 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")}
 
     # Handle the case where no suitable disk image is found
-    if [[ -z "${CACHED_DISK_NAME}" ]]; then
+    if [[ -z "${CACHED_DISK_NAME}" && "${ALLOW_MISSING:-false}" == "true" ]]; then
+        echo "No suitable cached state disk available. Continuing without one, as requested."
+    elif [[ -z "${CACHED_DISK_NAME}" ]]; then
         echo "No suitable cached state disk available. Try running the cached state rebuild job."
         exit 1
     else

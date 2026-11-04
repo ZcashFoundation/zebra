@@ -1,4 +1,0 @@
-project: zebrad
-kind: Added
-body: 'Activate NU7 on Mainnet at height 3,543,405, and advertise network protocol version 170190. Mainnet nodes must upgrade before the activation height to stay on the consensus chain. This release is supported for 8 weeks instead of 12, so it halts about 56 days after its estimated release height.'
-time: 2026-10-21T12:00:00.000000000Z

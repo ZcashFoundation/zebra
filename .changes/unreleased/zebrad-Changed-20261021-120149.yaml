@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: '`zebrad --version` now prints the full build version, including the git commit, for example `7.0.0-rc.0+git.6d1e414`. Builds without `git describe` metadata, such as the Docker images, now include the commit in their build version, which also appears in the `getinfo` RPC `build` field, the startup message, and the Sentry release name.'
-time: 2026-10-21T12:01:49.571724507Z

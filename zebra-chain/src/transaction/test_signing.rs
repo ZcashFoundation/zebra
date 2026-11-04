@@ -5,14 +5,13 @@
 
 use secp256k1::{PublicKey, SecretKey};
 use zcash_primitives::transaction::{
-    builder::DEFAULT_TX_EXPIRY_DELTA,
+    builder::default_tx_expiry_delta,
     fees::{
         transparent::InputSize,
         zip317::{FeeRule, P2PKH_STANDARD_OUTPUT_SIZE},
         FeeRule as _,
     },
-    sighash::{signature_hash, SignableInput},
-    txid::TxIdDigester,
+    sighash::{PrecomputedSighashData, SignableInput},
     Authorized, TransactionData, TxVersion, Unauthorized,
 };
 use zcash_protocol::{consensus::BranchId, value::Zatoshis};
@@ -132,7 +131,7 @@ impl Transaction {
 
         let branch_id = BranchId::for_height(network, target_height);
         let version = TxVersion::suggested_for_branch(branch_id);
-        let expiry_height = target_height + DEFAULT_TX_EXPIRY_DELTA;
+        let expiry_height = target_height + default_tx_expiry_delta(branch_id);
 
         let unauthed_tx = TransactionData::<Unauthorized>::from_parts(
             version,
@@ -144,19 +143,17 @@ impl Transaction {
             None,
             None,
         );
-        let txid_parts = unauthed_tx.digest(TxIdDigester);
-        let signed_bundle = unauthed_tx
+        let sighash_data = PrecomputedSighashData::new(unauthed_tx);
+        let signed_bundle = sighash_data
+            .tx()
             .transparent_bundle()
             .expect("bundle was just added")
             .clone()
             .apply_signatures(
                 |input| {
-                    *signature_hash(
-                        &unauthed_tx,
-                        &SignableInput::Transparent(input),
-                        &txid_parts,
-                    )
-                    .as_ref()
+                    *sighash_data
+                        .signature_hash(&SignableInput::Transparent(input))
+                        .as_ref()
                 },
                 &signing_set,
             )?;
