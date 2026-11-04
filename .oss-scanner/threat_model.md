@@ -44,7 +44,7 @@ Zebra's job is to agree with the Zcash protocol, and with every other correct no
 - `zebra-utils/`: developer and maintainer tools, including `zebra-checkpoints`, which reads from a node its operator runs.
 - `zebra-fuzz/`: the harnesses are tools, not the target. Bugs they find in the crates above are in scope.
 - `docker/`, `.github/`, `book/`, `docs/`, release tooling, and documentation.
-- The experimental `internal-miner` and `elasticsearch` features, unless the finding also affects default builds.
+- The experimental `internal-miner` feature, unless the finding also affects default builds.
 - The `zcashd` sidecar binary itself; Zebra's supervision of it is in scope.
 
 Windows and macOS code paths are in scope for review, but this image only runs Linux.
@@ -111,7 +111,7 @@ Zebra builds with `panic = "abort"` in both the dev and release profiles, so any
   - Secrets (the RPC cookie) written to logs at info level or above, or readable by other local users.
 - **Low**
   - Problems that need a malicious configuration file, a malicious state directory, or a local user with write access to either.
-  - Problems only in the experimental `internal-miner` or `elasticsearch` features, or with `debug_force_finished_sync`.
+  - Problems only in the experimental `internal-miner` feature, or with `debug_force_finished_sync`.
   - Panics on invalid arguments from code that embeds a Zebra crate as a library, where the API documents the requirement.
   - Secrets at debug or trace log level.
 

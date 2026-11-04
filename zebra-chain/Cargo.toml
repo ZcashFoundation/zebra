@@ -33,9 +33,6 @@ async-error = [
 # Experimental internal miner support
 internal-miner = ["equihash/solver"]
 
-# Experimental elasticsearch support
-elasticsearch = []
-
 # Test-only features
 
 proptest-impl = [

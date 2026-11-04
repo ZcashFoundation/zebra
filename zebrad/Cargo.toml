@@ -81,11 +81,6 @@ internal-miner = [
     "zebra-rpc/internal-miner",
 ]
 
-# Experimental elasticsearch indexing
-elasticsearch = [
-    "zebra-state/elasticsearch",
-]
-
 # Tracing and monitoring
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
