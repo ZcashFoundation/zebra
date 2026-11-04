@@ -1,11 +1,12 @@
 //! The piece download scheduler.
 //!
-//! One task owns every download: it assigns each piece to one peer, requests
+//! One task owns every download: it starts each piece with one peer, requests
 //! it in sub-ranges sized from the peer's measured rate, hashes the bytes as
 //! they arrive, stores each verified piece, and reports it on a channel. It
 //! detects stalled peers, takes the slowest peers' pieces away in the
-//! end-game, backs off from refusals and missing objects, and blames a peer
-//! only for a piece it delivered entirely.
+//! end-game, retries a final piece from every idle peer after a wrong-size
+//! answer, backs off from refusals and missing objects, and blames a peer only
+//! for a piece it delivered entirely.
 //!
 //! The scheduler is generic over the peer service, so tests drive it with
 //! mock peers, and it holds its state in the task alone: no locks.
@@ -1387,8 +1388,8 @@ where
         };
         let (peer, piece) = (download.peer, download.piece);
 
-        // a size that differs from the manifest cancels that peer's request, with no
-        // penalty, since only the hash check settles which size is right (draft, "get-object").
+        // A size that differs from the manifest is not blamed, since only the hash check settles
+        // which size is right (draft, "get-object"), but it makes no progress towards this piece.
         if size != u64::from(self.pieces[piece].size) {
             tracing::info!(
                 peer = %self.peers[peer].addr,
@@ -1398,7 +1399,10 @@ where
                 "a state snapshot peer gave another size for a piece; asking other peers for it",
             );
             self.peers[peer].wrong_size.insert(piece);
+            self.peers[peer].refusals = 0;
+            self.measure(peer, 0, length, elapsed, Instant::now());
             self.release(id);
+            self.assign_endgame_copies(piece);
             return;
         }
 
@@ -1431,6 +1435,33 @@ where
         download.give_back(offset + u64::from(delivered), request_end);
         download.accept(offset, data);
         self.try_finish(id);
+    }
+
+    /// When a wrong-size answer has returned the only pending piece, starts an
+    /// independent download from every idle peer that can serve it and fits in
+    /// the budget. Otherwise a series of wrong-size peers could each hold the
+    /// last piece until its request deadline while an honest peer stays idle.
+    fn assign_endgame_copies(&mut self, piece: usize) {
+        if self.pending.len() != 1 || self.pending.front() != Some(&piece) {
+            return;
+        }
+        self.pending.pop_front();
+
+        let mut assigned = false;
+        for peer in 0..self.peers.len() {
+            if !self.is_idle(peer) || !self.can_serve(peer, piece) {
+                continue;
+            }
+            if !self.budget_allows(self.pieces[piece].size) {
+                break;
+            }
+            self.start_download(peer, piece);
+            assigned = true;
+        }
+
+        if !assigned && self.pieces[piece].downloads.is_empty() {
+            self.pending.push_front(piece);
+        }
     }
 
     /// Verifies download `id`'s piece once all its bytes are hashed.
