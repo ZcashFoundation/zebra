@@ -6,6 +6,6 @@ snapshot_kind: text
 {
   "Err": {
     "code": -8,
-    "message": "the requested block is not in the main chain"
+    "message": "parse error: could not convert the input string to a hash or height"
   }
 }

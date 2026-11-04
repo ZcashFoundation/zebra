@@ -4,15 +4,15 @@ expression: cf_data
 ---
 [
   KV(
-    k: "000000",
+    k: "00",
     v: "9c0600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0100000000000000",
   ),
   KV(
-    k: "000001",
+    k: "0101",
     v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0300000000000000",
   ),
   KV(
-    k: "000002",
+    k: "0102",
     v: "510600000100000000000000000000000000000000000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0500000000000000",
   ),
 ]

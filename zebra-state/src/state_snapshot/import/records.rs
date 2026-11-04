@@ -37,8 +37,7 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        HistoryTreeParts, OutputLocation, TransactionLocation, HEIGHT_DISK_BYTES,
-        OUTPUT_LOCATION_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES,
+        height_from_bytes_prefix, HistoryTreeParts, OutputLocation, TransactionLocation,
     },
     state_snapshot::format::ComponentId,
     IntoDisk,
@@ -54,15 +53,8 @@ const ADDRESS_BYTES: usize = 21;
 /// test networks.
 const MAX_ADDRESS_KIND: u8 = 5;
 
-/// The width of an address balance: the balance, the address location and the
-/// total received.
-const ADDRESS_BALANCE_BYTES: usize = 8 + OUTPUT_LOCATION_DISK_BYTES + 8;
-
 /// The width of a note commitment subtree index.
 const SUBTREE_INDEX_BYTES: usize = 2;
-
-/// The width of a note commitment subtree: its end height and root.
-const SUBTREE_BYTES: usize = HEIGHT_DISK_BYTES + HASH_BYTES;
 
 /// The width of a chain value pool record in the current format.
 const VALUE_BALANCE_BYTES: usize = zebra_chain::value_balance::SERIALIZED_SIZE;
@@ -87,39 +79,35 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
 
     match component {
         HashByHeight => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             width(value, HASH_BYTES, "block hash")
         }
         HeightByHash => {
             width(key, HASH_BYTES, "block hash")?;
-            width(value, HEIGHT_DISK_BYTES, "height")
+            valid_height(value, "height")
         }
         Headers => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             decode_all::<block::Header>(value, "block header").map(drop)
         }
         Transactions => {
-            width(key, TRANSACTION_LOCATION_DISK_BYTES, "transaction location")?;
+            valid_transaction_location(key, "transaction location")?;
             decode_all::<Transaction>(value, "transaction").map(drop)
         }
         HashByTxLoc => {
-            width(key, TRANSACTION_LOCATION_DISK_BYTES, "transaction location")?;
+            valid_transaction_location(key, "transaction location")?;
             width(value, HASH_BYTES, "transaction hash")
         }
         TxLocByHash => {
             width(key, HASH_BYTES, "transaction hash")?;
-            width(
-                value,
-                TRANSACTION_LOCATION_DISK_BYTES,
-                "transaction location",
-            )
+            valid_transaction_location(value, "transaction location")
         }
         BlockInfo => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             block_info(value).map(drop)
         }
         Utxos => {
-            width(key, OUTPUT_LOCATION_DISK_BYTES, "output location")?;
+            valid_output_location(key, "output location")?;
             decode_all::<transparent::Output>(value, "transparent output").map(drop)
         }
         AddressBalances => {
@@ -130,19 +118,13 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             address_balance(value).map(drop)
         }
         AddressUtxos => {
-            width(
-                key,
-                2 * OUTPUT_LOCATION_DISK_BYTES,
-                "address unspent output location",
-            )?;
+            let (_, rest) = output_location_prefix(key, "address location")?;
+            let (_, rest) = output_location_prefix(rest, "unspent output location")?;
+            finish(rest, "address unspent output location")?;
             width(value, 0, "address unspent output value")
         }
         AddressTxs => {
-            width(
-                key,
-                OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES,
-                "address transaction location",
-            )?;
+            address_transaction_suffix(key).map(drop)?;
             width(value, 0, "address transaction value")
         }
         SproutNullifiers | SaplingNullifiers | OrchardNullifiers | IronwoodNullifiers => {
@@ -168,25 +150,26 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             width(value, 0, "anchor value")
         }
         SaplingTree => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             sapling_tree(value).map(drop)
         }
         OrchardTree | IronwoodTree => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             orchard_tree(value).map(drop)
         }
         SaplingSubtrees => {
             width(key, SUBTREE_INDEX_BYTES, "subtree index")?;
-            width(value, SUBTREE_BYTES, "Sapling subtree")?;
-            let root = hash(&value[HEIGHT_DISK_BYTES..], "Sapling subtree root")?;
+            let root = hash(
+                subtree_root(value, "Sapling subtree")?,
+                "Sapling subtree root",
+            )?;
             Option::<sapling_crypto::Node>::from(sapling_crypto::Node::from_bytes(root))
                 .ok_or_else(|| "Sapling subtree root is not a field element".to_string())
                 .map(drop)
         }
         OrchardSubtrees | IronwoodSubtrees => {
             width(key, SUBTREE_INDEX_BYTES, "subtree index")?;
-            width(value, SUBTREE_BYTES, "subtree")?;
-            orchard::tree::Node::try_from(&value[HEIGHT_DISK_BYTES..])
+            orchard::tree::Node::try_from(subtree_root(value, "subtree")?)
                 .map_err(|_| "subtree root is not a field element".to_string())
                 .map(drop)
         }
@@ -203,6 +186,60 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             value_pools(value).map(drop)
         }
     }
+}
+
+fn height_prefix<'a>(bytes: &'a [u8], what: &str) -> Result<(Height, &'a [u8]), String> {
+    height_from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn transaction_location_prefix<'a>(
+    bytes: &'a [u8],
+    what: &str,
+) -> Result<(TransactionLocation, &'a [u8]), String> {
+    TransactionLocation::from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn output_location_prefix<'a>(
+    bytes: &'a [u8],
+    what: &str,
+) -> Result<(OutputLocation, &'a [u8]), String> {
+    OutputLocation::from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn finish(rest: &[u8], what: &str) -> Result<(), String> {
+    if rest.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} trailing bytes after the {what}", rest.len()))
+    }
+}
+
+fn valid_height(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = height_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn valid_transaction_location(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = transaction_location_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn valid_output_location(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = output_location_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn subtree_root<'a>(bytes: &'a [u8], what: &str) -> Result<&'a [u8], String> {
+    let (_, root) = height_prefix(bytes, what)?;
+    width(root, HASH_BYTES, what)?;
+    Ok(root)
+}
+
+pub(super) fn address_transaction_suffix(bytes: &[u8]) -> Result<&[u8], String> {
+    let (_, transaction) = output_location_prefix(bytes, "address transaction location")?;
+    let (_, rest) = transaction_location_prefix(transaction, "address transaction location")?;
+    finish(rest, "address transaction location")?;
+    Ok(transaction)
 }
 
 /// Checks that `bytes` is `expected` bytes long.
@@ -449,9 +486,11 @@ pub(super) struct AddressBalance {
 
 /// Decodes an address balance record in the current encoding.
 pub(super) fn address_balance(bytes: &[u8]) -> Result<AddressBalance, String> {
-    width(bytes, ADDRESS_BALANCE_BYTES, "address balance")?;
-    let (balance, rest) = bytes.split_at(8);
-    let (location, received) = rest.split_at(OUTPUT_LOCATION_DISK_BYTES);
+    let (balance, rest) = bytes
+        .split_at_checked(8)
+        .ok_or_else(|| "address balance is not 8 bytes".to_string())?;
+    let (location, received) = output_location_prefix(rest, "address balance location")?;
+    width(received, 8, "address received total")?;
     let balance = Amount::<NonNegative>::from_bytes(
         balance
             .try_into()
@@ -460,7 +499,7 @@ pub(super) fn address_balance(bytes: &[u8]) -> Result<AddressBalance, String> {
     .map_err(|error| format!("invalid address balance: {error}"))?;
     Ok(AddressBalance {
         balance,
-        location: crate::FromDisk::from_bytes(location),
+        location,
         received: u64::from_le_bytes(
             received
                 .try_into()
@@ -469,7 +508,7 @@ pub(super) fn address_balance(bytes: &[u8]) -> Result<AddressBalance, String> {
     })
 }
 
-/// Decodes a height key or value, which `check_record` already checked the width of.
+/// Decodes a height key or value, which `check_record` already validated.
 pub(super) fn height(bytes: &[u8]) -> Height {
     crate::FromDisk::from_bytes(bytes)
 }

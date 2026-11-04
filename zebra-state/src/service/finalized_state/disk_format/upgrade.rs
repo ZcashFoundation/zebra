@@ -35,6 +35,7 @@ pub(crate) mod fix_tree_key_type;
 pub(crate) mod no_migration;
 pub(crate) mod prune_trees;
 pub(crate) mod tree_keys_and_caches_upgrade;
+pub(crate) mod variable_height;
 
 #[cfg(not(feature = "indexer"))]
 pub(crate) mod drop_tx_locs_by_spends;
@@ -151,7 +152,9 @@ fn format_upgrades(
             "isolate snapshot state from older readers",
             Version::new(32, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 12])
+        // Rewrites every fixed-width height, including those in snapshot-born v32 databases.
+        Box::new(variable_height::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 13])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -169,9 +172,8 @@ pub fn restorable_db_versions() -> Vec<u64> {
 
 /// Returns source directory majors for a reusable database upgrade, newest first.
 ///
-/// Sources need not include `running_major - 1`. Consequently v32 prefers v30 until the
-/// independent v31 record migration is registered, then prefers v31. Older registered sources
-/// remain fallbacks, and every intervening migration still runs in version order.
+/// Sources need not include `running_major - 1`. v33 prefers v32, with older registered sources
+/// as fallbacks, and every intervening migration still runs in version order.
 pub fn restorable_db_source_versions(running_major: u64) -> Vec<u64> {
     if !restorable_db_versions().contains(&running_major) {
         return Vec::new();
@@ -649,7 +651,7 @@ impl DbFormatChange {
     //
     // New format upgrades must be added to the *end* of this method.
     #[allow(clippy::unwrap_in_result)]
-    fn apply_format_upgrade(
+    pub(crate) fn apply_format_upgrade(
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
@@ -1058,11 +1060,13 @@ fn format_upgrades_are_in_version_order() {
 #[test]
 fn reusable_source_follows_the_registered_upgrade_chain() {
     assert_eq!(restorable_db_source_versions(30).first(), Some(&29));
-    let sources = restorable_db_source_versions(32);
-    assert_eq!(sources.first(), Some(&30));
+    assert_eq!(restorable_db_source_versions(32).first(), Some(&30));
+    let sources = restorable_db_source_versions(33);
+    assert_eq!(sources.first(), Some(&32));
+    assert!(sources.contains(&30), "v30 remains a fallback");
     assert!(sources.contains(&29), "older caches remain reusable");
     assert!(
         restorable_db_source_versions(31).is_empty(),
-        "v31 is registered by the independent variable-height migration"
+        "no upgrade registers format 31"
     );
 }

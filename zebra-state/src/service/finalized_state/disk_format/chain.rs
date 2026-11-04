@@ -24,43 +24,67 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk},
+    service::finalized_state::disk_format::{block::height_from_bytes_prefix, FromDisk, IntoDisk},
     state_snapshot::SnapshotBase,
 };
 
-/// The on-disk width of a [`SnapshotBase`]: two heights, two hashes, and the
-/// deferred checks byte.
-pub const SNAPSHOT_BASE_DISK_BYTES: usize = 2 * HEIGHT_DISK_BYTES + 32 + 32 + 1;
+impl SnapshotBase {
+    /// Decodes a snapshot marker without panicking on malformed database bytes.
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, &'static str> {
+        let (window_start, rest) = height_from_bytes_prefix(bytes)
+            .ok_or("the snapshot base has an invalid window start")?;
+        let (height, rest) =
+            height_from_bytes_prefix(rest).ok_or("the snapshot base has an invalid height")?;
+        let (block_hash, rest) = rest
+            .split_at_checked(32)
+            .ok_or("the snapshot base has no block hash")?;
+        let (manifest, rest) = rest
+            .split_at_checked(32)
+            .ok_or("the snapshot base has no manifest hash")?;
+        let (&deferred_checks, rest) = rest
+            .split_first()
+            .ok_or("the snapshot base has no deferred checks")?;
+        if !rest.is_empty() {
+            return Err("the snapshot base has trailing bytes");
+        }
+
+        Ok(SnapshotBase {
+            window_start,
+            height,
+            block_hash: block::Hash(
+                block_hash
+                    .try_into()
+                    .expect("32 block hash bytes were sliced"),
+            ),
+            manifest: ObjectHash(
+                manifest
+                    .try_into()
+                    .expect("32 manifest hash bytes were sliced"),
+            ),
+            deferred_checks,
+        })
+    }
+}
 
 impl IntoDisk for SnapshotBase {
-    type Bytes = [u8; SNAPSHOT_BASE_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let mut bytes = [0; SNAPSHOT_BASE_DISK_BYTES];
-        bytes[..3].copy_from_slice(&self.window_start.as_bytes());
-        bytes[3..6].copy_from_slice(&self.height.as_bytes());
-        bytes[6..38].copy_from_slice(&self.block_hash.as_bytes());
-        bytes[38..70].copy_from_slice(&self.manifest.0);
-        bytes[70] = self.deferred_checks;
-        bytes
+        [
+            self.window_start.as_bytes(),
+            self.height.as_bytes(),
+            self.block_hash.as_bytes().to_vec(),
+            self.manifest.0.to_vec(),
+            vec![self.deferred_checks],
+        ]
+        .concat()
     }
 }
 
 impl FromDisk for SnapshotBase {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let bytes = bytes.as_ref();
-        assert_eq!(
-            bytes.len(),
-            SNAPSHOT_BASE_DISK_BYTES,
-            "unexpected snapshot base length"
-        );
-        SnapshotBase {
-            window_start: Height::from_bytes(&bytes[..3]),
-            height: Height::from_bytes(&bytes[3..6]),
-            block_hash: block::Hash::from_bytes(&bytes[6..38]),
-            manifest: ObjectHash(bytes[38..70].try_into().expect("32 bytes were sliced")),
-            deferred_checks: bytes[70],
-        }
+        Self::decode(bytes.as_ref())
+            .expect("stored snapshot bases must use their canonical encoding")
     }
 }
 

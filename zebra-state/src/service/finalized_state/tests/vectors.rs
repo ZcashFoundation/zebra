@@ -153,241 +153,6 @@ fn ephemeral_database_reads_back_its_format_version() {
     db.shutdown(true);
 }
 
-/// A v29 cache is reused without rewriting legacy pool records, then accepts new blocks.
-#[tokio::test]
-async fn v29_cache_is_reused_with_legacy_value_pools() {
-    use std::{sync::Arc, time::Duration};
-
-    use semver::Version;
-    use tokio::time::{sleep, timeout};
-    use zebra_chain::{
-        block::Block, block_info::BlockInfo, parameters::Network,
-        serialization::ZcashDeserializeInto,
-    };
-
-    use crate::{
-        config::check_and_delete_old_state_databases,
-        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-        service::finalized_state::{
-            zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS},
-            FinalizedState, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
-        },
-        CheckpointVerifiedBlock, Config,
-    };
-
-    let _init_guard = zebra_test::init();
-    let network = Network::Mainnet;
-    let cache = tempfile::tempdir().unwrap();
-    let mut config = Config {
-        cache_dir: cache.path().to_path_buf(),
-        delete_old_database: true,
-        ..Config::default()
-    };
-    let old_version = Version::new(29, 0, 0);
-    let running_major = state_database_format_version_in_code().major;
-    let old_path = config.db_path(STATE_DATABASE_KIND, old_version.major, &network);
-    let mut state = FinalizedState {
-        db: ZebraDb::new(
-            &config,
-            STATE_DATABASE_KIND,
-            &old_version,
-            &network,
-            true,
-            STATE_COLUMN_FAMILIES_IN_CODE
-                .iter()
-                .map(ToString::to_string),
-            false,
-        )
-        .unwrap(),
-        debug_stop_at_height: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_db: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_blocks: vec![],
-    };
-    state
-        .db
-        .update_format_version_on_disk(&old_version)
-        .unwrap();
-    state.db.mark_finished_format_upgrades();
-
-    // Commit real blocks to a v29 database, retaining its backwards-compatible v28 pool records.
-    let legacy_block_info = |info: &BlockInfo| {
-        let mut bytes = [0; 52];
-        bytes[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
-        bytes[48..].copy_from_slice(&info.size().to_le_bytes());
-        bytes
-    };
-    for bytes in [
-        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.as_slice(),
-        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
-    ] {
-        let block = bytes.zcash_deserialize_into::<Arc<Block>>().unwrap();
-        let height = block.coinbase_height().unwrap();
-        state
-            .commit_finalized_direct(
-                CheckpointVerifiedBlock::from(block).into(),
-                None,
-                "archive cache reuse test",
-            )
-            .unwrap();
-        let info = state.db.block_info(height.into()).unwrap();
-        let cf = state.db.cf_handle(BLOCK_INFO).unwrap();
-        state
-            .db
-            .put_cf(&cf, height.as_bytes(), legacy_block_info(&info))
-            .unwrap();
-    }
-    let expected_tip_hash = state.db.finalized_tip_hash();
-    let expected_pools = state.db.finalized_value_pool();
-    let expected_info = state.db.block_info(Height(1).into()).unwrap();
-    let legacy_pools: [u8; 48] = expected_pools.to_bytes()[..48].try_into().unwrap();
-    state
-        .db
-        .put_cf(
-            &state.db.cf_handle(CHAIN_VALUE_POOLS).unwrap(),
-            [],
-            legacy_pools,
-        )
-        .unwrap();
-    assert!(!expected_pools.transparent_amount().is_zero());
-
-    let mut batch = crate::DiskWriteBatch::new();
-    let error = batch
-        .prepare_history_pruning(
-            &state.db,
-            Height(2),
-            state.db.history_capabilities().unwrap(),
-            state.db.ready_for_pruning(),
-            state.db.finalized_tip_height(),
-            &mut Default::default(),
-        )
-        .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "body deletion requires database format v30 or newer"
-    );
-    assert_eq!(batch, crate::DiskWriteBatch::new());
-    drop(state);
-
-    // Startup cleanup must not remove the cache before the upgrader has a chance to reuse it.
-    timeout(
-        Duration::from_secs(30),
-        check_and_delete_old_state_databases(&config, &network),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    assert!(
-        old_path.exists(),
-        "cleanup must protect a reusable v29 cache"
-    );
-
-    // Disabling cleanup is not a rollback backup: startup moves the v29 directory to the current
-    // format directory.
-    config.delete_old_database = false;
-    let mut state = FinalizedState::new(
-        &config,
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .unwrap();
-    timeout(Duration::from_secs(30), async {
-        while !state.db.finished_format_upgrades() {
-            state.db.check_for_panics();
-            sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(
-        state.db.format_version_on_disk().unwrap().unwrap().major,
-        running_major,
-    );
-    assert!(
-        !old_path.exists(),
-        "reuse moves rather than backs up the cache"
-    );
-    assert!(
-        !state.db.history_capabilities().unwrap().is_pruned(),
-        "the move keeps every body, so a never-pruned archive can be renamed back to v29",
-    );
-    assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
-    assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
-    assert_eq!(state.db.finalized_value_pool(), expected_pools);
-    assert!(state.db.finalized_value_pool().nsm_amount().is_zero());
-    assert_eq!(
-        state.db.block_info(Height(1).into()).unwrap(),
-        expected_info
-    );
-
-    // No migration has rewritten either old record.
-    for (column, key, expected) in [
-        (CHAIN_VALUE_POOLS, [].as_slice(), legacy_pools.as_slice()),
-        (
-            BLOCK_INFO,
-            Height(1).as_bytes().as_slice(),
-            legacy_block_info(&expected_info).as_slice(),
-        ),
-    ] {
-        let cf = state.db.cf_handle(column).unwrap();
-        let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
-        assert_eq!(raw.as_ref(), expected);
-    }
-
-    let next_block = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
-        .zcash_deserialize_into::<Arc<Block>>()
-        .unwrap();
-    let next_hash = next_block.hash();
-    state
-        .commit_finalized_direct(
-            CheckpointVerifiedBlock::from(next_block).into(),
-            None,
-            "upgraded archive cache reuse test",
-        )
-        .unwrap();
-    assert_eq!(state.db.finalized_tip_hash(), next_hash);
-    // Continuing the existing chain writes the wider layout, even while NSM is zero.
-    for (column, key, width) in [
-        (CHAIN_VALUE_POOLS, [].as_slice(), 56),
-        (BLOCK_INFO, Height(2).as_bytes().as_slice(), 60),
-    ] {
-        let cf = state.db.cf_handle(column).unwrap();
-        let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
-        assert_eq!(raw.len(), width);
-    }
-
-    // Rolling a never-pruned archive back to Zebra 7.0.0 renames the current directory to v29.
-    // The v29 reader must see every block, including the one written by the current build, with
-    // complete bodies.
-    let expected_blocks: Vec<_> = (0..=2)
-        .map(|height| state.db.block(Height(height).into()).unwrap().unwrap())
-        .collect();
-    let new_path = config.db_path(STATE_DATABASE_KIND, running_major, &network);
-    drop(state);
-    std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
-    std::fs::rename(&new_path, &old_path).unwrap();
-    let rolled_back = ZebraDb::new(
-        &config,
-        STATE_DATABASE_KIND,
-        &old_version,
-        &network,
-        true,
-        STATE_COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string),
-        false,
-    )
-    .unwrap();
-    assert_eq!(rolled_back.finalized_tip_hash(), next_hash);
-    assert!(!rolled_back.history_capabilities().unwrap().is_pruned());
-    for (height, expected) in (0..=2).zip(expected_blocks) {
-        let block = rolled_back.block(Height(height).into()).unwrap().unwrap();
-        assert_eq!(block, expected);
-    }
-}
-
 /// Check that the sprout tree database serialization format has not changed.
 #[test]
 fn sprout_note_commitment_tree_serialization() {
@@ -534,7 +299,7 @@ fn sapling_note_commitment_tree_serialization() {
     // not change by accident.
     let expected_serialized_tree_hex = "0102007c3ea01a6e3a3d90cf59cd789e467044b5cd78eb2c84cc6816f960746d0e036c0162324ff2c329e99193a74d28a585a3c167a93bf41a255135529c913bd9b1e66601ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c";
     let expected_serialized_subtree: &str =
-        "0186a0ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c";
+        "030186a0ddaa1ab86de5c153993414f34ba97e9674c459dfadde112b89eeeafa0e5a204c";
 
     sapling_checks(
         incremental_tree,
@@ -573,7 +338,7 @@ fn sapling_note_commitment_tree_serialization_one() {
     // not change by accident.
     let expected_serialized_tree_hex = "010000225747f3b5d5dab4e5a424f81f85c904ff43286e0f3fd07ef0b8c6a627b1145800012c60c7de033d7539d123fb275011edfe08d57431676981d162c816372063bc71";
     let expected_serialized_subtree: &str =
-        "0186a02c60c7de033d7539d123fb275011edfe08d57431676981d162c816372063bc71";
+        "030186a02c60c7de033d7539d123fb275011edfe08d57431676981d162c816372063bc71";
 
     sapling_checks(
         incremental_tree,
@@ -625,7 +390,7 @@ fn sapling_note_commitment_tree_serialization_pow2() {
     // not change by accident.
     let expected_serialized_tree_hex = "010701f43e3aac61e5a753062d4d0508c26ceaf5e4c0c58ba3c956e104b5d2cf67c41c3a3661bc12b72646c94bc6c92796e81953985ee62d80a9ec3645a9a95740ac15025991131c5c25911b35fcea2a8343e2dfd7a4d5b45493390e0cb184394d91c349002df68503da9247dfde6585cb8c9fa94897cf21735f8fc1b32116ef474de05c01d23765f3d90dfd97817ed6d995bd253d85967f77b9f1eaef6ecbcb0ef6796812";
     let expected_serialized_subtree =
-        "0186a0d23765f3d90dfd97817ed6d995bd253d85967f77b9f1eaef6ecbcb0ef6796812";
+        "030186a0d23765f3d90dfd97817ed6d995bd253d85967f77b9f1eaef6ecbcb0ef6796812";
 
     sapling_checks(
         incremental_tree,
@@ -678,7 +443,7 @@ fn orchard_note_commitment_tree_serialization() {
     // not change by accident.
     let expected_serialized_tree_hex = "010200ee9488053a30c596b43014105d3477e6f578c89240d1d1ee1743b77bb6adc40a01a34b69a4e4d9ccf954d46e5da1004d361a5497f511aeb4d481d23c0be177813301a0be6dab19bc2c65d8299258c16e14d48ec4d4959568c6412aa85763c222a702";
     let expected_serialized_subtree =
-        "0186a0a0be6dab19bc2c65d8299258c16e14d48ec4d4959568c6412aa85763c222a702";
+        "030186a0a0be6dab19bc2c65d8299258c16e14d48ec4d4959568c6412aa85763c222a702";
 
     orchard_checks(
         incremental_tree,
@@ -719,7 +484,7 @@ fn orchard_note_commitment_tree_serialization_one() {
     // not change by accident.
     let expected_serialized_tree_hex = "01000068135cf49933229099a44ec99a75e1e1cb4640f9b5bdec6b3223856fea16390a000178afd4da59c541e9c2f317f9aff654f1fb38d14dc99431cbbfa93601c7068117";
     let expected_serialized_subtree =
-        "0186a078afd4da59c541e9c2f317f9aff654f1fb38d14dc99431cbbfa93601c7068117";
+        "030186a078afd4da59c541e9c2f317f9aff654f1fb38d14dc99431cbbfa93601c7068117";
 
     orchard_checks(
         incremental_tree,
@@ -771,7 +536,7 @@ fn orchard_note_commitment_tree_serialization_pow2() {
     // not change by accident.
     let expected_serialized_tree_hex = "01010178315008fb2998b430a5731d6726207dc0f0ec81ea64af5cf612956901e72f0eee9488053a30c596b43014105d3477e6f578c89240d1d1ee1743b77bb6adc40a0001d3d525931005e45f5a29bc82524e871e5ee1b6d77839deb741a6e50cd99fdf1a";
     let expected_serialized_subtree =
-        "0186a0d3d525931005e45f5a29bc82524e871e5ee1b6d77839deb741a6e50cd99fdf1a";
+        "030186a0d3d525931005e45f5a29bc82524e871e5ee1b6d77839deb741a6e50cd99fdf1a";
 
     orchard_checks(
         incremental_tree,
