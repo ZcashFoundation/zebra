@@ -777,14 +777,31 @@ where
         // an incoming request, whichever comes first.
         //
         // If there is a pending request, peer messages can complete it. Block adverts use a
-        // separate channel in either state because they do not expect a response.
+        // separate channel, except while compact recovery needs its shorter response deadline.
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
+
+        // Keep at most one unrelated inbound message while recovering. Backpressure preserves
+        // peer ordering without letting an inbound service call or framed write hide the deadline.
+        let mut deferred_peer_message = None;
         loop {
             self.compact.expire();
+            let recovering = matches!(
+                self.state,
+                State::AwaitingResponse {
+                    handler: Handler::CompactBlock { .. },
+                    ..
+                }
+            );
+            if !recovering && !matches!(self.state, State::Failed) {
+                if let Some(message) = deferred_peer_message.take() {
+                    self.handle_message_as_request(message).await;
+                    continue;
+                }
+            }
             let compact_expiry = self.compact.expiry();
             let receive_slots = self.compact_receive_rx.borrow_and_update().clone();
-            if receive_slots.is_none() && self.compact_receive_permit.is_some() {
+            if !recovering && receive_slots.is_none() && self.compact_receive_permit.is_some() {
                 self.set_compact_receive(None).await;
             }
             let receive_slot = async {
@@ -941,8 +958,8 @@ where
                     self.state = State::AwaitingRequest;
                 }
 
-                // We're awaiting a response to a client request,
-                // so also wait on cancellation, timeout, and response-free block adverts.
+                // We're awaiting a response to a client request. Compact recovery defers unrelated
+                // writes rather than cancelling and restarting a potentially partial framed write.
                 State::AwaitingResponse {
                     ref span,
                     ref mut tx,
@@ -1016,13 +1033,14 @@ where
                         }
                         _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
                         Ok(()) = self.compact_receive_rx.changed() => continue,
-                        permit = &mut receive_slot, if self.connection_info.early_block_relay
+                        permit = &mut receive_slot, if !recovering
+                            && self.connection_info.early_block_relay
                             && self.compact_receive_permit.is_none() => {
                             self.set_compact_receive(Some(permit)).await;
                             continue;
                         }
-                        msg = peer_rx.next() => msg,
-                        Some(hash) = self.block_advert_rx.recv() => {
+                        msg = peer_rx.next(), if deferred_peer_message.is_none() => msg,
+                        Some(hash) = self.block_advert_rx.recv(), if !recovering => {
                             self.send_block_advert(hash).await;
                             continue;
                         }
@@ -1056,6 +1074,12 @@ where
                             // Returned messages can be inbound requests, including block adverts
                             // that also completed a FindBlocks response.
                             let unused_msg = if let Some(request_msg) = request_msg {
+                                if recovering
+                                    && !matches!(request_msg, Message::BlockTransactions(_))
+                                {
+                                    deferred_peer_message = Some(request_msg);
+                                    continue;
+                                }
                                 // do NOT instrument with the request span, this is
                                 // independent work
                                 self.handle_message_as_request(request_msg).await
