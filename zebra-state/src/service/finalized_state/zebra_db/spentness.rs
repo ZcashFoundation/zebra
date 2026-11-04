@@ -43,11 +43,10 @@ use tokio::sync::watch;
 
 use zebra_chain::{block, parameters::spentness_hints::VerifiedArtifact, transparent};
 
-use crate::{
-    request::FinalizedBlock,
-    service::finalized_state::{
-        disk_db::DiskWriteBatch, disk_format::transparent::OutputLocation, ZebraDb,
-    },
+use zebra_db::FinalizedBlock;
+
+use crate::service::finalized_state::{
+    disk_db::DiskWriteBatch, disk_format::transparent::OutputLocation, ZebraDb,
 };
 
 mod apply;

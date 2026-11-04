@@ -21,11 +21,10 @@ use std::ops::RangeInclusive;
 
 use zebra_chain::block::Height;
 
-use crate::{
-    request::FinalizedBlock,
-    service::finalized_state::{
-        disk_db::DiskWriteBatch, disk_format::chain::SyncMetadata, TypedColumnFamily, ZebraDb,
-    },
+use zebra_db::FinalizedBlock;
+
+use crate::service::finalized_state::{
+    disk_db::DiskWriteBatch, disk_format::chain::SyncMetadata, TypedColumnFamily, ZebraDb,
 };
 
 #[cfg(test)]

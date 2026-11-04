@@ -27,19 +27,18 @@ use zebra_chain::{
     transparent::{self, Input},
 };
 
-use crate::{
-    request::FinalizedBlock,
-    service::finalized_state::{
-        disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{
-            transparent::{
-                AddressBalanceLocation, AddressBalanceLocationInner, AddressBalanceLocationUpdates,
-                AddressLocation, AddressTransaction, AddressUnspentOutput, OutputLocation,
-            },
-            TransactionLocation,
+use zebra_db::FinalizedBlock;
+
+use crate::service::finalized_state::{
+    disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+    disk_format::{
+        transparent::{
+            AddressBalanceLocation, AddressBalanceLocationInner, AddressBalanceLocationUpdates,
+            AddressLocation, AddressTransaction, AddressUnspentOutput, OutputLocation,
         },
-        zebra_db::ZebraDb,
+        TransactionLocation,
     },
+    zebra_db::ZebraDb,
 };
 
 use super::super::TypedColumnFamily;

@@ -23,13 +23,12 @@ use super::{
     record::{Phase, Progress},
     HintedOutputs, SpentnessError, SPENTNESS_JOURNAL,
 };
-use crate::{
-    request::FinalizedBlock,
-    service::finalized_state::{
-        disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{OutputLocation, TransactionLocation},
-        zebra_db::{ZebraDb, PARALLEL_BLOCK_READ_THRESHOLD},
-    },
+use zebra_db::FinalizedBlock;
+
+use crate::service::finalized_state::{
+    disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
+    disk_format::{OutputLocation, TransactionLocation},
+    zebra_db::{ZebraDb, PARALLEL_BLOCK_READ_THRESHOLD},
 };
 
 /// The artifact position and counts at a block boundary.

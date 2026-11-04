@@ -67,7 +67,7 @@ RUN cargo build --locked --workspace --lib --bins \
 # without letting a failure abort the build. zebrad's integration tests and the
 # zebra-network tests that dial live peers are left out: they need the Internet.
 RUN timeout 900 cargo nextest run --locked --workspace --no-fail-fast \
-      -E 'package(zebra-chain) | package(zebra-script) | package(zebra-consensus) | package(zebra-state) | test(/^unit::/)' \
+      -E 'package(zebra-chain) | package(zebra-script) | package(zebra-consensus) | package(zebra-db) | package(zebra-state) | test(/^unit::/)' \
     || echo "WARNING: cargo nextest reported failures"
 
 # Best effort: the libFuzzer harnesses in zebra-fuzz/fuzz are a separate cargo

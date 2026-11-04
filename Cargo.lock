@@ -7627,6 +7627,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zebra-db"
+version = "0.1.0"
+dependencies = [
+ "zebra-chain",
+]
+
+[[package]]
 name = "zebra-network"
 version = "15.0.0"
 dependencies = [
@@ -7821,6 +7828,7 @@ dependencies = [
  "tracing",
  "zcash_history",
  "zebra-chain",
+ "zebra-db",
  "zebra-node-services",
  "zebra-test",
 ]
