@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Security
+body: Keep at most 500 block hashes from a `FindBlocks` response, the most a peer serves for a `getblocks` request, so a peer can't make the syncer process up to 50,000 hashes per response.
+time: 2026-10-14T12:00:00.000000+00:00
