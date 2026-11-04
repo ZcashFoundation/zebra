@@ -1,4 +1,7 @@
 //! Admission, scoring, and state-serving overlap for negotiated early relay.
+//!
+//! Keep a buffered state handle alive during authentication: dropping the last handle shuts down
+//! the writer and closes its published snapshot before the response necessarily finishes.
 
 use super::*;
 use zebra_chain::{
@@ -24,6 +27,15 @@ async fn state() -> (Network, ProposalTestState, zs::ReadStateService) {
         .clone()
         .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
             block::genesis::regtest_genesis_block().into(),
+        ))
+        .await
+        .unwrap();
+    // Early relay authenticates only against published non-finalized parents.
+    let parent = candidate(&network, &read, false).await;
+    state
+        .clone()
+        .oneshot(zs::Request::CommitSemanticallyVerifiedBlock(
+            zs::CheckpointVerifiedBlock::from(parent).into(),
         ))
         .await
         .unwrap();
@@ -234,6 +246,7 @@ async fn early_relay_rejects_forged_authorizing_data_before_transactions() {
         assert!(cache.get(&block.hash()).is_none());
         // A forged variant must not poison later admission of the genuine same-hash body.
         let zs::Response::EarlyRelay(Some(guard)) = state
+            .clone()
             .oneshot(zs::Request::EarlyRelay {
                 block,
                 require_authentication: true,
@@ -338,6 +351,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
         ));
         let next = candidate(&network, &receiver_read, false).await;
         let next_admission = receiver
+            .clone()
             .oneshot(zs::Request::EarlyRelay {
                 block: next.clone(),
                 require_authentication: false,
@@ -440,6 +454,7 @@ async fn early_relay_cancelled_verifier_withdraws_body() {
         assert!(cache.get(&block.hash()).is_none());
         drop(pending);
         let zs::Response::EarlyRelay(Some(guard)) = state
+            .clone()
             .oneshot(zs::Request::EarlyRelay {
                 block,
                 require_authentication: true,

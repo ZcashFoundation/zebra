@@ -33,13 +33,20 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
             Vec::new(),
             Vec::new(),
             LockTime::unlocked(),
-            Height(1),
+            block.coinbase_height().unwrap(),
         ));
         block.transactions.push(Arc::new(shielded));
         Arc::make_mut(&mut block.header).merkle_root =
             block.transactions.iter().map(|tx| tx.hash()).collect();
-        // This fixture extends genesis, before a chain-history root exists.
-        let block = seal_candidate(&network, block, None);
+        let zs::ReadResponse::ChainInfo(info) = read
+            .clone()
+            .oneshot(zs::ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("chain info response")
+        };
+        let block = seal_candidate(&network, block, info.chain_history_root);
         let cache = cache(&read).await;
         let dispatches = Arc::new(AtomicUsize::new(0));
         let count = dispatches.clone();
