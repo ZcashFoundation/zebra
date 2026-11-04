@@ -212,15 +212,8 @@ impl VerifiedSet {
     /// Evict one transaction and any transactions that directly or indirectly depend on
     /// its outputs from the set, returns the victim transaction and any dependent transactions.
     ///
-    /// Removes a transaction with probability in direct proportion to the
-    /// eviction weight, as per [ZIP-401].
-    ///
-    /// Consensus rule:
-    ///
-    /// > Each transaction also has an eviction weight, which is cost +
-    /// > low_fee_penalty, where low_fee_penalty is 16000 if the transaction pays
-    /// > a fee less than the conventional fee, otherwise 0. The conventional fee
-    /// > is currently defined as 1000 zatoshis
+    /// Removes a transaction with probability in direct proportion to its
+    /// [eviction weight](VerifiedUnminedTx::eviction_weight), as per [ZIP-401].
     ///
     /// # Note
     ///
