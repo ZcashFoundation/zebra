@@ -310,6 +310,78 @@ async fn rpc_getdeprecationinfo_estimated_time_is_never_negative() {
     assert_eq!(end_of_service.estimated_time, 0);
 }
 
+/// State failures do not expose local paths or other internal details through `getblockchaininfo`.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getblockchaininfo_sanitizes_local_state_errors() {
+    const LOCAL_STATE_ERROR: &str =
+        r#"failed to open "/home/operator/private/zebra/state/v32": permission denied"#;
+
+    let _init_guard = zebra_test::init();
+
+    for fail_usage_info in [true, false] {
+        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        let request = tokio::spawn(async move { rpc.get_blockchain_info().await });
+
+        read_state
+            .expect_request(ReadRequest::UsageInfo)
+            .await
+            .respond(if fail_usage_info {
+                Err(BoxError::from(LOCAL_STATE_ERROR))
+            } else {
+                Ok(ReadResponse::UsageInfo(0))
+            });
+        read_state
+            .expect_request(ReadRequest::TipPoolValues)
+            .await
+            .respond(Err(BoxError::from("no chain tip available")));
+        read_state
+            .expect_request(ReadRequest::ChainInfo)
+            .await
+            .respond(Err(BoxError::from("chain info not available")));
+
+        if !fail_usage_info {
+            read_state
+                .expect_request(ReadRequest::HistoryCapabilities)
+                .await
+                .respond(Err(BoxError::from(LOCAL_STATE_ERROR)));
+        }
+
+        let error = request
+            .await
+            .expect("the RPC task should not panic")
+            .expect_err("a fatal state read failure should fail the RPC");
+        assert_eq!(error.code(), -32603);
+        assert_eq!(error.message(), "Internal error");
+        assert!(error.data().is_none());
+        assert!(!format!("{error:?}").contains(LOCAL_STATE_ERROR));
+
+        mempool.expect_no_requests().await;
+        read_state.expect_no_requests().await;
+        assert!(rpc_tx_queue.now_or_never().is_none());
+    }
+}
+
 // Helper function that returns the nonce, final sapling root and
 // block commitments of a given Block.
 async fn get_block_data(
@@ -8802,7 +8874,27 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
 /// `NODE_NETWORK` never claims over RPC that it serves historical blocks.
 #[tokio::test(flavor = "current_thread")]
 async fn rpc_getnetworkinfo_reports_advertised_services() {
-    use zebra_network::types::PeerServices;
+    use zebra_network::{
+        address_book_peers::AddressBookPeers,
+        types::{MetaAddr, PeerServices},
+    };
+
+    #[derive(Clone)]
+    struct AdvertisedServices(PeerServices);
+
+    impl AddressBookPeers for AdvertisedServices {
+        fn recently_live_peers(&self, _now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
+            Vec::new()
+        }
+
+        fn add_peer(&mut self, _peer: PeerSocketAddr) -> bool {
+            false
+        }
+
+        fn local_services(&self) -> PeerServices {
+            self.0
+        }
+    }
 
     let _init_guard = zebra_test::init();
 
@@ -8810,13 +8902,7 @@ async fn rpc_getnetworkinfo_reports_advertised_services() {
         (PeerServices::NODE_NETWORK, "0000000000000001"),
         (PeerServices::empty(), "0000000000000000"),
     ] {
-        let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
-            ([127, 0, 0, 1], Mainnet.default_port()).into(),
-            services,
-            &Mainnet,
-            zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
-            tracing::Span::none(),
-        )));
+        let address_book = AdvertisedServices(services);
 
         let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
         let (rpc, _rpc_tx_queue) = RpcImpl::new(
