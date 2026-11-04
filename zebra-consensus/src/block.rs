@@ -983,7 +983,7 @@ where
             let phase_start = Instant::now();
 
             // Query only this block's candidates, against the mempool's processed tip.
-            let candidates = if let Some(mempool) = mempool {
+            let (reuse_query, candidates) = if let Some(mempool) = mempool {
                 match tokio::time::timeout(
                     MEMPOOL_REUSE_TIMEOUT,
                     mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {
@@ -992,13 +992,18 @@ where
                     }),
                 ).await {
                     Ok(Ok(mempool::Response::VerifiedTransactionsForBlock(transactions))) => {
-                        transactions
+                        ("answered", transactions)
                     }
-                    _ => HashMap::new(),
+                    Ok(_) => ("error", HashMap::new()),
+                    Err(_) => ("timeout", HashMap::new()),
                 }
             } else {
-                HashMap::new()
+                ("none", HashMap::new())
             };
+            if !request.is_proposal() {
+                metrics::counter!("zebra.consensus.block.reuse_query", "outcome" => reuse_query)
+                    .increment(1);
+            }
             let verified = if candidates.is_empty() {
                 HashMap::new()
             } else {
@@ -1044,6 +1049,8 @@ where
             let mut batch_flush = None;
             let mut sigops = 0;
             let mut block_miner_fees = Ok(Amount::zero());
+            let mut reused_transactions: u64 = 0;
+            let mut verified_transactions: u64 = 0;
 
             // Dispatch shielded transactions first: their proof batches are the longest checks, so
             // starting them before the transparent checks shortens the block's critical path.
@@ -1053,6 +1060,7 @@ where
                 .chain(transactions().filter(|(_, tx)| !tx.has_shielded_data()))
             {
                 if let Some(cached) = verified.get(&transaction_hash) {
+                    reused_transactions += 1;
                     sigops += cached.block_sigop_count();
                     block_miner_fees += cached.miner_fee;
                     continue;
@@ -1065,6 +1073,10 @@ where
                         &known_utxos,
                         shielded_transactions,
                     ));
+                }
+                // The coinbase is never reused, so counting it would understate the reuse rate.
+                if !transaction.is_coinbase() {
+                    verified_transactions += 1;
                 }
                 let rsp = transaction_verifier
                     .ready()
@@ -1080,6 +1092,12 @@ where
                 async_checks.push(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
+            if !request.is_proposal() {
+                metrics::counter!("zebra.consensus.block.verified_transactions")
+                    .increment(verified_transactions);
+                metrics::counter!("zebra.consensus.block.reused_transactions")
+                    .increment(reused_transactions);
+            }
 
             // Get the transaction results back from the transaction verifier.
 

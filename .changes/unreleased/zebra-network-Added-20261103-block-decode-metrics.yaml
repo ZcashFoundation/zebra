@@ -1,0 +1,7 @@
+project: zebra-network
+kind: Added
+body: >-
+  Added the `zebra.net.block.decode.duration_seconds` and `zebra.net.block.decode.wait_seconds`
+  histograms, which time the decoding of received `block` messages and their wait for the shared
+  decode thread pool.
+time: 2026-11-03T11:54:59Z

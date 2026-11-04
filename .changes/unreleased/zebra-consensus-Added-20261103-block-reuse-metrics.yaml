@@ -1,0 +1,7 @@
+project: zebra-consensus
+kind: Added
+body: >-
+  Added the `zebra.consensus.block.reused_transactions`, `zebra.consensus.block.verified_transactions`
+  and `zebra.consensus.block.reuse_query` counters, which report how many of a verified block's
+  transactions were reused from the mempool and how each mempool reuse query ended.
+time: 2026-11-03T11:54:59Z
