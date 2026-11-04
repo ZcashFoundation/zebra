@@ -142,6 +142,13 @@ pub enum StateInitError {
         minimum: u32,
     },
 
+    /// Pruning needs NU5 transaction consensus branch IDs to preserve the restart witness.
+    #[error(
+        "state.prune_blocks_older_than requires an NU5 or later activation height on this network. \
+         Configure NU5 or a later network upgrade, or omit this setting for archive operation"
+    )]
+    PruningRequiresNu5,
+
     /// A body prefix is unavailable, but pruning is disabled for this writable state.
     #[error(
         "cannot open pruned state at {path:?} with pruning disabled: bodies below \

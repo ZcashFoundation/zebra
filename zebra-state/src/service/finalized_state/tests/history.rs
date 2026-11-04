@@ -263,6 +263,46 @@ fn invalid_pruning_retention_does_not_create_a_cache_directory() {
 }
 
 #[test]
+fn pruning_without_nu5_does_not_create_a_cache_directory() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let network = Network::new_regtest(Default::default());
+    let config = Config {
+        cache_dir: cache.path().join("pruning-without-nu5"),
+        prune_blocks_older_than: Some(crate::MAX_BLOCK_REORG_HEIGHT + 1),
+        ..Config::default()
+    };
+    for read_only in [false, true] {
+        let low_level = DiskDb::new(
+            &config,
+            STATE_DATABASE_KIND,
+            &state_database_format_version_in_code(),
+            &network,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            read_only,
+        );
+        assert!(matches!(low_level, Err(StateInitError::PruningRequiresNu5)));
+        assert!(!config.cache_dir.exists());
+
+        let high_level = FinalizedState::new_with_debug(
+            &config,
+            &network,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            read_only,
+        );
+        assert!(matches!(
+            high_level,
+            Err(StateInitError::PruningRequiresNu5)
+        ));
+        assert!(!config.cache_dir.exists());
+    }
+}
+
+#[test]
 fn pruning_stages_at_most_one_hundred_contiguous_heights() {
     let _init_guard = zebra_test::init();
     let state = populated_with_witness(&Config::ephemeral(), Height(350), Height(351));

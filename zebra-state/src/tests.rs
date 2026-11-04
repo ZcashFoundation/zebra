@@ -144,7 +144,13 @@ fn pruning_retention_respects_network_minimums() {
         (Network::new_default_testnet(), MIN_PRUNING_RETENTION),
         (custom_testnet, MIN_PRUNING_RETENTION),
         (
-            Network::new_regtest(Default::default()),
+            Network::new_regtest(
+                testnet::ConfiguredActivationHeights {
+                    nu5: Some(1),
+                    ..Default::default()
+                }
+                .into(),
+            ),
             MAX_BLOCK_REORG_HEIGHT + 1,
         ),
     ] {
@@ -166,5 +172,69 @@ fn pruning_retention_respects_network_minimums() {
             config.prune_blocks_older_than = Some(configured);
             config.validate_pruning(&network).unwrap();
         }
+    }
+}
+
+#[test]
+fn pruning_requires_an_nu5_activation() {
+    use zebra_chain::parameters::{
+        testnet::{self, ConfiguredActivationHeights},
+        Network,
+    };
+
+    use crate::{Config, MAX_BLOCK_REORG_HEIGHT};
+
+    let custom_without_nu5 = testnet::Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .to_network()
+        .unwrap();
+    let custom_with_inherited_nu5 = testnet::Parameters::build()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu6: Some(2),
+            ..Default::default()
+        })
+        .unwrap()
+        .to_network()
+        .unwrap();
+    let regtest_with_nu5 = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    assert_eq!(
+        zebra_chain::parameters::NetworkUpgrade::Nu5.activation_height(&custom_without_nu5),
+        None,
+    );
+
+    let pruning_config = |network: &Network| Config {
+        prune_blocks_older_than: Some(if network.is_regtest() {
+            MAX_BLOCK_REORG_HEIGHT + 1
+        } else {
+            crate::MIN_PRUNING_RETENTION
+        }),
+        ..Config::default()
+    };
+    for network in [Network::new_regtest(Default::default()), custom_without_nu5] {
+        assert!(
+            matches!(
+                pruning_config(&network).validate_pruning(&network),
+                Err(crate::StateInitError::PruningRequiresNu5)
+            ),
+            "pruning without NU5 or a later activation must be rejected on {}",
+            network.lowercase_name(),
+        );
+    }
+
+    for network in [custom_with_inherited_nu5, regtest_with_nu5] {
+        pruning_config(&network).validate_pruning(&network).unwrap();
     }
 }
