@@ -613,7 +613,7 @@ impl BlockingTaskGuard {
 impl Drop for BlockingTaskGuard {
     fn drop(&mut self) {
         self.active.fetch_sub(1, Ordering::SeqCst);
-        self.done.notify_waiters();
+        self.done.notify_one();
     }
 }
 
@@ -927,11 +927,24 @@ where
         active_blocking: Arc<AtomicUsize>,
         blocking_done: Arc<Notify>,
     ) {
+        Self::wait_for_blocking_tasks_with_hook(active_blocking, blocking_done, || {}).await;
+    }
+
+    async fn wait_for_blocking_tasks_with_hook<F>(
+        active_blocking: Arc<AtomicUsize>,
+        blocking_done: Arc<Notify>,
+        mut after_active_load: F,
+    ) where
+        F: FnMut(),
+    {
         loop {
             let notified = blocking_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if active_blocking.load(Ordering::SeqCst) == 0 {
                 return;
             }
+            after_active_load();
             notified.await;
         }
     }

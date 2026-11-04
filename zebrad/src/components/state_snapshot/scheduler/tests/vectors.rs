@@ -27,8 +27,8 @@ use zebra_state::state_snapshot::{format::ComponentId, store::ArtifactStore, Sna
 
 use crate::{
     components::state_snapshot::scheduler::{
-        BlameReason, PeerBlame, PieceDescriptor, PieceStore, Scheduler, SchedulerConfig,
-        SchedulerError, VerifiedPiece,
+        BlameReason, BlockingTaskGuard, PeerBlame, PieceDescriptor, PieceStore, Run, Scheduler,
+        SchedulerConfig, SchedulerError, VerifiedPiece,
     },
     BoxError,
 };
@@ -2157,4 +2157,65 @@ async fn shutdown_waits_for_blocking_store_writes() {
         .expect("the scheduler finishes after the write")
         .expect("the scheduler task does not panic");
     assert!(matches!(result, Err(SchedulerError::Closed)), "{result:?}");
+}
+
+/// Blocking-task waiters do not miss completions that happen after their active-count load and
+/// before their notification await.
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn blocking_task_notifications_cover_the_post_load_pre_await_gap() {
+    let _init_guard = zebra_test::init();
+    let active = Arc::new(AtomicUsize::new(0));
+    let done = Arc::new(tokio::sync::Notify::new());
+    let first = BlockingTaskGuard::new(active.clone(), done.clone());
+    let second = BlockingTaskGuard::new(active.clone(), done.clone());
+
+    let mut lifecycle_receivers = Vec::new();
+    let mut resume_senders = Vec::new();
+    let mut waiters = Vec::new();
+    for _ in 0..2 {
+        let (lifecycle_tx, lifecycle_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        lifecycle_receivers.push(lifecycle_rx);
+        resume_senders.push(resume_tx);
+        let active = active.clone();
+        let done = done.clone();
+        waiters.push(tokio::spawn(async {
+            Run::<FakePeer, BlockingStore>::wait_for_blocking_tasks_with_hook(
+                active,
+                done,
+                move || {
+                    lifecycle_tx
+                        .send(())
+                        .expect("the test observes the active-count load");
+                    resume_rx
+                        .recv()
+                        .expect("the test resumes the notification await");
+                },
+            )
+            .await;
+        }));
+    }
+    for lifecycle_rx in lifecycle_receivers {
+        tokio::task::spawn_blocking(move || lifecycle_rx.recv())
+            .await
+            .expect("the lifecycle observer does not panic")
+            .expect("the waiter loads the active blocking-task count");
+    }
+
+    drop(first);
+    drop(second);
+    for resume_tx in resume_senders {
+        resume_tx
+            .send(())
+            .expect("the waiter is paused before its notification await");
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for waiter in waiters {
+            waiter
+                .await
+                .expect("the blocking-task waiter does not panic");
+        }
+    })
+    .await
+    .expect("registered waiters observe both blocking-task completions");
 }
