@@ -788,6 +788,11 @@ impl StateService {
                     self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 } else {
                     if is_handoff_retry {
+                        // The failed-handoff reset cleared fork eligibility. The retry is now
+                        // ordered in the writer channel, so its semantic children can follow it
+                        // without waiting for the disk write or an unrelated request.
+                        self.non_finalized_block_write_sent_hashes
+                            .can_fork_chain_at_hashes = true;
                         self.block_write_sender.finalized_retry_sent();
                     }
                     metrics::gauge!("state.checkpoint.sent.block.height")
