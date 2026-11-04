@@ -177,7 +177,7 @@ zebrad (CLI orchestration)
 | Crate             | Key Concerns                                                            |
 | ----------------- | ----------------------------------------------------------------------- |
 | `zebra-chain`     | Serialization correctness, no async, consensus-critical data structures |
-| `zebra-db`        | Disk encodings, RocksDB options, migrations, snapshots, format 30.1.0   |
+| `zebra-db`        | Disk encodings, RocksDB options, migrations, snapshots, format 32.0.0   |
 | `zebra-network`   | Protocol correctness, peer handling, rate limiting, DoS resistance      |
 | `zebra-consensus` | Verification completeness, error handling, checkpoint vs semantic paths |
 | `zebra-state`     | Read/write separation (`ReadRequest` vs `Request`), service boundaries  |
