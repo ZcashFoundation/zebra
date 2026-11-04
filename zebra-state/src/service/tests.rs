@@ -1750,6 +1750,300 @@ async fn semantic_handoff_dispatches_children_before_writer_acknowledgement() {
     .expect("the unacknowledged handoff regression finishes");
 }
 
+/// An in-flight honest retry is the only writer request for its hash. Its duplicate is rejected
+/// immediately, and successful completion is published before the retry caller is woken.
+#[tokio::test(flavor = "multi_thread")]
+async fn in_flight_handoff_retry_coalesces_duplicates_and_publishes_completion() {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::atomic::{AtomicBool, Ordering},
+        task::{Context, Wake, Waker},
+    };
+
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    struct CompletionObservation {
+        sender: super::write::BlockWriteSender,
+        published: AtomicBool,
+        woken: std::sync::mpsc::Sender<()>,
+    }
+
+    impl Wake for CompletionObservation {
+        fn wake(self: Arc<Self>) {
+            self.published
+                .store(self.sender.handoff_complete(), Ordering::SeqCst);
+            self.woken
+                .send(())
+                .expect("the test observes the retry wakeup");
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the semantic child fails after its invalid parent");
+        assert!(!state.block_write_sender.handoff_complete());
+
+        let (retry_sender, mut retry_messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(retry_sender));
+        let mut retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let queued_retry = match retry_messages.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => queued,
+            _ => panic!("the first honest retry is dispatched"),
+        };
+        assert!(state
+            .non_finalized_block_write_sent_hashes
+            .contains(&honest_parent.hash()));
+
+        let duplicate = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let duplicate_result = tokio::time::timeout(Duration::from_secs(1), duplicate)
+            .await
+            .expect("an in-flight duplicate does not remain pending")
+            .unwrap();
+        assert!(duplicate_result.is_err());
+        assert!(matches!(
+            retry_messages.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        let (woken_tx, woken_rx) = std::sync::mpsc::channel();
+        let observation = Arc::new(CompletionObservation {
+            sender: state.block_write_sender.clone(),
+            published: AtomicBool::new(false),
+            woken: woken_tx,
+        });
+        let waker = Waker::from(observation.clone());
+        let mut context = Context::from_waker(&waker);
+        assert!(Pin::new(&mut retry).poll(&mut context).is_pending());
+        state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::WriteMessage::Finalized(queued_retry))
+            .unwrap();
+        tokio::task::spawn_blocking(move || woken_rx.recv_timeout(Duration::from_secs(5)))
+            .await
+            .expect("the response observer does not panic")
+            .expect("the retry response wakes its registered caller");
+        assert!(
+            observation.published.load(Ordering::SeqCst),
+            "handoff completion is visible when the retry response wakes its caller"
+        );
+        retry
+            .await
+            .unwrap()
+            .expect("the in-flight honest retry commits");
+        assert!(state.block_write_sender.handoff_complete());
+    })
+    .await
+    .expect("the in-flight retry regression finishes");
+}
+
+/// Replacing an out-of-order checkpoint promptly answers the superseded request, while the
+/// replacement remains eligible to commit when its parent arrives.
+#[tokio::test(flavor = "multi_thread")]
+async fn superseded_checkpoint_request_is_answered_before_parent_arrives() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(2), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let superseded = state.queue_and_commit_to_finalized_state(blocks[2].clone().into(), None);
+        let mut replacement =
+            state.queue_and_commit_to_finalized_state(blocks[2].clone().into(), None);
+        let superseded_result = tokio::time::timeout(Duration::from_secs(1), superseded)
+            .await
+            .expect("the superseded checkpoint is answered promptly")
+            .unwrap();
+        assert!(superseded_result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut replacement)
+                .await
+                .is_err()
+        );
+
+        state
+            .queue_and_commit_to_finalized_state(blocks[1].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the missing parent commits");
+        replacement
+            .await
+            .unwrap()
+            .expect("the replacement checkpoint commits after its parent");
+    })
+    .await
+    .expect("the superseded checkpoint regression finishes");
+}
+
+/// A checkpoint captured before the handoff is rejected rather than forwarded by a later drain.
+#[tokio::test(flavor = "multi_thread")]
+async fn finalized_dequeue_rechecks_handoff_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(sender));
+        state.block_write_sender.start_handoff(blocks[0].hash());
+        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+        state
+            .finalized_state_queued_blocks
+            .insert(blocks[0].hash(), (blocks[1].clone().into(), rsp_tx, None));
+        state.drain_finalized_queue_and_commit();
+
+        assert!(matches!(
+            messages.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        let result = tokio::time::timeout(Duration::from_secs(1), rsp_rx)
+            .await
+            .expect("the stale checkpoint is answered promptly")
+            .unwrap();
+        assert!(result.is_err());
+        assert_eq!(state.finalized_block_write_last_sent_hash, blocks[0].hash());
+    })
+    .await
+    .expect("the finalized dequeue regression finishes");
+}
+
+async fn assert_stale_semantic_dispatch_is_rejected(initial_handoff: bool) {
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(4)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+    state
+        .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let (handoff_parent, parent, child) = if initial_handoff {
+        (blocks[1].clone(), blocks[1].clone(), blocks[2].clone())
+    } else {
+        state
+            .queue_and_commit_to_finalized_state(blocks[1].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        (blocks[1].clone(), blocks[2].clone(), blocks[3].clone())
+    };
+
+    let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+    drop(state.block_write_sender.non_finalized.replace(sender));
+    state
+        .block_write_sender
+        .start_handoff(handoff_parent.hash());
+    state
+        .non_finalized_block_write_sent_hashes
+        .can_fork_chain_at_hashes = false;
+    let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+    let queued = (child.prepare(), rsp_tx, None, None);
+    if initial_handoff {
+        state.non_finalized_state_queued_blocks.queue(queued);
+        state.send_ready_non_finalized(parent.hash(), None);
+    } else {
+        state.send_ready_non_finalized(parent.hash(), Some(queued));
+    }
+
+    assert!(matches!(
+        messages.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+    let result = tokio::time::timeout(Duration::from_secs(1), rsp_rx)
+        .await
+        .expect("the stale semantic request is answered promptly")
+        .unwrap();
+    assert!(result.is_err());
+}
+
+/// The initial handoff branch re-checks semantic dispatch admission for dequeued children.
+#[tokio::test(flavor = "multi_thread")]
+async fn initial_semantic_handoff_rechecks_dequeued_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        assert_stale_semantic_dispatch_is_rejected(true),
+    )
+    .await
+    .expect("the initial semantic dispatch regression finishes");
+}
+
+/// The post-handoff branch re-checks semantic dispatch admission for a directly ready child.
+#[tokio::test(flavor = "multi_thread")]
+async fn post_handoff_semantic_dispatch_rechecks_ready_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        assert_stale_semantic_dispatch_is_rejected(false),
+    )
+    .await
+    .expect("the post-handoff semantic dispatch regression finishes");
+}
+
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =

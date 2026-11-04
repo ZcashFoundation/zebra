@@ -228,6 +228,11 @@ impl BlockWriteSender {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn handoff_complete(&self) -> bool {
+        self.admission() == FinalizedAdmission::HandoffComplete
+    }
+
     /// Returns whether ordinary checkpoint blocks are still admitted to the writer.
     pub(super) fn accepts_finalized(&self) -> bool {
         self.finalized.is_some() && self.admission() == FinalizedAdmission::Checkpoints
@@ -507,11 +512,11 @@ impl WriteBlockWorkerTask {
                         permit.send((*hash, height));
                     }
                     let succeeded = result.is_ok();
-                    let _ = rsp_tx.send(result);
                     finalized_commit_failed = !succeeded;
                     if succeeded && handoff_requested {
                         handoff_complete.store(true, Ordering::Release);
                     }
+                    let _ = rsp_tx.send(result);
                     continue;
                 }
                 WriteMessage::NonFinalized(msg) => msg,
