@@ -157,9 +157,13 @@ next start can safely repeat it. The checkpoint is removed only after v33 is
 recorded; a crash between those steps removes it on the next start instead.
 RocksDB hard-links existing SST files into the checkpoint, but operators must
 still allow working space for new records, tombstones, and compaction during the
-rewrite. The live and checkpoint RocksDB identities must match, so a stale
-checkpoint from a replaced or restored database is rejected before any mutation.
-Pruned and snapshot-born databases migrate their retained records, including the
+rewrite. Live and checkpoint RocksDB identities and migration-operation metadata
+must match, so a stale checkpoint from a replaced or restored database is
+rejected before any mutation. Sources that already contain variable-height
+sentinel keys are also rejected instead of being migrated again. A versionless
+directory left by a major-version move is recovered as the newest registered
+source that needs a migration, not as the destination's current format. Pruned
+and snapshot-born databases migrate their retained records, including the
 `snapshot_base` marker, without reconstructing missing bodies. Spending-index
 mode restrictions remain unchanged.
 

@@ -102,6 +102,9 @@ pub struct ZebraDb {
     // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
+    /// Whether this instance created a new database instead of opening an existing one.
+    newly_created: bool,
+
     /// All history-dependent startup work and initial format checks have completed.
     ready_for_pruning: Arc<AtomicBool>,
 
@@ -207,7 +210,22 @@ impl ZebraDb {
             let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
             return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
         }
-        if read_only && variable_height::is_required(&format_change) {
+        let current_markers = if variable_height::is_required(&format_change) {
+            let probe = DiskDb::new_for_variable_height_upgrade(
+                config,
+                STATE_DATABASE_KIND,
+                &state_database_format_version_in_code(),
+                network,
+                STATE_COLUMN_FAMILIES_IN_CODE
+                    .iter()
+                    .map(ToString::to_string),
+                read_only,
+            )?;
+            variable_height::current_height_markers_exist(probe.inner(), probe.path())?
+        } else {
+            false
+        };
+        if read_only && variable_height::is_required(&format_change) && !current_markers {
             // Unlike compatible migrations, this rewrite must not expose mixed old/new records to
             // current-directory secondaries either.
             return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade {
@@ -221,8 +239,9 @@ impl ZebraDb {
         // We also allow skipping them in unit tests and dependent crates' test fixtures.
         let debug_skip_format_upgrades =
             read_only || (cfg!(any(test, feature = "proptest-impl")) && debug_skip_format_upgrades);
-        let synchronous_variable_height_upgrade =
-            !debug_skip_format_upgrades && variable_height::is_required(&format_change);
+        let synchronous_variable_height_upgrade = !debug_skip_format_upgrades
+            && variable_height::is_required(&format_change)
+            && !current_markers;
 
         // Open the low-level database and do initial checks.
         //
@@ -256,11 +275,19 @@ impl ZebraDb {
                 read_only,
             )?
         };
+        let format_change = if current_markers {
+            DbFormatChange::CheckOpenCurrent {
+                running_version: format_version_in_code.clone(),
+            }
+        } else {
+            format_change
+        };
 
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
+            newly_created: format_change.is_newly_created(),
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db: disk_db,
         };
@@ -332,6 +359,7 @@ impl ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades: true,
             format_change_handle: None,
+            newly_created: false,
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db,
         })
@@ -410,6 +438,9 @@ impl ZebraDb {
     ///
     /// See `database_format_version_on_disk()` for details.
     pub fn format_version_on_disk(&self) -> Result<Option<Version>, BoxError> {
+        if self.newly_created && !self.version_file_path().exists() {
+            return Ok(Some(Version::new(self.major_version(), 0, 0)));
+        }
         database_format_version_at_path(
             &self.version_file_path(),
             self.path(),

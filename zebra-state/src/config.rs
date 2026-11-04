@@ -20,7 +20,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
-    service::finalized_state::{restorable_db_source_versions, restorable_db_versions},
+    service::finalized_state::{
+        can_read_without_migration, restorable_db_source_versions, restorable_db_versions,
+    },
     state_database_format_version_in_code, BoxError, StateInitError, MIN_PRUNING_RETENTION,
 };
 
@@ -536,9 +538,9 @@ pub fn state_database_format_version_on_disk(
 ///
 /// Typically, the version is read from a version text file.
 ///
-/// If there is an existing on-disk database, but no version file,
-/// returns `Ok(Some(major_version.0.0))`.
-/// (This happens even if the database directory was just newly created.)
+/// If there is an existing on-disk database, but no version file, conservatively returns the
+/// newest registered source version that needs a migration, or `major_version.0.0` when no
+/// intervening migration is needed. This prevents a rename gap from bypassing required upgrades.
 ///
 /// If there is no existing on-disk database, or `config` is ephemeral, returns `Ok(None)`.
 ///
@@ -595,9 +597,20 @@ pub(crate) fn database_format_version_at_path(
     // There's no version file on disk, so we need to guess the version
     // based on the database content
     match fs::metadata(db_path) {
-        // But there is a database on disk, so it has the current major version with no upgrades.
-        // If the database directory was just newly created, we also return this version.
-        Ok(_metadata) => Ok(Some(Version::new(major_version, 0, 0))),
+        // A versionless directory can be left by a crash during a major-version move. Conservatively
+        // select the newest registered source that needs a migration, rather than assuming the
+        // destination's records are current. Empty databases skip the migration's record passes.
+        Ok(_metadata) => {
+            let mut running_version = state_database_format_version_in_code();
+            running_version.major = major_version;
+            let mut recovery_version = restorable_db_source_versions(major_version)
+                .into_iter()
+                .map(|major| Version::new(major, 0, 0))
+                .find(|source| !can_read_without_migration(source, &running_version))
+                .unwrap_or_else(|| running_version.clone());
+            recovery_version.build = running_version.build;
+            Ok(Some(recovery_version))
+        }
 
         // There's no version file and no database on disk, so it's a new database.
         // It will be created with the current version,

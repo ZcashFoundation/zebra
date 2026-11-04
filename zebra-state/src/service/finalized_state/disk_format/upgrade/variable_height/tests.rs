@@ -465,6 +465,136 @@ fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
 }
 
 #[test]
+fn stale_same_identity_checkpoint_is_rejected_before_replacing_newer_state() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let db = open_test_db(&config);
+    seed_legacy_records(&db);
+    db.update_format_version_on_disk(&v30()).unwrap();
+    let checkpoint = checkpoint_paths(&db).0;
+    db.disk_db().create_checkpoint(&checkpoint).unwrap();
+    let stale_source = DiskDb::open_read_only(&checkpoint).unwrap();
+    let stale_identity = stale_source.get_db_identity().unwrap();
+    drop(stale_source);
+
+    let live = db.disk_db().inner();
+    live.put_cf(
+        live.cf_handle("hash_by_height").unwrap(),
+        [4, 5, 6],
+        [0xee; 32],
+    )
+    .unwrap();
+    let replacement_path = cache.path().join("newer-replacement");
+    db.disk_db().create_checkpoint(&replacement_path).unwrap();
+    let live_path = db.path().to_path_buf();
+    drop(db);
+
+    std::fs::remove_dir_all(&live_path).unwrap();
+    std::fs::rename(replacement_path, &live_path).unwrap();
+    let replacement = open_test_db(&config);
+    assert_eq!(
+        replacement.disk_db().inner().get_db_identity().unwrap(),
+        stale_identity,
+        "the restored replacement must have the stale checkpoint's lineage"
+    );
+    let before = snapshot(&replacement);
+    let before_version = replacement.format_version_on_disk().unwrap();
+
+    let error = prepare(&replacement).unwrap_err();
+    assert!(
+        matches!(error, crate::StateInitError::HistoryRead { .. }),
+        "unexpected error: {error}"
+    );
+    assert_records(&replacement, &before);
+    assert_eq!(
+        replacement.format_version_on_disk().unwrap(),
+        before_version
+    );
+}
+
+#[test]
+fn versionless_rename_gap_runs_the_v31_migration_instead_of_inferring_current() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let network = Network::Mainnet;
+    let legacy = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &v30(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    let legacy_records = seed_legacy_records(&legacy);
+    let expected = expected_records(&legacy_records);
+    let legacy_path = legacy.path().to_path_buf();
+    drop(legacy);
+    if legacy_path.join("version").exists() {
+        std::fs::remove_file(legacy_path.join("version")).unwrap();
+    }
+
+    let current_path = config.db_path(STATE_DATABASE_KIND, 32, &network);
+    std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
+    std::fs::rename(legacy_path, &current_path).unwrap();
+
+    let disk_version = crate::state_database_format_version_on_disk(&config, &network)
+        .unwrap()
+        .unwrap();
+    let change = DbFormatChange::open_database(&running_version(), Some(disk_version));
+    assert!(
+        is_required(&change),
+        "a versionless rename gap must not be inferred as the current format"
+    );
+
+    let db = open_test_db(&config);
+    let initial_tip = prepare(&db).unwrap();
+    let (_sender, receiver) = bounded(1);
+    change
+        .apply_format_upgrade(&db, initial_tip, &receiver)
+        .unwrap();
+    finish(&db);
+    assert_eq!(
+        db.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+    assert_records(&db, &expected);
+    assert!(!checkpoint_paths(&db).0.exists());
+}
+
+#[test]
+fn versionless_current_records_are_rejected_instead_of_rewritten() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let db = open_test_db(&config);
+    let live = db.disk_db().inner();
+    live.put_cf(
+        live.cf_handle("hash_by_height").unwrap(),
+        Height::MIN.as_bytes(),
+        [0x55; 32],
+    )
+    .unwrap();
+    let before = snapshot(&db);
+    let version_path = db.path().join("version");
+    if version_path.exists() {
+        std::fs::remove_file(version_path).unwrap();
+    }
+
+    let error = prepare(&db).unwrap_err();
+    assert!(
+        matches!(error, crate::StateInitError::HistoryRead { .. }),
+        "unexpected error: {error}"
+    );
+    assert_records(&db, &before);
+}
+
+#[test]
 fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
