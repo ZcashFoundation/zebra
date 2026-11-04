@@ -14,10 +14,9 @@ the [deployment triggers and environments](continuous-delivery.md#triggers-and-e
    requires `lint`, `unit-tests`, `test-crates`, `pr-gate-result`, and
    `merge-policy`. It requires a PR and merge commits, but no approving
    review or merge queue. It does not require `mergefreeze`.
-3. Keep `next` current through the automatic `main`-to-`next` sync PR,
-   which merges itself with a merge commit once its checks pass. To hold
-   it, add the `do-not-merge` label. Resolve conflicts on its branch as
-   below.
+3. Keep `next` current through the automatic `main`-to-`next` sync PR. A
+   maintainer reviews it and merges it with a merge commit when `next`
+   should take those commits. Resolve conflicts on its branch as below.
 4. To promote the branch, open a PR from `next` to `main`. It follows
    `main`'s [review and merge-queue requirements](continuous-integration.md#automated-merges).
    Review the entire branch difference, not only the latest change.
@@ -39,8 +38,10 @@ uses `ubuntu-26.04` with a five-minute timeout and:
 - Finds an open PR from this repository's `sync/main-to-next` into `next`,
   rather than accepting a fork's branch with the same name, and creates
   `chore: sync main to next` if none exists.
-- Enables auto-merge with a merge commit when the PR is mergeable. A
-  conflicting PR can't merge itself; the run summary reports the conflict.
+- Leaves the PR for a maintainer to merge. If `main` can't be merged into
+  the branch, it turns the PR into a draft, because the branch is then
+  missing commits from `main`. The run summary reports a conflict with
+  `next`.
 
 The job opens PRs with a GitHub App token from `RELEASE_APP_ID` and
 `RELEASE_APP_PRIVATE_KEY`, requesting contents-write and pull-requests-write
@@ -65,8 +66,10 @@ PR with a merge commit after its checks pass. Do not force-push or reset
 `next` to discard the changes under evaluation.
 
 Later pushes to `main` are merged into the branch, never force-pushed over
-your resolution. If that merge conflicts, merge `origin/main` into the
-branch the same way.
+your resolution. If that merge conflicts, the workflow turns the PR into a
+draft, because the branch is missing commits from `main`. Merge
+`origin/main` into the branch the same way, then mark the PR ready for
+review.
 
 ## Publish a pre-release
 

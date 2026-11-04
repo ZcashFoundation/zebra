@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added sync stall diagnosis. Sync restarts now log why they happened, block download and verify errors include a `kind`, and the "chain updates have stalled" warning includes the latest restart reason and the age of the oldest in-flight block. The new `sync.restart.count`, `sync.block.error.count`, and `sync.downloads.oldest_age_seconds` metrics are exported to Prometheus, and sent to Sentry once a minute when Sentry is enabled.
+time: 2026-10-22T20:00:00.000000000Z
