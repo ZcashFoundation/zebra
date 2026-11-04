@@ -148,8 +148,10 @@ fn snapshot_databases_are_isolated_from_30_0_readers() {
     assert_eq!(current.snapshot_base(), Some(base));
 }
 
+/// A v32 directory whose records already use the current encoding, as a finished height rewrite
+/// leaves them, moves to v33 without another rewrite and keeps its snapshot marker.
 #[test]
-fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
+fn snapshot_v32_database_with_current_records_moves_to_v33_without_record_changes() {
     use std::time::{Duration, Instant};
 
     use crate::{
@@ -174,15 +176,15 @@ fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
 
     let network = network();
     let config = config(cache.path().to_path_buf(), Some(RETENTION));
-    let legacy_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 32, &network);
     std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
     std::fs::rename(current_path, &legacy_path).unwrap();
-    let mut legacy_version = semver::Version::new(30, 1, 0);
+    let mut legacy_version = semver::Version::new(32, 0, 0);
     legacy_version.build = state_database_format_version_in_code().build;
     write_database_format_version_to_disk(
         &config,
         STATE_DATABASE_KIND,
-        30,
+        32,
         &legacy_version,
         &network,
     )
