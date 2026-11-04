@@ -70,6 +70,152 @@ fn snapshot_marker_sets_the_history_capabilities() {
 }
 
 #[test]
+fn snapshot_databases_are_isolated_from_30_0_readers() {
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{
+            CancelFormatChange, DbFormatChange, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        tests::snapshot_db::network,
+    };
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, base) = snapshot_state(
+        cache.path().to_path_buf(),
+        TIP,
+        WINDOW_START,
+        Coinbase::Branched,
+        0,
+    );
+    let snapshot_path = state.db.path().to_path_buf();
+    let snapshot_tip = state.db.tip();
+    let snapshot_version = state.db.format_version_on_disk().unwrap().unwrap();
+    drop(state);
+
+    let config = config(cache.path().to_path_buf(), Some(RETENTION));
+    let mut old_version = semver::Version::new(30, 0, 0);
+    old_version.build = snapshot_version.build.clone();
+    let old_columns = || {
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .copied()
+            .filter(|name| *name != "snapshot_base")
+            .map(str::to_owned)
+    };
+    let old = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        &network(),
+        true,
+        old_columns(),
+        false,
+    )
+    .unwrap();
+    let old_path = old.path().to_path_buf();
+    let old_tip = old.tip();
+    let disk_version = old.format_version_on_disk().unwrap();
+    let change = DbFormatChange::open_database(&old_version, disk_version);
+    let (cancel, cancelled) = crossbeam_channel::bounded(1);
+    cancel.send(CancelFormatChange).unwrap();
+    let _ = change.run_format_change_or_check(&old, old_tip.map(|tip| tip.0), &cancelled);
+    drop(old);
+
+    let current = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network(),
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        current.format_version_on_disk().unwrap(),
+        Some(snapshot_version),
+        "the old open must not downgrade the snapshot version"
+    );
+    assert_eq!(old_tip, None, "30.0 must not read the snapshot chain");
+    assert_ne!(
+        old_path, snapshot_path,
+        "30.0 must not open the snapshot database directory"
+    );
+    assert_eq!(current.tip(), snapshot_tip);
+    assert_eq!(current.snapshot_base(), Some(base));
+}
+
+#[test]
+fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
+    use std::time::{Duration, Instant};
+
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        tests::snapshot_db::network,
+        write_database_format_version_to_disk,
+    };
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, base) = snapshot_state(
+        cache.path().to_path_buf(),
+        TIP,
+        WINDOW_START,
+        Coinbase::Branched,
+        0,
+    );
+    let snapshot_tip = state.db.tip();
+    let current_path = state.db.path().to_path_buf();
+    drop(state);
+
+    let network = network();
+    let config = config(cache.path().to_path_buf(), Some(RETENTION));
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
+    std::fs::rename(current_path, &legacy_path).unwrap();
+    let mut legacy_version = semver::Version::new(30, 1, 0);
+    legacy_version.build = state_database_format_version_in_code().build;
+    write_database_format_version_to_disk(
+        &config,
+        STATE_DATABASE_KIND,
+        30,
+        &legacy_version,
+        &network,
+    )
+    .unwrap();
+
+    let running_version = state_database_format_version_in_code();
+    let mut db = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &running_version,
+        &network,
+        false,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !db.ready_for_pruning() {
+        db.check_for_panics();
+        assert!(Instant::now() < deadline, "the v32 upgrade did not finish");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert_eq!(db.path(), config.db_path(STATE_DATABASE_KIND, 32, &network));
+    assert!(!legacy_path.exists());
+    assert_eq!(db.tip(), snapshot_tip);
+    assert_eq!(db.snapshot_base(), Some(base));
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(running_version));
+}
+
+#[test]
 fn snapshot_marker_must_be_consistent_with_the_stored_chain() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();

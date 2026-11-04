@@ -17,7 +17,7 @@ use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
-    service::finalized_state::restorable_db_versions,
+    service::finalized_state::{restorable_db_source_version, restorable_db_versions},
     state_database_format_version_in_code, BoxError, StateInitError, MIN_PRUNING_RETENTION,
 };
 
@@ -454,8 +454,8 @@ fn check_and_delete_database(
     // Don't delete databases that can be reused.
     if restorable_db_versions
         .iter()
-        .map(|v| v - 1)
-        .any(|v| v == dir_major_version)
+        .filter_map(|version| restorable_db_source_version(*version))
+        .any(|version| version == dir_major_version)
     {
         return None;
     }
