@@ -1,4 +1,4 @@
 project: zebra-network
 kind: breaking
-body: Added negotiated compact-block wire messages, bounded witnessed-identity reconstruction, and compact screening requests and responses; update exhaustive matches on Message, Request, and Response. Compact downloads can return `Response::ReconstructedBlock`, and `Request::CheckCompactBlock` carries optional immutable `zebra_node_services::compact::ReconstructedBlock` evidence ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)).
+body: Handle compact-block messages and `Request::{AdvertiseCompactBlock, CheckCompactBlock, CheckCompactHeader, CompactBlockTransactions}` and `Response::{CompactBlockTransactions, ReconstructedBlock}` in exhaustive matches. `Request::CheckCompactBlock` carries optional immutable `zebra_node_services::compact::ReconstructedBlock` evidence ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)). Missing-transaction recovery keeps its original two-second deadline independently of unrelated peer writes ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).
 time: 2026-10-23T03:22:51.907202654+02:00

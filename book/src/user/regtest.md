@@ -50,23 +50,39 @@ Compact block relay is enabled by default. Set `compact_block_relay = false` in
 the handshake; other peers retain ordinary full-block relay.
 
 After NU5, opted-in nodes can advertise and serve an authenticated child of the
-committed best tip before transaction verification finishes. Full validation is
-still required before committing it. The cache retains one body for at most
-15 seconds, with a 2 MB wire limit and a conservative 64 MiB decoded-content
-charge. Rejection, cancellation, or expiry withdraws the body; after withdrawal,
-the admission slot stays reserved until its deadline or the next committed tip
-to bound replayed advertisements. Locally invalidated hashes are ineligible.
-At most eight authenticated, deterministic rejection hashes are remembered for
-60 seconds to suppress repeated expensive verification. Unauthenticated variants,
-timeouts, and infrastructure failures do not populate this set. Ordinary
-committed announcements are unchanged. Compatible peers do not punish one another
-for later transaction validation failures after authenticating the body against a
-current committed parent. If that context is unavailable, including historical
-or pipelined downloads, verification continues. Before assigning a punitive later
-failure, authentication retries for at most 30 seconds without publication;
-unavailable context remains non-punitive, while a failed authentication is scored.
-Withdrawn bodies are rechecked before their local wire write begins, falling back
-to committed state if necessary. Bytes already sent cannot be recalled.
+committed best tip before transaction verification finishes. Authentication uses
+parent context from a published immutable snapshot of the non-finalized chains.
+If the parent is absent, early relay is skipped; full verification and ordinary
+post-commit relay continue. Full validation is still required before committing
+any block. Speculative mining jobs can still use finalized-tip context; they do
+not authorize early relay or serving an uncommitted block.
+
+The cache retains one body for at most 15 seconds, with a 2 MB wire limit and a
+conservative 64 MiB decoded-content charge. Cached bodies are served only while
+their parent remains the published snapshot's best tip. Rejection, cancellation, or
+expiry withdraws the body; after withdrawal, the admission slot stays reserved
+until its deadline or the next committed tip to bound replayed advertisements.
+Locally invalidated hashes are ineligible. Authenticated deterministic rejections
+from peers and submitted blocks are retained in memory until their block heights
+finalize, preventing repeated early relay and speculative mining-template work.
+The body must match its transaction and authorizing-data commitments before a
+rejection is recorded, so malformed variants cannot invalidate the genuine block.
+Proof-of-work authentication limits growth on public networks, but not on networks
+that disable proof of work; a defensive cap stops early relay and speculative
+mining instead of evicting unfinalized rejections. Rejections past the cap are not
+recorded, so their replays are verified again. The cap does not prevent ordinary
+full validation and commits; finalization frees capacity. Transient failures,
+including missing parents or UTXOs, timeouts and infrastructure failures, withdraw
+cached bodies without recording rejections.
+
+Compatible peers do not punish one another for later transaction validation
+failures after authenticating the body against committed parent context on any
+retained fork. If that context is unavailable, including historical or pipelined
+downloads, verification continues. Before assigning a punitive later failure,
+authentication retries for at most 30 seconds without publication; unavailable
+context remains non-punitive, while a failed authentication is scored. Withdrawn
+bodies are rechecked before their local wire write begins, falling back to
+committed state if necessary. Bytes already sent cannot be recalled.
 
 These connections also negotiate compact encoding version 1 with
 `sendcmpct`. At most three recipients per announcement receive `cmpctblock`;
@@ -81,12 +97,17 @@ v5/v6 transactions and the transaction ID for earlier versions.
 Reconstruction uses the verified mempool, then one `getblocktxn`/`blocktxn`
 exchange for missing transactions. Collisions, commitment mismatches, unknown
 parents, and a two-second recovery timeout fall back to a full block without
-punishing the announcing peer. Repeated recovery responses share a block-size
-payload budget for 15 seconds after delivery, even if publication permission is withdrawn.
-The deadline also bounds backpressured recovery writes, releasing the globally
-bounded snapshot before connection cleanup. The normal consensus verifier still
-checks every reconstructed block. Coinbase-only blocks use full relay because
-compact encoding would not save bytes.
+punishing the announcing peer. The recovery deadline starts after the
+missing-transaction request is written and is not extended by unrelated peer
+writes. Unrelated advertisements and inbound requests wait until recovery
+completes or fallback begins. Transport backpressure can still delay delivery of
+the fallback request.
+Repeated recovery responses share a block-size payload budget for 15 seconds
+after delivery, even if publication permission is withdrawn. This serving deadline
+also bounds backpressured recovery writes, releasing the globally bounded
+snapshot before connection cleanup. The normal consensus verifier still checks
+every reconstructed block. Coinbase-only blocks use full relay because compact
+encoding would not save bytes.
 
 This uses service bit 16 (`NODE_COMPACT_BLOCKS`), assigned by the
 [draft Compact Block Relay ZIP](https://github.com/zcash/zips/pull/1429).
