@@ -42,6 +42,8 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+mod mining_rejection;
+
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
 #[tokio::test(flavor = "multi_thread")]

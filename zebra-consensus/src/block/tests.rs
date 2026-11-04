@@ -1320,6 +1320,10 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
                 hash
             );
         } else {
+            state
+                .expect_request(zs::Request::RejectBlock(block.clone()))
+                .await
+                .respond(zs::Response::Rejected(false));
             let err = verify
                 .await?
                 .expect_err("the coinbase pays the wrong subsidy");
@@ -2341,12 +2345,11 @@ async fn changed_proposals_require_transaction_verification() {
             });
             let state = tower::service_fn(|request| async move {
                 match request {
-                    zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
+                    zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
                     zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
                     zs::Request::EarlyRelay { .. } => Ok(zs::Response::EarlyRelay(None)),
-                    zs::Request::CommitSemanticallyVerifiedBlock(_) => {
-                        Err::<_, BoxError>("fully verified".into())
-                    }
+                    // The fee-free transaction mock leaves the historical coinbase overpaying.
+                    zs::Request::RejectBlock(_) => Ok(zs::Response::Rejected(false)),
                     _ => panic!("a changed proposal must miss"),
                 }
             });
@@ -2365,10 +2368,21 @@ async fn changed_proposals_require_transaction_verification() {
                 .deserialize(&block.zcash_serialize_to_vec().unwrap())
                 .unwrap();
             assert!(decoded.matched.is_none(), "mutation {change} must miss");
-            assert!(verifier
+            let error = verifier
                 .oneshot(Request::CommitDecoded(decoded, None))
                 .await
-                .is_err());
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    VerifyBlockError::Block {
+                        source: BlockError::Transaction(TransactionError::Subsidy(
+                            zebra_chain::parameters::subsidy::SubsidyError::InvalidMinerFees
+                        ))
+                    }
+                ),
+                "the fixture must reach fee validation after a cache miss: {error:?}"
+            );
             assert_eq!(
                 calls.load(Ordering::SeqCst),
                 count,

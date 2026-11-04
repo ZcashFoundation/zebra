@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_in_result)]
 
 mod prop;
+mod rejections;
 mod vectors;
 
 impl super::NonFinalizedState {

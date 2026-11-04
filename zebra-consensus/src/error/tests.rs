@@ -68,13 +68,6 @@ fn verification_errors_have_high_misbehavior_score() {
 fn early_relay_rejection_excludes_transient_and_unclassified_errors() {
     for error in [
         TransactionError::TransparentInputNotFound,
-        TransactionError::LockedUntilAfterBlockHeight(block::Height(10)),
-        TransactionError::LockedUntilAfterBlockTime(Utc::now()),
-        TransactionError::ExpiredTransaction {
-            expiry_height: block::Height(1),
-            block_height: block::Height(2),
-            transaction_hash: [0; 32].into(),
-        },
         TransactionError::ImmatureTransparentCoinbaseSpend {
             outpoint: transparent::OutPoint {
                 hash: [0; 32].into(),
@@ -97,5 +90,20 @@ fn early_relay_rejection_excludes_transient_and_unclassified_errors() {
         TransactionError::Script(zebra_script::Error::TxCoinbase),
     ] {
         assert!(!error.is_deterministic_for_block(), "{error:?}");
+    }
+}
+
+#[test]
+fn block_lock_time_and_expiry_rejections_are_deterministic() {
+    for error in [
+        TransactionError::LockedUntilAfterBlockHeight(block::Height(10)),
+        TransactionError::LockedUntilAfterBlockTime(Utc::now()),
+        TransactionError::ExpiredTransaction {
+            expiry_height: block::Height(1),
+            block_height: block::Height(2),
+            transaction_hash: [0; 32].into(),
+        },
+    ] {
+        assert!(error.is_deterministic_for_block(), "{error:?}");
     }
 }

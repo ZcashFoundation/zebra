@@ -403,8 +403,9 @@ impl From<BoxError> for TransactionError {
 impl TransactionError {
     /// Whether this failure is fixed by the authenticated block's contents and network upgrade.
     ///
-    /// This allowlist deliberately excludes time rules, contextual/maturity checks, mempool policy,
-    /// UTXO availability, and generic infrastructure/conversion failures. Successfully fetched UTXO
+    /// This allowlist deliberately excludes contextual/maturity checks, mempool policy, UTXO
+    /// availability, and generic infrastructure/conversion failures. Block lock time and expiry use
+    /// the authenticated block's fixed height and header time. Successfully fetched UTXO
     /// scripts and amounts are committed by their outpoints, so signature failures cannot change
     /// with the best chain. Unknown variants must not poison early-relay rejection retention.
     pub(crate) fn is_deterministic_for_block(&self) -> bool {
@@ -426,6 +427,9 @@ impl TransactionError {
                 | NotCoinbase
                 | CoinbaseExpiryBlockHeight { .. }
                 | MaximumExpiryHeight { .. }
+                | LockedUntilAfterBlockHeight(_)
+                | LockedUntilAfterBlockTime(_)
+                | ExpiredTransaction { .. }
                 | WrongVersion
                 | UnsupportedByNetworkUpgrade(..)
                 | NoInputs
@@ -434,6 +438,9 @@ impl TransactionError {
                 | IncorrectFee
                 | Subsidy(
                     SubsidyError::InvalidMinerFees
+                        | SubsidyError::FundingStreamNotFound
+                        | SubsidyError::FoundersRewardNotFound
+                        | SubsidyError::OneTimeLockboxDisbursementNotFound
                         | SubsidyError::Overflow
                         | SubsidyError::Underflow
                         | SubsidyError::InvalidAmount(_)
