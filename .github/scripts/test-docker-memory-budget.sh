@@ -67,6 +67,7 @@ cat > "${fake_bin}/fake-metrics" <<'FAKE'
 set -euo pipefail
 container=$1
 scenario=${FAKE_SCENARIO:-normal}
+target_height=${TARGET_HEIGHT:-1200}
 write_stopped=0
 delayed_write_rate=0
 stall_micros=0
@@ -102,8 +103,8 @@ printf '%s\n' \
   'zebra_memory_budget_bytes 1073741824' \
   "zebra_state_rocksdb_write_stopped ${write_stopped}" \
   "zebra_state_rocksdb_delayed_write_rate ${delayed_write_rate}" \
-  'sync_verified_block_count_total 400' \
-  'checkpoint_verified_block_count_total 401'
+  "sync_verified_block_count_total ${target_height}" \
+  "checkpoint_verified_block_count_total $((target_height + 1))"
 if ((capped)); then
   printf 'zebra_state_rocksdb_stall_micros_total %s\n' "$stall_micros"
 fi
@@ -136,6 +137,7 @@ FAKE
 cat > "${fake_bin}/docker" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
+target_height=${TARGET_HEIGHT:-1200}
 printf 'docker %s\n' "$*" >> "${FAKE_STATE}/commands"
 command=$1
 shift
@@ -164,8 +166,10 @@ case $command in
         shift
       fi
     done
-    if [[ $format == *State.Running* ]]; then
+    if [[ $format == *State.Running* && $format == *State.OOMKilled* ]]; then
       printf 'true false\n'
+    elif [[ $format == *State.Running* ]]; then
+      printf 'true\n'
     else
       printf 'false\n'
     fi
@@ -188,7 +192,7 @@ case $command in
         "${FAKE_BIN}/fake-metrics" "$container"
       else
         "${FAKE_BIN}/fake-advance" 40000
-        printf '{"result":400}\n'
+        printf '{"result":%s}\n' "$target_height"
       fi
     else
       printf 'unexpected fake docker exec: %s\n' "$*" >&2
@@ -198,12 +202,14 @@ case $command in
   logs)
     "${FAKE_BIN}/fake-advance" 30000
     printf '%s\n' \
+      'Opened Zcash protocol endpoint at 0.0.0.0:18233' \
       'memory budget 1113 MiB (auto: effective RAM 2.0 GiB) profile=ibd' \
       'memory budget 4 GiB (explicit) profile=ibd' \
       'memory budget 1 GiB (explicit) profile=tip_only' \
-      'verified checkpoint range Height(400)'
+      '2026-01-01T00:00:00.000000Z INFO sync:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=1 current_range=(Unbounded, Included(Height(0)))' \
+      "2026-01-01T00:00:01.000000Z INFO sync:checkpoint: zebra_consensus::checkpoint: verified checkpoint range block_count=400 current_range=(Excluded(Height($((target_height - 400)))), Included(Height(${target_height})))"
     ;;
-  stop | rm | load)
+  stop | rm | load | network | volume)
     ;;
   *)
     printf 'unexpected fake docker command: %s\n' "$command" >&2
@@ -263,8 +269,8 @@ run_testnet() {
     "PATH=${fake_bin}:/usr/local/bin:/usr/bin:/bin"
     "FAKE_BIN=$fake_bin" "FAKE_STATE=$state" "FAKE_SCENARIO=$scenario"
     "RUNNER_TEMP=$runner_temp" "RESULTS_DIR=${runner_temp}/results"
-    "GITHUB_SHA=fake" "TARGET_HEIGHT=400" "CASE_TIMEOUT_SECONDS=1200"
-    "POLL_SECONDS=2" "ROCKSDB_METRICS_REFRESH_SECONDS=30"
+    "GITHUB_SHA=fake" "TARGET_HEIGHT=200000" "ARCHIVE_TIMEOUT_SECONDS=1800"
+    "CASE_TIMEOUT_SECONDS=1200" "POLL_SECONDS=2" "ROCKSDB_METRICS_REFRESH_SECONDS=30"
   )
   env "${fixture_env[@]}" bash "$testnet_script" > "${temporary_root}/output" 2>&1
 }
@@ -285,6 +291,35 @@ run_regtest() {
 
 show_output() {
   cat "${temporary_root}/output" >&2
+}
+
+check_testnet_topology() {
+  local results="${runner_temp}/results"
+  local archive_config="${results}/archive.toml"
+  local client_config="${results}/client.toml"
+  local name
+
+  grep -Fxq 'initial_testnet_peers = []' "$archive_config"
+  grep -Fxq 'peerset_initial_target_size = 25' "$archive_config"
+  grep -Fxq 'max_connections_per_ip = 8' "$archive_config"
+  grep -Fxq 'initial_testnet_peers = ["memory-budget-testnet-archive:18233"]' "$client_config"
+  grep -Fxq 'peerset_initial_target_size = 1' "$client_config"
+  grep -Fxq 'cache_dir = false' "$client_config"
+  grep -Fxq 'docker network create --internal memory-budget-testnet-local' "${state}/commands"
+
+  if [[ $(grep -c '^docker run .*--name memory-budget-testnet-archive ' "${state}/commands") != 2 ]]; then
+    echo "Testnet did not restart its archive exactly once" >&2
+    return 1
+  fi
+  for name in warmup uncapped 2g 4g; do
+    if ! grep -F "docker run " "${state}/commands" \
+      | grep -F -- "--name memory-budget-testnet-${name} " \
+      | grep -F -- '--network memory-budget-testnet-local ' \
+      | grep -F -- "--volume ${client_config}:/tmp/zebrad.toml:ro " >/dev/null; then
+      echo "Testnet client $name did not use the shared local archive configuration" >&2
+      return 1
+    fi
+  done
 }
 
 expect_testnet_failure() {
@@ -337,18 +372,19 @@ if should_run testnet-success; then
     show_output
     exit 1
   fi
-  for name in uncapped 2g 4g; do
+  for name in warmup uncapped 2g 4g; do
     wall_time="$(< "${runner_temp}/results/${name}/wall-time-ms")"
     if [[ $wall_time != 1000 ]]; then
       echo "$name included scrape delays in its wall time: $wall_time ms instead of 1000 ms" >&2
       exit 1
     fi
   done
-  if [[ $(grep -c '^31$' "${state}/sleeps") != 3 ]]; then
+  if [[ $(grep -c '^31$' "${state}/sleeps") != 4 ]]; then
     echo "Testnet did not wait for a fresh RocksDB sample after every case" >&2
     exit 1
   fi
-  echo "ok: Testnet timing excludes log, metrics and RPC delays"
+  check_testnet_topology
+  echo "ok: Testnet timing and deterministic local archive topology"
 fi
 
 if should_run testnet-cumulative; then

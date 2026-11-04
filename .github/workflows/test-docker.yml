@@ -396,11 +396,13 @@ jobs:
             exit 1
           fi
 
-  # Compare identical fresh Testnet syncs sequentially on one runner. Each run must verify and
-  # commit the checkpoint range ending at height 400 without a write stall or an OOM kill.
+  # Compare identical fresh Testnet syncs sequentially on one runner. Each run downloads real
+  # Testnet blocks from one local archive and must verify and commit through checkpoint 200,000
+  # without a write stall or an OOM kill. Public-peer discovery is limited to archive preparation.
   #
-  # It depends on public Testnet peers, so it runs on a schedule, on manual dispatch, and for pull
-  # requests that change the memory budget, and stays out of the required `test-docker` gate.
+  # It depends on public Testnet peers and takes over an hour, so it runs on a schedule, on manual
+  # dispatch, and for pull requests that change the memory budget, and stays out of the required
+  # `test-docker` gate.
   test-memory-budget-testnet:
     name: Test memory budgets through a Testnet checkpoint range
     needs: [changes, build-docker-image]
@@ -415,7 +417,8 @@ jobs:
     timeout-minutes: 90
     env:
       RESULTS_DIR: ${{ github.workspace }}/memory-budget-testnet
-      TARGET_HEIGHT: 400
+      TARGET_HEIGHT: 200000
+      ARCHIVE_TIMEOUT_SECONDS: 1800
       CASE_TIMEOUT_SECONDS: 1200
       POLL_SECONDS: 2
       ROCKSDB_METRICS_REFRESH_SECONDS: 30
@@ -435,6 +438,88 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS_DIR"
+
+          LOCAL_NETWORK="memory-budget-testnet-local"
+          ARCHIVE_CONTAINER="memory-budget-testnet-archive"
+          ARCHIVE_VOLUME="memory-budget-testnet-archive-state"
+          ARCHIVE_CONFIG="$RESULTS_DIR/archive.toml"
+          CLIENT_CONFIG="$RESULTS_DIR/client.toml"
+          IMAGE="zebrad-runtime:${GITHUB_SHA}"
+
+          rpc_height() {
+            local container=$1
+            local response
+            response=$(timeout 15 docker exec "$container" curl --silent --fail --max-time 5 \
+              -H 'content-type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"getblockcount","params":[]}' \
+              http://127.0.0.1:18232 2>/dev/null) || return 1
+            jq -er '.result | select(type == "number" and . >= 0)' <<< "$response"
+          }
+
+          checkpoint_wall_time_ms() {
+            local log_file=$1
+            python3 - "$log_file" "$TARGET_HEIGHT" <<'PY'
+          from datetime import datetime
+          import sys
+
+          log_file, target_height = sys.argv[1], int(sys.argv[2])
+          started = None
+          with open(log_file) as lines:
+              for line in lines:
+                  if "verified checkpoint range" not in line:
+                      continue
+                  timestamp = line.split(maxsplit=1)[0]
+                  try:
+                      observed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                  except ValueError:
+                      continue
+                  if started is None and "block_count=1" in line and "Height(0)" in line:
+                      started = observed
+                  if f"Height({target_height})" in line:
+                      if started is None:
+                          raise SystemExit("the target checkpoint precedes the genesis checkpoint")
+                      elapsed_ms = int((observed - started).total_seconds() * 1000)
+                      if elapsed_ms <= 0:
+                          raise SystemExit(f"invalid checkpoint wall time: {elapsed_ms} ms")
+                      print(elapsed_ms)
+                      break
+              else:
+                  raise SystemExit("missing genesis or target checkpoint timestamp")
+          PY
+          }
+
+          wait_for_archive() {
+            local phase=$1
+            local deadline=$((SECONDS + ARCHIVE_TIMEOUT_SECONDS))
+            local log_file="$RESULTS_DIR/archive-$phase.log"
+            local running height
+
+            while ((SECONDS < deadline)); do
+              if ! running=$(timeout 10 docker inspect --format '{{.State.Running}}' "$ARCHIVE_CONTAINER"); then
+                echo "ERROR: could not inspect the $phase archive."
+                return 1
+              fi
+              if [[ $running != true ]]; then
+                echo "ERROR: the $phase archive exited before serving height $TARGET_HEIGHT."
+                docker logs --tail 200 "$ARCHIVE_CONTAINER" || true
+                return 1
+              fi
+
+              if height=$(rpc_height "$ARCHIVE_CONTAINER") && ((height >= TARGET_HEIGHT)); then
+                timeout 30 docker logs "$ARCHIVE_CONTAINER" > "$log_file" 2>&1 || true
+                if grep -Fq 'Opened Zcash protocol endpoint at' "$log_file"; then
+                  printf '%s\n' "$height" > "$RESULTS_DIR/archive-$phase-height"
+                  echo "The $phase archive is serving real Testnet blocks through height $height."
+                  return 0
+                fi
+              fi
+              sleep "$POLL_SECONDS"
+            done
+
+            echo "ERROR: the $phase archive did not serve height $TARGET_HEIGHT within $ARCHIVE_TIMEOUT_SECONDS seconds."
+            docker logs --tail 200 "$ARCHIVE_CONTAINER" || true
+            return 1
+          }
 
           check_write_stalls() {
             local metrics=$1
@@ -477,38 +562,31 @@ jobs:
             local log_file="$case_dir/zebrad.log"
             local metrics_file="$case_dir/metrics.txt"
             local events_file="$case_dir/memory.events"
-            local image="zebrad-runtime:${GITHUB_SHA}"
             local deadline=$((SECONDS + CASE_TIMEOUT_SECONDS))
             local completed=0
             mkdir -p "$case_dir"
 
-            local docker_args=(--detach --name "$container")
+            local docker_args=(
+              --detach
+              --name "$container"
+              --network "$LOCAL_NETWORK"
+              --volume "$CLIENT_CONFIG:/tmp/zebrad.toml:ro"
+              -e CONFIG_FILE_PATH=/tmp/zebrad.toml
+            )
             if [[ -n $cap ]]; then
               docker_args+=(--memory="$cap" --memory-swap="$cap")
             fi
-            docker_args+=(
-              -e ZEBRA_NETWORK__NETWORK=Testnet
-              -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232
-              -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
-              -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
-              -e ZEBRA_TRACING__USE_COLOR=false
-            )
             if [[ -n $budget ]]; then
               docker_args+=(-e "ZEBRA_RESOURCES__MEMORY_BUDGET=$budget")
             fi
-            docker_args+=("$image" zebrad start)
+            docker_args+=("$IMAGE" zebrad start)
 
-            local started_ms finished_ms elapsed_ms
+            local started_ms elapsed_ms
             started_ms=$(date +%s%3N)
             timeout 30 docker run "${docker_args[@]}"
             echo "Started $name at $started_ms ms; waiting for verified and committed height $TARGET_HEIGHT."
 
             while ((SECONDS < deadline && completed == 0)); do
-              # Timestamp the poll before diagnostics, so slow logs and scrapes do not change the
-              # checkpoint-sync wall time when this poll observes completion.
-              local observed_ms
-              observed_ms=$(date +%s%3N)
-
               local state running oom_killed
               if ! state=$(timeout 10 docker inspect --format '{{.State.Running}} {{.State.OOMKilled}}' "$container"); then
                 echo "ERROR: could not inspect $container."
@@ -567,7 +645,6 @@ jobs:
               fi
               if [[ $range_verified == 1 && $height =~ ^[0-9]+$ ]] && ((height >= TARGET_HEIGHT)); then
                 completed=1
-                finished_ms=$observed_ms
                 break
               fi
 
@@ -580,7 +657,9 @@ jobs:
               return 1
             fi
 
-            elapsed_ms=$((finished_ms - started_ms))
+            # Compare the actual checkpoint events, not container startup, peer-request timeouts,
+            # or the time spent scraping logs and metrics after verification finishes.
+            elapsed_ms=$(checkpoint_wall_time_ms "$log_file")
             if ((elapsed_ms <= 0)); then
               echo "ERROR: $name has an invalid wall time of $elapsed_ms ms."
               return 1
@@ -658,6 +737,83 @@ jobs:
             echo "$name completed the verified range in $elapsed_ms ms; cgroup memory.peak=$peak."
           }
 
+          # Public peers are used only to prepare the archive, never during a measured run. The
+          # archive is restarted without outbound peers on an internal network, so every client
+          # gets the same real Testnet blocks from the same local peer.
+          docker rm --force "$ARCHIVE_CONTAINER" \
+            memory-budget-testnet-warmup memory-budget-testnet-uncapped \
+            memory-budget-testnet-2g memory-budget-testnet-4g \
+            2>/dev/null || true
+          docker volume rm --force "$ARCHIVE_VOLUME" >/dev/null 2>&1 || true
+          docker network rm "$LOCAL_NETWORK" >/dev/null 2>&1 || true
+          docker network create --internal "$LOCAL_NETWORK"
+
+          cat > "$ARCHIVE_CONFIG" <<'TOML'
+          [state]
+          cache_dir = "/home/zebra/.cache/zebra"
+
+          [network]
+          network = "Testnet"
+          listen_addr = "0.0.0.0:18233"
+          initial_testnet_peers = []
+          # No outbound peers, but enough inbound capacity for sequential measured clients.
+          peerset_initial_target_size = 25
+          max_connections_per_ip = 8
+          cache_dir = false
+
+          [rpc]
+          listen_addr = "0.0.0.0:18232"
+          enable_cookie_auth = false
+
+          [tracing]
+          use_color = false
+          TOML
+
+          cat > "$CLIENT_CONFIG" <<'TOML'
+          [state]
+          cache_dir = "/home/zebra/.cache/zebra"
+
+          [network]
+          network = "Testnet"
+          listen_addr = "0.0.0.0:18233"
+          initial_testnet_peers = ["memory-budget-testnet-archive:18233"]
+          peerset_initial_target_size = 1
+          cache_dir = false
+
+          [rpc]
+          listen_addr = "0.0.0.0:18232"
+          enable_cookie_auth = false
+
+          [metrics]
+          endpoint_addr = "0.0.0.0:9999"
+
+          [tracing]
+          use_color = false
+          TOML
+
+          timeout 30 docker run --detach --name "$ARCHIVE_CONTAINER" \
+            --volume "$ARCHIVE_VOLUME:/home/zebra/.cache/zebra" \
+            -e ZEBRA_NETWORK__NETWORK=Testnet \
+            -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:18232 \
+            -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=false \
+            -e ZEBRA_TRACING__USE_COLOR=false \
+            "$IMAGE" zebrad start
+          wait_for_archive public
+          timeout 60 docker stop --time 30 "$ARCHIVE_CONTAINER" >/dev/null
+          docker rm "$ARCHIVE_CONTAINER" >/dev/null
+
+          timeout 30 docker run --detach --name "$ARCHIVE_CONTAINER" \
+            --network "$LOCAL_NETWORK" \
+            --volume "$ARCHIVE_VOLUME:/home/zebra/.cache/zebra" \
+            --volume "$ARCHIVE_CONFIG:/tmp/zebrad.toml:ro" \
+            -e CONFIG_FILE_PATH=/tmp/zebrad.toml \
+            "$IMAGE" zebrad start
+          wait_for_archive local
+
+          # Warm the archive and executable caches before the baseline, so later cases do not get
+          # an artificial advantage. The warm-up has the same peer and validation gates, but is not
+          # an input to the capped/uncapped ratio.
+          run_case warmup "" "" ""
           run_case uncapped "" "" ""
           run_case 2g 2g auto 'memory budget 1113 MiB (auto: effective RAM 2.0 GiB) profile=ibd'
           run_case 4g 4g '4 GiB' 'memory budget 4 GiB (explicit) profile=ibd'
@@ -689,7 +845,7 @@ jobs:
       - name: Show failed Testnet container diagnostics
         if: failure()
         run: |
-          for name in uncapped 2g 4g; do
+          for name in archive warmup uncapped 2g 4g; do
             container="memory-budget-testnet-$name"
             echo "===== $container ====="
             docker logs --tail 300 "$container" 2>&1 || true
@@ -699,7 +855,15 @@ jobs:
       - name: Clean up Testnet containers
         if: always()
         run: |
-          docker rm --force memory-budget-testnet-uncapped memory-budget-testnet-2g memory-budget-testnet-4g 2>/dev/null || true
+          docker rm --force \
+            memory-budget-testnet-archive \
+            memory-budget-testnet-warmup \
+            memory-budget-testnet-uncapped \
+            memory-budget-testnet-2g \
+            memory-budget-testnet-4g \
+            2>/dev/null || true
+          docker network rm memory-budget-testnet-local >/dev/null 2>&1 || true
+          docker volume rm --force memory-budget-testnet-archive-state >/dev/null 2>&1 || true
 
   test-docker:
     runs-on: ubuntu-26.04
