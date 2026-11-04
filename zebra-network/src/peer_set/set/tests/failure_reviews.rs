@@ -107,6 +107,41 @@ async fn compact_advertisement_routes_sourceless_sync_to_its_sender() {
     finish_download(&mut handles[1], request, response, download).await;
 }
 
+/// Explicit parent inventory outranks a recovery's carried child source.
+#[tokio::test(start_paused = true)]
+async fn parent_advertiser_precedes_carried_child_source() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the fixture contains block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: Some(addrs[1]),
+    };
+    peer_set.ready().await.unwrap();
+    // Make the real advertiser busier, so treating both sources as one P2C tier chooses wrongly.
+    let service = peer_set.ready_services.get_mut(&addrs[0]).unwrap();
+    let busy_request = service.call(Request::Peers);
+    service.ready().await.unwrap();
+    let held_request = handles[0]
+        .try_to_receive_outbound_client_request()
+        .request()
+        .unwrap();
+    assert!(peer_set.query_load(&addrs[0]).unwrap() > peer_set.query_load(&addrs[1]).unwrap());
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    let download = peer_set.ready().await.unwrap().call(request.clone());
+    assert_eq!(received_request(&mut handles[1]), None);
+    finish_download(&mut handles[0], request, response, download).await;
+    drop(busy_request);
+    drop(held_request);
+}
+
 /// Carried provenance cannot override explicit missing inventory or a completed peer failure.
 #[tokio::test(start_paused = true)]
 async fn carried_advertiser_respects_missing_and_failed_candidates() {

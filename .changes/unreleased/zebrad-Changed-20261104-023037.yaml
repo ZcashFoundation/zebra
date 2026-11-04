@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Recover one missing parent of an out-of-order gossiped block without waiting for the next sync round, reusing parents already being downloaded.
+time: 2026-11-04T02:30:37.708488597+01:00

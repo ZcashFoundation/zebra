@@ -839,6 +839,8 @@ async fn setup(
     // Initialize the inbound service
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
+        network: network.clone(),
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: peer_set.background_service(),
         block_verifier: buffered_block_verifier,

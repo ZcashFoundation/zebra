@@ -1044,6 +1044,8 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             MockService::build().for_unit_tests();
         assert!(setup_tx
             .send(InboundSetupData {
+                network: network.clone(),
+                sync_downloads: Default::default(),
                 address_book: Arc::new(Mutex::new(zn::AddressBook::new(
                     "127.0.0.1:0".parse().unwrap(),
                     &network,

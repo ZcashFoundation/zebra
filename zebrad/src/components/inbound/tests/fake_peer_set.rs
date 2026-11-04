@@ -451,6 +451,8 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
+        network: network.clone(),
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -1061,6 +1063,8 @@ async fn caches_getaddr_response() {
         let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
 
         let setup_data = InboundSetupData {
+            network: network.clone(),
+            sync_downloads: Default::default(),
             address_book: address_book.clone(),
             block_download_peer_set: buffered_peer_set,
             block_verifier,
@@ -1301,7 +1305,10 @@ async fn setup(
     // Add transactions to the mempool, skipping verification and broadcast
     let mut added_transactions = Vec::new();
     if add_transactions {
-        added_transactions.extend(add_some_stuff_to_mempool(&mut mempool_service, network));
+        added_transactions.extend(add_some_stuff_to_mempool(
+            &mut mempool_service,
+            network.clone(),
+        ));
     }
 
     let mempool_service = BoxService::new(mempool_service);
@@ -1317,6 +1324,8 @@ async fn setup(
 
     let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
+        network,
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -1392,11 +1401,20 @@ async fn setup_gossiped_block_misbehavior(
     let network = Mainnet;
     let state_config = StateConfig::ephemeral();
 
-    // An empty state, so gossiped blocks are always unknown, and the lookahead limit is
-    // measured from the genesis height.
+    // Keep the parent of the gossiped block known, so these tests isolate verifier attribution.
     let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
         zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(1).service(state);
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state_service
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.into(),
+        ))
+        .await
+        .unwrap();
 
     setup_gossiped_block_misbehavior_with_state(block_verifier, state_service, latest_chain_tip)
         .await
@@ -1446,6 +1464,8 @@ async fn setup_gossiped_block_misbehavior_with_state(
     let (misbehavior_sender, misbehavior_rx) = tokio::sync::mpsc::channel(10);
 
     let setup_data = InboundSetupData {
+        network,
+        sync_downloads: Default::default(),
         address_book,
         block_download_peer_set: buffered_peer_set,
         block_verifier,
@@ -2117,6 +2137,8 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     let (misbehavior_sender, mut misbehavior) = tokio::sync::mpsc::channel(1);
     assert!(setup_tx
         .send(InboundSetupData {
+            network: network.clone(),
+            sync_downloads: Default::default(),
             address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                 SocketAddr::from(([0, 0, 0, 0], 0)),
                 &network,

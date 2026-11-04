@@ -1455,7 +1455,7 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready peer that advertised the inventory, then a ready peer that isn't missing it.
+    /// Prefers a ready inventory advertiser, then the carried source, then any eligible ready peer.
     /// For blocks, that fallback prefers peers that advertised [`PeerServices::NODE_NETWORK`].
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
@@ -1495,7 +1495,6 @@ where
             .inventory_registry
             .advertising_peers(hash)
             .copied()
-            .chain(advertiser)
             .collect();
         let advertising_peer_list = advertising_peers
             .iter()
@@ -1513,6 +1512,14 @@ where
         // so that a peer can't provide all our inventory responses.
         if let Some(peer) = self.select_p2c_peer_from_list(&advertising_peer_list) {
             tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
+            return InvRoute::Peer(peer);
+        }
+
+        // A recovery carries the child's source, which need not have advertised the parent.
+        // Prefer explicit parent inventory, but retain that source ahead of speculative peers.
+        if let Some(peer) =
+            advertiser.filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
+        {
             return InvRoute::Peer(peer);
         }
 
@@ -1552,11 +1559,13 @@ where
         // busy peer might have an advertised block, but only busy serving peers might have a
         // historic block.
         //
-        // Downloaders carry their known advertiser separately from this lossy registry.
+        // Downloaders carry their known source separately from this lossy registry. A recovery's
+        // source supplied the requested block's child, so that block is recent too.
         //
         // A disconnected or failed advertiser must not enable speculative non-serving fallback.
         let is_advertised = advertising_peers
             .iter()
+            .chain(advertiser.iter())
             .any(|addr| self.has_peer_with_addr(*addr) && !has_failed(addr));
         let busy_peer_might_have = |failed: bool| {
             self.cancel_handles.keys().any(|key| {
