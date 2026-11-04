@@ -54,7 +54,6 @@ fn early_relay_final_snapshot_excludes_finalized_roots() {
         chain_tip_sender: tip_sender,
         non_finalized_state_sender: state_sender,
         backup_dir_path: None,
-        early_relay: super::super::super::early_relay::EarlyRelayState::new(None),
     };
     worker.run();
     assert_eq!(rsp_rx.blocking_recv().unwrap().unwrap(), block.hash());

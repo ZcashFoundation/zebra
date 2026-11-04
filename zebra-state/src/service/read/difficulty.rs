@@ -84,7 +84,7 @@ pub fn get_block_template_chain_info(
     )
 }
 
-/// Checks a committed parent, contextual header rules, and history/body commitments.
+/// Checks a parent in the published snapshot, contextual rules, and history/body commitments.
 ///
 /// Callers must first check PoW, size, transaction structure, and the transaction Merkle root.
 /// Before NU5 this does not check the final Sapling root; mining checks it after tree updates,
@@ -110,15 +110,10 @@ pub(crate) fn authenticated_candidate_header(
     else {
         return Ok(None);
     };
-    let parent = block.header.previous_block_hash;
     crate::service::check::block_commitment_is_valid_for_chain_history(
         block, network, &history, None,
     )?;
-    Ok((!best_tip_only
-        || read::best_tip(non_finalized_state, db).is_some_and(|(tip_height, tip_hash)| {
-            tip_hash == parent && tip_height.next().ok() == Some(height)
-        }))
-    .then_some(history))
+    Ok(Some(history))
 }
 
 /// Checks parent, height, contextual difficulty/time, and retrieves the matching history context.
@@ -135,13 +130,15 @@ pub(crate) fn candidate_header_context(
         return Err(crate::ValidateContextError::BlockPreviouslyInvalidated { block_hash: hash });
     }
     let tip_hash = header.previous_block_hash;
-    let chain = non_finalized_state
+    // Required authentication accepts a parent on any retained fork, so a peer racing a reorg
+    // keeps its exemption and a rejected side-fork body is remembered.
+    let Some((chain, tip_height)) = non_finalized_state
         .chain_iter()
-        .find(|chain| chain.height_by_hash.contains_key(&tip_hash));
-    let Some(tip_height) = read::height_by_hash(chain, db, tip_hash) else {
+        .find_map(|chain| Some((chain, chain.height_by_hash(tip_hash)?)))
+    else {
         return Ok(None);
     };
-    if best_tip_only && read::best_tip(non_finalized_state, db) != Some((tip_height, tip_hash)) {
+    if best_tip_only && non_finalized_state.best_tip() != Some((tip_height, tip_hash)) {
         return Ok(None);
     }
     if tip_height.next().ok() != Some(height) {
@@ -154,11 +151,15 @@ pub(crate) fn candidate_header_context(
     {
         return Ok(None);
     }
-    let mut relevant_data =
-        any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, tip_hash)
-            .take(pow_adjustment_block_span(network, height))
-            .map(|header| (header.difficulty_threshold, header.time))
-            .peekable();
+    // Follow hashes across the snapshot boundary. Finalized headers are immutable and survive
+    // pruning, unlike the live database's tip and history tree.
+    let mut relevant_data = std::iter::successors(
+        read::block_header(Some(chain), db, tip_hash.into()),
+        |header| read::block_header(Some(chain), db, header.previous_block_hash.into()),
+    )
+    .take(pow_adjustment_block_span(network, height))
+    .map(|header| (header.difficulty_threshold, header.time))
+    .peekable();
     if relevant_data.peek().is_none() {
         return Ok(None);
     }
@@ -166,26 +167,13 @@ pub(crate) fn candidate_header_context(
         header.difficulty_threshold,
         AdjustedDifficulty::new_from_header_time(header.time, tip_height, network, relevant_data),
     )?;
-    // Disk retains only the finalized tip's history tree, not arbitrary historical roots.
-    // Bind it to this parent before and after reading; never score a body against another root.
-    let history = if let Some(chain) = chain {
-        chain.history_tree(tip_hash.into())
-    } else if db.finalized_tip_hash() == tip_hash {
-        let history = db.history_tree();
-        (db.finalized_tip_hash() == tip_hash).then_some(history)
-    } else {
-        None
-    };
-    let Some(history) = history else {
-        return Ok(None);
-    };
-    Ok(
-        (!best_tip_only || read::best_tip(non_finalized_state, db) == Some((tip_height, tip_hash)))
-            .then_some(history),
-    )
+    Ok(chain.history_tree(tip_hash.into()))
 }
 
 /// Computes child context after checking candidate header rules and commitments, without committing.
+///
+/// Mining can use finalized-tip context before a non-finalized snapshot exists. Speculative child
+/// work does not authorize early relay or serving the candidate body.
 pub(crate) fn mining_candidate_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
@@ -199,13 +187,37 @@ pub(crate) fn mining_candidate_chain_info(
     if block.header.previous_block_hash != tip_hash
         || block.coinbase_height() != Some(height)
         || zebra_chain::parameters::subsidy::nsm_reissuance_is_active(child_height, network)
+        || non_finalized_state.is_block_invalidated(block.hash())
+        || block.header.difficulty_threshold.to_work().is_none()
+        || DateTime32::try_from(block.header.time).is_err()
     {
         return None;
     }
-    let mut history =
-        authenticated_candidate_header(non_finalized_state, db, network, block.clone(), true)
-            .ok()??;
     let chain = non_finalized_state.best_chain();
+    let parent_header = read::block_header(chain, db, tip_hash.into())?;
+    let parent_headers = || {
+        std::iter::successors(Some(parent_header.clone()), |header| {
+            read::block_header(chain, db, header.previous_block_hash.into())
+        })
+    };
+    difficulty_threshold_and_time_are_valid(
+        block.header.difficulty_threshold,
+        AdjustedDifficulty::new_from_header_time(
+            block.header.time,
+            tip_height,
+            network,
+            parent_headers().map(|header| (header.difficulty_threshold, header.time)),
+        ),
+    )
+    .ok()?;
+    let mut history = history_tree(chain, db, tip_hash.into())?;
+    crate::service::check::block_commitment_is_valid_for_chain_history(
+        block.clone(),
+        network,
+        &history,
+        None,
+    )
+    .ok()?;
     let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;
     let mut orchard = read::tree::orchard_tree(chain, db, tip_hash.into())?;
     let mut ironwood = read::tree::ironwood_tree(chain, db, tip_hash.into())?;
@@ -245,10 +257,7 @@ pub(crate) fn mining_candidate_chain_info(
         )
         .ok()?;
     let relevant_data = std::iter::once((block.header.difficulty_threshold, block.header.time))
-        .chain(
-            any_chain_ancestor_iter::<block::Header>(non_finalized_state, db, tip_hash)
-                .map(|header| (header.difficulty_threshold, header.time)),
-        )
+        .chain(parent_headers().map(|header| (header.difficulty_threshold, header.time)))
         .take(pow_adjustment_block_span(network, child_height))
         .collect();
     if read::best_tip(non_finalized_state, db) != Some((tip_height, tip_hash)) {

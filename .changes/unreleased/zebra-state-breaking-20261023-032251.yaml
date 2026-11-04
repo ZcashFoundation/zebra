@@ -1,4 +1,4 @@
 project: zebra-state
 kind: breaking
-body: Added read-only committed-tip header and authorization-commitment checks for compact reconstruction; update exhaustive matches on ReadRequest and ReadResponse.
+body: Update exhaustive `ReadRequest` and `ReadResponse` matches for the new `CheckBestTipHeader`, `CheckBestTipBlockCommitments`, `ValidBestTipHeader` and `ValidBestTipBlockCommitments` variants. These checks require parent context from the published immutable best-chain snapshot; unavailable parents prevent early relay ([#12291](https://github.com/ZcashFoundation/zebra/pull/12291)).
 time: 2026-10-23T03:22:51.911380151+02:00
