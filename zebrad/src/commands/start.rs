@@ -520,7 +520,7 @@ impl StartCmd {
             None
         };
 
-        // An empty pruned node may bootstrap from a state snapshot (design, §6) before the state
+        // An empty pruned node may bootstrap from a state snapshot before the state
         // opens: the import renames a complete database into place, and `zebra_state::init`
         // then opens it at the snapshot height like any other state.
         let snapshot_store = zebra_state::state_snapshot::store::ArtifactStore::new(
@@ -1159,7 +1159,7 @@ impl StartCmd {
         }
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
-        // On a snapshot state, log the sync stages above the snapshot height (design, §10).
+        // On a snapshot state, log the sync stages above the snapshot height.
         let snapshot_stages_task_handle = if let Some(snapshot_height) = snapshot_height {
             let stages = RuntimeStages::new(
                 snapshot_height,

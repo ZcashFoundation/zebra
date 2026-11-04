@@ -282,7 +282,7 @@ where
         relay: true,
     };
 
-    // A node that serves snapshot objects gets the larger send window (DESIGN.md §5, "Server").
+    // A node that serves snapshot objects gets the larger send window.
     let windows = quic::Windows::for_services(identity.services);
     let endpoint = match quic::bind_with_windows(&config.network, listen_addr, windows) {
         Ok(endpoint) => endpoint,

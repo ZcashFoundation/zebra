@@ -1,5 +1,4 @@
-//! The stages of a state snapshot bootstrap, as logged (design, §10
-//! "Structured stage logs").
+//! The stages of a state snapshot bootstrap, as structured log lines.
 //!
 //! Each stage is logged once, at info, as a line that starts with the stage's
 //! [`Display`](fmt::Display) text, so tests and the benchmark harness can

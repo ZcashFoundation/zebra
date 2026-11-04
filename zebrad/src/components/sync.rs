@@ -403,8 +403,10 @@ pub struct Config {
 
     /// What to do when the snapshot cannot be downloaded or is rejected.
     ///
-    /// `"error"` by default: exit with an actionable message and leave no state directory, so
-    /// the next start retries. `"genesis"` continues with a normal sync from genesis.
+    /// `"error"` by default: exit with an actionable message. An aborted download leaves no state
+    /// directory and is retried on the next start; a rejected snapshot stays refused until its
+    /// commitment changes or its rejection marker is removed after investigation. `"genesis"`
+    /// continues with a normal sync from genesis.
     pub state_snapshot_fallback: StateSnapshotFallback,
 
     /// Whether to serve the state snapshots this node holds to version 2 peers.
@@ -421,7 +423,8 @@ pub struct Config {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateSnapshotFallback {
-    /// Exit with an actionable error and leave no state directory, so the next start retries.
+    /// Exit with an actionable error. An aborted download is retried on the next start; a rejected
+    /// snapshot stays refused until its commitment changes or its marker is removed.
     #[default]
     Error,
 
@@ -1605,7 +1608,7 @@ where
     /// our node.
     ///
     /// A state that already has a tip is not checked: a snapshot-imported state
-    /// ships genesis with its window (design, §7), and any other state committed
+    /// ships genesis with its window, and any other state committed
     /// genesis before its tip, so asking would only download a block below the
     /// tip.
     async fn request_genesis(&mut self) -> Result<(), Report> {

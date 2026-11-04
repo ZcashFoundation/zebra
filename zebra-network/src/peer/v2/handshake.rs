@@ -231,7 +231,7 @@ pub async fn handshake<C: ChainTip>(
 ///
 /// A state-snapshot bootstrap requires `NODE_SYNC_ARTIFACTS`: the peers it
 /// dials serve snapshot objects, and a pruned node that serves them never
-/// advertises `NODE_NETWORK` (DESIGN.md §5, "Bootstrap dialer").
+/// advertises `NODE_NETWORK`.
 #[allow(clippy::too_many_arguments)]
 pub async fn handshake_requiring<C: ChainTip>(
     connection: &Connection,

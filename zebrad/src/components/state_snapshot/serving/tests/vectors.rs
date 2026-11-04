@@ -1,5 +1,5 @@
 //! Fixed test vectors for the serving index: what a scan of the artifact
-//! store publishes and what it leaves out (design, §8).
+//! store publishes and what it leaves out.
 
 use std::{
     collections::HashSet,

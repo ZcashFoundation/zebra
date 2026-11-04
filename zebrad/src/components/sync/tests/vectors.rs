@@ -3370,7 +3370,7 @@ async fn singleton_discovery_downloads_once(ignore_first_round: bool) {
 
 /// A state that already has a tip, like one imported from a state snapshot, is
 /// not asked whether it knows the genesis block, and genesis is not downloaded
-/// below its tip (state-snapshot design, §7).
+/// below its tip.
 #[tokio::test]
 async fn request_genesis_is_skipped_when_the_state_has_a_tip() {
     let _init_guard = zebra_test::init();

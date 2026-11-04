@@ -1,4 +1,4 @@
-//! Serving state snapshots to version 2 peers (design, §8).
+//! Serving state snapshots to version 2 peers.
 //!
 //! With `[sync] serve_state_snapshots` on, the objects in the artifact store
 //! are published as the node's object index, which the network serves through
@@ -127,7 +127,7 @@ pub fn object_index(
 
 /// Scans `store` and returns the objects to serve: every verified manifest
 /// that is not marked as rejected, and every verified piece such a manifest
-/// lists with the same size (design, §8).
+/// lists with the same size.
 ///
 /// Blocks on the filesystem: every object is read once to re-hash it.
 pub(crate) fn scan_store(store: &ArtifactStore, network: &Network) -> (ObjectIndex, ScanSummary) {

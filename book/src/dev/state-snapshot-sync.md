@@ -307,15 +307,16 @@ restarts without bootstrapping again, compares the bytes it kept against A's sta
 matches the stage lines in order. A third node without checkpoints is refused by the decision rule
 and syncs from genesis through full verification.
 
-The Mainnet benchmark serves snapshots exported from a hard-linked copy of a Mainnet state advanced
-to checkpoint heights with `debug_stop_at_height`, and records bytes, CPU, peak RSS, write bytes,
-QUIC statistics, blocks per second per 1,000-block window split into checkpoint and full
-verification, and restarts, over three runs of the snapshot stages and two runs from `H` to a fixed
-target, cross-checked against an archive at the target.
+The completed Mainnet benchmark served a snapshot exported from a hard-linked copy of a Mainnet
+state advanced to a checkpoint height with `debug_stop_at_height`, then synced to a fixed target
+cross-checked against an archive. Its review evidence records bytes, CPU, peak RSS, write bytes,
+QUIC statistics, blocks per second, and restarts. The `zebra.net.out.objects.bytes` comparisons are
+exact object response payload measurements: they exclude request bytes, response framing, QUIC
+packets, and UDP/IP overhead, and are not total-wire-byte or wire-overhead measurements.
 
 ## Differences from the drafts
 
-The full list is in the design folder's spec feedback; these affect contributors:
+The implementation differs from the public drafts in these contributor-relevant ways:
 
 - The sync draft's minimum contents cannot validate blocks above `H`. Zebra also ships the four
   anchor sets, the transaction index of every UTXO-creating transaction, the block at `H` and
