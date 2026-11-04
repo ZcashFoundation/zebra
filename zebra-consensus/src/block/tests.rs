@@ -1728,6 +1728,37 @@ async fn verified_proposal() -> (
     (verifier, state, solved, calls, read_state)
 }
 
+/// A verifier's proposal cache bound applies to the proposals it verifies: below one proposal's
+/// charge, verifying a proposal evicts every cached proposal and caches none.
+#[tokio::test(flavor = "multi_thread")]
+async fn verifier_proposal_cache_bytes_bound_its_cache() {
+    let _init_guard = zebra_test::init();
+    let (verifier, _state, solved, _calls, _read_state) = verified_proposal().await;
+    let cache = verifier.prepared_blocks();
+    let bytes = solved.zcash_serialize_to_vec().unwrap();
+    assert!(
+        cache.deserialize(&bytes).unwrap().matched.is_some(),
+        "the default bound caches the proposal"
+    );
+
+    let mut verifier = verifier.with_proposal_cache_bytes(0);
+    let mut proposal = (*solved).clone();
+    Arc::make_mut(&mut proposal.header).nonce = [0; 32].into();
+    Arc::make_mut(&mut proposal.header).solution = equihash::Solution::for_proposal();
+    verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CheckProposal(Arc::new(proposal)))
+        .await
+        .unwrap();
+
+    assert!(
+        cache.deserialize(&bytes).unwrap().matched.is_none(),
+        "a zero byte bound caches no proposal"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn exact_proposal_commits_without_transaction_verification() {
     check_proposal_commits(true, None, false).await;
@@ -2412,6 +2443,7 @@ fn cancelled_proposal_is_not_cached() {
         entered.await.unwrap();
         let mut caching = Box::pin(cache_proposal(
             &proposals,
+            DEFAULT_PROPOSAL_CACHE_BYTES,
             [0; 32],
             block,
             0,
@@ -2506,6 +2538,7 @@ async fn full_size_transparent_proposals_keep_eight_entries() {
     for key in 0..8 {
         cache_proposal(
             &proposals,
+            DEFAULT_PROPOSAL_CACHE_BYTES,
             [key; 32],
             block.clone(),
             block.transactions.zcash_serialized_size(),
@@ -2546,6 +2579,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
     for key in 0..8 {
         cache_proposal(
             &proposals,
+            DEFAULT_PROPOSAL_CACHE_BYTES,
             [key; 32],
             ordinary.clone(),
             ordinary.transactions.zcash_serialized_size(),
@@ -2567,7 +2601,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
         script.push(0x75); // OP_DROP
     }
     script.push(0x51); // OP_TRUE
-    let spent_count = MAX_PROPOSAL_BYTES / (8 * script.len()) + 1;
+    let spent_count = DEFAULT_PROPOSAL_CACHE_BYTES / (8 * script.len()) + 1;
     let spent: HashMap<_, _> = (0..spent_count)
         .map(|index| {
             let index = u32::try_from(index).unwrap();
@@ -2609,13 +2643,14 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
     Arc::make_mut(&mut large.header).merkle_root =
         large.transactions.iter().map(|tx| tx.hash()).collect();
     let large = Arc::new(large);
-    assert!(8 * large.zcash_serialized_size() < MAX_PROPOSAL_BYTES);
-    assert!(8 * spent.len() * script.len() > MAX_PROPOSAL_BYTES);
+    assert!(8 * large.zcash_serialized_size() < DEFAULT_PROPOSAL_CACHE_BYTES);
+    assert!(8 * spent.len() * script.len() > DEFAULT_PROPOSAL_CACHE_BYTES);
     let large_contextual = contextual(large.clone(), spent);
     let charged = large_contextual.retained_bytes();
     for key in 0..8 {
         cache_proposal(
             &proposals,
+            DEFAULT_PROPOSAL_CACHE_BYTES,
             [key; 32],
             large.clone(),
             large.transactions.zcash_serialized_size(),
@@ -2629,12 +2664,63 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
         proposals.len() < 8,
         "spent scripts must trigger eviction before the count cap"
     );
-    assert!(proposals.len() * charged <= MAX_PROPOSAL_BYTES);
+    assert!(proposals.len() * charged <= DEFAULT_PROPOSAL_CACHE_BYTES);
     assert_eq!(
         proposals.front().unwrap().key,
         [7; 32],
         "retain the newest proposal"
     );
+}
+
+/// The default bound is the one the cache had before it could be chosen: eight 72 MiB proposals.
+#[test]
+fn default_proposal_cache_bytes_is_eight_72_mib_proposals() {
+    assert_eq!(DEFAULT_PROPOSAL_CACHE_BYTES, 603_979_776);
+}
+
+/// The cache keeps only the newest proposals whose charges fit in its configured byte bound.
+#[tokio::test]
+async fn proposal_cache_keeps_the_newest_proposals_within_its_byte_bound() {
+    use std::collections::HashMap;
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let contextual = zs::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        zs::SemanticallyVerifiedBlock::with_hash(block.clone(), block.hash()),
+        HashMap::new(),
+        DeferredPoolBalanceChange::zero(),
+        &Network::Mainnet,
+        Default::default(),
+    )
+    .unwrap();
+    let charged = contextual.retained_bytes();
+
+    for (proposal_cache_bytes, retained) in [(3 * charged, 3), (charged - 1, 0)] {
+        let proposals = watch::channel(VecDeque::new()).0;
+        for key in 0..8 {
+            cache_proposal(
+                &proposals,
+                proposal_cache_bytes,
+                [key; 32],
+                block.clone(),
+                block.transactions.zcash_serialized_size(),
+                Box::new(contextual.clone()),
+            )
+            .await;
+        }
+
+        let proposals = proposals.borrow();
+        assert_eq!(
+            proposals.len(),
+            retained,
+            "a {proposal_cache_bytes} byte bound keeps {retained} proposals of {charged} bytes"
+        );
+        if let Some(newest) = proposals.front() {
+            assert_eq!(newest.key, [7; 32], "retain the newest proposal");
+        }
+    }
 }
 
 #[test]
