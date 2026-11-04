@@ -1350,6 +1350,37 @@ async fn get_headers_without_a_known_locator_starts_at_height_1() {
     .expect("the test completes well within the timeout");
 }
 
+/// Empty-locator requests are refused until the inbound service can look up a
+/// header directly; they must never materialize a block just for its header.
+#[tokio::test]
+async fn empty_locator_header_requests_do_not_load_blocks() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut raw = raw_peer_node(&network).await;
+        let hash_stop = Fixture::new().blocks[1].hash();
+        let request = WireRequest::Headers(GetHeaders {
+            locator_hashes: Vec::new(),
+            hash_stop,
+            tx_ids: false,
+        });
+
+        let mut recv = raw_request(&raw.connection, &request).await;
+        assert_reset(
+            recv.read_to_end(MAX_RECORD_PAYLOAD_LEN).await,
+            ErrorCode::Refused,
+        );
+        assert!(
+            raw.node.inbound_rx.try_recv().is_err(),
+            "the request did not reach the inbound service"
+        );
+        assert!(raw.connection.close_reason().is_none());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// A `get-mempool` snapshot holds at most the legacy limit of transaction
 /// IDs, then the stream finishes.
 #[tokio::test]
