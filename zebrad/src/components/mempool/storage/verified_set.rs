@@ -8,7 +8,9 @@ use std::{
 
 use zebra_chain::{
     block::Height,
-    ironwood, orchard, sapling, sprout,
+    ironwood, orchard,
+    parameters::Network,
+    sapling, sprout,
     transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -82,6 +84,14 @@ impl VerifiedSet {
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the set.
     pub fn transactions(&self) -> &HashMap<transaction::Hash, VerifiedUnminedTx> {
         &self.transactions
+    }
+
+    /// Refresh cached fee-policy fields and their metrics.
+    pub(super) fn update_fee_parameters(&mut self, network: &Network, next_block_height: Height) {
+        for transaction in self.transactions.values_mut() {
+            transaction.update_fee_parameters(network, next_block_height);
+        }
+        self.update_metrics();
     }
 
     /// Returns a reference to the [`TransactionDependencies`] in the set.
@@ -415,7 +425,7 @@ impl VerifiedSet {
         let mut size_with_weight_gt3 = 0;
 
         for entry in self.transactions().values() {
-            paid_actions += entry.conventional_actions - entry.unpaid_actions;
+            paid_actions += entry.transaction.conventional_actions - entry.unpaid_actions;
 
             if entry.fee_weight_ratio > 3.0 {
                 size_with_weight_gt3 += entry.transaction.size;

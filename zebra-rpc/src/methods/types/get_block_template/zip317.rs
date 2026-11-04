@@ -94,7 +94,11 @@ pub fn select_mempool_transactions(
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
         mempool_txs
             .into_iter()
-            .map(|tx| (tx.transaction.id.mined_id(), tx))
+            .map(|mut tx| {
+                // The mempool entry may have been verified before fee activation, or on a fork.
+                tx.update_fee_parameters(net, height);
+                (tx.transaction.id.mined_id(), tx)
+            })
             .partition(|(tx_id, _tx)| !tx_dependencies.contains_key(tx_id));
 
     // Setup the transaction lists.
