@@ -960,7 +960,7 @@ impl StateService {
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let queued = (semantically_verified, rsp_tx, contextual, notifications);
-            if !self.block_write_sender.accepts_finalized()
+            if self.semantic_handoff_started()
                 && self.block_write_sender.non_finalized.is_some()
                 && self.can_fork_chain_at(&parent_hash)
             {
@@ -1008,7 +1008,7 @@ impl StateService {
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if !self.block_write_sender.accepts_finalized()
+        } else if self.semantic_handoff_started()
             && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
         {
             self.send_ready_non_finalized(parent_hash, ready);
@@ -1031,6 +1031,16 @@ impl StateService {
         self.non_finalized_state_queued_blocks.prune_overflow();
 
         rsp_rx
+    }
+
+    /// Returns whether semantic block admission has started locally or completed in the writer.
+    ///
+    /// The sent-hash flag is set when the handoff is queued. The writer's completion flag can
+    /// lag behind it, so semantic admission must not wait for that acknowledgement.
+    fn semantic_handoff_started(&self) -> bool {
+        self.non_finalized_block_write_sent_hashes
+            .can_fork_chain_at_hashes
+            || !self.block_write_sender.accepts_finalized()
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
