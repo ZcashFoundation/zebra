@@ -9,4 +9,5 @@ body: >-
   migrate retained records without an archive resync. Direct database readers must support v33
   and wait for the writer to finish. State snapshots now use snapshot format 2, which older
   releases reject.
+  ([#12182](https://github.com/ZcashFoundation/zebra/pull/12182))
 time: 2026-11-03T19:10:59-05:00
