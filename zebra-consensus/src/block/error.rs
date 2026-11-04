@@ -1,4 +1,6 @@
-//! Block verification errors.
+//! Errors returned by the semantic block verifier.
+//!
+//! The errors for individual consensus rules live in `crate::error`.
 
 use thiserror::Error;
 

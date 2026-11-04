@@ -14,10 +14,13 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    parameters::NetworkUpgrade,
+    parameters::{subsidy::SubsidyError, NetworkUpgrade},
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
-    work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
+    work::{
+        difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
+        equihash,
+    },
 };
 use zebra_script::Sigops;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
@@ -26,8 +29,8 @@ use crate::transaction;
 
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::limits::{GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT};
+use super::proposal::{PreparedProposal, MAX_PROPOSAL_BYTES};
 use super::*;
-use zebra_chain::{parameters::subsidy::SubsidyError, work::equihash};
 
 mod decoded_size;
 mod early_relay;

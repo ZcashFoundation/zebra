@@ -45,13 +45,17 @@ pub mod request;
 
 pub use error::VerifyBlockError;
 pub use limits::{ShieldedActionCounts, MAX_BLOCK_SIGOPS};
+// `block` is public under `fuzzing`, so keep the limits' paths it exposed before they moved.
+#[cfg(feature = "fuzzing")]
+pub use limits::{
+    GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT,
+    SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
+};
 pub use proposal::{DecodedBlock, PreparedBlockCache};
 pub use request::Request;
 
 use error::map_commit_error;
 use proposal::{cache_proposal, normalized_proposal_header, proposal_key_and_size, ProposalCache};
-#[cfg(test)]
-use proposal::{PreparedProposal, MAX_PROPOSAL_BYTES};
 
 #[cfg(test)]
 mod tests;
