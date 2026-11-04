@@ -1076,6 +1076,14 @@ pub enum Request {
     /// bound any retries. Use this before assigning peer punishment after deferred authentication.
     AuthenticateEarlyRelay(Arc<Block>),
 
+    /// Records a deterministic full-verification failure after independently authenticating its body.
+    ///
+    /// Only the block verifier's failure handling may send this request, after proof of work,
+    /// size, transaction structure, Merkle-root and branch checks. Never expose it through an RPC
+    /// method or peer request. Missing parents, UTXOs, timeouts, cancellation and infrastructure
+    /// failures are not deterministic rejections. Returns [`Response::Rejected`].
+    RejectBlock(Arc<Block>),
+
     /// Announces a block after proof-of-work and transaction Merkle-root checks.
     ///
     /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
@@ -1452,6 +1460,7 @@ impl Request {
             Request::MiningCandidate(_) => "mining_candidate",
             Request::EarlyRelay { .. } => "early_relay",
             Request::AuthenticateEarlyRelay(_) => "authenticate_early_relay",
+            Request::RejectBlock(_) => "reject_block",
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitContextuallyVerifiedBlock(_) => "commit_contextually_verified_block",
             Request::CommitMinedBlock { .. } => "commit_mined_block",
@@ -1512,7 +1521,7 @@ pub enum ReadRequest {
     EarlyRelayCache,
 
     /// Checks height and contextual difficulty/time for a child of the published best-chain tip.
-    /// Rejects locally invalidated or recently deterministically rejected block hashes.
+    /// Rejects locally invalidated or deterministically rejected block hashes until finalization.
     ///
     /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
     /// Callers must independently check proof of work and bound compact-body resources.
@@ -2142,6 +2151,7 @@ impl TryFrom<Request> for ReadRequest {
             | Request::MiningCandidate(_)
             | Request::EarlyRelay { .. }
             | Request::AuthenticateEarlyRelay(_)
+            | Request::RejectBlock(_)
             | Request::CommitCheckpointVerifiedBlock(_)
             | Request::InvalidateBlock(_)
             | Request::PreciousBlock(_)

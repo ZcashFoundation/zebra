@@ -6,7 +6,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     mem,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use indexmap::IndexMap;
@@ -48,6 +48,59 @@ use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
 pub(crate) use created_utxos::CreatedUtxos;
 
+/// Each rejection requires an authenticated block with valid proof of work at its contextual
+/// difficulty, unless the network disables proof of work. The hard cap is defense in depth:
+/// capacity disables early relay and speculative mining until the covered heights are finalized,
+/// rather than forgetting a recorded hash. Later rejections are not recorded, so their replays
+/// are verified again.
+pub(super) const MAX_EARLY_RELAY_REJECTIONS: usize = 4096;
+
+#[derive(Debug, Default)]
+pub(super) struct RejectedBlocks {
+    hashes: HashMap<Hash, Height>,
+    finalized_height: Option<Height>,
+    full_until: Option<Height>,
+}
+
+impl RejectedBlocks {
+    pub(super) fn contains(&self, hash: Hash) -> bool {
+        self.hashes.contains_key(&hash)
+    }
+
+    pub(super) fn is_full(&self) -> bool {
+        self.full_until.is_some()
+    }
+
+    /// Returns whether overflow requires withdrawing every early-relay candidate.
+    pub(super) fn reject(&mut self, hash: Hash, height: Height) -> bool {
+        if self
+            .finalized_height
+            .is_some_and(|finalized| height <= finalized)
+        {
+            return self.full_until.is_some();
+        }
+        if self.hashes.len() < MAX_EARLY_RELAY_REJECTIONS {
+            self.hashes.entry(hash).or_insert(height);
+        } else if !self.hashes.contains_key(&hash) {
+            self.full_until = Some(self.full_until.map_or(height, |old| old.max(height)));
+        }
+        if self.hashes.len() == MAX_EARLY_RELAY_REJECTIONS && self.full_until.is_none() {
+            self.full_until = self.hashes.values().copied().max();
+        }
+        self.full_until.is_some()
+    }
+
+    fn prune(&mut self, finalized: Height) -> bool {
+        let was_full = self.is_full();
+        self.hashes.retain(|_, height| *height > finalized);
+        self.finalized_height = Some(finalized);
+        if self.full_until.is_some_and(|height| height <= finalized) {
+            self.full_until = None;
+        }
+        was_full && !self.is_full()
+    }
+}
+
 /// The state of the chains in memory, including queued blocks.
 ///
 /// Clones of the non-finalized state contain independent copies of the chains.
@@ -71,6 +124,14 @@ pub struct NonFinalizedState {
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
+
+    /// Authenticated rejections, shared so concurrent verifiers immediately stop early relay.
+    ///
+    /// This is the only mutable part of otherwise immutable published chain snapshots. Entries
+    /// are add-only between finalizations; only the writer prunes them when finalizing a height.
+    /// Never hold this lock across an await, another lock, or I/O. Kept only in memory: after a
+    /// restart, a replay is verified once before it is recorded again.
+    pub(super) rejected_blocks: Arc<Mutex<RejectedBlocks>>,
 
     // Configuration
     //
@@ -119,6 +180,7 @@ impl Clone for NonFinalizedState {
             precious_rank: self.precious_rank,
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            rejected_blocks: self.rejected_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -137,6 +199,7 @@ impl NonFinalizedState {
             precious_rank: 0,
             network: network.clone(),
             invalidated_blocks: Default::default(),
+            rejected_blocks: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -386,6 +449,17 @@ impl NonFinalizedState {
         // Remove all invalidated_blocks at or below the finalized height
         self.invalidated_blocks
             .retain(|height, _blocks| *height >= best_chain_root.height);
+        let rejection_capacity_cleared = self
+            .rejected_blocks
+            .lock()
+            .expect("authenticated rejection lock is not poisoned")
+            .prune(best_chain_root.height);
+        if rejection_capacity_cleared {
+            tracing::info!(
+                finalized_height = ?best_chain_root.height,
+                "early relay and speculative mining enabled after finalization freed rejection capacity"
+            );
+        }
 
         self.update_metrics_for_chains();
 

@@ -34,6 +34,7 @@ fn guard(state: &Arc<EarlyRelayState>, hash: block::Hash) -> EarlyRelayGuard {
         alive: watch::Sender::new(()),
         state: state.clone(),
         hash,
+        height: block::Height(2),
     }
 }
 
@@ -193,39 +194,22 @@ fn early_relay_retains_large_small_transaction_blocks() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn early_relay_rejections_have_fixed_count_and_unextended_expiry() {
-    let state = EarlyRelayState::new(WatchReceiver::new(
-        watch::channel(NonFinalizedState::new(&Network::Mainnet)).1,
-    ));
-    let lease = |byte| EarlyRelayGuard {
-        alive: watch::Sender::new(()),
-        state: state.clone(),
-        hash: block::Hash([byte; 32]),
-    };
-    let first = lease(0);
+async fn early_relay_rejections_survive_time_and_competing_hashes() {
+    let (state, cache, _snapshot, block) = cache();
+    let first = guard(&state, block.hash());
     first.reject();
-    tokio::time::advance(REJECTION_LIFETIME / 2).await;
-    first.reject();
-    tokio::time::advance(REJECTION_LIFETIME / 2).await;
-    assert!(!first.is_rejected(), "replay must not refresh a rejection");
-
-    first.reject();
-    for byte in 1..u8::try_from(MAX_REJECTIONS).unwrap() {
-        lease(byte).reject();
+    for byte in 0..9 {
+        guard(&state, block::Hash([byte; 32])).reject();
     }
-    assert!(first.is_rejected(), "all eight hashes fit");
-    lease(u8::try_from(MAX_REJECTIONS).unwrap()).reject();
-    assert!(!first.is_rejected(), "the ninth hash evicts the oldest");
-    for byte in 1..=u8::try_from(MAX_REJECTIONS).unwrap() {
-        assert!(lease(byte).is_rejected());
-    }
-    tokio::time::advance(REJECTION_LIFETIME).await;
-    for byte in 0..=u8::try_from(MAX_REJECTIONS).unwrap() {
-        assert!(!lease(byte).is_rejected());
-    }
+    tokio::time::advance(Duration::from_secs(61)).await;
+    assert!(first.is_rejected());
+    let replay = guard(&state, block.hash());
+    assert!(replay.is_rejected());
+    state.publish(block.clone(), &replay, 1);
+    assert!(cache.get(&block.hash()).is_none());
     assert!(
         state.entry.lock().unwrap().is_none(),
-        "hashes retain no bodies"
+        "rejections retain no bodies"
     );
 }
 
@@ -235,17 +219,37 @@ async fn early_relay_rejection_withdraws_live_body_and_prevents_republication() 
     let lease = guard(&state, block.hash());
     state.publish(block.clone(), &lease, 1);
     assert!(cache.get(&block.hash()).is_some());
-    let concurrent = EarlyRelayGuard {
-        alive: watch::Sender::new(()),
-        state: state.clone(),
-        hash: block.hash(),
-    };
+    let concurrent = guard(&state, block.hash());
     concurrent.reject();
     assert!(cache.get(&block.hash()).is_none());
     state.publish(block.clone(), &lease, 1);
     assert!(cache.get(&block.hash()).is_none());
     assert_eq!(*cache.subscribe().borrow(), None);
     assert_eq!(Arc::strong_count(&block), 1);
+}
+
+#[tokio::test]
+async fn early_relay_rejection_capacity_fails_closed() {
+    use super::super::non_finalized_state::MAX_EARLY_RELAY_REJECTIONS;
+
+    let (state, cache, _snapshot, block) = cache();
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_some());
+    for index in 0..=MAX_EARLY_RELAY_REJECTIONS {
+        let mut hash = block::Hash([0; 32]);
+        hash.0[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        guard(&state, hash).reject();
+    }
+    assert!(
+        !lease.is_rejected(),
+        "capacity must not reject ordinary full validation"
+    );
+    assert!(!state.allows_early_relay(block.hash()));
+    assert!(cache.get(&block.hash()).is_none());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_none());
+    assert_eq!(*cache.subscribe().borrow(), None);
 }
 
 #[tokio::test(start_paused = true)]

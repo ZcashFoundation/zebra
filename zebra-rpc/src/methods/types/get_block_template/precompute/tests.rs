@@ -24,6 +24,7 @@ use super::*;
 
 mod lifecycle;
 mod publication;
+mod rejection;
 mod speculation;
 
 /// Returns a template with an explicit timestamp boundary.

@@ -7,6 +7,7 @@ use zebra_chain::{
 };
 use zebra_test::mock_service::MockService;
 
+mod mining_rejections;
 mod rejections;
 
 async fn state() -> (Network, ProposalTestState, zs::ReadStateService) {
@@ -371,6 +372,7 @@ async fn early_relay_pre_nu5_keeps_ordinary_scoring() {
             Ok::<_, BoxError>(match request {
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
                 zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
+                zs::Request::RejectBlock(_) => zs::Response::Rejected(false),
                 _ => panic!("pre-NU5 negotiated bodies use ordinary validation"),
             })
         });

@@ -714,6 +714,7 @@ where
             let mut early_relay_authenticated = false;
             let mut early_relay = None;
             let mut pending_authentication = None;
+            let mut rejection_candidate = None;
             let result = async {
             let phase_start = Instant::now();
             let hash = block.hash();
@@ -880,6 +881,7 @@ where
 
             // Bound shielded work before output recovery or proof verification.
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+            rejection_candidate = (!request.is_proposal()).then(|| block.clone());
             let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
                 && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
             early_relay = if request.is_proposal()
@@ -948,7 +950,7 @@ where
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
                 };
-                let result = state_service.oneshot(commit).await;
+                let result = state_service.clone().oneshot(commit).await;
                 metrics::histogram!(
                     "zebra.consensus.block.phase.duration_seconds",
                     "phase" => "state_commit"
@@ -1247,8 +1249,14 @@ where
                     }
                 }
             }
-            if let Some(guard) = early_relay.as_ref().filter(|_| error.is_deterministic_rejection()) {
-                guard.reject();
+            if error.is_deterministic_rejection() {
+                if let Some(guard) = early_relay.as_ref() {
+                    guard.reject();
+                } else if let Some(block) = rejection_candidate {
+                    // State independently authenticates the body before remembering the hash.
+                    // Failure to authenticate must not replace the original validation error.
+                    let _ = state_service.oneshot(zs::Request::RejectBlock(block)).await;
+                }
             }
             Err(error.for_early_relay(early_relay_authenticated))
         }

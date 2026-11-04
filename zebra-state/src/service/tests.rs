@@ -43,6 +43,7 @@ use crate::{
 };
 
 mod header;
+mod mining_rejection;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
