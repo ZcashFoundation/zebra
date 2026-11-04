@@ -225,8 +225,10 @@ workflow automatically deletes test instances, instance templates, disks, and im
 
 If you want to keep instances, instance templates, disks, or images in Google Cloud, name them so they don't match the automated names:
 
-- deleted instances, instance templates and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
-- deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
+- deleted instances and disks end in a commit hash, so use a name that doesn't end in `-[0-9a-f]{7,}`
+- deleted instance templates start with `zebrad-`, and deleted disks and images start with `zebrad-` or `lwd-`, so use a name starting with anything else
+
+A template that a managed instance group still uses is never deleted.
 
 Our production Google Cloud project doesn't have automated deletion.
 

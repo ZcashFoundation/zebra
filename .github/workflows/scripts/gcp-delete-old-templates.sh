@@ -18,8 +18,11 @@ if ! command -v gcloud &> /dev/null; then
     exit 1
 fi
 
-# Fetch the list of instance templates to delete
-if ! TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp --filter="name~-[0-9a-f]{7,}$ AND creationTimestamp < ${DELETE_BEFORE_DATE}" --format='value(NAME)'); then
+# Fetch the list of instance templates to delete. Every template the deploy workflow
+# creates starts with "zebrad-", but its suffix has changed with the naming scheme, so
+# match the prefix only. GCP refuses to delete a template that a MIG still references,
+# so each MIG keeps its current template.
+if ! TEMPLATES=$(gcloud compute instance-templates list --sort-by=creationTimestamp --filter="name~^zebrad- AND creationTimestamp < ${DELETE_BEFORE_DATE}" --format='value(NAME)'); then
     echo "Error fetching instance templates."
     exit 1
 fi
