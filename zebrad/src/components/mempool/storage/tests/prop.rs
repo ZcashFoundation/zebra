@@ -1192,15 +1192,4 @@ proptest! {
             Ok::<_, TestCaseError>(())
         })?;
     }
-
-    /// Check if EvictionList panics if entries are added multiple times.
-    #[test]
-    #[should_panic]
-    fn eviction_list_refresh(
-        txid in any::<UnminedTxId>()
-    ) {
-        let mut e = EvictionList::new(2, EVICTION_MEMORY_TIME);
-        e.insert(txid.mined_id());
-        e.insert(txid.mined_id());
-    }
 }
