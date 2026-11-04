@@ -36,20 +36,17 @@ use zebra_chain::{
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
-        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES,
+        block::TRANSACTION_LOCATION_DISK_BYTES,
+        chain::{SNAPSHOT_BASE, SNAPSHOT_BASE_DISK_BYTES},
+        transparent::{
+            fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+            BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+        },
         upgrade::restorable_db_source_versions, FromDisk, IntoDisk, TransactionIndex,
         TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
     write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
     StateInitError,
-};
-
-use super::zebra_db::{
-    chain::SNAPSHOT_BASE,
-    transparent::{
-        fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
-        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
-    },
 };
 // Doc-only imports
 #[allow(unused_imports)]

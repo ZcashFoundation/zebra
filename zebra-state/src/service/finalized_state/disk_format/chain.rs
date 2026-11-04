@@ -28,6 +28,12 @@ use crate::{
     state_snapshot::SnapshotBase,
 };
 
+/// The name of the snapshot base column family: `()` → [`SnapshotBase`] in a
+/// database imported from a state snapshot, and empty otherwise.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const SNAPSHOT_BASE: &str = "snapshot_base";
+
 /// The on-disk width of a [`SnapshotBase`]: two heights, two hashes, and the
 /// deferred checks byte.
 pub const SNAPSHOT_BASE_DISK_BYTES: usize = 2 * HEIGHT_DISK_BYTES + 32 + 32 + 1;

@@ -51,11 +51,8 @@ impl PruningWitness {
         let Some(activation) = NetworkUpgrade::Nu5.activation_height(&network) else {
             return Ok(None);
         };
-        let ancestors = crate::service::block_iter::known_chain_ancestor_iter::<block::Block>(
-            None,
-            db,
-            tip.1.into(),
-        );
+        let ancestors = std::iter::successors(db.height(tip.1), |height| height.previous().ok())
+            .map_while(|height| db.block(height.into()).transpose());
         // A branchless suffix is valid. Bound the initial search, then inspect only new blocks;
         // no witness means keeping the bodies, not rejecting the verified chain.
         let mut last_height = None;

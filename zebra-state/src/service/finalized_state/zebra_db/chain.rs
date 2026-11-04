@@ -77,13 +77,7 @@ pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNeg
 /// This constant should be used so the compiler can detect typos.
 pub const BLOCK_INFO: &str = "block_info";
 
-/// The name of the snapshot base column family: `()` → [`SnapshotBase`] in a
-/// database imported from a state snapshot, and empty otherwise.
-///
-/// This constant should be used so the compiler can detect typos.
-///
-/// [`SnapshotBase`]: crate::SnapshotBase
-pub const SNAPSHOT_BASE: &str = "snapshot_base";
+pub use crate::service::finalized_state::disk_format::chain::SNAPSHOT_BASE;
 
 /// The type for reading value pools from the database.
 ///
