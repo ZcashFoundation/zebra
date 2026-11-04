@@ -1,0 +1,12 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added the public `retained_charge` field to `SemanticallyVerifiedBlock`, so code that builds the
+  struct with a literal or destructures it without `..` must set or match it. It carries the
+  numeric block charge computed by `block_retained_charge`; the state reuses it instead of
+  serializing again, including through contextual conversions and
+  `ContextuallyVerifiedBlock::into_mined_request`. Added `MemoryLimits` and `init_with_limits`, which open the state
+  with the RocksDB bounds in `MemoryLimits::rocksdb` and drop the highest blocks waiting for their
+  parent above `MemoryLimits::queued_blocks_bytes`; `init` uses `MemoryLimits::default()`, which
+  keeps today's limits.
+time: 2026-11-06T11:34:05Z

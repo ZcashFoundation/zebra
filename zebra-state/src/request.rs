@@ -288,6 +288,16 @@ pub struct SemanticallyVerifiedBlock {
     /// tests); `Chain::cmp` treats unstamped blocks as received before any stamped
     /// block, like `zcashd`'s disk-loaded blocks, which all share `nSequenceId` 0.
     pub received_time: Option<Instant>,
+
+    /// The block's retained-content charge from [`block_retained_charge`], if the producer of
+    /// this block computed it, so later memory accounting reuses it instead of serializing the
+    /// block again.
+    ///
+    /// `None` when no producer computed it; consumers then compute it themselves. A producer
+    /// that sets it must use [`block_retained_charge`] of this `block` and `transaction_hashes`:
+    /// the state's orphan queue and non-finalized memory accounting use the carried value as
+    /// given.
+    pub retained_charge: Option<usize>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -339,7 +349,7 @@ pub struct CommitAids {}
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
     pub(crate) block: Arc<Block>,
@@ -380,6 +390,38 @@ pub struct ContextuallyVerifiedBlock {
     /// through the block verifier, copied from the [`SemanticallyVerifiedBlock`] it was
     /// built from. See that type's `received_time` field for details.
     pub(crate) received_time: Option<Instant>,
+
+    /// The block's retained-content charge from [`block_retained_charge`]: the
+    /// [`SemanticallyVerifiedBlock::retained_charge`] this block was built from, or computed once
+    /// when it was built without one.
+    pub(crate) retained_charge: usize,
+}
+
+/// Compares every field except `retained_charge`, which is derived from the block, so records of
+/// the same block are equal whichever producer computed their charge.
+impl PartialEq for ContextuallyVerifiedBlock {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+            received_time,
+            retained_charge: _,
+        } = self;
+
+        *block == other.block
+            && *hash == other.hash
+            && *height == other.height
+            && *new_outputs == other.new_outputs
+            && *spent_outputs == other.spent_outputs
+            && *transaction_hashes == other.transaction_hashes
+            && *chain_value_pool_change == other.chain_value_pool_change
+            && *received_time == other.received_time
+    }
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -550,10 +592,9 @@ impl ContextuallyVerifiedBlock {
     /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
     ///
     /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
-    /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
+    /// The block's share is the charge it carries, so this only walks the output maps.
     pub fn retained_bytes(&self) -> usize {
-        block_wire_and_retained_bytes(&self.block, &self.transaction_hashes)
-            .1
+        self.retained_charge
             .saturating_add(self.contextual_data_retained_bytes())
     }
 
@@ -569,6 +610,8 @@ impl ContextuallyVerifiedBlock {
     /// The caller must verify proof of work and ensure every serialized byte except nonce and
     /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
     pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        // The solved block has the proposal's serialized size and transactions, so it keeps the
+        // proposal's charge.
         self.hash = block.hash();
         self.block = block;
         self.received_time = Some(received_time);
@@ -586,6 +629,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut self.new_outputs)),
             transaction_hashes: self.transaction_hashes.clone(),
             received_time: self.received_time,
+            retained_charge: Some(self.retained_charge),
         };
         Request::CommitMinedBlock {
             block,
@@ -641,6 +685,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time,
+            retained_charge,
         } = semantically_verified;
 
         let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
@@ -649,6 +694,8 @@ impl ContextuallyVerifiedBlock {
             network,
             previous_value_pools,
         )?;
+        let retained_charge =
+            retained_charge.unwrap_or_else(|| block_retained_charge(&block, &transaction_hashes));
 
         Ok((
             Self {
@@ -660,10 +707,21 @@ impl ContextuallyVerifiedBlock {
                 transaction_hashes,
                 chain_value_pool_change,
                 received_time,
+                retained_charge,
             },
             transaction_fees,
         ))
     }
+}
+
+/// The conservative retained-content charge of `block` and its `transaction_hashes`, including
+/// decoded metadata, in bytes: the block's share of every retained-memory charge.
+///
+/// This is a resource bound, not allocator RSS. Computing it serializes the block without copying
+/// its bytes, so call it once per block, off the async runtime and the state writer thread, and
+/// carry the result in [`SemanticallyVerifiedBlock::retained_charge`].
+pub fn block_retained_charge(block: &Block, transaction_hashes: &[transaction::Hash]) -> usize {
+    block_wire_and_retained_bytes(block, transaction_hashes).1
 }
 
 /// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
@@ -775,6 +833,7 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time: None,
+            retained_charge: None,
         }
     }
 }
@@ -811,6 +870,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time: None,
+            retained_charge: None,
         }
     }
 }
@@ -824,6 +884,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             new_outputs: Arc::unwrap_or_clone(valid.new_outputs),
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
+            retained_charge: Some(valid.retained_charge),
         }
     }
 }
@@ -838,6 +899,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             transaction_hashes: finalized.transaction_hashes,
             // The finalized state does not track receipt times, so there is no stamp.
             received_time: None,
+            retained_charge: None,
         }
     }
 }

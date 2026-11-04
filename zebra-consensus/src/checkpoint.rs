@@ -1626,6 +1626,7 @@ where
                 new_outputs: Default::default(),
                 transaction_hashes: block.transaction_hashes.clone(),
                 received_time: block.received_time,
+                retained_charge: block.retained_charge,
             };
             let commit = match notifications.clone() {
                 Some(notifications) => zs::Request::CommitMinedCheckpointVerifiedBlock {

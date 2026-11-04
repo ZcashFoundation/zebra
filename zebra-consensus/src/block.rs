@@ -1179,6 +1179,7 @@ where
                 new_outputs,
                 transaction_hashes,
                 received_time: Some(received_time),
+                retained_charge: None,
             };
 
             // Return early for proposal requests.

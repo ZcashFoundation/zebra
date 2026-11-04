@@ -138,6 +138,7 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         new_outputs,
         transaction_hashes,
         received_time: None,
+        retained_charge: None,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
         CheckpointVerifiedBlock::from(semantically_verified),
@@ -294,6 +295,7 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
             new_outputs,
             transaction_hashes,
             received_time: None,
+            retained_charge: None,
         }),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
