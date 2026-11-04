@@ -222,6 +222,11 @@ impl Encoder<Message> for Codec {
 }
 
 impl Codec {
+    /// Return the encoded message size, including its wire header, without allocating a buffer.
+    pub(crate) fn wire_length(&self, msg: &Message) -> Result<usize, Error> {
+        self.body_length(msg).map(|length| HEADER_LEN + length)
+    }
+
     /// Obtain the size of the body of a given message. This will match the
     /// number of bytes written to the writer provided to `write_body` for the
     /// same message.

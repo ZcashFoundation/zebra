@@ -7,7 +7,14 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
+use std::{
+    borrow::Cow,
+    collections::{HashSet, VecDeque},
+    fmt,
+    pin::Pin,
+    sync::Arc,
+    time::Instant,
+};
 
 use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
@@ -35,7 +42,7 @@ use crate::{
     },
     peer_set::{BlockAdvert, ConnectionTracker},
     protocol::{
-        external::{types::Nonce, InventoryHash, Message},
+        external::{types::Nonce, Codec, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
     },
     BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
@@ -773,14 +780,47 @@ where
         // an incoming request, whichever comes first.
         //
         // If there is a pending request, peer messages can complete it. Block adverts use a
-        // separate channel in either state because they do not expect a response.
+        // separate channel, except while compact recovery needs its shorter response deadline.
         //
         // TODO: turn this comment into a module-level comment, after splitting the module.
+
+        // Keep reading recovery replies without letting unrelated service calls or writes hide
+        // the deadline. Both limits include every deferred message, in peer order.
+        const MAX_DEFERRED_MESSAGES: usize = 64;
+        const MAX_DEFERRED_BYTES: usize = 1024 * 1024;
+        let sizing_codec = Codec::builder()
+            .for_version(self.connection_info.negotiated_version)
+            .finish();
+        let mut deferred_peer_messages = VecDeque::new();
+        let mut deferred_peer_bytes = 0;
         loop {
             self.compact.expire();
+            let recovering = matches!(
+                self.state,
+                State::AwaitingResponse {
+                    handler: Handler::CompactBlock { .. },
+                    ..
+                }
+            );
+            if !recovering
+                && !matches!(
+                    self.state,
+                    State::Failed
+                        | State::AwaitingResponse {
+                            handler: Handler::Finished(_),
+                            ..
+                        }
+                )
+            {
+                if let Some((message, bytes)) = deferred_peer_messages.pop_front() {
+                    deferred_peer_bytes -= bytes;
+                    self.handle_message_as_request(message).await;
+                    continue;
+                }
+            }
             let compact_expiry = self.compact.expiry();
             let receive_slots = self.compact_receive_rx.borrow_and_update().clone();
-            if receive_slots.is_none() && self.compact_receive_permit.is_some() {
+            if !recovering && receive_slots.is_none() && self.compact_receive_permit.is_some() {
                 self.set_compact_receive(None).await;
             }
             let receive_slot = async {
@@ -937,8 +977,8 @@ where
                     self.state = State::AwaitingRequest;
                 }
 
-                // We're awaiting a response to a client request,
-                // so also wait on cancellation, timeout, and response-free block adverts.
+                // We're awaiting a response to a client request. Compact recovery defers unrelated
+                // writes rather than cancelling and restarting a potentially partial framed write.
                 State::AwaitingResponse {
                     ref span,
                     ref mut tx,
@@ -1012,13 +1052,14 @@ where
                         }
                         _ = tokio::time::sleep_until(compact_expiry), if self.compact.has_cached() => continue,
                         Ok(()) = self.compact_receive_rx.changed() => continue,
-                        permit = &mut receive_slot, if self.connection_info.early_block_relay
+                        permit = &mut receive_slot, if !recovering
+                            && self.connection_info.early_block_relay
                             && self.compact_receive_permit.is_none() => {
                             self.set_compact_receive(Some(permit)).await;
                             continue;
                         }
                         msg = peer_rx.next() => msg,
-                        Some(hash) = self.block_advert_rx.recv() => {
+                        Some(hash) = self.block_advert_rx.recv(), if !recovering => {
                             self.send_block_advert(hash).await;
                             continue;
                         }
@@ -1052,6 +1093,29 @@ where
                             // Returned messages can be inbound requests, including block adverts
                             // that also completed a FindBlocks response.
                             let unused_msg = if let Some(request_msg) = request_msg {
+                                if recovering
+                                    && !matches!(request_msg, Message::BlockTransactions(_))
+                                {
+                                    let bytes = match sizing_codec.wire_length(&request_msg) {
+                                        Ok(bytes) => bytes,
+                                        Err(error) => {
+                                            self.fail_with(error).await;
+                                            continue;
+                                        }
+                                    };
+                                    if deferred_peer_messages.len() >= MAX_DEFERRED_MESSAGES
+                                        || bytes > MAX_DEFERRED_BYTES - deferred_peer_bytes
+                                    {
+                                        self.fail_with(SerializationError::Parse(
+                                            "compact recovery receive buffer exceeded",
+                                        ))
+                                        .await;
+                                        continue;
+                                    }
+                                    deferred_peer_bytes += bytes;
+                                    deferred_peer_messages.push_back((request_msg, bytes));
+                                    continue;
+                                }
                                 // do NOT instrument with the request span, this is
                                 // independent work
                                 self.handle_message_as_request(request_msg).await
