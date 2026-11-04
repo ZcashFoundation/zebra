@@ -420,9 +420,13 @@ fn precious_response_follows_tip_and_snapshot_publication() {
 }
 
 /// Observe the real writer at notification, response, database write, and snapshot boundaries.
+///
+/// Every observation reads each block in the window exactly once, although the snapshot keeps the
+/// newest finalized block until the next commit.
 #[test]
 fn commit_response_precedes_retention_finalization_without_read_gaps() {
     use std::{
+        collections::HashSet,
         future::Future,
         pin::Pin,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -434,7 +438,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         Unit,
     };
 
-    use zebra_chain::serialization::ZcashDeserializeInto;
+    use zebra_chain::{serialization::ZcashDeserializeInto, transparent};
 
     use crate::{service::read, MinedBlockNotifications};
 
@@ -444,6 +448,11 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         tip: LatestChainTip,
         root: Arc<Block>,
         committed: Arc<Block>,
+        conflicting_root: block::Hash,
+        deferred_chain: Option<std::sync::Weak<Chain>>,
+        /// An address that receives `reward` zatoshis in every block after genesis.
+        address: transparent::Address,
+        reward: i64,
         wakes: AtomicUsize,
         before_write: AtomicBool,
         overlapping_read: AtomicBool,
@@ -452,14 +461,28 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
     impl BeforeFinalization {
         fn readable(&self) -> bool {
             let snapshot = self.snapshot.borrow();
+            let chain = snapshot.best_chain();
+            let tip_height = self.committed.coinbase_height().unwrap();
             self.tip.best_tip_hash() == Some(self.committed.hash())
+                && !snapshot.any_chain_contains(&self.conflicting_root)
                 && [&self.root, &self.committed].into_iter().all(|block| {
                     [block.hash().into(), block.coinbase_height().unwrap().into()]
                         .into_iter()
-                        .all(|key| {
-                            read::block(snapshot.best_chain(), &self.db, key)
-                                == Ok(Some(block.clone()))
-                        })
+                        .all(|key| read::block(chain, &self.db, key) == Ok(Some(block.clone())))
+                })
+                && (0..=tip_height.0).all(|height| {
+                    matches!(
+                        read::block(chain, &self.db, Height(height).into()),
+                        Ok(Some(_))
+                    )
+                })
+                && read::transparent_balance(
+                    chain.cloned(),
+                    &self.db,
+                    HashSet::from([self.address]),
+                )
+                .is_ok_and(|(balance, _)| {
+                    balance.zatoshis() == self.reward * i64::from(tip_height.0)
                 })
         }
     }
@@ -470,7 +493,11 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
             self.before_write.fetch_and(
                 self.readable()
                     && self.db.finalized_tip_height().unwrap() + 1 == self.root.coinbase_height()
-                    && self.snapshot.borrow().any_chain_contains(&self.root.hash()),
+                    && self.snapshot.borrow().any_chain_contains(&self.root.hash())
+                    && self
+                        .deferred_chain
+                        .as_ref()
+                        .is_none_or(|chain| chain.strong_count() > 0),
                 Ordering::SeqCst,
             );
             self.wakes.fetch_add(1, Ordering::SeqCst);
@@ -533,6 +560,18 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         .commit_new_chain(root.clone().prepare(), &finalized.db)
         .unwrap();
     let second_root = root.make_fake_child();
+    let third_root = second_root.make_fake_child();
+    let coinbase_outputs = root.transactions[0].outputs();
+    let address = coinbase_outputs
+        .iter()
+        .find_map(|output| output.address(&Network::Mainnet))
+        .unwrap();
+    let reward = coinbase_outputs
+        .iter()
+        .filter(|output| output.address(&Network::Mainnet) == Some(address))
+        .map(|output| output.value().zatoshis())
+        .sum();
+    assert!(reward > 0, "the balance checks need a non-zero reward");
     let mut parent = root.clone();
     for _ in 1..MAX_BLOCK_REORG_HEIGHT {
         parent = parent.make_fake_child();
@@ -541,15 +580,25 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
             .unwrap();
     }
     let retained = state.clone();
+    let conflicting_root = root.clone().set_work(1);
+    state
+        .commit_new_chain(conflicting_root.clone().prepare(), &finalized.db)
+        .unwrap();
+    assert_eq!(state.chain_count(), 2);
+    let deferred_chain = Arc::downgrade(
+        &state
+            .find_chain(|chain| chain.contains_block_hash(conflicting_root.hash()))
+            .unwrap(),
+    );
     let (chain_tip_sender, tip, _) = ChainTipSender::new(None, &Network::Mainnet);
     let (non_finalized_state_sender, snapshot) = watch::channel(state.clone());
     let (queued, non_finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
     let db = finalized.db.clone();
-    let mut proposals = state.clone();
+    let mut proposals = retained.clone();
     let mut observations = Vec::new();
     let mut responses = Vec::new();
-    for root in [root, second_root] {
+    for root in [root, second_root, third_root] {
         let child = parent.make_fake_child();
         proposals
             .commit_block(child.clone().prepare(), &db)
@@ -560,7 +609,11 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
             snapshot: snapshot.clone(),
             tip: tip.clone(),
             root,
+            conflicting_root: conflicting_root.hash(),
+            deferred_chain: observations.is_empty().then(|| deferred_chain.clone()),
             committed: child.clone(),
+            address,
+            reward,
             wakes: AtomicUsize::new(0),
             before_write: AtomicBool::new(true),
             overlapping_read: AtomicBool::new(false),
@@ -608,12 +661,15 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         writes: writes.clone(),
     }));
     metrics::with_local_recorder(&recorder, || worker.run());
-    assert_eq!(writes.load(Ordering::SeqCst), 2);
+    assert_eq!(writes.load(Ordering::SeqCst), 3);
     assert_eq!(pruning_notifications.len(), 1);
+    assert_eq!(deferred_chain.strong_count(), 0);
+    // The newest finalized root stays published until the next commit pops it.
     assert_eq!(
         snapshot.borrow().best_chain_len(),
-        Some(MAX_BLOCK_REORG_HEIGHT)
+        Some(MAX_BLOCK_REORG_HEIGHT + 1)
     );
+    let newest_root = observations.last().unwrap().root.hash();
     for (observation, (mut response, mut commits)) in observations.iter().zip(responses) {
         assert_eq!(observation.wakes.load(Ordering::SeqCst), 2);
         assert!(
@@ -635,9 +691,12 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
                 observation.committed.coinbase_height().unwrap()
             ),
         );
-        assert!(!snapshot
-            .borrow()
-            .any_chain_contains(&observation.root.hash()));
+        assert_eq!(
+            snapshot
+                .borrow()
+                .any_chain_contains(&observation.root.hash()),
+            observation.root.hash() == newest_root,
+        );
         for chain in [snapshot.borrow().best_chain(), retained.best_chain()] {
             assert_eq!(
                 read::block(chain, &db, observation.root.hash().into()),
