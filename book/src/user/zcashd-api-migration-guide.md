@@ -20,6 +20,42 @@ an unmodified payout processor works with Zallet.
 | Wallet keys, balances, transaction construction | Zallet, with its [altered RPC semantics][zallet-semantics] |
 | Existing wallet integration during migration | The restricted [zcashd-compat sidecar](zcashd-compat.md) |
 
+### Pruned history
+
+Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
+retention, format-30 upgrades, monitoring, and recovery. Enabling pruning immediately removes
+`NODE_NETWORK` from peer advertisements and rejects zcashd sidecars, even before deletion.
+
+For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
+(`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`. This matches zcashd, which
+throws `RPC_INTERNAL_ERROR` with that message in `src/rpc/blockchain.cpp`.
+Verbosity 3 also fails if a spent output's parent transaction is unavailable, even when the
+requested block is retained. Historical verbosity 1 remains available with complete transaction IDs.
+
+For `getrawtransaction`, a known transaction whose body is unavailable returns `-32603` and
+`"Transaction not available (pruned data)"`, with or without a block hash. Unknown transactions
+still return `-5`. Mempool and retained transactions remain available. zcashd has no
+pruned-specific error for `getrawtransaction`; it returns `-5`.
+
+The `getblockchaininfo` response reports actual availability: `pruned` is true when a historical
+body prefix is missing, and `pruneheight` is the start of the complete retained suffix. Genesis
+remains available below that floor. An archive reports `pruned: false` and omits `pruneheight`.
+These fields describe stored data, not a configured retention target.
+
+Historical headers, transaction IDs, address balances and UTXOs, treestates, and subtrees remain
+available from retained indexes. These do not replace the bodies required for historical wallet
+rescans or indexer bootstrap. The [gRPC history contract](../api.md#historical-data-availability)
+returns `FAILED_PRECONDITION` for pruned bodies and attempts to send a terminal error if a stream
+encounters unavailable history after earlier results. A stalled consumer can miss that error when
+the send times out. Clients must check range completeness; stream closure alone does not prove it.
+
+### Pruned output versions
+
+For `gettxout`, Zebra returns `"version": null` when the unspent output exists but its creating
+transaction body has been pruned. The value, script, confirmations, and coinbase flag remain available
+from the UTXO set. Retained and mempool transactions still return their exact numeric version.
+This differs from zcashd, which persists transaction versions in its coins database.
+
 ## How to read the table
 
 ### Method
@@ -88,8 +124,8 @@ tracks remaining shared-RPC differences.
 | Method                                                                          | Owner | Status  | Notes                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------------------------------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)         | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
-| [`getblock`](https://zcash.github.io/rpc/getblock.html) | Zebra | Partial | No `authdataroot`, `chainhistoryroot`, `chainwork`, or `anchor`. The `verbosity` argument is numeric, not boolean. Adds `nTx` and Ironwood tree data. Verbosity `3` adds transparent-input `prevout` data and non-coinbase `fee` where spent outputs are available. |
-| [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html) | Zebra | Partial | No `initial_block_download_complete`, `softforks`, or `pruneheight`. The `chainwork` value is numeric `0`, not a hex string; `commitments` is `0`, `pruned` is `false`, and `headers` equals the committed tip. [#11033] |
+| [`getblock`](https://zcash.github.io/rpc/getblock.html) | Zebra | Partial | No `authdataroot`, `chainhistoryroot`, `chainwork`, or `anchor`. The `verbosity` argument is numeric, not boolean. Adds `nTx` and Ironwood tree data. Verbosity `3` adds transparent-input `prevout` data and non-coinbase `fee` where spent outputs are available. Historical bodies removed by pruning return an error; see [pruned history](#pruned-history). |
+| [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html) | Zebra | Partial | No `initial_block_download_complete` or `softforks`. The `chainwork` value is numeric `0`, not a hex string; `commitments` is `0`, and `headers` equals the committed tip. `pruned` and `pruneheight` report stored body availability; see [pruned history](#pruned-history). [#11033] |
 | [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)               | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
 | [`getblockdeltas`](https://zcash.github.io/rpc/getblockdeltas.html) | — | Retired | Build explorer indexes on [indexer gRPC](#notification-transports). |
 | [`getblockhash`](https://zcash.github.io/rpc/getblockhash.html)                 | Zebra | Done    |                                                                                                                                                                                                                                                                                                                                            |
@@ -100,7 +136,7 @@ tracks remaining shared-RPC differences.
 | [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)             | Zebra | Partial | The regtest-only key is spelled `fully_notified`; zcashd spells it `fullyNotified`.                                                                                                                                                                                                                                                        |
 | [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html) | Zebra | Partial | In verbose output, `modifiedfee` equals `fee`; Zebra has no `prioritisetransaction` fee deltas. |
 | [`getspentinfo`](https://zcash.github.io/rpc/getspentinfo.html) | — | Planned | Intended to use Zebra's `indexer` spending-transaction index. |
-| [`gettxout`](https://zcash.github.io/rpc/gettxout.html) | Zebra | Partial | P2PK outputs do not receive the synthetic P2PKH address reported by `zcashd`; the script address list is empty. |
+| [`gettxout`](https://zcash.github.io/rpc/gettxout.html) | Zebra | Partial | P2PK outputs do not receive the synthetic P2PKH address reported by `zcashd`; the script address list is empty. `version` is `null` when the creating transaction body was pruned; see [pruned output versions](#pruned-output-versions). |
 | [`gettxoutproof`](https://zcash.github.io/rpc/gettxoutproof.html) | — | Planned | [Decision][11022-decisions]. |
 | [`gettxoutsetinfo`](https://zcash.github.io/rpc/gettxoutsetinfo.html) | — | Retired | Build explorer indexes on [indexer gRPC](#notification-transports). |
 | [`verifychain`](https://zcash.github.io/rpc/verifychain.html) | — | Retired | |
@@ -164,7 +200,7 @@ tracks remaining shared-RPC differences.
 | [`decoderawtransaction`](https://zcash.github.io/rpc/decoderawtransaction.html) | [Zallet][zallet-decoderawtransaction] | Done | [#8645] |
 | [`decodescript`](https://zcash.github.io/rpc/decodescript.html)                 | [Zallet][zallet-decodescript]         | Done     |                                                                                                                                                                                      |
 | [`fundrawtransaction`](https://zcash.github.io/rpc/fundrawtransaction.html)     | Zallet                                | Replaced | Use Zallet's PCZT methods instead.                                                                                                                                                   |
-| [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html) | Zebra | Partial | Uses numeric verbosity. Outputs expose `valueZat`, not `valueSat`, and omit `spentTxId`, `spentIndex`, and `spentHeight`. P2PK outputs have no synthetic address ([#9671]). Supports Ironwood transaction data. |
+| [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html) | Zebra | Partial | Uses numeric verbosity. Outputs expose `valueZat`, not `valueSat`, and omit `spentTxId`, `spentIndex`, and `spentHeight`. P2PK outputs have no synthetic address ([#9671]). Supports Ironwood transaction data. Known transactions removed by pruning return an error; see [pruned history](#pruned-history). |
 | [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html)     | Zebra                                 | Partial  | `allowhighfees` is accepted and ignored.                                                                                                                                             |
 | [`signrawtransaction`](https://zcash.github.io/rpc/signrawtransaction.html)     | Zallet                                | Replaced | Use Zallet's PCZT methods instead.                                                                                                                                                   |
 

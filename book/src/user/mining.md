@@ -4,6 +4,10 @@ Zebra supplies block templates and validates submitted blocks over JSON-RPC.
 A mining pool distributes those templates to external Equihash solvers; Zebra
 does not start a solver when an operator configures a reward address.
 
+A mining backend that does not need full historical bodies can use
+[pruned mining nodes](pruning.md). Pruning is irreversible; pool payout and
+accounting queries may need a longer retention window or a separate archive.
+
 ## Download Zebra
 
 Install [Zebra](install.md) or use the [Docker instructions](mining-docker.md).

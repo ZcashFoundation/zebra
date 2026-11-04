@@ -18,6 +18,10 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 /// `zebra-checkpoints`) can use it without depending on `zebra-state`.
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
+/// Minimum retained finalized block bodies on Mainnet and Testnet when pruning is enabled.
+/// Regtest permits `MAX_BLOCK_REORG_HEIGHT + 1` bodies instead.
+pub const MIN_PRUNING_RETENTION: u32 = 10_000;
+
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
@@ -34,7 +38,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 29;
+const DATABASE_FORMAT_VERSION: u64 = 30;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -45,6 +49,11 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
+///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
+///   binaries must not open a pruned v30 directory: their minor-version downgrade path assumes
+///   archive bodies remain complete. A never-pruned v30 directory can be renamed back to v29 for
+///   rollback, because no records are rewritten; a pruned one needs a separate archive backup.
 /// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
 ///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
 ///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network

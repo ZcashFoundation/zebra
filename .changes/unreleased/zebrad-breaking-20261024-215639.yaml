@@ -1,0 +1,10 @@
+project: zebrad
+kind: breaking
+body: >-
+  Moved to state format v30 for opt-in block-body pruning. Compatible v29 archive databases are
+  reused by moving their network directory without a resync, even with pruning disabled, and
+  disabling old-database cleanup does not prevent the move. A never-pruned archive can return to
+  Zebra 7.0.0 by moving `state/v30/<network>` back to `state/v29/<network>`; a pruned database
+  cannot, so keep a separate archive backup before enabling pruning. Pruning is irreversible;
+  returning to archive operation requires an archive snapshot or full resync.
+time: 2026-10-24T21:56:39.657595187+02:00

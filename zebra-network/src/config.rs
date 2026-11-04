@@ -34,6 +34,7 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -224,6 +225,15 @@ pub struct Config {
 }
 
 impl Config {
+    /// Applies configured experimental services to the caller's base service capabilities.
+    pub(crate) fn advertised_services(&self, mut services: PeerServices) -> PeerServices {
+        services.set(
+            PeerServices::NODE_EARLY_BLOCK_RELAY,
+            self.experimental_early_block_relay,
+        );
+        services
+    }
+
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
     ///

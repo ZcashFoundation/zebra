@@ -30,8 +30,8 @@ pub use address::{
 };
 pub use block::{
     any_block, any_transaction, any_utxo, block, block_and_size, block_header, block_info,
-    mined_transaction, spent_outputs_for_block, transaction_hashes_for_any_block,
-    transaction_hashes_for_block, unspent_utxo,
+    known_transaction, mined_transaction, spent_outputs_for_block,
+    transaction_hashes_for_any_block, transaction_hashes_for_block, unspent_output, unspent_utxo,
 };
 
 #[cfg(feature = "indexer")]

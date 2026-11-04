@@ -344,6 +344,7 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | --- | --- | --- | --- |
 | `cache_dir` | Path string | Default cache directory | Root of the state database and non-finalized-state backup. Does not relocate peer caches or RPC cookies. |
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
+| `prune_blocks_older_than` | Integer, optional | Unset (archive) | Number of recent finalized block bodies to retain; older bodies are deleted. At least 10,000 on Mainnet and Testnet, or 1,001 on Regtest. Irreversible, and stops advertising `NODE_NETWORK`. See [pruned mining nodes](pruning.md). |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
@@ -354,8 +355,8 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `elasticsearch_password` | String; `elasticsearch` feature only | `""` | Elasticsearch HTTP Basic authentication password. Redacted from debug output, but stored in plaintext in the configuration file. Environment overrides are rejected. |
 | `elasticsearch_skip_cert_validation` | Boolean; `elasticsearch` feature only | `false` | Disable HTTPS certificate validation. Use only for trusted local clusters with self-signed certificates; credentials and indexed data can be intercepted. |
 
-Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
-7.0.0. Non-finalized backups use
+Persistent state uses `<cache_dir>/state/v30/<network-directory>`; Zebra 7.0.0
+used `state/v29`. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.

@@ -202,6 +202,11 @@ genesis. To restore the backup:
 
 Roll back direct readers to builds for the older format at the same time.
 
+Format 30 is an exception for archives that have never been pruned: the
+upgrade from format 29 rewrites no records, so the directory can be moved back
+for Zebra 7.0.0. See
+[format 30 and recovery](pruning.md#format-30-recovery-and-copies).
+
 ## Zebra 7.0.0
 
 - **NU7.** Mainnet activates NU7 at height 3,543,405; 6.x releases cannot
