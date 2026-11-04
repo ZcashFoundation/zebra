@@ -895,12 +895,8 @@ impl Arbitrary for VerifiedUnminedTx {
             any::<Amount<NonNegative>>(),
             any::<u32>(),
             any::<u32>(),
-            any::<(u16, u16)>().prop_map(|(unpaid_actions, conventional_actions)| {
-                (
-                    unpaid_actions % conventional_actions.saturating_add(1),
-                    conventional_actions,
-                )
-            }),
+            // The unpaid count is bounded by the transaction's cached action count below.
+            any::<u32>(),
             any::<f32>(),
             serialization::arbitrary::datetime_u32(),
             any::<block::Height>(),
@@ -911,24 +907,19 @@ impl Arbitrary for VerifiedUnminedTx {
                     miner_fee,
                     sigops,
                     p2sh_sigops,
-                    (conventional_actions, mut unpaid_actions),
+                    unpaid_actions,
                     fee_weight_ratio,
                     time,
                     height,
                 )| {
-                    if unpaid_actions > conventional_actions {
-                        unpaid_actions = conventional_actions;
-                    }
-
-                    let conventional_actions = conventional_actions as u32;
-                    let unpaid_actions = unpaid_actions as u32;
+                    let unpaid_actions =
+                        unpaid_actions % transaction.conventional_actions.saturating_add(1);
 
                     Self {
                         transaction,
                         miner_fee,
                         legacy_sigop_count: sigops,
                         p2sh_sigop_count: p2sh_sigops,
-                        conventional_actions,
                         unpaid_actions,
                         fee_weight_ratio,
                         time: Some(time),

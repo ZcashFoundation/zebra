@@ -126,7 +126,7 @@ use types::{
     get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
-    get_standard_fee::{standard_fee, GetStandardFeeResponse},
+    get_standard_fee::GetStandardFeeResponse,
     long_poll::{LongPollId, LongPollInput},
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
@@ -712,9 +712,9 @@ pub trait Rpc {
     /// Returns the recommended standard fee per logical action, in zatoshis.
     ///
     /// Currently returns the ZIP 317 marginal fee for the next block, with `version` 0:
-    /// 5000 zatoshis before Mainnet height 3,590,000, and 1000 zatoshis from that height
-    /// and on test networks. This will be replaced by a dynamic estimate without changing
-    /// the parameters or result shape.
+    /// 5000 zatoshis before ZIP 2009 activation, and 1000 zatoshis from Mainnet height
+    /// 3,590,000, Testnet height 4,465,026, or Regtest height 1. Custom testnets use the
+    /// Testnet policy height.
     ///
     /// method: post
     /// tags: wallet
@@ -3291,7 +3291,7 @@ where
         };
 
         Ok(GetStandardFeeResponse::new(
-            standard_fee(&self.network, next_block_height),
+            zebra_chain::transaction::zip317::marginal_fee(&self.network, next_block_height),
             VERSION,
         ))
     }

@@ -254,8 +254,9 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
             let mut tx = transaction.clone();
             tx.set_expiry_height(Height(2_000 + i));
             let tx = zebra_chain::transaction::UnminedTx::from(Arc::new(tx));
-            let fee = tx.conventional_fee;
-            VerifiedUnminedTx::new(tx, fee, 0, 0, Arc::new(vec![])).unwrap()
+            let fee =
+                transaction::zip317::conventional_fee(tx.conventional_actions, &network, height);
+            VerifiedUnminedTx::new(tx, fee, 0, 0, Arc::new(vec![]), &network, height).unwrap()
         })
         .collect();
     let extra_counts =
@@ -307,4 +308,69 @@ fn reserves_shielded_budget_for_sapling_coinbase() {
         actual.data.as_ref().len(),
         sizing_tx.zcash_serialized_size()
     );
+}
+
+#[test]
+fn fee_activation_refreshes_template_candidates() {
+    use std::sync::Arc;
+    use zebra_chain::transaction::{LockTime, Transaction, UnminedTx, VerifiedUnminedTx};
+
+    let transaction = UnminedTx::from(Arc::new(Transaction::test_v1(
+        vec![],
+        vec![],
+        LockTime::unlocked(),
+    )));
+    let miner = MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])));
+
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        let activation = network.fee_reduction_height();
+        let before = activation.previous().unwrap();
+        let low_fee = VerifiedUnminedTx::new(
+            transaction.clone(),
+            2_000.try_into().unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+            &network,
+            activation,
+        )
+        .unwrap();
+
+        // An entry accepted on a newer tip must not be selected before activation after a reorg.
+        for (height, expected_count) in [(before, 0), (activation, 1)] {
+            let selected = select_mempool_transactions(
+                &network,
+                height,
+                &miner,
+                vec![low_fee.clone()],
+                TransactionDependencies::default(),
+                None,
+                Some(Amount::zero()),
+            );
+            assert_eq!(selected.len(), expected_count);
+        }
+
+        let high_fee = VerifiedUnminedTx::new(
+            transaction.clone(),
+            100_000.try_into().unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+            &network,
+            before,
+        )
+        .unwrap();
+        assert_eq!(high_fee.fee_weight_ratio, 4.0);
+        let selected = select_mempool_transactions(
+            &network,
+            activation,
+            &miner,
+            vec![high_fee],
+            TransactionDependencies::default(),
+            None,
+            Some(Amount::zero()),
+        );
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].1.fee_weight_ratio, 10.0);
+    }
 }

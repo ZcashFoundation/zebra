@@ -37,7 +37,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
-    transaction::UnminedTxId,
+    transaction::{zip317, UnminedTxId},
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network as zn;
@@ -700,6 +700,14 @@ impl Service<Request> for Mempool {
             last_seen_tip_hash,
         } = &mut self.active_state
         {
+            // Refresh retained entries before completed downloads can insert and update metrics.
+            if let Some(TipAction::Grow { block }) = tip_action.as_ref() {
+                let fee_height = self.network.fee_reduction_height();
+                if block.height.next().ok() == Some(fee_height) {
+                    storage.update_fee_parameters(&self.network, fee_height);
+                }
+            }
+
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
             let mut invalidated_ids = HashSet::<_>::new();
@@ -781,7 +789,22 @@ impl Service<Request> for Mempool {
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.metric_label()).increment(1);
 
                         invalidated_ids.insert(tx_id);
-                        storage.reject_if_needed(tx_id, error);
+                        // An old-policy fee failure must not block resubmission after activation.
+                        let activation = self.network.fee_reduction_height();
+                        let stale_fee_rejection = matches!(
+                            &error,
+                            TransactionDownloadVerifyError::Invalid {
+                                error: TransactionError::Zip317(zip317::Error::UnpaidActions),
+                                verification_height,
+                                ..
+                            } if *verification_height < activation
+                                && best_tip_height.is_some_and(|tip| {
+                                    tip.next().is_ok_and(|height| height >= activation)
+                                })
+                        );
+                        if !stale_fee_rejection {
+                            storage.reject_if_needed(tx_id, error);
+                        }
                     }
                     Err((tx_id, _elapsed)) => {
                         tracing::info!(

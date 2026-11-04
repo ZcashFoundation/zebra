@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Apply ZIP 2009 fees and selection weights at the next-block activation height in block templates and `getstandardfee`.
+time: 2026-11-04T06:08:32.532575512+01:00

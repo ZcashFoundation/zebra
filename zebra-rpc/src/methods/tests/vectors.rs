@@ -1466,7 +1466,7 @@ async fn rpc_getrawtransaction() {
                         id: UnminedTxId::Legacy(tx.hash()),
                         transaction: tx.clone(),
                         size: 0,
-                        conventional_fee: Amount::zero(),
+                        conventional_actions: zip317::conventional_actions(tx),
                     }]));
                 });
 
@@ -3418,17 +3418,14 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         transaction: tx.clone(),
         id: tx.unmined_id(),
         size: tx.zcash_serialized_size(),
-        conventional_fee: 0.try_into().unwrap(),
+        conventional_actions: zip317::conventional_actions(&tx),
     };
-
-    let conventional_actions = zip317::conventional_actions(&unmined_tx.transaction);
 
     let verified_unmined_tx = VerifiedUnminedTx {
         transaction: unmined_tx,
-        miner_fee: 0.try_into().unwrap(),
+        miner_fee: 10_000.try_into().unwrap(),
         legacy_sigop_count: 0,
         p2sh_sigop_count: 0,
-        conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
         time: None,
@@ -3805,12 +3802,11 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         transaction: tx.clone(),
         id: tx.unmined_id(),
         size: tx.zcash_serialized_size(),
-        conventional_fee: 0.try_into().unwrap(),
+        conventional_actions: zip317::conventional_actions(&tx),
     };
     let mempool_tx = VerifiedUnminedTx {
-        conventional_actions: zip317::conventional_actions(&unmined_tx.transaction),
         transaction: unmined_tx,
-        miner_fee: 0.try_into().unwrap(),
+        miner_fee: 10_000.try_into().unwrap(),
         legacy_sigop_count: 0,
         p2sh_sigop_count: 0,
         unpaid_actions: 0,
@@ -5318,20 +5314,20 @@ async fn rpc_gettxout() {
 async fn rpc_get_standard_fee() {
     let _init_guard = zebra_test::init();
 
-    // The fee applies to the block after the tip, so Mainnet switches at a tip one block below
-    // the activation height.
-    let tip_heights = [
-        None,
-        Some(Height(3_589_998)),
-        Some(Height(3_589_999)),
-        Some(Height(3_590_000)),
-    ];
-
-    for (network, expected_fees) in [
-        (Mainnet, [5000, 5000, 1000, 1000]),
-        (Network::new_default_testnet(), [1000; 4]),
-        (Network::new_regtest(Default::default()), [1000; 4]),
+    // Wallets pay for the next block, including when the tip is one below activation.
+    for network in [
+        Mainnet,
+        Network::new_default_testnet(),
+        Network::new_regtest(Default::default()),
     ] {
+        let activation = network.fee_reduction_height();
+        let tip_heights = [
+            None,
+            activation.previous().unwrap().previous().ok(),
+            Some(activation.previous().unwrap()),
+            Some(activation),
+        ];
+        let expected_fees = [5000, 5000, 1000, 1000];
         let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
