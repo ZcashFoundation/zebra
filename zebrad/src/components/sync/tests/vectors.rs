@@ -3293,3 +3293,225 @@ async fn inter_round_ancestor_failure_is_retried() {
     }
 }
 
+/// A first responder must not fill the batch before another peer's next block is admitted.
+#[tokio::test(start_paused = true)]
+async fn sync_tip_responses_share_batch_capacity() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let [honest, adversary_first, adversary_second, overlap] =
+        [1, 98, 99, 97].map(|byte| block::Hash::from([byte; 32]));
+
+    for extend in [false, true] {
+        for duplicate in [false, true] {
+            let response_index = Arc::new(AtomicUsize::new(0));
+            let network = tower::service_fn(move |request| {
+                let response = match request {
+                    zn::Request::FindBlocks { .. } => {
+                        let mut hashes = match response_index.fetch_add(1, Ordering::SeqCst) {
+                            0 => {
+                                let mut hashes = vec![adversary_first, adversary_second];
+                                if duplicate {
+                                    hashes.push(honest);
+                                }
+                                hashes
+                            }
+                            1 => vec![honest],
+                            _ => Vec::new(),
+                        };
+                        if extend {
+                            hashes.insert(0, overlap);
+                        }
+                        Some(zn::Response::BlockHashes(hashes))
+                    }
+                    zn::Request::BlockDownload { .. } => None,
+                    _ => unreachable!("the syncer only requests tips and blocks"),
+                };
+                // Each tip response completes before the fanout yields to dispatch the next.
+                async move {
+                    match response {
+                        Some(response) => Ok::<_, crate::BoxError>(response),
+                        None => futures::future::pending().await,
+                    }
+                }
+            });
+            let state = tower::service_fn(|request| {
+                let response = match request {
+                    zs::Request::BlockLocator => {
+                        zs::Response::BlockLocator(vec![block::Hash::from([0; 32])])
+                    }
+                    zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                    _ => unreachable!("the syncer only checks known blocks and the locator"),
+                };
+                futures::future::ok::<_, crate::BoxError>(response)
+            });
+            let (tip, tip_sender) = MockChainTip::new();
+            tip_sender.send_best_tip_height(Height(0));
+            let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+            let (mut chain_sync, _status) = ChainSync::new(
+                &ZebradConfig::default(),
+                Height(0),
+                network,
+                MockService::build().for_unit_tests(),
+                state,
+                MockService::build().for_unit_tests(),
+                tip,
+                misbehavior_tx,
+            );
+            chain_sync.full_verify_concurrency_limit = 2;
+            if extend {
+                chain_sync.prospective_tips.insert(sync::CheckedTip {
+                    tip: block::Hash::from([0; 32]),
+                    expected_next: overlap,
+                });
+            }
+
+            let extra = tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, async {
+                if extend {
+                    chain_sync.extend_tips().await
+                } else {
+                    chain_sync.obtain_tips().await
+                }
+            })
+            .await
+            .expect("a tip round must finish without waiting for pending block downloads")
+            .unwrap();
+
+            assert_eq!(
+                extra.into_iter().collect::<Vec<_>>(),
+                vec![adversary_second],
+                "the honest successor must be admitted in this round"
+            );
+            assert_eq!(chain_sync.downloads.in_flight(), 2);
+            assert!(matches!(
+                chain_sync.downloads.download_and_verify(honest).await,
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. })
+            ));
+            chain_sync.downloads.cancel_all();
+        }
+    }
+}
+
+/// New batches use only the remaining lookahead capacity and preserve the unqueued suffix.
+#[tokio::test(start_paused = true)]
+async fn request_blocks_respects_remaining_capacity() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    chain_sync.full_verify_concurrency_limit = 2;
+    let hashes = [1, 2, 3].map(|byte| block::Hash::from([byte; 32]));
+
+    assert!(chain_sync
+        .request_blocks([hashes[0]].into_iter().collect())
+        .await
+        .unwrap()
+        .is_empty());
+    let extra = chain_sync
+        .request_blocks(hashes[1..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(extra.iter().copied().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+
+    let extra = chain_sync.request_blocks(extra).await.unwrap();
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+    chain_sync.downloads.cancel_all();
+}
+
+
+/// Delayed retries retain capacity so a fresh batch cannot overfill the queue when they resume.
+#[tokio::test(start_paused = true)]
+async fn request_blocks_reserves_capacity_for_retries() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    chain_sync.full_verify_concurrency_limit = 2;
+    let hashes = [1, 2, 3].map(|byte| block::Hash::from([byte; 32]));
+    chain_sync.reobtain_hashes.insert(hashes[0]);
+
+    let extra = chain_sync
+        .request_blocks(hashes[1..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), vec![hashes[2]]);
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+
+    chain_sync.reobtain_missing_blocks().await;
+    assert_eq!(chain_sync.downloads.in_flight(), 2);
+    assert!(chain_sync.reobtain_hashes.is_empty());
+    chain_sync.downloads.cancel_all();
+}
+
+
+/// A partially queued final checkpoint must leave room for its missing blocks.
+#[tokio::test(start_paused = true)]
+async fn partial_final_checkpoint_keeps_admission_capacity() {
+    let _init_guard = zebra_test::init();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(1..=9)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let hashes: Vec<_> = blocks.iter().map(|block| block.hash()).collect();
+    let network = tower::service_fn(move |request| {
+        let zn::Request::BlockDownload { hash, .. } = request else {
+            panic!("only block downloads are expected");
+        };
+        let block = blocks.iter().find(|block| block.hash() == hash).unwrap();
+        futures::future::ok::<_, crate::BoxError>(zn::Response::Blocks(vec![Available((
+            block.clone(),
+            None,
+        ))]))
+    });
+    let mut verifier = MockService::build().for_unit_tests();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(0));
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let mut config = ZebradConfig::default();
+    config.sync.full_verify_concurrency_limit = 1;
+    let (mut chain_sync, _status) = ChainSync::new(
+        &config,
+        Height(5),
+        network,
+        verifier.clone(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    assert!(chain_sync
+        .request_blocks(hashes[..3].iter().copied().collect())
+        .await
+        .unwrap()
+        .is_empty());
+    let mut pending_checkpoint = Vec::new();
+    for _ in 0..3 {
+        pending_checkpoint.push(verifier.expect_request_that(|_| true).await);
+    }
+    let extra = chain_sync
+        .request_blocks(hashes[3..].iter().copied().collect())
+        .await
+        .unwrap();
+    assert_eq!(chain_sync.downloads.in_flight(), 6);
+    assert_eq!(extra.iter().copied().collect::<Vec<_>>(), hashes[6..]);
+    for _ in 0..3 {
+        pending_checkpoint.push(verifier.expect_request_that(|_| true).await);
+    }
+    assert!(pending_checkpoint
+        .iter()
+        .any(|request| request.request().block().coinbase_height() == Some(Height(5))));
+
+    // The final checkpoint and first fully verified block can now finish.
+    for request in pending_checkpoint {
+        request.respond_with(|request| request.block().hash());
+    }
+    tip_sender.send_best_tip_height(Height(6));
+    let extra = tokio::time::timeout(
+        MAX_SERVICE_REQUEST_DELAY,
+        chain_sync.try_to_sync_once(extra),
+    )
+    .await
+    .expect("a completed final checkpoint must not block the full-verification pipeline")
+    .unwrap();
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+    assert_eq!(extra.into_iter().collect::<Vec<_>>(), hashes[7..]);
+    chain_sync.downloads.cancel_all();
+}
+

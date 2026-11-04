@@ -4,7 +4,7 @@
 
 use std::{
     cmp::max,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     pin::Pin,
     task::Poll,
     time::Duration,
@@ -65,6 +65,24 @@ pub use status::SyncStatus;
 fn is_not_found(error: &dyn std::error::Error) -> bool {
     // TODO: improve this by checking the type (#2908).
     format!("{error:?}").contains("NotFound")
+}
+
+/// Orders tip response hashes round-robin across responses, so each peer's next hash is admitted
+/// before any peer's later hashes when the lookahead limit caps the batch.
+///
+/// Duplicates are removed after interleaving, so one response can't bury another peer's next hash
+/// deep in its own list.
+fn interleave_peer_hashes(
+    download_set: &mut IndexSet<block::Hash>,
+    mut responses: VecDeque<impl Iterator<Item = block::Hash>>,
+) {
+    download_set.clear();
+    while let Some(mut hashes) = responses.pop_front() {
+        if let Some(hash) = hashes.next() {
+            download_set.insert(hash);
+            responses.push_back(hashes);
+        }
+    }
 }
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
@@ -793,15 +811,15 @@ where
         //
         // To avoid a deadlock or long waits for blocks to expire, we ignore the download
         // lookahead limit when there are only a small number of blocks waiting.
-        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
+        while self.downloads.in_flight() >= self.lookahead_limit()
+            || (self.downloads.in_flight() >= self.lookahead_limit() / 2
                 && self.past_lookahead_limit_receiver.cloned_watch_data())
         {
             trace!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "waiting for pending blocks",
             );
@@ -823,7 +841,7 @@ where
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "requesting more blocks",
             );
@@ -836,7 +854,7 @@ where
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "extending tips",
             );
@@ -933,6 +951,7 @@ where
         }
 
         let mut download_set = IndexSet::new();
+        let mut peer_hashes = VecDeque::new();
         while let Some(res) = requests.next().await {
             match res
                 .unwrap_or_else(|e @ JoinError { .. }| {
@@ -951,7 +970,6 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
@@ -1001,9 +1019,6 @@ where
                         debug!("downloading response that extends only one block");
                     }
 
-                    // security: the first response determines our download order
-                    //
-                    // TODO: can we make the download order independent of response order?
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -1011,6 +1026,8 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+                    let known_hashes = hashes.len() - unknown_hashes.len();
+                    peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -1019,14 +1036,22 @@ where
         }
 
         debug!(?self.prospective_tips);
+        // Interleave before filtering so rebuilding the set cannot restore committed hashes.
+        interleave_peer_hashes(&mut download_set, peer_hashes);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
+        // State can advance during fanout. Compact unknown hashes in place, preserving order.
+        let mut retained = 0;
+        for index in 0..download_set.len() {
+            let hash = download_set[index];
             debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+            if !self.state_contains(hash).await? {
+                if retained != index {
+                    download_set.swap_indices(retained, index);
+                }
+                retained += 1;
             }
         }
+        download_set.truncate(retained);
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
@@ -1051,6 +1076,7 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
+        let mut peer_hashes = VecDeque::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             debug!(?tip, "asking peers to extend chain tip");
@@ -1151,9 +1177,6 @@ where
                             debug!("downloading response that extends only one block");
                         }
 
-                        // security: the first response determines our download order
-                        //
-                        // TODO: can we make the download order independent of response order?
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
@@ -1161,6 +1184,8 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+                        let known_hashes = hashes.len() - unknown_hashes.len();
+                        peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -1177,6 +1202,7 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
+        interleave_peer_hashes(&mut download_set, peer_hashes);
         let response = self.request_blocks(download_set).await;
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
@@ -1261,7 +1287,7 @@ where
         &mut self,
         mut hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
-        let lookahead_limit = self.lookahead_limit(hashes.len());
+        let lookahead_limit = self.lookahead_limit();
 
         debug!(
             hashes.len = hashes.len(),
@@ -1269,8 +1295,12 @@ where
             "requesting blocks",
         );
 
-        let extra_hashes = if hashes.len() > lookahead_limit {
-            hashes.split_off(lookahead_limit)
+        // Missing blocks keep their slots until their bounded retries can be queued.
+        let capacity = lookahead_limit
+            .saturating_sub(self.downloads.in_flight())
+            .saturating_sub(self.reobtain_hashes.len());
+        let extra_hashes = if hashes.len() > capacity {
+            hashes.split_off(capacity)
         } else {
             IndexSet::new()
         };
@@ -1292,9 +1322,9 @@ where
         Ok(extra_hashes)
     }
 
-    /// The configured lookahead limit, based on the currently verified height,
-    /// and the number of hashes we haven't queued yet.
-    fn lookahead_limit(&self, new_hashes: usize) -> usize {
+    /// The configured lookahead limit, including room to finish the final checkpoint before
+    /// switching to full verification.
+    fn lookahead_limit(&self) -> usize {
         let max_checkpoint_height: usize = self
             .max_checkpoint_height
             .0
@@ -1312,10 +1342,12 @@ where
 
         if verified_height >= max_checkpoint_height {
             self.full_verify_concurrency_limit
-        } else if (verified_height + new_hashes) >= max_checkpoint_height {
-            // If we're just about to start full verification, allow enough for the remaining checkpoint,
-            // and also enough for a separate full verification lookahead.
-            let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
+        } else if max_checkpoint_height - verified_height
+            <= self.checkpoint_verify_concurrency_limit
+        {
+            // Pending checkpoint blocks cannot finish until the whole range arrives. Reserve
+            // its remaining distance, not just the portion present in the latest hash batch.
+            let checkpoint_hashes = max_checkpoint_height - verified_height;
 
             self.full_verify_concurrency_limit + checkpoint_hashes
         } else {
