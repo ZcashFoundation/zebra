@@ -14,6 +14,7 @@ use futures::{
     FutureExt,
 };
 use tokio::sync::oneshot;
+use tokio_util::task::AbortOnDropHandle;
 use tower::{
     buffer::Buffer,
     timeout::{error::Elapsed, Timeout},
@@ -329,26 +330,17 @@ where
             let (spent_utxos, spent_outputs) =
                 Self::block_spent_utxos(tx.clone(), known_utxos, state.clone()).await?;
 
-            let cached_ffi_transaction =
-                Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
-
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            // Select version-specific async verification pipeline
-            let dispatch = || {
-                dispatch_version_verification(
-                    tx.as_ref(),
-                    nu,
-                    script_verifier,
-                    cached_ffi_transaction.clone(),
-                    tx_id,
-                )
-            };
-            let async_checks = match queueing.as_ref() {
-                Some(queueing) => queueing.scope(dispatch),
-                None => dispatch(),
-            }?;
-            drop(queueing);
+            let (cached_ffi_transaction, async_checks) = prepare_transaction(
+                tx.clone(),
+                spent_outputs,
+                nu,
+                script_verifier,
+                tx_id,
+                queueing,
+            )
+            .await?;
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
@@ -560,19 +552,17 @@ where
             let unpaid_actions = transaction::zip317::unpaid_actions(&unmined_tx, miner_fee);
             transaction::zip317::mempool_checks(unpaid_actions, miner_fee, unmined_tx.size)?;
 
-            let cached_ffi_transaction =
-                Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
-
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            // Select version-specific async verification pipeline
-            let mut async_checks = dispatch_version_verification(
-                tx.as_ref(),
+            let (cached_ffi_transaction, mut async_checks) = prepare_transaction(
+                tx.clone(),
+                spent_outputs,
                 nu,
                 script_verifier,
-                cached_ffi_transaction.clone(),
                 tx_id,
-            )?;
+                None,
+            )
+            .await?;
 
             // Include service readiness in the state deadline while sibling CPU checks drain.
             let check_anchors_and_revealed_nullifiers_query = tokio::time::timeout(
@@ -978,6 +968,84 @@ fn check_maturity_height(
     )
 }
 
+/// Builds the sighash data and queues the verification requests for `tx`.
+///
+/// The block verifier polls all its transaction futures from one task, so this CPU work runs on a
+/// blocking thread, except for transactions small enough that the thread hop costs more.
+///
+/// Preparation can wait for lazily built verifying keys, whose construction uses the Rayon pool,
+/// so it must not run on a Rayon thread.
+async fn prepare_transaction(
+    tx: Arc<Transaction>,
+    spent_outputs: Vec<transparent::Output>,
+    nu: NetworkUpgrade,
+    script_verifier: script::Verifier,
+    tx_id: UnminedTxId,
+    queueing: Option<primitives::flush::Queueing>,
+) -> Result<(Arc<CachedFfiTransaction>, AsyncChecks), TransactionError> {
+    let inline = is_small_transparent(&tx, &spent_outputs);
+    let prepare = move || {
+        #[cfg(test)]
+        tests::record_preparation_thread();
+
+        let cached = Arc::new(
+            CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu)
+                .map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?,
+        );
+        let dispatch = || {
+            dispatch_version_verification(tx.as_ref(), nu, script_verifier, cached.clone(), tx_id)
+        };
+        let checks = match queueing.as_ref() {
+            Some(queueing) => queueing.scope(dispatch),
+            None => dispatch(),
+        }?;
+        Ok((cached, checks))
+    };
+    if inline {
+        return prepare();
+    }
+
+    let span = tracing::Span::current();
+    #[cfg(test)]
+    let prepare = tests::with_verifier_task_locals(prepare);
+    AbortOnDropHandle::new(tokio::task::spawn_blocking(move || span.in_scope(prepare)))
+        .await
+        .expect("preparation reports invalid transactions as errors, and is aborted only on drop")
+}
+
+/// Returns `true` if `tx` has no shielded data and only a few short transparent scripts.
+///
+/// Preparing such a transaction inline takes 1-2 µs, less than the 2-3 µs that spawning it onto a
+/// blocking thread would add to the polling task, before the thread wakeup.
+fn is_small_transparent(tx: &Transaction, spent_outputs: &[transparent::Output]) -> bool {
+    if tx.has_shielded_data() {
+        return false;
+    }
+    let Some(bundle) = tx.transparent_bundle() else {
+        return true;
+    };
+    // Check the counts first, so that the script length sum is bounded. There is at most one
+    // spent output per input.
+    bundle.vin.len() + bundle.vout.len() <= 8
+        && bundle
+            .vin
+            .iter()
+            .map(|input| input.script_sig().0 .0.len())
+            .chain(
+                bundle
+                    .vout
+                    .iter()
+                    .map(|output| output.script_pubkey().0 .0.len()),
+            )
+            .chain(
+                spent_outputs
+                    .iter()
+                    .map(|output| output.lock_script.as_raw_bytes().len()),
+            )
+            .sum::<usize>()
+            <= 1024
+}
+
 /// Dispatches version-specific async verification checks for `tx`.
 ///
 /// `nu` is the network upgrade active at the transaction's verification height,
@@ -1073,7 +1141,7 @@ fn verify_v4_transaction(
         .sighasher()
         .sighash(HashType::ALL, None);
     #[cfg(test)]
-    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
+    tests::count_shielded_sighash();
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1181,7 +1249,7 @@ fn verify_v5_transaction(
         .sighasher()
         .sighash(HashType::ALL, None);
     #[cfg(test)]
-    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
+    tests::count_shielded_sighash();
 
     Ok(
         verify_transparent_inputs_and_outputs(tx, script_verifier, cached_ffi_transaction)?
@@ -1258,7 +1326,7 @@ fn verify_v6_transaction(
         .sighasher()
         .sighash(HashType::ALL, None);
     #[cfg(test)]
-    let _ = tests::SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.set(count.get() + 1));
+    tests::count_shielded_sighash();
 
     // The Ironwood bundle reuses the Orchard Action proof system and the NU6.3 circuit key, so
     // it is verified the same way as the v6 Orchard bundle (against the NU6.3 key).
