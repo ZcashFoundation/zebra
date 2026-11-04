@@ -35,8 +35,11 @@ pub(super) async fn connected_pair_with(
     network: &Network,
     client_config: Option<quinn::ClientConfig>,
 ) -> (Connection, Connection, Endpoint, Endpoint) {
-    let server = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
-    let mut client = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let windows = quic::QuicWindows::default();
+    let server =
+        quic::bind_with_windows(network, "127.0.0.1:0".parse().unwrap(), windows).expect("binds");
+    let mut client =
+        quic::bind_with_windows(network, "127.0.0.1:0".parse().unwrap(), windows).expect("binds");
     if let Some(client_config) = client_config {
         client.set_default_client_config(client_config);
     }

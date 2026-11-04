@@ -605,8 +605,11 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         quic,
     };
 
-    let dialer = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
-    let listener = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let windows = quic::QuicWindows::default();
+    let dialer =
+        quic::bind_with_windows(network, "127.0.0.1:0".parse().unwrap(), windows).expect("binds");
+    let listener =
+        quic::bind_with_windows(network, "127.0.0.1:0".parse().unwrap(), windows).expect("binds");
     let listener_addr = listener.local_addr().expect("bound");
     let (outbound, inbound) = tokio::join!(quic::connect(&dialer, listener_addr), async {
         listener

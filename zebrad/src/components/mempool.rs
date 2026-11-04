@@ -96,6 +96,17 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, ReadState>;
 
+/// Memory limits for the mempool, derived from zebrad's memory budget.
+///
+/// [`MempoolMemoryLimits::default()`] is today's behaviour: the configured limits apply.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MempoolMemoryLimits {
+    /// Replaces [`Config::tx_cost_limit`] when it is not set explicitly.
+    ///
+    /// `None` keeps the configured value.
+    pub tx_cost_limit: Option<u64>,
+}
+
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);

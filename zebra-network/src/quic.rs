@@ -50,7 +50,7 @@ use crate::{
 mod tls;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Bidirectional streams a peer may have open at once: request streams plus
 /// the handshake stream; twice the draft's minimum, which it treats as the
@@ -73,14 +73,23 @@ const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Windows {
     /// The per-stream receive window, in bytes.
-    pub stream_receive: u32,
+    pub stream_receive_window: u32,
 
     /// The per-connection receive window, in bytes.
-    pub connection_receive: u32,
+    pub connection_receive_window: u32,
 
     /// The most bytes this node keeps buffered for sending on one connection,
     /// across all its streams, until the peer acknowledges them.
-    pub send: u64,
+    pub send_window: u64,
+}
+
+/// The public name of the version 2 flow-control windows used by network memory limits.
+pub type QuicWindows = Windows;
+
+impl Default for Windows {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 impl Windows {
@@ -112,11 +121,11 @@ impl Windows {
     /// most this window plus the objects of the requests being served.
     pub const DEFAULT: Windows = Windows {
         // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the product fits in a `u32`; checked below.
-        stream_receive: (2 * MAX_RECORD_PAYLOAD_LEN) as u32,
+        stream_receive_window: (2 * MAX_RECORD_PAYLOAD_LEN) as u32,
         // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the 8 MiB product fits in a `u32`; checked below.
-        connection_receive: (4 * MAX_RECORD_PAYLOAD_LEN) as u32,
+        connection_receive_window: (4 * MAX_RECORD_PAYLOAD_LEN) as u32,
         // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
-        send: 3 * MAX_RECORD_PAYLOAD_LEN as u64,
+        send_window: 3 * MAX_RECORD_PAYLOAD_LEN as u64,
     };
 
     /// The windows of a node that serves synchronization artifacts through
@@ -130,7 +139,7 @@ impl Windows {
     /// connection, as [`Windows::DEFAULT`] describes; a serving node accepts
     /// 2 MiB more of it.
     pub const SERVING: Windows = Windows {
-        send: 8 << 20,
+        send_window: 8 << 20,
         ..Windows::DEFAULT
     };
 
@@ -144,8 +153,8 @@ impl Windows {
     /// these windows keep the bootstrap's eight peers within a few hundred MiB
     /// of buffers instead, and downloads proceed from several peers at once.
     pub const BOOTSTRAP: Windows = Windows {
-        stream_receive: 8 << 20,
-        connection_receive: 16 << 20,
+        stream_receive_window: 8 << 20,
+        connection_receive_window: 16 << 20,
         ..Windows::DEFAULT
     };
 
@@ -159,15 +168,61 @@ impl Windows {
             Windows::DEFAULT
         }
     }
+
+    /// The windows for small memory budgets: one maximum-size record with its framing per stream
+    /// ([`MIN_STREAM_RECEIVE_WINDOW`], the draft's minimum `initial_max_stream_data`), two such
+    /// streams per connection, and a 3 MiB send window.
+    ///
+    /// The send window holds one `get-blocks` response (at most a 1 MB byte budget plus one 2 MiB
+    /// block). Larger responses, such as a `get-block-range` stream of about 8 MB, and the
+    /// `get-object` chunks of a node serving synchronization artifacts are flow-controlled through
+    /// it: they are sent more slowly, but never buffer more than the window.
+    ///
+    /// That is about 2.1, 4.3 and 3 MiB, so at most about 7.3 MiB per connection instead of the
+    /// default 14 MiB.
+    pub const fn compact() -> Self {
+        Self {
+            // `MIN_STREAM_RECEIVE_WINDOW` is a `u32`; the doubled window fits in one; checked below.
+            stream_receive_window: MIN_STREAM_RECEIVE_WINDOW,
+            connection_receive_window: 2 * MIN_STREAM_RECEIVE_WINDOW,
+            // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the 3 MiB product fits in a `u64`.
+            send_window: (MAX_RECORD_PAYLOAD_LEN + MAX_RECORD_PAYLOAD_LEN / 2) as u64,
+        }
+    }
+
+    /// Returns these windows with each one below its [`Windows::compact()`] minimum raised
+    /// to that minimum.
+    pub(crate) fn at_least_compact(self) -> Self {
+        let compact = Self::compact();
+
+        Self {
+            stream_receive_window: self
+                .stream_receive_window
+                .max(compact.stream_receive_window),
+            connection_receive_window: self
+                .connection_receive_window
+                .max(compact.connection_receive_window),
+            send_window: self.send_window.max(compact.send_window),
+        }
+    }
 }
+
+/// The smallest per-stream receive window the draft allows: the maximum record payload length
+/// plus framing headroom, 2,228,224 bytes.
+pub const MIN_STREAM_RECEIVE_WINDOW: u32 = 2_228_224;
 
 // The parameters above meet the draft's minimums; checked at compile time.
 const _: () = {
+    assert!(MIN_STREAM_RECEIVE_WINDOW as usize > MAX_RECORD_PAYLOAD_LEN);
+    assert!(Windows::compact().stream_receive_window >= MIN_STREAM_RECEIVE_WINDOW);
+    assert!(Windows::DEFAULT.stream_receive_window >= MIN_STREAM_RECEIVE_WINDOW);
+    // Guards the doubling in `Windows::compact()`.
+    assert!(MIN_STREAM_RECEIVE_WINDOW <= u32::MAX / 2);
     assert!(KEEP_ALIVE_INTERVAL.as_millis() * 2 <= MIN_IDLE_TIMEOUT.as_millis());
     // Guards the truncating `as u32` casts in `Windows::DEFAULT`'s definition.
     // The windows are `u32`s, which always fit in a `usize` on supported targets.
-    assert!(Windows::DEFAULT.stream_receive as usize == 2 * MAX_RECORD_PAYLOAD_LEN);
-    assert!(Windows::DEFAULT.connection_receive as usize == 4 * MAX_RECORD_PAYLOAD_LEN);
+    assert!(Windows::DEFAULT.stream_receive_window as usize == 2 * MAX_RECORD_PAYLOAD_LEN);
+    assert!(Windows::DEFAULT.connection_receive_window as usize == 4 * MAX_RECORD_PAYLOAD_LEN);
 };
 
 /// An error building or binding a QUIC endpoint.
@@ -226,9 +281,9 @@ fn transport_config(windows: Windows) -> TransportConfig {
                 .expect("the idle timeout is far below the VarInt limit"),
         ))
         .keep_alive_interval(Some(KEEP_ALIVE_INTERVAL))
-        .stream_receive_window(VarInt::from_u32(windows.stream_receive))
-        .receive_window(VarInt::from_u32(windows.connection_receive))
-        .send_window(windows.send)
+        .stream_receive_window(VarInt::from_u32(windows.stream_receive_window))
+        .receive_window(VarInt::from_u32(windows.connection_receive_window))
+        .send_window(windows.send_window)
         // The draft does not use datagrams: do not advertise them, and buffer none.
         .datagram_receive_buffer_size(None)
         .datagram_send_buffer_size(0)
@@ -275,8 +330,8 @@ pub(crate) fn client_config_with_receive_windows(
 ) -> ClientConfig {
     let alpn = alpn_protocol_id(network).expect("the test network has an ALPN identifier");
     let windows = Windows {
-        stream_receive: stream_window,
-        connection_receive: connection_window,
+        stream_receive_window: stream_window,
+        connection_receive_window: connection_window,
         ..Windows::DEFAULT
     };
     client_config(alpn, windows).expect("the client configuration builds")
@@ -301,6 +356,8 @@ pub fn bind(network: &Network, addr: SocketAddr) -> Result<Endpoint, EndpointErr
 ///
 /// The endpoint's address family is `addr`'s: an endpoint bound to an IPv4
 /// address cannot dial IPv6 peers, and [`connect`] fails at once for them.
+///
+/// Every connection the endpoint opens or accepts uses the flow-control `windows`.
 ///
 /// # Panics
 ///

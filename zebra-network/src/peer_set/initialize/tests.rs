@@ -4,4 +4,5 @@
 
 mod bootstrap;
 mod lifecycle;
+mod memory_limits;
 mod vectors;
