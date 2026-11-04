@@ -989,9 +989,13 @@ proptest! {
             in continuous_empty_blocks_from_test_vectors(),
     ) {
         let _init_guard = zebra_test::init();
+        let max_checkpoint_height = finalized_blocks
+            .iter()
+            .map(|block| block.height)
+            .max()
+            .unwrap_or(Height::MAX);
         let (mut state_service, _, _, _) = Runtime::new().unwrap().block_on(async {
-            // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-            StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+            StateService::new(Config::ephemeral(), &network, max_checkpoint_height, 0).await
         });
 
         prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
@@ -1083,10 +1087,14 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         let runtime = Runtime::new().unwrap();
+        let max_checkpoint_height = finalized_blocks
+            .iter()
+            .map(|block| block.height)
+            .max()
+            .unwrap_or(Height::MAX);
         let (mut state_service, _read_only_state_service, mut latest_chain_tip, mut chain_tip_change) =
             runtime.block_on(async {
-                // Each block is committed separately, so the maximum checkpoint height is unused.
-                StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+                StateService::new(Config::ephemeral(), &network, max_checkpoint_height, 0).await
             });
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
@@ -1772,6 +1780,57 @@ async fn semantic_handoff_rejects_checkpoint_before_writer_acknowledgement() {
     .expect("the unacknowledged handoff admission regression finishes");
 }
 
+/// A height-skipping semantic orphan whose parent is an intermediate checkpoint must not close
+/// ordinary checkpoint admission, including after the orphan fails contextual verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_orphan_above_max_checkpoint_preserves_checkpoint_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(2), 0).await;
+        for block in &blocks[..2] {
+            state
+                .queue_and_commit_to_finalized_state(block.clone().into(), None)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        let mut orphan = blocks[3].clone();
+        Arc::make_mut(&mut Arc::make_mut(&mut orphan).header).previous_block_hash =
+            blocks[1].hash();
+        let orphan_response =
+            state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None);
+        if let Ok(result) = tokio::time::timeout(Duration::from_secs(1), orphan_response).await {
+            assert!(
+                result.unwrap().is_err(),
+                "the height-skipping orphan must not commit"
+            );
+        }
+        assert!(
+            state.block_write_sender.accepts_finalized(),
+            "an orphan above the maximum checkpoint closed ordinary checkpoint admission"
+        );
+
+        state
+            .queue_and_commit_to_finalized_state(blocks[2].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the ordinary maximum checkpoint still commits after the orphan");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(2))
+        );
+    })
+    .await
+    .expect("the intermediate-parent handoff regression finishes");
+}
+
 /// A semantic child must switch the writer to non-finalized commits even when its checkpoint
 /// parent is still queued for its disk write, and checkpoint UTXOs must remain available meanwhile.
 #[tokio::test(flavor = "multi_thread")]
@@ -1798,6 +1857,7 @@ async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
         drop(state.block_write_sender.finalized.replace(finalized_sender));
         let parent = CheckpointVerifiedBlock::from(blocks[1].clone());
         state.finalized_block_write_last_sent_hash = parent.hash;
+        state.finalized_block_write_last_sent_height = Some(parent.height);
         state
             .non_finalized_block_write_sent_hashes
             .add_finalized(&parent);
@@ -2185,7 +2245,7 @@ async fn post_handoff_semantic_dispatch_rechecks_ready_admission() {
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =
-        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .unwrap();

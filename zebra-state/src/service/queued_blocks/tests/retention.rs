@@ -22,7 +22,7 @@ use crate::{
 
 async fn orphan_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =
-        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .unwrap();
