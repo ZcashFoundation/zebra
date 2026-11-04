@@ -1,0 +1,9 @@
+project: zebra-consensus
+kind: Added
+body: >-
+  Added `router::init_with_limits`, which initializes the verifiers like `router::init` with a
+  byte capacity for the block verifier's cache of successful block proposals, and
+  `DEFAULT_PROPOSAL_CACHE_BYTES`, the capacity `router::init` keeps (8 × 72 MiB). A capacity
+  smaller than one proposal's charge caches no proposal. An optional checkpoint tip makes the
+  checkpoint verifier fast-forward like `router::init_with_checkpoint_tip`.
+time: 2026-11-06T11:34:04Z

@@ -60,6 +60,8 @@ pub struct SemanticBlockVerifier<S, V> {
         Option<oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>>,
     /// Successful proposals, newest first; shared by all outstanding verification requests.
     proposals: Arc<watch::Sender<ProposalCache>>,
+    /// The bound on the retained bytes of the cached proposals.
+    proposal_cache_bytes: usize,
     /// Admission remains owned by blocking checks even if their requesting future is cancelled.
     blocking_checks: Arc<Semaphore>,
     #[cfg(test)]
@@ -126,18 +128,21 @@ struct PreparedProposal {
     retained_bytes: usize,
 }
 
-/// Bound retained proposal data, including unusually large spent-output scripts.
+/// The default bound on retained proposal data, including unusually large spent-output scripts.
 ///
 /// The shared conservative charge, not measured heap usage, is 66,198,006 bytes for a MAX_BLOCK_BYTES
 /// proposal with 19,215 transactions using 104-byte one-input/one-P2PKH-output payments. Eight such
 /// ordinary transparent proposals need about 505 MiB; 8 * 72 MiB leaves about 14% layout headroom.
 /// Smaller consensus-valid transactions can pack more decoded structs into a block and retain fewer
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
-const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
+pub const DEFAULT_PROPOSAL_CACHE_BYTES: usize = 8 * 72 * 1024 * 1024;
 
 /// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
+///
+/// Keeps the newest proposals whose charges sum to at most `proposal_cache_bytes`.
 async fn cache_proposal(
     proposals: &watch::Sender<ProposalCache>,
+    proposal_cache_bytes: usize,
     key: [u8; 32],
     block: Arc<block::Block>,
     transaction_bytes: usize,
@@ -165,7 +170,7 @@ async fn cache_proposal(
             .take(8)
             .take_while(|proposal| {
                 retained_bytes = retained_bytes.saturating_add(proposal.retained_bytes);
-                retained_bytes <= MAX_PROPOSAL_BYTES
+                retained_bytes <= proposal_cache_bytes
             })
             .count();
         proposals.truncate(retained);
@@ -634,6 +639,7 @@ where
             mempool: None,
             mempool_setup_rx: None,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
+            proposal_cache_bytes: DEFAULT_PROPOSAL_CACHE_BYTES,
             blocking_checks: Arc::new(Semaphore::new(4)),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
@@ -648,6 +654,13 @@ where
         receiver: oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     ) -> Self {
         self.mempool_setup_rx = Some(receiver);
+        self
+    }
+
+    /// Bounds the retained bytes of the cached successful proposals by `proposal_cache_bytes`,
+    /// instead of [`DEFAULT_PROPOSAL_CACHE_BYTES`].
+    pub(crate) fn with_proposal_cache_bytes(mut self, proposal_cache_bytes: usize) -> Self {
+        self.proposal_cache_bytes = proposal_cache_bytes;
         self
     }
 
@@ -699,6 +712,7 @@ where
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
         let proposals = self.proposals.clone();
+        let proposal_cache_bytes = self.proposal_cache_bytes;
         let blocking_checks = self.blocking_checks.clone();
         #[cfg(test)]
         let proposal_key_computations = self.proposal_key_computations.clone();
@@ -1181,7 +1195,15 @@ where
                     zs::Response::ValidBlockProposal(contextual) => {
                         let (key, size) = proposal_key.expect("proposals always have a cache key");
                         let transaction_bytes = size - block.header.zcash_serialized_size();
-                        cache_proposal(&proposals, key, block, transaction_bytes, contextual).await;
+                        cache_proposal(
+                            &proposals,
+                            proposal_cache_bytes,
+                            key,
+                            block,
+                            transaction_bytes,
+                            contextual,
+                        )
+                        .await;
                         Ok(hash)
                     }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
