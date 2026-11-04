@@ -1461,6 +1461,91 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
     Ok(())
 }
 
+/// A failed checkpoint parent must not make its honest retry look finalized after the semantic
+/// handoff. The retry also restores the UTXO lookahead needed by its semantic children.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        assert_eq!(invalid_parent.hash(), honest_parent.hash());
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the semantic child is processed after its failed parent");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(0))
+        );
+
+        let retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        assert!(
+            state
+                .non_finalized_block_write_sent_hashes
+                .contains(&honest_parent.hash()),
+            "the retry restores checkpoint UTXO lookahead before its disk write",
+        );
+        retry
+            .await
+            .unwrap()
+            .expect("the honest same-hash checkpoint retry commits");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(1))
+        );
+
+        let semantic_child = child(
+            &honest_parent,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        state
+            .queue_and_commit_to_non_finalized_state(semantic_child.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits after the honest parent retry");
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the failed-parent handoff regression finishes");
+}
+
 /// A semantic child must switch the writer to non-finalized commits even when its checkpoint
 /// parent is still queued for its disk write, and checkpoint UTXOs must remain available meanwhile.
 #[tokio::test(flavor = "multi_thread")]
@@ -1480,9 +1565,9 @@ async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
             .unwrap()
             .unwrap();
 
-        // Hold the last checkpoint in a detached queue so the durable tip stays at genesis after
-        // the real writer has drained its original finalized channel. Its missing parent makes the
-        // semantic child's prompt rejection distinguish dispatch from the old indefinite queueing.
+        // Hold the last checkpoint in a detached queue so the durable tip stays at genesis. Its
+        // missing parent makes the semantic child's prompt rejection distinguish ordered dispatch
+        // from the old indefinite queueing behind a durable-tip check.
         let (finalized_sender, finalized_receiver) = tokio::sync::mpsc::unbounded_channel();
         drop(state.block_write_sender.finalized.replace(finalized_sender));
         let parent = CheckpointVerifiedBlock::from(blocks[1].clone());
@@ -1496,7 +1581,11 @@ async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
             .finalized
             .as_ref()
             .unwrap()
-            .send((parent.clone(), parent_rsp_tx, None))
+            .send(super::write::WriteMessage::Finalized((
+                parent.clone(),
+                parent_rsp_tx,
+                None,
+            )))
             .unwrap();
         assert_eq!(state.read_service.db.finalized_tip_hash(), blocks[0].hash());
 
@@ -1508,7 +1597,7 @@ async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
             .expect("the semantic child must not remain queued behind a stale durable-tip check")
             .unwrap();
         assert!(result.is_err(), "the detached checkpoint parent is absent");
-        assert!(state.block_write_sender.finalized.is_none());
+        assert!(state.block_write_sender.finalized.is_some());
         assert!(!state.non_finalized_state_queued_blocks.has(child_hash));
         assert!(
             state
@@ -1734,14 +1823,16 @@ async fn mined_rejections_and_stale_parent_publish_no_notifications() {
             .non_finalized
             .as_ref()
             .unwrap()
-            .send(super::write::NonFinalizedWriteMessage::Commit(
-                (
-                    child.clone().prepare(),
-                    response_sender,
-                    Some(Box::new(contextual.clone())),
-                    Some(notifications.clone()),
+            .send(super::write::WriteMessage::NonFinalized(
+                super::write::NonFinalizedWriteMessage::Commit(
+                    (
+                        child.clone().prepare(),
+                        response_sender,
+                        Some(Box::new(contextual.clone())),
+                        Some(notifications.clone()),
+                    ),
+                    std::time::Instant::now(),
                 ),
-                std::time::Instant::now(),
             ))
             .unwrap_or_else(|_| panic!("the state writer is still running"));
         assert!(response.await.unwrap().is_err());

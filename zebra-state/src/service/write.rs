@@ -2,7 +2,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Instant,
 };
 
@@ -124,11 +127,18 @@ fn update_latest_chain_channels(
     tip_block_height
 }
 
+/// The ordered input of the single block writer. Logical finalized and non-finalized senders feed
+/// the same channel, so a checkpoint retry can still be processed after the semantic handoff.
+pub enum WriteMessage {
+    Finalized(QueuedCheckpointVerified),
+    Handoff,
+    NonFinalized(NonFinalizedWriteMessage),
+}
+
 /// A worker task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state`.
 struct WriteBlockWorkerTask {
-    finalized_block_write_receiver: UnboundedReceiver<QueuedCheckpointVerified>,
-    non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
+    block_write_receiver: UnboundedReceiver<WriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
     /// Signals the [`crate::service::StateService`] that a finalized block commit failed,
@@ -142,6 +152,8 @@ struct WriteBlockWorkerTask {
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
     non_finalized_rejected_sender: UnboundedSender<block::Hash>,
+    /// Becomes true only when the checkpoint parent at the handoff, or its valid retry, commits.
+    handoff_complete: Arc<AtomicBool>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
     /// If `Some`, the non-finalized state is written to this backup directory
@@ -156,7 +168,7 @@ struct WriteBlockWorkerTask {
     pruning_wake: Option<crossbeam_channel::Sender<()>>,
 }
 
-/// The message type for the non-finalized block write task channel.
+/// The message type for non-finalized writer requests.
 pub enum NonFinalizedWriteMessage {
     /// A newly downloaded and semantically verified block prepared for
     /// contextual validation and insertion into the non-finalized state,
@@ -186,19 +198,23 @@ pub enum NonFinalizedWriteMessage {
 /// it blocks.
 #[derive(Clone, Debug)]
 pub(super) struct BlockWriteSender {
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`NonFinalizedState`].
-    pub non_finalized: Option<tokio::sync::mpsc::UnboundedSender<NonFinalizedWriteMessage>>,
+    /// A logical channel to send non-finalized messages to the ordered writer.
+    pub non_finalized: Option<UnboundedSender<WriteMessage>>,
 
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`FinalizedState`].
+    /// A logical channel to send finalized messages to the ordered writer.
     ///
-    /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest semantically verified block arrives.
-    pub finalized: Option<tokio::sync::mpsc::UnboundedSender<QueuedCheckpointVerified>>,
+    /// The sender stays alive after the semantic handoff so an honest checkpoint retry can follow
+    /// a failed parent. Admission closes only after that parent or its retry commits.
+    pub finalized: Option<UnboundedSender<WriteMessage>>,
+    handoff_complete: Arc<AtomicBool>,
 }
 
 impl BlockWriteSender {
+    /// Returns whether checkpoint blocks are still admitted to the writer.
+    pub(super) fn accepts_finalized(&self) -> bool {
+        self.finalized.is_some() && !self.handoff_complete.load(Ordering::Acquire)
+    }
+
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -225,27 +241,28 @@ impl BlockWriteSender {
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
-        // Security: The number of blocks in these channels is limited by
+        // Security: The number of blocks in this channel is limited by
         //           the syncer and inbound lookahead limits.
-        let (non_finalized_block_write_sender, non_finalized_block_write_receiver) =
-            tokio::sync::mpsc::unbounded_channel();
-        let (finalized_block_write_sender, finalized_block_write_receiver) =
-            tokio::sync::mpsc::unbounded_channel();
+        let (block_write_sender, block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let non_finalized_block_write_sender = block_write_sender.clone();
+        let finalized_block_write_sender = block_write_sender;
         let (invalid_block_reset_sender, invalid_block_write_reset_receiver) =
             tokio::sync::mpsc::unbounded_channel();
         let (non_finalized_rejected_sender, non_finalized_rejected_receiver) =
             tokio::sync::mpsc::unbounded_channel();
+        let handoff_complete = Arc::new(AtomicBool::new(false));
 
         let span = Span::current();
+        let worker_handoff_complete = handoff_complete.clone();
         let task = std::thread::spawn(move || {
             span.in_scope(|| {
                 WriteBlockWorkerTask {
-                    finalized_block_write_receiver,
-                    non_finalized_block_write_receiver,
+                    block_write_receiver,
                     finalized_state,
                     non_finalized_state,
                     invalid_block_reset_sender,
                     non_finalized_rejected_sender,
+                    handoff_complete: worker_handoff_complete,
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
@@ -262,6 +279,7 @@ impl BlockWriteSender {
                 non_finalized: Some(non_finalized_block_write_sender),
                 finalized: should_use_finalized_block_write_sender
                     .then_some(finalized_block_write_sender),
+                handoff_complete,
             },
             invalid_block_write_reset_receiver,
             non_finalized_rejected_receiver,
@@ -283,12 +301,12 @@ impl WriteBlockWorkerTask {
     )]
     pub fn run(mut self) {
         let Self {
-            finalized_block_write_receiver,
-            non_finalized_block_write_receiver,
+            block_write_receiver,
             finalized_state,
             non_finalized_state,
             invalid_block_reset_sender,
             non_finalized_rejected_sender,
+            handoff_complete,
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
@@ -298,6 +316,10 @@ impl WriteBlockWorkerTask {
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
+        // Save any errors to propagate down to queued child blocks.
+        let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
+        let mut handoff_requested = false;
+        let mut finalized_commit_failed = false;
 
         // The spentness writer is owned by this task, never by the shared `FinalizedState`.
         // Without a receiver, it still detects an incomplete hinted sync, and refuses to
@@ -308,136 +330,140 @@ impl WriteBlockWorkerTask {
         let mut spentness =
             SpentnessWriter::new(&finalized_state.db, spentness_hints, max_checkpoint_height);
 
-        // Write all the finalized blocks sent by the state,
-        // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
-            let _context_update = early_relay.updating_context();
-            // TODO: split these checks into separate functions
-
+        while let Some(message) = block_write_receiver.blocking_recv() {
             if invalid_block_reset_sender.is_closed() {
                 info!("StateService closed the block reset channel. Is Zebra shutting down?");
                 return;
             }
 
-            // Discard any children of invalid blocks in the channel
-            //
-            // `commit_finalized()` requires blocks in height order.
-            // So if there has been a block commit error,
-            // we need to drop all the descendants of that block,
-            // until we receive a block at the required next height.
-            let next_valid_height = finalized_state
-                .db
-                .finalized_tip_height()
-                .map(|height| (height + 1).expect("committed heights are valid"))
-                .unwrap_or(Height(0));
-
-            if ordered_block.0.height != next_valid_height {
-                debug!(
-                    ?next_valid_height,
-                    invalid_height = ?ordered_block.0.height,
-                    invalid_hash = ?ordered_block.0.hash,
-                    "got a block that was the wrong height. \
-                     Assuming a parent block failed, and dropping this block",
-                );
-
-                // We don't want to send a reset here, because it could overwrite a valid sent hash
-                std::mem::drop(ordered_block);
-                continue;
-            }
-
-            let committed_permit = match ordered_block
-                .2
-                .as_ref()
-                .map(crate::MinedBlockNotifications::try_reserve_committed)
-                .transpose()
-            {
-                Ok(permit) => permit.flatten(),
-                Err(error) => {
-                    drop(_context_update);
-                    // Publish the reset before replying so an immediate retry can make progress.
-                    let _ = invalid_block_reset_sender.send((
-                        finalized_state.db.finalized_tip_height(),
-                        finalized_state.db.finalized_tip_hash(),
-                    ));
-                    let _ = ordered_block.1.send(Err(error.into()));
+            let msg = match message {
+                WriteMessage::Handoff => {
+                    handoff_requested = true;
+                    if !finalized_commit_failed {
+                        handoff_complete.store(true, Ordering::Release);
+                    }
                     continue;
                 }
-            };
+                WriteMessage::Finalized(ordered_block) => {
+                    let _context_update = early_relay.updating_context();
+                    // TODO: split these checks into separate functions
 
-            // Try committing the block, but keep notifications until its context is published.
-            let (checkpoint_verified, rsp_tx, _) = ordered_block;
-            let height = checkpoint_verified.height;
-            let result = match finalized_state.commit_finalized_with_spentness(
-                checkpoint_verified,
-                prev_finalized_note_commitment_trees.take(),
-                spentness.as_mut(),
-            ) {
-                Ok((finalized, note_commitment_trees)) => {
-                    let hash = finalized.hash;
-                    let tip_block = ChainTipBlock::from(finalized);
-                    prev_finalized_note_commitment_trees = Some(note_commitment_trees);
-                    chain_tip_sender.set_finalized_tip(tip_block);
-                    if let Some(wake) = pruning_wake {
-                        let _ = wake.try_send(());
+                    // Discard any children of invalid blocks in the channel
+                    //
+                    // `commit_finalized()` requires blocks in height order.
+                    // So if there has been a block commit error,
+                    // we need to drop all the descendants of that block,
+                    // until we receive a block at the required next height.
+                    let next_valid_height = finalized_state
+                        .db
+                        .finalized_tip_height()
+                        .map(|height| (height + 1).expect("committed heights are valid"))
+                        .unwrap_or(Height(0));
+
+                    if ordered_block.0.height != next_valid_height {
+                        debug!(
+                            ?next_valid_height,
+                            invalid_height = ?ordered_block.0.height,
+                            invalid_hash = ?ordered_block.0.hash,
+                            "got a block that was the wrong height. \
+                             Assuming a parent block failed, and dropping this block",
+                        );
+
+                        // We don't want to send a reset here, because it could overwrite a valid sent hash
+                        std::mem::drop(ordered_block);
+                        continue;
                     }
-                    Ok(hash)
-                }
-                Err(error) if error.spentness_failure().is_some() => {
-                    // Retrying the block would repeat a hint artifact defect, and the state can
-                    // not continue the sync without hints, so stop Zebra.
-                    let failure = format!("{error:?}");
-                    let finalized_tip = finalized_state.db.tip();
-                    drop(_context_update);
-                    let _ = rsp_tx.send(Err(error));
-                    spentness_failure_stops_zebra(&failure, finalized_tip);
-                }
-                Err(error) => {
-                    let finalized_tip = finalized_state.db.tip();
 
-                    // The last block in the queue failed, so we can't commit the next block.
-                    // Instead, we need to reset the state queue,
-                    // and discard any children of the invalid block in the channel.
-                    info!(
-                        ?error,
-                        last_valid_height = ?finalized_tip.map(|tip| tip.0),
-                        last_valid_hash = ?finalized_tip.map(|tip| tip.1),
-                        "committing a block to the finalized state failed, resetting state queue",
-                    );
+                    let committed_permit = match ordered_block
+                        .2
+                        .as_ref()
+                        .map(crate::MinedBlockNotifications::try_reserve_committed)
+                        .transpose()
+                    {
+                        Ok(permit) => permit.flatten(),
+                        Err(error) => {
+                            drop(_context_update);
+                            // Publish the reset before replying so an immediate retry can make progress.
+                            let _ = invalid_block_reset_sender.send((
+                                finalized_state.db.finalized_tip_height(),
+                                finalized_state.db.finalized_tip_hash(),
+                            ));
+                            let _ = ordered_block.1.send(Err(error.into()));
+                            finalized_commit_failed = true;
+                            continue;
+                        }
+                    };
 
-                    let send_result = invalid_block_reset_sender.send((
-                        finalized_state.db.finalized_tip_height(),
-                        finalized_state.db.finalized_tip_hash(),
-                    ));
+                    // Try committing the block, but keep notifications until its context is published.
+                    let (checkpoint_verified, rsp_tx, _) = ordered_block;
+                    let height = checkpoint_verified.height;
+                    let result = match finalized_state.commit_finalized_with_spentness(
+                        checkpoint_verified,
+                        prev_finalized_note_commitment_trees.take(),
+                        spentness.as_mut(),
+                    ) {
+                        Ok((finalized, note_commitment_trees)) => {
+                            let hash = finalized.hash;
+                            let tip_block = ChainTipBlock::from(finalized);
+                            prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+                            chain_tip_sender.set_finalized_tip(tip_block);
+                            if let Some(wake) = pruning_wake {
+                                let _ = wake.try_send(());
+                            }
+                            Ok(hash)
+                        }
+                        Err(error) if error.spentness_failure().is_some() => {
+                            // Retrying the block would repeat a hint artifact defect, and the
+                            // state can not continue the sync without hints, so stop Zebra.
+                            let failure = format!("{error:?}");
+                            let finalized_tip = finalized_state.db.tip();
+                            drop(_context_update);
+                            let _ = rsp_tx.send(Err(error));
+                            spentness_failure_stops_zebra(&failure, finalized_tip);
+                        }
+                        Err(error) => {
+                            let finalized_tip = finalized_state.db.tip();
 
-                    if send_result.is_err() {
-                        info!(
+                            // The last block in the queue failed, so we can't commit the next block.
+                            // Instead, we need to reset the state queue,
+                            // and discard any children of the invalid block in the channel.
+                            info!(
+                                ?error,
+                                last_valid_height = ?finalized_tip.map(|tip| tip.0),
+                                last_valid_hash = ?finalized_tip.map(|tip| tip.1),
+                                "committing a block to the finalized state failed, resetting state queue",
+                            );
+
+                            let send_result = invalid_block_reset_sender.send((
+                                finalized_state.db.finalized_tip_height(),
+                                finalized_state.db.finalized_tip_hash(),
+                            ));
+
+                            if send_result.is_err() {
+                                info!(
                             "StateService closed the block reset channel. Is Zebra shutting down?"
                         );
-                        drop(_context_update);
-                        let _ = rsp_tx.send(Err(error));
-                        return;
+                                drop(_context_update);
+                                let _ = rsp_tx.send(Err(error));
+                                return;
+                            }
+                            Err(error)
+                        }
+                    };
+                    drop(_context_update);
+                    if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
+                        permit.send((*hash, height));
                     }
-                    Err(error)
+                    let succeeded = result.is_ok();
+                    let _ = rsp_tx.send(result);
+                    finalized_commit_failed = !succeeded;
+                    if succeeded && handoff_requested {
+                        handoff_complete.store(true, Ordering::Release);
+                    }
+                    continue;
                 }
+                WriteMessage::NonFinalized(msg) => msg,
             };
-            drop(_context_update);
-            if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
-                permit.send((*hash, height));
-            }
-            let _ = rsp_tx.send(result);
-        }
-
-        // Do this check even if the channel got closed before any finalized blocks were sent.
-        // This can happen if we're past the finalized tip.
-        if invalid_block_reset_sender.is_closed() {
-            info!("StateService closed the block reset channel. Is Zebra shutting down?");
-            return;
-        }
-
-        // Save any errors to propagate down to queued child blocks
-        let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
-
-        while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let _context_update = early_relay.updating_context();
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {

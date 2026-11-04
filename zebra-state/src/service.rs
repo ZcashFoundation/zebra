@@ -647,7 +647,7 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let mut queued = (checkpoint_verified, rsp_tx, notifications);
 
-        if self.block_write_sender.finalized.is_some() {
+        if self.block_write_sender.accepts_finalized() {
             if let Some(previous) = self
                 .finalized_state_queued_blocks
                 .get_mut(&queued_prev_hash)
@@ -742,7 +742,7 @@ impl StateService {
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
             // Blocks waiting in the queue are not recorded, so they can be downloaded again.
-            if self.block_write_sender.finalized.is_some()
+            if self.block_write_sender.accepts_finalized()
                 && self.is_close_to_final_checkpoint(last_sent_finalized_block_height)
             {
                 self.non_finalized_block_write_sent_hashes
@@ -752,10 +752,11 @@ impl StateService {
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
             if let Some(finalized_block_write_sender) = &self.block_write_sender.finalized {
-                let send_result = finalized_block_write_sender.send(queued_block);
+                let send_result =
+                    finalized_block_write_sender.send(write::WriteMessage::Finalized(queued_block));
 
                 // If the receiver is closed, we can't send any more blocks.
-                if let Err(SendError(queued)) = send_result {
+                if let Err(SendError(write::WriteMessage::Finalized(queued))) = send_result {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
@@ -959,7 +960,7 @@ impl StateService {
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let queued = (semantically_verified, rsp_tx, contextual, notifications);
-            if self.block_write_sender.finalized.is_none()
+            if !self.block_write_sender.accepts_finalized()
                 && self.block_write_sender.non_finalized.is_some()
                 && self.can_fork_chain_at(&parent_hash)
             {
@@ -975,15 +976,17 @@ impl StateService {
         // that are a child of the last block we sent.
         //
         // TODO: configure the state with the last checkpoint hash instead?
-        if self.block_write_sender.finalized.is_some()
+        if self.block_write_sender.accepts_finalized()
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
         {
-            // The writer drains the finalized channel before reading the non-finalized channel,
-            // so the last checkpoint is committed before its semantic children. Waiting for its
-            // disk write here can deadlock when every semantic child arrives during that write.
-            std::mem::drop(self.block_write_sender.finalized.take());
+            // The handoff is ordered after the last checkpoint in the writer channel, and semantic
+            // children are ordered after the handoff. Waiting for the parent's disk write here can
+            // deadlock when every semantic child arrives during that write.
+            if let Some(sender) = &self.block_write_sender.finalized {
+                let _ = sender.send(write::WriteMessage::Handoff);
+            }
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method. Keep checkpoint
             // hashes until the durable-tip pruning below, because semantic verification can still
             // need their UTXOs while the writer drains the finalized channel.
@@ -1005,7 +1008,7 @@ impl StateService {
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if self.block_write_sender.finalized.is_none()
+        } else if !self.block_write_sender.accepts_finalized()
             && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
         {
             self.send_ready_non_finalized(parent_hash, ready);
@@ -1071,11 +1074,14 @@ impl StateService {
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
-                    let send_result = non_finalized_block_write_sender.send(
-                        NonFinalizedWriteMessage::Commit(queued_child, Instant::now()),
-                    );
+                    let send_result =
+                        non_finalized_block_write_sender.send(write::WriteMessage::NonFinalized(
+                            NonFinalizedWriteMessage::Commit(queued_child, Instant::now()),
+                        ));
 
-                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued, _))) = send_result
+                    if let Err(SendError(write::WriteMessage::NonFinalized(
+                        NonFinalizedWriteMessage::Commit(queued, _),
+                    ))) = send_result
                     {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
@@ -1113,9 +1119,15 @@ impl StateService {
         };
 
         if let Err(tokio::sync::mpsc::error::SendError(error)) =
-            sender.send(NonFinalizedWriteMessage::Invalidate { hash, rsp_tx })
+            sender.send(write::WriteMessage::NonFinalized(
+                NonFinalizedWriteMessage::Invalidate { hash, rsp_tx },
+            ))
         {
-            let NonFinalizedWriteMessage::Invalidate { rsp_tx, .. } = error else {
+            let write::WriteMessage::NonFinalized(NonFinalizedWriteMessage::Invalidate {
+                rsp_tx,
+                ..
+            }) = error
+            else {
                 unreachable!("should return the same Invalidate message could not be sent");
             };
 
@@ -1137,9 +1149,15 @@ impl StateService {
         };
 
         if let Err(tokio::sync::mpsc::error::SendError(error)) =
-            sender.send(NonFinalizedWriteMessage::Reconsider { hash, rsp_tx })
+            sender.send(write::WriteMessage::NonFinalized(
+                NonFinalizedWriteMessage::Reconsider { hash, rsp_tx },
+            ))
         {
-            let NonFinalizedWriteMessage::Reconsider { rsp_tx, .. } = error else {
+            let write::WriteMessage::NonFinalized(NonFinalizedWriteMessage::Reconsider {
+                rsp_tx,
+                ..
+            }) = error
+            else {
                 unreachable!("should return the same Reconsider message could not be sent");
             };
 
@@ -1155,12 +1173,12 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, PreciousError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        // The writer drains finalized blocks before receiving non-finalized requests.
+        // The writer commits earlier finalized messages before later non-finalized requests.
         let sender = self
             .block_write_sender
             .non_finalized
             .as_ref()
-            .filter(|_| self.block_write_sender.finalized.is_none());
+            .filter(|_| !self.block_write_sender.accepts_finalized());
         let Some(sender) = sender else {
             let result = if self.read_service.db.contains_hash(hash) {
                 Ok(hash)
@@ -1180,10 +1198,14 @@ impl StateService {
             return rsp_rx;
         };
 
-        if let Err(tokio::sync::mpsc::error::SendError(error)) =
-            sender.send(NonFinalizedWriteMessage::Precious { hash, rsp_tx })
-        {
-            let NonFinalizedWriteMessage::Precious { rsp_tx, .. } = error else {
+        if let Err(tokio::sync::mpsc::error::SendError(error)) = sender.send(
+            write::WriteMessage::NonFinalized(NonFinalizedWriteMessage::Precious { hash, rsp_tx }),
+        ) {
+            let write::WriteMessage::NonFinalized(NonFinalizedWriteMessage::Precious {
+                rsp_tx,
+                ..
+            }) = error
+            else {
                 unreachable!("should return the same Precious message that could not be sent");
             };
 

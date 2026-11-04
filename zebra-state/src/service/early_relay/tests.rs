@@ -421,9 +421,11 @@ fn early_relay_rejected_commit_releases_context_before_response() {
         .non_finalized
         .as_ref()
         .unwrap()
-        .send(NonFinalizedWriteMessage::Commit(
-            (genesis.block.clone().prepare(), rsp_tx, None, None),
-            std::time::Instant::now(),
+        .send(super::super::write::WriteMessage::NonFinalized(
+            NonFinalizedWriteMessage::Commit(
+                (genesis.block.clone().prepare(), rsp_tx, None, None),
+                std::time::Instant::now(),
+            ),
         ))
         .unwrap();
     let version = version_rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -503,11 +505,11 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
         .finalized
         .as_ref()
         .unwrap()
-        .send((
+        .send(super::super::write::WriteMessage::Finalized((
             block.into(),
             rsp_tx,
             Some(MinedBlockNotifications::new(committed, validated)),
-        ))
+        )))
         .unwrap();
     let observations = [
         observed_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
