@@ -473,7 +473,7 @@ async fn cached_shielded_prefix_does_not_hold_the_miss_batch_open() {
         let count = flushes.clone();
         let result = FLUSH
             .scope(
-                Box::new(move |verifier| {
+                Arc::new(move |verifier| {
                     assert!(matches!(verifier, Verifier::Sapling));
                     count.fetch_add(1, Ordering::SeqCst);
                     Ok(true)

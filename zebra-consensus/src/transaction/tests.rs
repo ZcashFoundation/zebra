@@ -5,7 +5,14 @@
 //
 // TODO: split fixed test vectors into a `vectors` module?
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
@@ -6317,7 +6324,184 @@ tokio::task_local! {
     /// Private Sapling cache for the current transaction-verification test.
     pub(crate) static SAPLING_CACHE_VERIFIER: crate::primitives::sapling::VerifierService;
     /// Number of shielded sighashes computed by this task's transaction verifier.
-    pub(super) static SHIELDED_SIGHASH_REQUESTS: std::cell::Cell<usize>;
+    static SHIELDED_SIGHASH_REQUESTS: Arc<AtomicUsize>;
+    /// The thread that ran each transaction preparation by this task's verifier.
+    static PREPARATION_THREADS: Arc<Mutex<Vec<std::thread::ThreadId>>>;
+}
+
+/// Counts a shielded sighash computed by the transaction verifier.
+pub(super) fn count_shielded_sighash() {
+    let _ = SHIELDED_SIGHASH_REQUESTS.try_with(|count| count.fetch_add(1, Ordering::SeqCst));
+}
+
+/// Returns and resets the number of shielded sighashes counted in this task.
+fn take_shielded_sighash_requests() -> usize {
+    SHIELDED_SIGHASH_REQUESTS.with(|count| count.swap(0, Ordering::SeqCst))
+}
+
+/// Records the thread running the current transaction preparation.
+pub(super) fn record_preparation_thread() {
+    assert!(
+        rayon::current_thread_index().is_none(),
+        "preparation can wait for verifying keys built on Rayon, so it must not occupy Rayon"
+    );
+    let _ = PREPARATION_THREADS.try_with(|threads| {
+        threads
+            .lock()
+            .expect("only test code holds the lock")
+            .push(std::thread::current().id())
+    });
+}
+
+/// Carries the verifier's test task locals into a preparation that runs on a blocking thread.
+pub(super) fn with_verifier_task_locals<T>(
+    prepare: impl FnOnce() -> T + Send,
+) -> impl FnOnce() -> T + Send {
+    use crate::primitives::flush::tests::FLUSH;
+
+    let halo2 = HALO2_CACHE_VERIFIER.try_with(Clone::clone).ok();
+    let sapling = SAPLING_CACHE_VERIFIER.try_with(Clone::clone).ok();
+    let flush = FLUSH.try_with(Clone::clone).ok();
+    let requests = SHIELDED_SIGHASH_REQUESTS.try_with(Clone::clone).ok();
+    let threads = PREPARATION_THREADS.try_with(Clone::clone).ok();
+    move || {
+        scoped(&HALO2_CACHE_VERIFIER, halo2, || {
+            scoped(&SAPLING_CACHE_VERIFIER, sapling, || {
+                scoped(&FLUSH, flush, || {
+                    scoped(&SHIELDED_SIGHASH_REQUESTS, requests, || {
+                        scoped(&PREPARATION_THREADS, threads, prepare)
+                    })
+                })
+            })
+        })
+    }
+}
+
+/// Runs `f` with `key` set to `value`, if the caller's task had one.
+fn scoped<V: 'static, T>(
+    key: &'static tokio::task::LocalKey<V>,
+    value: Option<V>,
+    f: impl FnOnce() -> T,
+) -> T {
+    match value {
+        Some(value) => key.sync_scope(value, f),
+        None => f(),
+    }
+}
+
+/// Runs `future`, returning whether each transaction preparation in it ran off the thread
+/// polling it.
+async fn preparation_offloads(future: impl Future<Output = ()>) -> Vec<bool> {
+    let threads = Arc::new(Mutex::new(Vec::new()));
+    let mut pollers = Vec::new();
+    let mut future = std::pin::pin!(PREPARATION_THREADS.scope(threads.clone(), future));
+    futures::future::poll_fn(|cx| {
+        pollers.push(std::thread::current().id());
+        future.as_mut().poll(cx)
+    })
+    .await;
+    let threads = threads.lock().expect("the scope has finished");
+    threads.iter().map(|id| !pollers.contains(id)).collect()
+}
+
+/// Both entry points must prepare shielded transactions off the async task, and keep counting
+/// their shielded sighashes.
+#[test]
+fn shielded_preparation_runs_on_blocking_thread() {
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let (upgrade, tx) = cacheable_mainnet_sapling_transaction();
+        let height = tx.expiry_height().unwrap();
+        assert_eq!(NetworkUpgrade::current(&Network::Mainnet, height), upgrade);
+        let requests = Arc::new(AtomicUsize::new(0));
+        let offloads =
+            preparation_offloads(SHIELDED_SIGHASH_REQUESTS.scope(requests.clone(), async {
+                let state = service_fn(|_| async { unreachable!("the fixture has no inputs") });
+                timeout(
+                    test_timeout(),
+                    BlockTxVerifier::new(&Network::Mainnet, state)
+                        .oneshot(cache_test_block_request(&tx, height)),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+
+                let state = service_fn(|request| async move {
+                    assert!(matches!(
+                        request,
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    ));
+                    Ok::<_, crate::BoxError>(
+                        zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+                    )
+                });
+                timeout(
+                    test_timeout(),
+                    MempoolTxVerifier::new_for_tests(&Network::Mainnet, state).oneshot(
+                        MempoolRequest {
+                            transaction: Arc::new(tx).into(),
+                            height,
+                        },
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            }))
+            .await;
+        assert_eq!(offloads, [true, true]);
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+    });
+}
+
+/// Small transparent transactions are prepared inline, but many outputs or long scripts are not.
+#[tokio::test]
+async fn transparent_preparation_inline_work_is_bounded() {
+    let _init_guard = zebra_test::init();
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&Network::Mainnet)
+        .unwrap();
+    // The mock's scriptSig is 2 bytes and its spent P2SH script is 23 bytes, so a 999-byte output
+    // script reaches the 1024-byte inline limit.
+    for (output_count, script_size, offloaded) in [
+        (7, 1, false),
+        (8, 1, true),
+        (1, 999, false),
+        (1, 1000, true),
+    ] {
+        let (input, mut output, utxos) = mock_transparent_transfer(
+            (height - 1).unwrap(),
+            true,
+            0,
+            Amount::try_from(100_001).unwrap(),
+        );
+        output.lock_script = transparent::Script::new(&vec![0; script_size]);
+        let tx = Arc::new(Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![input],
+            vec![output; output_count],
+            LockTime::unlocked(),
+            height,
+        ));
+        let state = service_fn(|_| async { unreachable!("all inputs are supplied") });
+        let offloads = preparation_offloads(async {
+            timeout(
+                test_timeout(),
+                BlockTxVerifier::new(&Network::Mainnet, state).oneshot(BlockRequest {
+                    transaction_hash: tx.hash(),
+                    transaction: tx,
+                    known_utxos: Arc::new(utxos),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                }),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        })
+        .await;
+        assert_eq!(offloads, [offloaded]);
+    }
 }
 
 /// Transparent-only verification skips the shielded digest, not scripts or version checks.
@@ -6327,7 +6511,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
 
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(SHIELDED_SIGHASH_REQUESTS.scope(
-        std::cell::Cell::new(0),
+        Arc::default(),
         async {
             for version in [4, 5, 6] {
                 let nu = NetworkUpgrade::Nu6_3;
@@ -6393,7 +6577,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                             unsupported
                         )),
                     );
-                    assert_eq!(SHIELDED_SIGHASH_REQUESTS.with(std::cell::Cell::get), 0);
+                    assert_eq!(take_shielded_sighash_requests(), 0);
 
                     let state = service_fn(|_| async { unreachable!("all UTXOs are supplied") });
                     let result = timeout(
@@ -6419,7 +6603,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                         );
                     }
                     assert_eq!(
-                        SHIELDED_SIGHASH_REQUESTS.with(std::cell::Cell::get),
+                        take_shielded_sighash_requests(),
                         0,
                         "V{version} transparent verification must not compute a shielded sighash",
                     );
@@ -6442,7 +6626,6 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                 (orchard_nu, orchard_tx),
                 (sprout_nu, (*sprout_tx).clone()),
             ] {
-                SHIELDED_SIGHASH_REQUESTS.with(|count| count.set(0));
                 let shielded_checks = usize::from(tx.has_sapling_shielded_data())
                     + usize::from(tx.has_orchard_shielded_data())
                     + tx.joinsplit_count()
@@ -6463,7 +6646,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                     tx.unmined_id(),
                 )
                 .unwrap();
-                assert_eq!(SHIELDED_SIGHASH_REQUESTS.with(std::cell::Cell::get), 1);
+                assert_eq!(take_shielded_sighash_requests(), 1);
                 assert_eq!(checks.0.len(), shielded_checks);
                 timeout(test_timeout(), checks.check())
                     .await
@@ -6487,7 +6670,6 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                     )
                     .unwrap(),
                 );
-                SHIELDED_SIGHASH_REQUESTS.with(|count| count.set(0));
                 let checks = super::dispatch_version_verification(
                     &mixed,
                     nu,
@@ -6496,7 +6678,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                     mixed.unmined_id(),
                 )
                 .unwrap();
-                assert_eq!(SHIELDED_SIGHASH_REQUESTS.with(std::cell::Cell::get), 1);
+                assert_eq!(take_shielded_sighash_requests(), 1);
                 assert_eq!(checks.0.len(), shielded_checks + 1);
                 assert!(timeout(test_timeout(), checks.check())
                     .await
@@ -6523,7 +6705,6 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                     )
                     .unwrap(),
                 );
-                SHIELDED_SIGHASH_REQUESTS.with(|count| count.set(0));
                 let checks = super::dispatch_version_verification(
                     &tx,
                     NetworkUpgrade::Nu6_3,
@@ -6532,7 +6713,7 @@ fn shielded_sighash_is_requested_only_for_shielded_bundles() {
                     tx.unmined_id(),
                 )
                 .unwrap();
-                assert_eq!(SHIELDED_SIGHASH_REQUESTS.with(std::cell::Cell::get), 1);
+                assert_eq!(take_shielded_sighash_requests(), 1);
                 assert_eq!(checks.0.len(), usize::from(orchard) + usize::from(ironwood));
                 assert!(timeout(test_timeout(), checks.check())
                     .await
