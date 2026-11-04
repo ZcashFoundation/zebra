@@ -107,7 +107,7 @@ pub struct InboundSetupData {
     /// The chain parameters used to screen proof of work before recovering missing parents.
     pub network: Network,
 
-    /// A read-only view of blocks already being fetched by the chain syncer.
+    /// Shared ownership of blocks being fetched by the chain syncer or inbound gossip.
     pub(crate) sync_downloads: crate::components::sync::InFlightDownloads,
 
     /// A shared list of peer addresses.
