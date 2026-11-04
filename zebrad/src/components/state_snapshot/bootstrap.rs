@@ -55,7 +55,9 @@ use crate::{application::user_agent, config::ZebradConfig, BoxError};
 
 use super::{
     progress::Stage,
-    scheduler::{PieceDescriptor, Scheduler, SchedulerConfig, SchedulerError, VerifiedPiece},
+    scheduler::{
+        PieceDescriptor, PieceStore, Scheduler, SchedulerConfig, SchedulerError, VerifiedPiece,
+    },
 };
 
 #[cfg(test)]
@@ -397,6 +399,70 @@ async fn close_bootstrap_after<T>(
     result
 }
 
+/// How many times a piece write retries after another attempt removes the shared directory entry
+/// before this attempt can create its lease.
+const OBJECT_LEASE_ATTEMPTS: usize = 16;
+
+/// A shared artifact store with an attempt-owned lease for every object this attempt imports.
+#[derive(Clone, Debug)]
+struct AttemptStore {
+    /// The content-addressed objects shared with other attempts and snapshot serving.
+    shared: ArtifactStore,
+
+    /// This attempt's hard links to the shared objects, inside its unique import workspace.
+    leases: PathBuf,
+}
+
+impl AttemptStore {
+    fn new(shared: &ArtifactStore, temp_root: &Path) -> Self {
+        AttemptStore {
+            shared: shared.clone(),
+            leases: temp_root.join("leased-objects"),
+        }
+    }
+
+    /// Stores a verified object and returns a path another attempt's cleanup can not invalidate.
+    fn put(&self, hash: ObjectHash, object: &[u8]) -> Result<PathBuf, SnapshotError> {
+        let lease = self.leases.join(hash.to_string());
+        if lease.exists() {
+            return Ok(lease);
+        }
+        fs::create_dir_all(&self.leases).map_err(|source| SnapshotError::Io {
+            path: self.leases.clone(),
+            source,
+        })?;
+
+        for _ in 0..OBJECT_LEASE_ATTEMPTS {
+            let shared = self.shared.put(hash, object)?;
+            match fs::hard_link(&shared, &lease) {
+                Ok(()) => return Ok(lease),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(lease),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(source) => {
+                    return Err(SnapshotError::Io {
+                        path: lease,
+                        source,
+                    });
+                }
+            }
+        }
+
+        Err(SnapshotError::Io {
+            path: lease,
+            source: io::Error::new(
+                io::ErrorKind::NotFound,
+                "another snapshot attempt repeatedly removed the shared object before it could be leased",
+            ),
+        })
+    }
+}
+
+impl PieceStore for AttemptStore {
+    fn put(&self, hash: ObjectHash, object: &[u8]) -> Result<PathBuf, SnapshotError> {
+        AttemptStore::put(self, hash, object)
+    }
+}
+
 /// Steps 3 to 7 of the flow, from the manifest to the renamed database.
 async fn run<S>(
     config: &ZebradConfig,
@@ -411,6 +477,8 @@ where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
+    let attempt_store = AttemptStore::new(store, temp_root);
+
     // 3. The manifest.
     let (manifest, manifest_bytes) = fetch_manifest(
         &mut peers,
@@ -419,7 +487,7 @@ where
         connected_at + MANIFEST_DEADLINE,
     )
     .await?;
-    put_object(store, commitment.manifest, manifest_bytes).await?;
+    put_object(&attempt_store, commitment.manifest, manifest_bytes).await?;
     info!(
         height = manifest.height.0,
         hash = %manifest.block_hash,
@@ -439,7 +507,7 @@ where
         Instant::now() + HISTORY_TREE_DEADLINE,
     )
     .await?;
-    let tree_path = put_object(store, tree_piece.hash, tree_bytes).await?;
+    let tree_path = put_object(&attempt_store, tree_piece.hash, tree_bytes).await?;
     let history_tree = {
         let (tree_path, network) = (tree_path.clone(), network.clone());
         tokio::task::spawn_blocking(move || decode_history_tree(&tree_path, &network))
@@ -472,7 +540,7 @@ where
         path: tree_path,
     };
     let piece_paths =
-        download_and_build(peers, &manifest, store.clone(), temp_root, tree_piece).await?;
+        download_and_build(peers, &manifest, attempt_store, temp_root, tree_piece).await?;
 
     // 6. Import and check the database under this attempt's workspace. The
     // final rename is separate so cancellation can never leave the importer's
@@ -518,7 +586,13 @@ where
 
     // 7. Cleanup cannot undo a successful installation or trigger genesis
     // fallback after the database has been renamed into place.
-    finish_install(piece_paths, temp_root, config.sync.serve_state_snapshots).await
+    finish_install(
+        piece_paths,
+        temp_root,
+        store,
+        config.sync.serve_state_snapshots,
+    )
+    .await
 }
 
 /// The suffix of the lock file next to each import workspace. The attempt that uses the
@@ -733,6 +807,39 @@ async fn install_staged_snapshot_with_hook<F>(
 where
     F: FnOnce() + Send + 'static,
 {
+    install_staged_snapshot_using(staged, target, backup, before_rename, |from, to| {
+        fs::rename(from, to)
+    })
+    .await
+}
+
+#[cfg(test)]
+async fn install_staged_snapshot_with_rename_failure(
+    staged: PathBuf,
+    target: PathBuf,
+    backup: Option<PathBuf>,
+) -> Result<(), BootstrapError> {
+    install_staged_snapshot_using(
+        staged,
+        target,
+        backup,
+        || {},
+        |_, _| Err(io::Error::other("injected state snapshot rename failure")),
+    )
+    .await
+}
+
+async fn install_staged_snapshot_using<F, R>(
+    staged: PathBuf,
+    target: PathBuf,
+    backup: Option<PathBuf>,
+    before_rename: F,
+    rename: R,
+) -> Result<(), BootstrapError>
+where
+    F: FnOnce() + Send + 'static,
+    R: FnOnce(&Path, &Path) -> io::Result<()> + Send + 'static,
+{
     tokio::task::spawn_blocking(move || {
         if zebra_chain::shutdown::is_shutting_down() {
             return Err(shutdown_before_install());
@@ -752,20 +859,6 @@ where
             source,
         })?;
 
-        if let Some(backup) = backup {
-            match fs::remove_dir_all(&backup) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(source) => {
-                    return Err(SnapshotError::Io {
-                        path: backup,
-                        source,
-                    }
-                    .into())
-                }
-            }
-        }
-
         if zebra_chain::shutdown::is_shutting_down() {
             return Err(shutdown_before_install());
         }
@@ -773,11 +866,46 @@ where
         // Shutdown either wins before this guard and prevents the rename, or waits for this guard
         // to finish. There is no detached rename left racing runtime teardown after a SIGINT.
         let _install = SnapshotInstall::begin()?;
+        let preserved_backup = preserve_backup(backup)?;
         before_rename();
-        fs::rename(&staged, &target).map_err(|source| SnapshotError::Io {
-            path: target.clone(),
-            source,
-        })?;
+
+        if let Err(source) = rename(&staged, &target) {
+            if let Some((preserved, backup)) = preserved_backup {
+                let restore = if backup.exists() {
+                    Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "another process created a non-finalized backup during installation",
+                    ))
+                } else {
+                    fs::rename(&preserved, &backup)
+                };
+                if let Err(restore) = restore {
+                    return Err(SnapshotError::Unsupported(format!(
+                        "the state snapshot rename failed ({source}); the previous backup could not \
+                         be restored to {backup:?} ({restore}), and remains preserved at \
+                         {preserved:?}; the staged database remains at {staged:?}"
+                    ))
+                    .into());
+                }
+            }
+            return Err(SnapshotError::Io {
+                path: target.clone(),
+                source,
+            }
+            .into());
+        }
+
+        if let Some((preserved, _)) = preserved_backup {
+            if let Err(error) = fs::remove_dir_all(&preserved) {
+                if error.kind() != io::ErrorKind::NotFound {
+                    warn!(
+                        ?error,
+                        path = %preserved.display(),
+                        "the state snapshot was installed, but its preserved backup could not be deleted"
+                    );
+                }
+            }
+        }
 
         if !cfg!(windows) {
             if let Err(error) = fs::File::open(parent).and_then(|directory| directory.sync_all()) {
@@ -797,31 +925,67 @@ where
     })?
 }
 
+/// Moves `backup` to a unique sibling, returning the preserved and original paths.
+fn preserve_backup(backup: Option<PathBuf>) -> Result<Option<(PathBuf, PathBuf)>, SnapshotError> {
+    let Some(backup) = backup else {
+        return Ok(None);
+    };
+    let parent = backup.parent().ok_or_else(|| {
+        SnapshotError::Unsupported(format!("no parent directory for the backup {backup:?}"))
+    })?;
+    let name = backup.file_name().ok_or_else(|| {
+        SnapshotError::Unsupported(format!("no directory name for the backup {backup:?}"))
+    })?;
+    let preserved = parent.join(format!(
+        ".{}.snapshot-install-{}",
+        name.to_string_lossy(),
+        import_nonce()
+    ));
+
+    match fs::rename(&backup, &preserved) {
+        Ok(()) => Ok(Some((preserved, backup))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(SnapshotError::Io {
+            path: backup,
+            source,
+        }),
+    }
+}
+
 /// Finishes a successful installation, logging cleanup failures instead of
 /// sending the caller through fallback with a database already installed.
 async fn finish_install(
     piece_paths: HashMap<ObjectHash, PathBuf>,
     temp_root: &Path,
+    store: &ArtifactStore,
     serve_state_snapshots: bool,
 ) -> Result<(), BootstrapError> {
-    if !serve_state_snapshots {
-        let paths: Vec<PathBuf> = piece_paths.into_values().collect();
-        if let Err(error) = tokio::task::spawn_blocking(move || {
-            for path in &paths {
-                if let Err(error) = fs::remove_file(path) {
+    let store = store.clone();
+    let paths: Vec<(ObjectHash, PathBuf)> = piece_paths.into_iter().collect();
+    if let Err(error) = tokio::task::spawn_blocking(move || {
+        for (hash, lease) in paths {
+            if let Err(error) = fs::remove_file(&lease) {
+                if error.kind() != io::ErrorKind::NotFound {
+                    warn!(?error, path = %lease.display(), "could not delete this attempt's snapshot piece lease");
+                }
+            }
+
+            if !serve_state_snapshots {
+                let shared = store.object_path(hash);
+                if let Err(error) = fs::remove_file(&shared) {
                     if error.kind() != io::ErrorKind::NotFound {
-                        warn!(?error, path = %path.display(), "could not delete a snapshot piece");
+                        warn!(?error, path = %shared.display(), "could not delete a shared snapshot piece");
                     }
                 }
             }
-        })
-        .await
-        {
-            warn!(
-                ?error,
-                "the snapshot piece deletion task failed after installation"
-            );
         }
+    })
+    .await
+    {
+        warn!(
+            ?error,
+            "the snapshot piece deletion task failed after installation"
+        );
     }
     if let Err(error) = remove_dir(temp_root).await {
         warn!(
@@ -1683,7 +1847,7 @@ where
 async fn download_and_build<S>(
     peers: Peers<S>,
     manifest: &Manifest,
-    store: ArtifactStore,
+    store: AttemptStore,
     temp_root: &Path,
     tree_piece: VerifiedPiece,
 ) -> Result<HashMap<ObjectHash, PathBuf>, BootstrapError>
@@ -1707,7 +1871,7 @@ where
 async fn download_and_build_with<S, B>(
     peers: Peers<S>,
     manifest: &Manifest,
-    store: ArtifactStore,
+    store: AttemptStore,
     temp_root: &Path,
     tree_piece: VerifiedPiece,
     builder: B,
@@ -1736,11 +1900,11 @@ where
         SchedulerConfig::default(),
         pieces,
         peers.into_clients(),
-        store,
+        store.shared.clone(),
         verified_sender,
         blame_sender,
     );
-    let mut scheduler = Some(tokio::spawn(scheduler.run()));
+    let mut scheduler = Some(tokio::spawn(scheduler.run_storing_in(store)));
     let mut blame_logger = tokio::spawn(async move {
         while let Some(blame) = blames.recv().await {
             warn!(
@@ -1906,10 +2070,9 @@ fn import_nonce() -> String {
     format!("{nanos:x}-{}-{sequence}", std::process::id())
 }
 
-/// Stores `object` as `hash` in `store` on a blocking thread, and returns its
-/// path.
+/// Stores `object` as `hash` in `store` on a blocking thread, and returns this attempt's lease.
 async fn put_object(
-    store: &ArtifactStore,
+    store: &AttemptStore,
     hash: ObjectHash,
     object: Vec<u8>,
 ) -> Result<PathBuf, BootstrapError> {
