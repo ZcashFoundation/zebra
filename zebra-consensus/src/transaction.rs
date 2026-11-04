@@ -576,21 +576,29 @@ where
             )
             .await?;
 
-            // The async checks are lazy: nothing reaches a verifier until they are polled. Check
-            // nullifiers and anchors first, because returning early does not remove items that are
-            // already queued in a batch verifier. Include service readiness in the state deadline.
-            let response = tokio::time::timeout(
-                UTXO_LOOKUP_TIMEOUT,
-                state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
-                    unmined_tx.clone(),
-                )),
-            )
-            .await
-            .map_err(BoxError::from)??;
-            assert!(
-                response == zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
-                "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
-            );
+            // Only shielded bundles have nullifiers or anchors for the state to check.
+            if tx.has_sprout_joinsplit_data()
+                || tx.has_sapling_shielded_data()
+                || tx.has_orchard_shielded_data()
+                || tx.has_ironwood_shielded_data()
+            {
+                // The async checks are lazy: nothing reaches a verifier until they are polled.
+                // Check nullifiers and anchors first, because returning early does not remove
+                // items that are already queued in a batch verifier. Include service readiness
+                // in the state deadline.
+                let response = tokio::time::timeout(
+                    UTXO_LOOKUP_TIMEOUT,
+                    state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
+                        unmined_tx.clone(),
+                    )),
+                )
+                .await
+                .map_err(BoxError::from)??;
+                assert!(
+                    response == zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
+                    "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
+                );
+            }
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
