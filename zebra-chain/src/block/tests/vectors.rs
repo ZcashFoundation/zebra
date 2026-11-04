@@ -243,6 +243,24 @@ fn parallel_merkle_roots_match_serial_edge_cases() {
 }
 
 #[test]
+fn height_i64_conversion_checks_bounds() {
+    let _init_guard = zebra_test::init();
+
+    for height in [Height::MIN, Height(1), Height::MAX] {
+        assert_eq!(Height::try_from(i64::from(height)), Ok(height));
+    }
+    for value in [
+        i64::MIN,
+        -1,
+        i64::from(Height::MAX.0) + 1,
+        i64::from(u32::MAX),
+        i64::MAX,
+    ] {
+        assert!(Height::try_from(value).is_err(), "accepted height {value}");
+    }
+}
+
+#[test]
 fn blockheaderhash_debug() {
     let _init_guard = zebra_test::init();
 

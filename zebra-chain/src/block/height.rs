@@ -149,10 +149,13 @@ impl TryFrom<u32> for Height {
 }
 
 impl TryFrom<i64> for Height {
-    type Error = core::num::TryFromIntError;
+    type Error = &'static str;
 
+    /// Checks that the signed height is within the valid [`Height`] range.
     fn try_from(height: i64) -> Result<Self, Self::Error> {
-        u32::try_from(height).map(Height)
+        u32::try_from(height)
+            .map_err(|_| "heights must be non-negative and fit in u32")?
+            .try_into()
     }
 }
 
