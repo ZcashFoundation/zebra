@@ -36,8 +36,8 @@ use zebra_chain::{
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
-        upgrade::restorable_db_source_versions, FromDisk, IntoDisk, TransactionIndex,
-        TransactionLocation, MAX_ON_DISK_HEIGHT,
+        upgrade::{restorable_db_source_versions, variable_height},
+        FromDisk, IntoDisk, TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
     write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
     StateInitError,
@@ -606,7 +606,7 @@ impl DiskDb {
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
@@ -662,7 +662,7 @@ impl DiskDb {
     pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), [], false);
 
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
@@ -760,7 +760,7 @@ impl DiskDb {
         let mut total_size_on_disk = 0;
         let mut measured_column_family = false;
         let mut complete = true;
-        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
+        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), [], false) {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -1013,6 +1013,7 @@ impl DiskDb {
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
+        legacy_height_format: bool,
     ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
@@ -1032,10 +1033,17 @@ impl DiskDb {
                 let mut cf_options = db_options.clone();
 
                 if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
-                    cf_options.set_merge_operator_associative(
-                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
-                        fetch_add_balance_and_received,
-                    );
+                    if legacy_height_format {
+                        cf_options.set_merge_operator_associative(
+                            BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                            variable_height::fetch_add_legacy_balance_and_received,
+                        );
+                    } else {
+                        cf_options.set_merge_operator_associative(
+                            BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                            fetch_add_balance_and_received,
+                        );
+                    }
                 }
 
                 rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
@@ -1074,7 +1082,7 @@ impl DiskDb {
         )
     }
 
-    /// Opens fixed-width state whose history must be decoded by the variable-height upgrader.
+    /// Opens fixed-width state whose history and pending balance merges use the legacy codecs.
     pub(crate) fn new_for_variable_height_upgrade(
         config: &Config,
         db_kind: impl AsRef<str>,
@@ -1101,7 +1109,7 @@ impl DiskDb {
         network: &Network,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
-        skip_history_check: bool,
+        legacy_height_format: bool,
     ) -> Result<DiskDb, StateInitError> {
         config.validate_pruning(network)?;
 
@@ -1157,8 +1165,12 @@ impl DiskDb {
             }
             column_families_in_code.retain(|cf| column_families_on_disk.contains(cf));
         }
-        let column_families =
-            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
+        let column_families = DiskDb::construct_column_families(
+            db_options.clone(),
+            &path,
+            column_families_in_code,
+            legacy_height_format,
+        );
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
@@ -1196,7 +1208,7 @@ impl DiskDb {
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
-                if !skip_history_check {
+                if !legacy_height_format {
                     // Guard the lowest writable entry point before launching migrations or checks.
                     let history = db.history_capabilities()?;
                     if let Some(base) = history
@@ -1322,10 +1334,10 @@ impl DiskDb {
         rocksdb::checkpoint::Checkpoint::new(&*self.db)?.create_checkpoint(path)
     }
 
-    /// Opens a migration checkpoint without allowing writes or WAL recovery.
+    /// Opens a fixed-width migration checkpoint without allowing writes or WAL recovery.
     pub(crate) fn open_read_only(path: &Path) -> Result<DB, rocksdb::Error> {
         let options = Self::options();
-        let column_families = Self::construct_column_families(options.clone(), path, []);
+        let column_families = Self::construct_column_families(options.clone(), path, [], true);
         DB::open_cf_descriptors_read_only(&options, path, column_families, false)
     }
 

@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use crossbeam_channel::bounded;
 use semver::Version;
 use zebra_chain::{
+    amount::{Amount, NegativeAllowed},
     block::{Block, Height},
     parameters::Network,
     serialization::ZcashDeserializeInto,
@@ -18,7 +19,8 @@ use crate::{
         disk_format::{
             block::height_from_bytes_prefix,
             transparent::{
-                AddressLocation, AddressTransaction, AddressUnspentOutput, OutputLocation,
+                AddressBalanceLocationChange, AddressLocation, AddressTransaction,
+                AddressUnspentOutput, OutputLocation,
             },
             FromDisk, IntoDisk,
         },
@@ -256,6 +258,90 @@ fn migration_rewrites_all_records_collisions_and_survives_reopen() {
 
     let reopened = open_test_db(&config);
     assert_records(&reopened, &expected);
+}
+
+#[test]
+fn migration_merges_legacy_balance_operands_before_converting() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let legacy = DiskDb::new_for_variable_height_upgrade(
+        &config,
+        STATE_DATABASE_KIND,
+        &v30(),
+        &Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    let location = OutputLocation::from_usize(Height(1), 0, 0);
+    let change = |balance, received| {
+        let mut change = AddressBalanceLocationChange::new(location);
+        *change.balance_mut() = Amount::<NegativeAllowed>::try_from(balance).unwrap();
+        *change.received_mut() = received;
+        change
+    };
+    let first = change(10_i64, 100_u64);
+    let second = change(20_i64, 200_u64);
+    let first = legacy_part(Part::AddressBalance, &first.as_bytes());
+    let second = legacy_part(Part::AddressBalance, &second.as_bytes());
+    let key = [7; 21];
+    let live = legacy.inner();
+    let cf = live.cf_handle("balance_by_transparent_addr").unwrap();
+    live.merge_cf(&cf, key, first).unwrap();
+    live.merge_cf(&cf, key, second).unwrap();
+
+    let expected = (change(10_i64, 100_u64) + change(20_i64, 200_u64))
+        .unwrap()
+        .as_bytes();
+    let legacy_expected = legacy_part(Part::AddressBalance, &expected);
+    let checkpoint = cache.path().join("legacy-balance-checkpoint");
+    legacy.create_checkpoint(&checkpoint).unwrap();
+    let source = DiskDb::open_read_only(&checkpoint).unwrap();
+    let source_cf = source.cf_handle("balance_by_transparent_addr").unwrap();
+    assert_eq!(
+        source.get_pinned_cf(&source_cf, key).unwrap().as_deref(),
+        Some(legacy_expected.as_slice())
+    );
+
+    let family = AFFECTED_FAMILIES
+        .iter()
+        .find(|family| family.name == "balance_by_transparent_addr")
+        .unwrap();
+    let (_sender, receiver) = bounded(1);
+    for pass in [
+        Pass::WriteConverted,
+        Pass::DeleteLegacy,
+        Pass::WriteConverted,
+    ] {
+        rewrite_pass(live, &source, family, pass, &receiver).unwrap();
+    }
+    assert_eq!(
+        live.get_pinned_cf(&cf, key).unwrap().as_deref(),
+        Some(expected.as_slice())
+    );
+    drop(source);
+    drop(legacy);
+
+    let reopened = DiskDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &v30(),
+        &Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    let live = reopened.inner();
+    let cf = live.cf_handle("balance_by_transparent_addr").unwrap();
+    assert_eq!(
+        live.get_pinned_cf(&cf, key).unwrap().as_deref(),
+        Some(expected.as_slice())
+    );
 }
 
 #[test]
