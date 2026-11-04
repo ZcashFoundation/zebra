@@ -146,6 +146,12 @@ pub const DEFAULT_PROPOSAL_CACHE_BYTES: usize = 8 * 72 * 1024 * 1024;
 /// The conservative retained charge per serialized proposal byte.
 const PROPOSAL_WORK_CHARGE_RATIO: usize = 36;
 
+/// How long a mined block submission waits for in-flight proposal work to release its capacity.
+///
+/// Proposals fail at once when the capacity is used, but a mined block is worth waiting for: a
+/// maximum-size proposal finishes verification well within this time.
+const MINED_SUBMISSION_ADMISSION_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Immediate byte admission for decoded and active proposal work.
 #[derive(Clone, Debug)]
 struct ProposalWorkBudget {
@@ -179,6 +185,25 @@ impl ProposalWorkBudget {
             .clone()
             .try_acquire_many_owned(self.charge(serialized_size))
             .map_err(|_| VerifyBlockError::ProposalMemoryPressure)?;
+        Ok(ProposalAdmission { _permit: permit })
+    }
+
+    /// Admits mined-submission work, waiting up to `timeout` for in-flight work to finish, then
+    /// fails with memory pressure.
+    async fn admit_waiting(
+        &self,
+        serialized_size: usize,
+        timeout: Duration,
+    ) -> Result<ProposalAdmission, VerifyBlockError> {
+        let permit = tokio::time::timeout(
+            timeout,
+            self.slots
+                .clone()
+                .acquire_many_owned(self.charge(serialized_size)),
+        )
+        .await
+        .map_err(|_| VerifyBlockError::ProposalMemoryPressure)?
+        .expect("the proposal work semaphore is never closed");
         Ok(ProposalAdmission { _permit: permit })
     }
 
@@ -276,11 +301,12 @@ async fn cache_proposal(
 /// handle does not retain contextual data after cache eviction or authorize reuse by another cache.
 ///
 /// Ordinary decoding records only the consumed wire size, not any validation or authorization.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DecodedBlock {
     block: Arc<block::Block>,
     consumed_size: Option<usize>,
     matched: Option<(Weak<zs::ContextuallyVerifiedBlock>, usize)>,
+    _admission: Option<ProposalAdmission>,
 }
 
 impl DecodedBlock {
@@ -295,6 +321,7 @@ impl DecodedBlock {
             block,
             consumed_size: Some(input_size - bytes.len()),
             matched: None,
+            _admission: None,
         })
     }
 
@@ -304,12 +331,25 @@ impl DecodedBlock {
     }
 }
 
+impl Clone for DecodedBlock {
+    fn clone(&self) -> Self {
+        Self {
+            block: self.block.clone(),
+            consumed_size: self.consumed_size,
+            matched: self.matched.clone(),
+            // Cloned submissions acquire their own work admission at verification.
+            _admission: None,
+        }
+    }
+}
+
 impl From<Arc<block::Block>> for DecodedBlock {
     fn from(block: Arc<block::Block>) -> Self {
         Self {
             block,
             consumed_size: None,
             matched: None,
+            _admission: None,
         }
     }
 }
@@ -390,6 +430,47 @@ impl PreparedBlockCache {
         }))
     }
 
+    /// Admits and decodes a block submission on a blocking worker, reusing exact proposal matches.
+    ///
+    /// A submission waits up to 30 seconds for in-flight proposal work
+    /// to release capacity, so a concurrent proposal doesn't make a mined block fail. The outer error
+    /// reports capacity still exhausted after that, and the inner error reports malformed bytes.
+    /// Without a work bound, this retains the existing blocking decode and owns no admission.
+    pub async fn deserialize_with_admission(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Result<Result<DecodedBlock, SerializationError>, VerifyBlockError> {
+        self.deserialize_with_admission_timeout(bytes, MINED_SUBMISSION_ADMISSION_TIMEOUT)
+            .await
+    }
+
+    /// Like [`Self::deserialize_with_admission`], waiting at most `timeout` for capacity.
+    pub(crate) async fn deserialize_with_admission_timeout(
+        &self,
+        bytes: Vec<u8>,
+        timeout: Duration,
+    ) -> Result<Result<DecodedBlock, SerializationError>, VerifyBlockError> {
+        let admission = match self.proposal_work.as_ref() {
+            Some(budget) => Some(budget.admit_waiting(bytes.len(), timeout).await?),
+            None => None,
+        };
+        let cache = self.clone();
+        #[cfg(test)]
+        let proposal_deserializations = self.proposal_deserializations.clone();
+        let (decoded, admission) = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            proposal_deserializations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let decoded = cache.deserialize(&bytes);
+            (decoded, admission)
+        })
+        .await
+        .expect("block submission deserialization reports malformed input rather than panicking");
+        Ok(decoded.map(|mut decoded| {
+            decoded._admission = admission;
+            decoded
+        }))
+    }
+
     /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
     ///
     /// Transaction-section length and the header with only nonce and solution normalized select a
@@ -453,6 +534,7 @@ impl PreparedBlockCache {
             block,
             consumed_size: None,
             matched: Some((matched, bytes.len())),
+            _admission: None,
         })
     }
 }
@@ -866,10 +948,28 @@ where
                     Err(error) => return async move { Err(error) }.boxed(),
                 }
             }
+            Request::CommitDecoded(mut decoded, notifications)
+                if self.proposal_work.is_some() && decoded._admission.is_none() =>
+            {
+                let admission = self
+                    .proposal_work
+                    .as_ref()
+                    .expect("the guarded proposal work budget is present")
+                    .try_admit(decoded.block.zcash_serialized_size());
+                match admission {
+                    Ok(admission) => {
+                        decoded._admission = Some(admission);
+                        Request::CommitDecoded(decoded, notifications)
+                    }
+                    Err(error) => return async move { Err(error) }.boxed(),
+                }
+            }
             request => request,
         };
-        let detach_proposal = self.proposal_work.is_some() && request.is_proposal();
-        let cancellation = detach_proposal.then(CancellationToken::new);
+        let detach_verification = self.proposal_work.is_some()
+            && (request.is_proposal()
+                || matches!(request, Request::CommitDecoded(ref decoded, _) if decoded._admission.is_some()));
+        let cancellation = detach_verification.then(CancellationToken::new);
         let verification_cancellation = cancellation.clone();
 
         // Stamp the time the verifier received this block: the non-finalized state's
@@ -1118,6 +1218,13 @@ where
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
 
+            if verification_cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Ok(hash);
+            }
+
             // Keep early work alive while the remaining checks and state commit run.
             let _mining_candidate = if request.is_proposal() {
                 None
@@ -1159,6 +1266,12 @@ where
                         unreachable!("proposals never reuse the cache")
                     }
                 };
+                if verification_cancellation
+                    .as_ref()
+                    .is_some_and(CancellationToken::is_cancelled)
+                {
+                    return Ok(hash);
+                }
                 let result = state_service.oneshot(commit).await;
                 metrics::histogram!(
                     "zebra.consensus.block.phase.duration_seconds",
@@ -1410,7 +1523,7 @@ where
                             block,
                             transaction_bytes,
                             contextual,
-                            verification_cancellation,
+                            verification_cancellation.clone(),
                         )
                         .await;
                         Ok(hash)
@@ -1437,6 +1550,12 @@ where
                 }
             };
 
+            if verification_cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Ok(hash);
+            }
             let phase_start = Instant::now();
             let result = state_service
                 .ready()
@@ -1491,10 +1610,10 @@ where
         }
         .instrument(span);
 
-        if detach_proposal {
+        if detach_verification {
             let (result_sender, result_receiver) = oneshot::channel();
             let caller_cancellation = cancellation
-                .expect("detached proposals have a cancellation token")
+                .expect("detached verification has a cancellation token")
                 .drop_guard();
             tokio::spawn(async move {
                 let result = verification.await;
