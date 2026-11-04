@@ -1461,6 +1461,67 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
     Ok(())
 }
 
+/// A semantic child must switch the writer to non-finalized commits even when its checkpoint
+/// parent is still queued for its disk write, and checkpoint UTXOs must remain available meanwhile.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Hold the last checkpoint in a detached queue so the durable tip stays at genesis after
+        // the real writer has drained its original finalized channel. Its missing parent makes the
+        // semantic child's prompt rejection distinguish dispatch from the old indefinite queueing.
+        let (finalized_sender, finalized_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(finalized_sender));
+        let parent = CheckpointVerifiedBlock::from(blocks[1].clone());
+        state.finalized_block_write_last_sent_hash = parent.hash;
+        state
+            .non_finalized_block_write_sent_hashes
+            .add_finalized(&parent);
+        let (parent_rsp_tx, parent_rsp_rx) = tokio::sync::oneshot::channel();
+        state
+            .block_write_sender
+            .finalized
+            .as_ref()
+            .unwrap()
+            .send((parent.clone(), parent_rsp_tx, None))
+            .unwrap();
+        assert_eq!(state.read_service.db.finalized_tip_hash(), blocks[0].hash());
+
+        let child = blocks[2].clone();
+        let child_hash = child.hash();
+        let response = state.queue_and_commit_to_non_finalized_state(child.prepare(), None, None);
+        let result = tokio::time::timeout(Duration::from_secs(1), response)
+            .await
+            .expect("the semantic child must not remain queued behind a stale durable-tip check")
+            .unwrap();
+        assert!(result.is_err(), "the detached checkpoint parent is absent");
+        assert!(state.block_write_sender.finalized.is_none());
+        assert!(!state.non_finalized_state_queued_blocks.has(child_hash));
+        assert!(
+            state
+                .non_finalized_block_write_sent_hashes
+                .contains(&parent.hash),
+            "the undrained checkpoint parent's UTXO lookahead is retained"
+        );
+        drop((finalized_receiver, parent_rsp_rx));
+    })
+    .await
+    .expect("the semantic handoff regression finishes");
+}
+
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =
