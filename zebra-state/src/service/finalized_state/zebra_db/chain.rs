@@ -28,8 +28,9 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+use zebra_db::FinalizedBlock;
+
 use crate::{
-    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::DiskWriteBatch,
         disk_format::{chain::HistoryTreeParts, RawBytes},

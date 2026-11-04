@@ -134,8 +134,9 @@ fn mining_candidate_matches_committed_block() {
     use std::collections::HashMap;
 
     use crate::{
-        arbitrary::Prepare, service::finalized_state::DiskWriteBatch, CheckpointVerifiedBlock,
-        OutputLocation, TransactionLocation, WriteDisk,
+        arbitrary::{Prepare, SemanticallyVerifiedBlockTestExt},
+        service::finalized_state::DiskWriteBatch,
+        CheckpointVerifiedBlock, OutputLocation, TransactionLocation, WriteDisk,
     };
 
     let _init_guard = zebra_test::init();

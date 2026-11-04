@@ -33,9 +33,10 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+use zebra_db::FinalizedBlock;
+
 use crate::{
     error::{BlockReadError, CommitCheckpointVerifiedError},
-    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{

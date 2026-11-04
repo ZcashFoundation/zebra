@@ -24,7 +24,7 @@ progress-bar = [
 ]
 
 # Indexes spending transaction ids by spent outpoints and revealed nullifiers
-indexer = []
+indexer = ["zebra-db/indexer"]
 
 # Test-only features
 proptest-impl = [
@@ -82,6 +82,7 @@ serde_json = { workspace = true, optional = true }
 
 zebra-node-services = { path = "../zebra-node-services", version = "13.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
+zebra-db = { path = "../zebra-db", version = "0.1.0" }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }

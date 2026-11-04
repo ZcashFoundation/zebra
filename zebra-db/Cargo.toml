@@ -1,0 +1,31 @@
+[package]
+name = "zebra-db"
+version = "0.1.0"
+authors.workspace = true
+description = "Finalized-state storage and state snapshots for Zebra"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+readme = "../README.md"
+homepage.workspace = true
+# crates.io is limited to 5 keywords and categories
+keywords.workspace = true
+# Must be one of <https://crates.io/category_slugs>
+categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
+
+[features]
+default = []
+
+# Indexes spending transaction ids by spent outpoints and revealed nullifiers
+indexer = []
+
+# Test-only features
+proptest-impl = []
+
+[dependencies]
+zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
+
+[lints]
+workspace = true

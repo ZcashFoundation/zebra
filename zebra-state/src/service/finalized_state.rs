@@ -626,7 +626,7 @@ impl FinalizedState {
 
         let snapshot_base = self.deferred_snapshot_checks(&finalized, checkpoint_verified)?;
         let result = self.db.write_block(
-            finalized,
+            finalized.into(),
             prev_note_commitment_trees,
             &self.network(),
             source,

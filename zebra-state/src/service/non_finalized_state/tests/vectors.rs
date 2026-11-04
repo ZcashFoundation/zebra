@@ -18,7 +18,7 @@ use zebra_chain::{
 use zebra_test::prelude::*;
 
 use crate::{
-    arbitrary::Prepare,
+    arbitrary::{Prepare, SemanticallyVerifiedBlockTestExt},
     error::PreciousError,
     service::{
         finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
