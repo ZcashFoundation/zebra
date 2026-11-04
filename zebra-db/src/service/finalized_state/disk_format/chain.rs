@@ -91,6 +91,7 @@ impl FromDisk for ValueBalance<NonNegative> {
 // We explicitly use `bincode::DefaultOptions`  to disallow trailing bytes; see
 // https://docs.rs/bincode/1.3.3/bincode/config/index.html#options-struct-vs-bincode-functions
 
+/// The serializable parts of a finalized history tree.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct HistoryTreeParts {
     network_kind: NetworkKind,
@@ -103,7 +104,7 @@ impl HistoryTreeParts {
     /// Decodes a state snapshot's `history_tree` value for `network` without trusting it: the
     /// bytes must be exactly the current encoding of a tree for this network at a height where
     /// the history tree exists, and the tree must rebuild from its peaks.
-    pub(crate) fn decode_canonical(
+    pub fn decode_canonical(
         bytes: &[u8],
         network: &Network,
     ) -> Result<NonEmptyHistoryTree, String> {
@@ -138,10 +139,7 @@ impl HistoryTreeParts {
     }
 
     /// Converts [`HistoryTreeParts`] to a [`NonEmptyHistoryTree`].
-    pub(crate) fn with_network(
-        self,
-        network: &Network,
-    ) -> Result<NonEmptyHistoryTree, HistoryTreeError> {
+    pub fn with_network(self, network: &Network) -> Result<NonEmptyHistoryTree, HistoryTreeError> {
         assert_eq!(
             self.network_kind,
             network.kind(),
@@ -152,18 +150,18 @@ impl HistoryTreeParts {
     }
 
     /// Returns the kind of network the tree is for.
-    pub(crate) fn network_kind(&self) -> NetworkKind {
+    pub fn network_kind(&self) -> NetworkKind {
         self.network_kind
     }
 
     /// Returns the height of the last block in the tree.
-    pub(crate) fn current_height(&self) -> Height {
+    pub fn current_height(&self) -> Height {
         self.current_height
     }
 
     /// Returns the number of peaks in the tree, which is never zero for a tree
     /// that [`Self::with_network`] can rebuild.
-    pub(crate) fn peak_count(&self) -> usize {
+    pub fn peak_count(&self) -> usize {
         self.peaks.len()
     }
 }
@@ -189,30 +187,28 @@ impl IntoDisk for HistoryTreeParts {
     }
 }
 
-/// A stored history tree, with its peaks as bytes: the layout of
-/// [`HistoryTreeParts`], whose fields are private.
+/// A stored history tree, with its peaks as bytes: the layout of [`HistoryTreeParts`].
 #[derive(Serialize, Deserialize)]
-pub(crate) struct RawHistoryTree {
+pub struct RawHistoryTree {
     network_kind: NetworkKind,
     size: u32,
-    pub(crate) peaks: BTreeMap<u32, RawEntry>,
+    /// The serialized history tree peaks, indexed by their tree positions.
+    pub peaks: BTreeMap<u32, RawEntry>,
     current_height: Height,
 }
 
 /// A stored history tree entry: its kind, then the node data of the tree's version.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct RawEntry {
+pub struct RawEntry {
+    /// The serialized entry bytes.
     #[serde(with = "BigArray")]
-    pub(crate) inner: [u8; MAX_ENTRY_SIZE],
+    pub inner: [u8; MAX_ENTRY_SIZE],
 }
 
 /// Checks that the history tree `bytes` rebuilds without panicking: it has peaks, every peak is an
 /// entry of the tree version of `upgrade`, and the work and transaction counts added while combining
 /// them do not overflow.
-pub(crate) fn check_history_tree_peaks(
-    bytes: &[u8],
-    upgrade: NetworkUpgrade,
-) -> Result<(), String> {
+pub fn check_history_tree_peaks(bytes: &[u8], upgrade: NetworkUpgrade) -> Result<(), String> {
     let raw: RawHistoryTree = bincode::DefaultOptions::new()
         .deserialize(bytes)
         .map_err(|error| format!("invalid history tree: {error}"))?;
@@ -297,7 +293,7 @@ const LEGACY_MAX_ENTRY_SIZE: usize = 253;
 /// parse at the current width. The field order must match [`HistoryTreeParts`] so the two share a
 /// bincode layout (bincode ignores field names and identifies fields by position).
 #[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct LegacyHistoryTreeParts {
+pub struct LegacyHistoryTreeParts {
     network_kind: NetworkKind,
     size: u32,
     peaks: BTreeMap<u32, LegacyEntry>,
@@ -306,7 +302,7 @@ pub(crate) struct LegacyHistoryTreeParts {
 
 /// A history-tree entry serialized at the pre-NU6.3 [`LEGACY_MAX_ENTRY_SIZE`] width.
 #[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct LegacyEntry {
+pub struct LegacyEntry {
     #[serde(with = "BigArray")]
     inner: [u8; LEGACY_MAX_ENTRY_SIZE],
 }
@@ -542,6 +538,3 @@ impl FromDisk for SyncMetadata {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

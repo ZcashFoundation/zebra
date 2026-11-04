@@ -31,7 +31,8 @@ proptest-impl = [
     "proptest",
     "proptest-derive",
     "zebra-test",
-    "zebra-chain/proptest-impl"
+    "zebra-chain/proptest-impl",
+    "zebra-db/proptest-impl",
 ]
 
 # Experimental elasticsearch support
@@ -39,6 +40,7 @@ elasticsearch = [
     "dep:elasticsearch",
     "dep:serde_json",
     "zebra-chain/elasticsearch",
+    "zebra-db/elasticsearch",
 ]
 
 [dependencies]
@@ -114,6 +116,7 @@ jubjub = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-db = { path = "../zebra-db", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
 
 [lints]

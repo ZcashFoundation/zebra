@@ -7630,7 +7630,28 @@ dependencies = [
 name = "zebra-db"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "chrono",
+ "derive-new",
+ "dirs",
+ "elasticsearch",
+ "humantime-serde",
+ "lazy_static",
+ "proptest",
+ "proptest-derive",
+ "regex",
+ "rocksdb",
+ "sapling-crypto",
+ "semver",
+ "serde",
+ "serde-big-array",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "zcash_history",
  "zebra-chain",
+ "zebra-test",
 ]
 
 [[package]]

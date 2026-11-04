@@ -17,8 +17,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         calculate_deferred_pool_balance_change,
-        disk_format::transparent::{AddressBalanceLocationChange, AddressLocation},
-        MAX_ON_DISK_HEIGHT,
+        disk_format::transparent::AddressBalanceLocationChange,
     },
     DiskWriteBatch, HashOrHeight, TransactionLocation, WriteDisk,
 };
@@ -328,17 +327,5 @@ impl Upgrade {
         }
 
         Ok(Ok(()))
-    }
-}
-
-impl AddressBalanceLocationChange {
-    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and
-    /// a dummy (all one bits) location. See `AddressBalanceLocationInner::add()`
-    /// for the rationale for using this dummy value.
-    fn empty() -> Self {
-        Self::new(AddressLocation::from_output_index(
-            TransactionLocation::from_index(MAX_ON_DISK_HEIGHT, u16::MAX),
-            u32::MAX,
-        ))
     }
 }

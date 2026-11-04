@@ -22,10 +22,43 @@ default = []
 indexer = []
 
 # Test-only features
-proptest-impl = []
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "zebra-test",
+    "zebra-chain/proptest-impl",
+]
+
+# Experimental elasticsearch support
+elasticsearch = ["dep:elasticsearch"]
 
 [dependencies]
+bincode = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+derive-new = { workspace = true }
+dirs = { workspace = true }
+humantime-serde = { workspace = true }
+lazy_static = { workspace = true }
+regex = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4"] }
+semver = { workspace = true }
+serde = { workspace = true, features = ["serde_derive"] }
+serde-big-array = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+sapling-crypto = { workspace = true }
+zcash_history = { workspace = true }
+
+elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
+
 zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
+
+zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 
 [lints]
 workspace = true
