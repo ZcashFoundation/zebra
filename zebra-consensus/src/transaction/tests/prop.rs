@@ -602,9 +602,6 @@ fn mock_funded_transparent_transaction(
 }
 
 /// Returns a mock read service using `known_utxos` as the entire best chain UTXO set.
-///
-/// Nullifier and anchor checks always succeed: this module compares the two verifiers against
-/// each other, and contextual validity is not what distinguishes them.
 fn mock_state_service(
     known_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     next_median_time_past: DateTime32,
@@ -633,9 +630,6 @@ fn mock_state_service(
                 }
                 zs::ReadRequest::BestChainNextMedianTimePast => {
                     zs::ReadResponse::BestChainNextMedianTimePast(next_median_time_past)
-                }
-                zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
-                    zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors
                 }
                 request => unreachable!("unexpected state request: {request:?}"),
             };

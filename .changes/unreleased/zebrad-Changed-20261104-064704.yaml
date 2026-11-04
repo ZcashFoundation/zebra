@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce state round trips when admitting transactions to the mempool, which speeds up transparent transaction admission.
+time: 2026-11-04T06:47:04.429016079+01:00

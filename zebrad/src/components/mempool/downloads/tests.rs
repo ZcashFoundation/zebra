@@ -12,6 +12,65 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use super::*;
 
+/// Already-mined or failed known-ID lookups reject the transaction without a tip lookup, so
+/// gossiping mined IDs costs one state read each.
+#[tokio::test]
+async fn known_id_rejections_skip_the_tip_lookup() {
+    let _init_guard = zebra_test::init();
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("mainnet vectors contain a transaction")
+        .transaction;
+    let txid = transaction.id;
+
+    for known in [Ok(true), Err("known transaction lookup failed")] {
+        let peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let mut state: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
+            MockService::build().for_unit_tests();
+        let mut downloads =
+            Downloads::new(peer_set, verifier, state.clone(), Arc::new(Notify::new()));
+        downloads
+            .download_if_needed_and_verify(Gossip::Tx(transaction.clone()), None, None)
+            .expect("the request can be queued");
+
+        state
+            .expect_request(zs::ReadRequest::Transaction(txid.mined_id()))
+            .await
+            .respond(
+                known
+                    .map(|_| {
+                        zs::ReadResponse::Transaction(Some(zs::MinedTx {
+                            tx: transaction.transaction.clone(),
+                            height: Height(1),
+                            confirmations: 1,
+                            block_time: chrono::Utc::now(),
+                            best_chain_tip_hash: zebra_chain::block::Hash([0; 32]),
+                        }))
+                    })
+                    .map_err(BoxError::from),
+            );
+
+        let (_txid, error) = *tokio::time::timeout(Duration::from_secs(1), downloads.next())
+            .await
+            .expect("the known-ID lookup has responded")
+            .expect("the download returns its result")
+            .expect("the task did not time out")
+            .expect_err("the known-ID lookup rejects the transaction");
+        match (known, error) {
+            (Ok(_), TransactionDownloadVerifyError::InState) => {}
+            (Err(message), TransactionDownloadVerifyError::StateError(error)) => {
+                assert_eq!(error.to_string(), message);
+            }
+            (_, error) => panic!("expected the known-ID result, got {error:?}"),
+        }
+        state.expect_no_requests().await;
+    }
+}
+
 #[test]
 fn download_verify_error_metric_labels_ignore_details() {
     use zebra_consensus::error::TransactionError;

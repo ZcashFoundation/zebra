@@ -452,6 +452,7 @@ where
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
+            // Rejected IDs must not also pay for a tip lookup.
             Self::transaction_in_best_chain(&mut state, txid).await?;
 
             trace!(?txid, "transaction is not in best chain");
