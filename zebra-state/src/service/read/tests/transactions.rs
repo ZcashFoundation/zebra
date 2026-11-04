@@ -141,7 +141,10 @@ fn transaction_queries_reject_disagreeing_finalized_and_cached_chains(
     }
     let cached_chain = non_finalized.best_chain().unwrap();
 
-    let mut alternate = genesis.block.make_fake_child().set_block_commitment([0x42; 32]);
+    let mut alternate = genesis
+        .block
+        .make_fake_child()
+        .set_block_commitment([0x42; 32]);
     let mut alternates = vec![alternate.clone()];
     for _ in 1..4 {
         alternate = alternate.make_fake_child();

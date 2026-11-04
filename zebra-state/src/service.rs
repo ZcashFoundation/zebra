@@ -436,15 +436,10 @@ impl StateService {
 
         // # Correctness
         //
-        // The state service must set the finalized block write sender to `None`
-        // if there are blocks in the restored non-finalized state that are above
-        // the max checkpoint height so that non-finalized blocks can be written, otherwise,
-        // Zebra will be unable to commit semantically verified blocks, and its chain sync will stall.
-        //
-        // The state service must not set the finalized block write sender to `None` if there
-        // aren't blocks in the restored non-finalized state that are above the max checkpoint height,
-        // otherwise, unless checkpoint sync is disabled in the zebra-consensus configuration,
-        // Zebra will be unable to commit checkpoint verified blocks, and its chain sync will stall.
+        // Once the finalized tip reaches the maximum checkpoint, or a non-finalized chain is
+        // restored, semantic blocks must bypass finalized admission. Below the maximum checkpoint,
+        // an empty non-finalized state must keep checkpoint admission open so checkpoint sync can
+        // make progress.
         let finalized_tip_height = finalized_tip
             .as_ref()
             .map(|tip| tip.coinbase_height().expect("valid block must have height"));
@@ -487,7 +482,8 @@ impl StateService {
         let early_relay = early_relay::EarlyRelayState::new(Some(latest_chain_tip.clone()));
 
         let finalized_state_for_writing = finalized_state.clone();
-        let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
+        let should_use_finalized_block_write_sender =
+            non_finalized_state.is_chain_set_empty() && !is_finalized_tip_past_max_checkpoint;
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         let (pruning_wake, pruning_receiver) = config
             .prune_blocks_older_than
