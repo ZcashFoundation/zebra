@@ -10,4 +10,5 @@ body: >-
   fallbacks. Direct readers must use v33-or-newer code and wait for the writer to finish. v32 and
   older readers cannot decode v33 records. `SNAPSHOT_FORMAT` is now 2, because state snapshots
   carry the new record encoding.
+  ([#12182](https://github.com/ZcashFoundation/zebra/pull/12182))
 time: 2026-11-03T19:10:59-05:00
