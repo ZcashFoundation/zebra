@@ -44,30 +44,18 @@ elasticsearch = [
 ]
 
 [dependencies]
-bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
-dirs = { workspace = true }
 futures = { workspace = true }
 hashbrown = { workspace = true }
 hex = { workspace = true }
-hex-literal = { workspace = true }
-humantime-serde = { workspace = true }
-human_bytes = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
-lazy_static = { workspace = true }
 metrics = { workspace = true }
 mset = { workspace = true }
-regex = { workspace = true }
-rlimit = { workspace = true }
-rocksdb = { workspace = true, features = ["lz4"] }
 semver = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
-serde-big-array = { workspace = true }
-sha2 = { workspace = true }
 tempfile = { workspace = true }
-thiserror = { workspace = true }
 
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
@@ -75,7 +63,6 @@ tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
-zcash_history = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
@@ -94,10 +81,14 @@ zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 derive-getters.workspace = true
-derive-new.workspace = true
 
 [dev-dependencies]
+bincode = { workspace = true }
 color-eyre = { workspace = true }
+hex-literal = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4"] }
+serde-big-array = { workspace = true }
+zcash_history = { workspace = true }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }
