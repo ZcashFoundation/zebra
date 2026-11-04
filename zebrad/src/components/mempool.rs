@@ -189,6 +189,9 @@ enum ActiveState {
         ///
         /// Updated in `poll_ready()` before each request.
         last_seen_tip: (block::Hash, Height),
+
+        /// Last chain tip height checked for expired transactions.
+        last_expiry_height: Option<Height>,
     },
 }
 
@@ -462,6 +465,7 @@ impl Mempool {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
             last_seen_tip,
+            last_expiry_height: None,
         };
     }
 
@@ -730,6 +734,7 @@ impl Service<Request> for Mempool {
             storage,
             tx_downloads,
             last_seen_tip,
+            last_expiry_height,
         } = &mut self.active_state
         {
             // Refresh retained entries before completed downloads can insert and update metrics.
@@ -897,11 +902,16 @@ impl Service<Request> for Mempool {
             }
 
             // Remove expired transactions from the mempool.
+            // Newly inserted transactions were verified for the next block at this tip, so
+            // they cannot already be expired. Only a tip height change requires another scan.
             //
             // Lock times never expire, because block times are strictly increasing.
             // So we don't need to check them here.
-            if let Some(tip_height) = best_tip_height {
+            if let Some(tip_height) =
+                best_tip_height.filter(|&height| Some(height) != *last_expiry_height)
+            {
                 let expired_transactions = storage.remove_expired_transactions(tip_height);
+                *last_expiry_height = Some(tip_height);
                 // Remove transactions that are expired from the peers list
                 send_to_peers_ids =
                     Self::remove_expired_from_peer_list(&send_to_peers_ids, &expired_transactions);
@@ -980,6 +990,7 @@ impl Service<Request> for Mempool {
                 storage,
                 tx_downloads,
                 last_seen_tip,
+                ..
             } => match req {
                 // Queries
                 Request::TransactionIds => {
