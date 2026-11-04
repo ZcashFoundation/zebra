@@ -575,8 +575,7 @@ fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), Snapsho
     let mut iterator = raw.iter_from(ComponentId::AddressTxs, &[]);
     while iterator.valid() {
         let (key, _) = item(&iterator);
-        let transaction = records::address_transaction_suffix(key)
-            .expect("address transaction records are validated before their SST is written");
+        let transaction = records::address_transaction_suffix(key).map_err(fail)?;
         if !raw.contains(ComponentId::HashByTxLoc, transaction)? {
             return Err(fail(format!(
                 "an address transaction row names {:?}, which has no hash index row",
