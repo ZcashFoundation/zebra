@@ -31,7 +31,7 @@ use super::{key, BlockFlush, Queueing, Verifier, BLOCKS};
 
 tokio::task_local! {
     /// Overrides only flush routing; tests still use the real bounded crypto batch worker.
-    pub(crate) static FLUSH: Box<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
+    pub(crate) static FLUSH: Arc<dyn Fn(Verifier) -> Result<bool, BoxError> + Send + Sync>;
     static REGISTRY_ACCESSES: Cell<usize>;
 }
 
@@ -96,7 +96,7 @@ async fn shielded_block_transaction_batch_does_not_wait_for_idle() {
     let flush_cache = cache.clone();
     let flushes = Arc::new(AtomicUsize::new(0));
     let count = flushes.clone();
-    let hook = Box::new(move |verifier| {
+    let hook = Arc::new(move |verifier| {
         assert!(matches!(verifier, Verifier::Sapling));
         count.fetch_add(1, Ordering::SeqCst);
         flush_cache.inner().primary().clone().try_flush()
@@ -217,7 +217,7 @@ async fn flush_waits_for_late_transactions_and_queue_admission() {
     let flushes = count.clone();
     FLUSH
         .scope(
-            Box::new(move |_| {
+            Arc::new(move |_| {
                 flushes.fetch_add(1, Ordering::SeqCst);
                 Ok(true)
             }),
