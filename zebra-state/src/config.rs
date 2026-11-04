@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
-use zebra_chain::{common::default_cache_dir, parameters::Network};
+use zebra_chain::{
+    common::default_cache_dir,
+    parameters::{Network, NetworkUpgrade},
+};
 
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
@@ -224,6 +227,9 @@ impl Config {
                 configured,
                 minimum,
             });
+        }
+        if NetworkUpgrade::Nu5.activation_height(network).is_none() {
+            return Err(StateInitError::PruningRequiresNu5);
         }
         Ok(())
     }
