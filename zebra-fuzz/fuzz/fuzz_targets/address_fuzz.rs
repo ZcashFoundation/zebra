@@ -28,10 +28,10 @@ use libfuzzer_sys::fuzz_target;
 use std::panic;
 use std::str::FromStr;
 
+use zcash_address::ZcashAddress;
 use zebra_chain::primitives::Address as ZebraAddress;
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 use zebra_chain::transparent::Address as TransparentAddress;
-use zcash_address::ZcashAddress;
 
 fuzz_target!(|data: &[u8]| {
     // Address strings are textual; non-UTF-8 byte streams are rejected by
@@ -97,12 +97,13 @@ fuzz_target!(|data: &[u8]| {
     // We construct a fresh ZcashAddress (not reusing the one from oracle 3
     // above) so the panic-catching boundary is clean.
     // ─────────────────────────────────────────────────────────────────
-    let convert_outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        match ZcashAddress::try_from_encoded(s) {
-            Ok(addr) => Some(addr.convert::<ZebraAddress>().is_ok()),
-            Err(_) => None,
-        }
-    }));
+    let convert_outcome =
+        panic::catch_unwind(panic::AssertUnwindSafe(
+            || match ZcashAddress::try_from_encoded(s) {
+                Ok(addr) => Some(addr.convert::<ZebraAddress>().is_ok()),
+                Err(_) => None,
+            },
+        ));
 
     // ─────────────────────────────────────────────────────────────────
     // Divergence oracle: upstream said "valid encoding" but our convert

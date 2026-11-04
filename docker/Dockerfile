@@ -177,6 +177,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
     --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-fuzz/fuzz,target=zebra-fuzz/fuzz \
     --mount=type=bind,source=zebra-network,target=zebra-network \
     --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
     --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
@@ -190,7 +191,8 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,id=zebra-release-target,target=${CARGO_TARGET_DIR},sharing=locked \
     --mount=type=cache,target=${CARGO_HOME} \
     [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
-    # Keep this list in sync with the workspace crates bind-mounted above.
+    # Clean the production crates mounted above; zebra-fuzz/fuzz is mounted
+    # for workspace discovery but is not built by --package zebrad.
     cargo clean --release \
         --package tower-batch-control --package tower-fallback --package zebra-chain \
         --package zebra-consensus --package zebra-network --package zebra-node-services \

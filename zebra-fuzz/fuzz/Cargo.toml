@@ -1,19 +1,17 @@
-[workspace]
-members = ["."]
-
 [package]
 name = "zebra-fuzz-targets"
 version = "0.0.0"
 publish = false
-edition = "2021"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [package.metadata]
 cargo-fuzz = true
 
 # The dependency set is the union of the crates imported by the fuzz targets.
-# External versions track the workspace at the repository root: this crate is a
-# separate cargo workspace, so a version that drifts from the root manifest can
-# put two copies of a crate in the graph and break trait resolution.
+# Inherit shared dependencies so API changes cannot leave the harnesses pinned
+# to a different version from the node crates.
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
@@ -28,36 +26,33 @@ zebra-node-services = { path = "../../zebra-node-services" }
 zebra-script = { path = "../../zebra-script" }
 
 # rpc_handler_fuzz / jsonrpsee_envelope_fuzz async harness deps
-tokio = { version = "1.44", features = ["rt", "sync", "macros", "time"] }
-tower = { version = "0.4.13", features = ["buffer", "util"] }
-futures = "0.3.31"
-jsonrpsee = { version = "0.24.8", features = ["server"] }
-serde_json = "1.0.140"
+tokio = { workspace = true, features = ["rt", "sync", "macros", "time"] }
+tower = { workspace = true, features = ["buffer", "util"] }
+futures = { workspace = true }
+jsonrpsee = { workspace = true, features = ["server"] }
+serde_json = { workspace = true }
 
 # structure-aware oracle support
-proptest = "1.6"
-# address_fuzz third oracle. Must track zebra-chain's workspace pin: if this
-# crate pins an older minor, two zcash_address versions coexist in the
-# dependency graph and the TryFromAddress / From<transparent::Address> impls
-# (defined by zebra-chain against its own pin) stop resolving.
-zcash_address = "0.14.0"
+proptest = { workspace = true }
+# address_fuzz third oracle uses zebra-chain's address conversion traits.
+zcash_address = { workspace = true }
 # note_commitment_tree_fuzz tree types
-halo2 = { package = "halo2_proofs", version = "0.4" }
-sapling-crypto = "0.9"
+halo2 = { workspace = true }
+sapling-crypto = { workspace = true }
 # rpc_handler_fuzz / jsonrpsee_envelope_fuzz timestamp handling
-chrono = { version = "0.4.40", default-features = false }
+chrono = { workspace = true }
 # equihash_fuzz multi-param oracle
-equihash = "0.3"
+equihash = { workspace = true }
 # script_flag_matrix_fuzz: below-zebra-script FFI flag matrix
-libzcash_script = "0.2"
-zcash_script = { version = "0.6", features = ["signature-validation"] }
-hex = "0.4.3"
+libzcash_script = { workspace = true }
+zcash_script = { workspace = true, features = ["signature-validation"] }
+hex = { workspace = true }
 # p2p_*/addr_message_fuzz: wire Codec Decoder/Encoder traits + BytesMut buffer
-bytes = "1.10"
-tokio-util = { version = "0.7.14", features = ["codec"] }
+bytes = { workspace = true }
+tokio-util = { workspace = true, features = ["codec"] }
 # generate_v6_seeds bundle types
-orchard = "0.16.0"
-zcash_protocol = "0.11.0"
+orchard = { workspace = true }
+zcash_protocol = { workspace = true }
 
 [[bin]]
 name = "rpc_handler_fuzz"
@@ -74,6 +69,7 @@ doc = false
 [[bin]]
 name = "script_verify_fuzz"
 path = "fuzz_targets/script_verify_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
@@ -104,41 +100,49 @@ doc = false
 [[bin]]
 name = "block_deserialize"
 path = "fuzz_targets/block_deserialize.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "block_deep_fuzz"
 path = "fuzz_targets/block_deep_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "p2p_message_parse"
 path = "fuzz_targets/p2p_message_parse.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "p2p_deep_fuzz"
 path = "fuzz_targets/p2p_deep_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "addr_message_fuzz"
 path = "fuzz_targets/addr_message_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "v6_transaction_fuzz"
 path = "fuzz_targets/v6_transaction_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "v6_transaction_semantic_fuzz"
 path = "fuzz_targets/v6_transaction_semantic_fuzz.rs"
+test = false
 doc = false
 
 [[bin]]
 name = "ironwood_value_balance_codec_fuzz"
 path = "fuzz_targets/ironwood_value_balance_codec_fuzz.rs"
+test = false
 doc = false
 
 # Helper binary (NOT a fuzz target): emits structural-diversity v6/Ironwood seeds.

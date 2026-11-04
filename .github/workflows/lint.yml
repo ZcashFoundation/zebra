@@ -141,7 +141,7 @@ jobs:
           # Only main writes caches, see the clippy job above.
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: ./.github/actions/setup-zebra-build
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace
+      - run: cargo build --bin "${{ matrix.binary }}" --package zebrad
 
   fmt:
     name: fmt

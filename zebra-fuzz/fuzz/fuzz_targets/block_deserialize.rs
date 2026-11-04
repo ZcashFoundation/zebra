@@ -29,8 +29,8 @@ use std::io::Cursor;
 use std::panic;
 use std::sync::Arc;
 
-use zebra_chain::block::{Block, Hash, Height, ZCASH_BLOCK_VERSION, MAX_BLOCK_BYTES};
 use zebra_chain::block::merkle::Root as MerkleRoot;
+use zebra_chain::block::{Block, Hash, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION};
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 
 fuzz_target!(|data: &[u8]| {
@@ -80,9 +80,7 @@ fuzz_target!(|data: &[u8]| {
             Err(e) => {
                 // We just produced these bytes from a parsed block — the
                 // serializer disagreeing with its own deserializer is a bug.
-                panic!(
-                    "I-1: serializer produced bytes the deserializer rejects: {e:?}"
-                );
+                panic!("I-1: serializer produced bytes the deserializer rejects: {e:?}");
             }
         }
     }
@@ -160,9 +158,7 @@ fuzz_target!(|data: &[u8]| {
             Some(root)
         }
     }));
-    if let (Some(via_txs), Ok(Some(via_hashes))) =
-        (merkle_root, merkle_root_via_hashes_result)
-    {
+    if let (Some(via_txs), Ok(Some(via_hashes))) = (merkle_root, merkle_root_via_hashes_result) {
         assert_eq!(
             via_txs, via_hashes,
             "I-3: merkle root mismatch between transaction-collect and \
@@ -179,8 +175,7 @@ fuzz_target!(|data: &[u8]| {
     // The range is enforced by `Height::new`/serialize callers, but we
     // guard against any parser path producing an out-of-range value.
     // ────────────────────────────────────────────────────────────────────
-    let height_result =
-        panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
+    let height_result = panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
     match height_result {
         Ok(None) => {
             // Block with no coinbase height — legal for malformed inputs
