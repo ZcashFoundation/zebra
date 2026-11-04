@@ -108,6 +108,9 @@ zebra-test = { path = "../zebra-test/" }
 
 criterion = { workspace = true, features = ["html_reports"] }
 
+[target.'cfg(zebra_loom)'.dev-dependencies]
+loom = { workspace = true }
+
 [[bench]]
 name = "groth16"
 harness = false

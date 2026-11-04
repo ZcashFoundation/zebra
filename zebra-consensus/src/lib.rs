@@ -41,6 +41,7 @@ mod block;
 #[cfg(feature = "fuzzing")]
 pub mod block;
 mod checkpoint;
+pub(crate) mod loom;
 mod primitives;
 mod script;
 

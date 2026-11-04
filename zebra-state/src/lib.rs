@@ -28,6 +28,7 @@ pub mod constants;
 pub mod arbitrary;
 
 mod error;
+pub(crate) mod loom;
 mod request;
 mod response;
 mod service;

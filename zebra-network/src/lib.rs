@@ -158,6 +158,7 @@ mod address_book_updater;
 mod ban_list;
 mod connection_metrics;
 mod isolated;
+pub(crate) mod loom;
 mod meta_addr;
 mod peer;
 mod peer_cache_updater;
