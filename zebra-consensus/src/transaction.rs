@@ -564,13 +564,19 @@ where
             )
             .await?;
 
-            // Include service readiness in the state deadline while sibling CPU checks drain.
-            let check_anchors_and_revealed_nullifiers_query = tokio::time::timeout(
-                UTXO_LOOKUP_TIMEOUT,
-                state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
-                    unmined_tx.clone(),
-                )),
-            )
+            // Only shielded bundles have nullifiers or anchors for the state to check.
+            if tx.has_sprout_joinsplit_data()
+                || tx.has_sapling_shielded_data()
+                || tx.has_orchard_shielded_data()
+                || tx.has_ironwood_shielded_data()
+            {
+                // Include service readiness in the state deadline while sibling CPU checks drain.
+                let check_anchors_and_revealed_nullifiers_query = tokio::time::timeout(
+                    UTXO_LOOKUP_TIMEOUT,
+                    state.clone().oneshot(zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(
+                        unmined_tx.clone(),
+                    )),
+                )
                 .map(|res| {
                     assert!(
                         res?? == zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors,
@@ -579,7 +585,8 @@ where
                     Ok(())
                 });
 
-            async_checks.push(check_anchors_and_revealed_nullifiers_query);
+                async_checks.push(check_anchors_and_revealed_nullifiers_query);
+            }
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
