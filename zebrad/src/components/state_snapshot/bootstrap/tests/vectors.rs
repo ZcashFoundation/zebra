@@ -46,8 +46,9 @@ use crate::components::state_snapshot::{
         check_successor_block, check_successor_commitment, close_bootstrap_after,
         create_import_workspace, download_and_build_with, fetch_header_chain, fetch_manifest,
         fetch_object, fetch_piece, fetch_successor_copies, finish_install, install_staged_snapshot,
-        install_staged_snapshot_with_hook, interleave_resolved_peers, quiesce_download_tasks,
-        snapshot_fault, wait_for_snapshot_install_with_hook, window_start, BootstrapError,
+        install_staged_snapshot_with_hook, install_staged_snapshot_with_rename_failure,
+        interleave_resolved_peers, quiesce_download_tasks, snapshot_fault,
+        wait_for_snapshot_install_with_hook, window_start, AttemptStore, BootstrapError,
         ChainCheckError, FetchError, Peers, SstBuilder, INSTALLS_QUIESCED,
         VERIFIED_PIECE_CHANNEL_BOUND,
     },
@@ -1277,6 +1278,191 @@ async fn workspace_errors_wait_for_bootstrap_close() {
     );
 }
 
+async fn shared_artifact_survives_first_attempt_cleanup(pre_existing: bool) {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let store = zebra_state::state_snapshot::store::ArtifactStore::at(temp.path().join("shared"));
+    let bytes = if pre_existing {
+        b"pre-existing shared object".to_vec()
+    } else {
+        b"object introduced by an attempt".to_vec()
+    };
+    let hash = ObjectHash::of(&bytes);
+    if pre_existing {
+        store.put(hash, &bytes).expect("the object pre-exists");
+    }
+    let first_root = temp.path().join("first");
+    let second_root = temp.path().join("second");
+    let first_store = AttemptStore::new(&store, &first_root);
+    let second_store = AttemptStore::new(&store, &second_root);
+    let first_lease = first_store
+        .put(hash, &bytes)
+        .expect("the first attempt stores and leases the object");
+    let second_lease = second_store
+        .put(hash, &bytes)
+        .expect("the second attempt stores and leases the object");
+    let shared_path = store.object_path(hash);
+    assert_ne!(first_lease, second_lease);
+    assert_ne!(second_lease, shared_path);
+    let first_paths = [(hash, first_lease.clone())].into_iter().collect();
+    let second_paths = [(hash, second_lease.clone())].into_iter().collect();
+
+    finish_install(first_paths, &first_root, &store, false)
+        .await
+        .expect("the first attempt finishes");
+    assert!(!first_root.exists(), "the first workspace is cleaned");
+    assert!(
+        !shared_path.exists(),
+        "the first attempt cleans the shared directory entry"
+    );
+    assert_eq!(
+        std::fs::read(&second_lease).expect("the active second attempt retains its leased object"),
+        bytes,
+        "the surviving lease remains usable for SST building and import"
+    );
+
+    finish_install(second_paths, &second_root, &store, false)
+        .await
+        .expect("the second attempt finishes");
+    assert!(!second_root.exists(), "the second workspace is cleaned");
+    assert!(
+        !shared_path.exists(),
+        "the last attempt leaves no shared directory entry when serving is off"
+    );
+}
+
+#[tokio::test]
+async fn snapshot_regression_preexisting_artifact_survives_concurrent_cleanup() {
+    shared_artifact_survives_first_attempt_cleanup(true).await;
+}
+
+#[tokio::test]
+async fn snapshot_regression_new_artifact_survives_concurrent_cleanup() {
+    shared_artifact_survives_first_attempt_cleanup(false).await;
+}
+
+#[tokio::test]
+async fn snapshot_regression_target_race_preserves_backup_and_staged_state() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let staged = temp.path().join("staged");
+    let backup = temp.path().join("backup");
+    let target = temp.path().join("state");
+    std::fs::create_dir(&staged).expect("the staged database is created");
+    std::fs::write(staged.join("marker"), b"staged").expect("the staged marker is written");
+    std::fs::create_dir(&backup).expect("the backup is created");
+    std::fs::write(backup.join("marker"), b"backup").expect("the backup marker is written");
+
+    let competing_target = target.clone();
+    let result = install_staged_snapshot_with_hook(
+        staged.clone(),
+        target.clone(),
+        Some(backup.clone()),
+        move || {
+            std::fs::create_dir(&competing_target).expect("another process creates the target");
+            std::fs::write(competing_target.join("marker"), b"competitor")
+                .expect("the competing target is not empty");
+        },
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "the competing target prevents installation"
+    );
+    assert_eq!(
+        std::fs::read(backup.join("marker")).expect("the old backup survives the failed rename"),
+        b"backup"
+    );
+    assert_eq!(
+        std::fs::read(staged.join("marker")).expect("the staged state survives the failed rename"),
+        b"staged"
+    );
+    assert_eq!(
+        std::fs::read(target.join("marker")).expect("the competing target is preserved"),
+        b"competitor"
+    );
+}
+
+/// An install rename failure restores the previous backup and leaves the staged database for a
+/// later attempt instead of deleting either one.
+#[tokio::test]
+async fn snapshot_regression_injected_rename_failure_restores_backup_and_staged_state() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let staged = temp.path().join("staged");
+    let backup = temp.path().join("backup");
+    let target = temp.path().join("state");
+    std::fs::create_dir(&staged).expect("the staged database is created");
+    std::fs::write(staged.join("marker"), b"staged").expect("the staged marker is written");
+    std::fs::create_dir(&backup).expect("the backup is created");
+    std::fs::write(backup.join("marker"), b"backup").expect("the backup marker is written");
+
+    let result = install_staged_snapshot_with_rename_failure(
+        staged.clone(),
+        target.clone(),
+        Some(backup.clone()),
+    )
+    .await;
+
+    assert!(result.is_err(), "the injected rename failure is returned");
+    assert!(!target.exists(), "the failed install creates no target");
+    assert_eq!(
+        std::fs::read(backup.join("marker")).expect("the old backup is restored"),
+        b"backup"
+    );
+    assert_eq!(
+        std::fs::read(staged.join("marker")).expect("the staged state survives the failed rename"),
+        b"staged"
+    );
+    assert!(
+        std::fs::read_dir(temp.path())
+            .expect("the test directory is readable")
+            .all(|entry| !entry
+                .expect("a test directory entry is readable")
+                .file_name()
+                .to_string_lossy()
+                .contains(".snapshot-install-")),
+        "the restored backup leaves no preserved-aside directory"
+    );
+}
+
+/// A successful install deletes the preserved backup only after the staged database reaches the
+/// target, and leaves no temporary backup directory behind.
+#[tokio::test]
+async fn snapshot_regression_successful_install_cleans_preserved_backup() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let staged = temp.path().join("staged");
+    let backup = temp.path().join("backup");
+    let target = temp.path().join("state");
+    std::fs::create_dir(&staged).expect("the staged database is created");
+    std::fs::write(staged.join("marker"), b"staged").expect("the staged marker is written");
+    std::fs::create_dir(&backup).expect("the backup is created");
+    std::fs::write(backup.join("marker"), b"backup").expect("the backup marker is written");
+
+    install_staged_snapshot(staged.clone(), target.clone(), Some(backup.clone()))
+        .await
+        .expect("the staged database installs");
+
+    assert!(!staged.exists(), "the staged database moved to the target");
+    assert_eq!(
+        std::fs::read(target.join("marker")).expect("the installed state is at the target"),
+        b"staged"
+    );
+    assert!(!backup.exists(), "the obsolete backup is cleaned");
+    assert!(
+        std::fs::read_dir(temp.path())
+            .expect("the test directory is readable")
+            .all(|entry| !entry
+                .expect("a test directory entry is readable")
+                .file_name()
+                .to_string_lossy()
+                .contains(".snapshot-install-")),
+        "success leaves no preserved-aside directory"
+    );
+}
+
 /// A cleanup error after installation is logged but cannot turn the installed
 /// database back into a bootstrap failure and genesis fallback.
 #[tokio::test]
@@ -1287,7 +1473,8 @@ async fn post_install_cleanup_errors_do_not_fail_the_bootstrap() {
     std::fs::write(&not_a_directory, b"installed elsewhere")
         .expect("the cleanup obstacle is created");
 
-    let result = finish_install(HashMap::new(), &not_a_directory, false).await;
+    let store = zebra_state::state_snapshot::store::ArtifactStore::at(temp.path().join("shared"));
+    let result = finish_install(HashMap::new(), &not_a_directory, &store, false).await;
     assert!(result.is_ok(), "{result:?}");
     assert!(not_a_directory.exists());
 }
@@ -1618,7 +1805,10 @@ impl SstBuilder for GatedBuilder {
 async fn verified_piece_backpressure_bounds_the_sst_build_queue() {
     let _init_guard = zebra_test::init();
     let temp = tempfile::tempdir().expect("a temporary test directory");
-    let store = zebra_state::state_snapshot::store::ArtifactStore::at(temp.path().join("objects"));
+    let store = AttemptStore::new(
+        &zebra_state::state_snapshot::store::ArtifactStore::at(temp.path().join("objects")),
+        &temp.path().join("workspace"),
+    );
     let history_bytes = vec![0];
     let history_hash = ObjectHash::of(&history_bytes);
     let history_path = store

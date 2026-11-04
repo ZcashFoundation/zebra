@@ -315,14 +315,17 @@ where
 
     /// Downloads every piece like [`Self::run`], storing the verified pieces
     /// in `store`.
-    async fn run_storing_in<P: PieceStore>(self, store: P) -> Result<(), SchedulerError> {
+    pub(crate) async fn run_storing_in<P: PieceStore>(
+        self,
+        store: P,
+    ) -> Result<(), SchedulerError> {
         Run::new(self, store).run().await
     }
 }
 
 /// Where the scheduler stores verified pieces: the artifact store, or a test
 /// double.
-trait PieceStore: Clone + Send + Sync + 'static {
+pub(crate) trait PieceStore: Clone + Send + Sync + 'static {
     /// Stores `object` as `hash`, which is its hash, and returns its path.
     /// Blocks, so it runs on a blocking thread.
     fn put(&self, hash: ObjectHash, object: &[u8]) -> Result<PathBuf, SnapshotError>;
