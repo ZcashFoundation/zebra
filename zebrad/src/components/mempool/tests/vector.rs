@@ -346,6 +346,86 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     Ok(())
 }
 
+/// Repeated polls and insertions only rescan expiration after the tip height changes.
+#[tokio::test]
+async fn mempool_expires_transactions_once_per_tip_height() {
+    timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let (
+            mut mempool,
+            _peer_set,
+            mut state_service,
+            mut chain_tip_change,
+            _tx_verifier,
+            mut recent_syncs,
+            _mempool_transaction_receiver,
+        ) = setup(&network, u64::MAX, true).await;
+
+        // Start after the first network upgrade so the next block grows rather than resets the pool.
+        let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        (&mut state_service)
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block1.into()))
+            .await
+            .unwrap();
+        chain_tip_change.wait_for_tip_change().await.unwrap();
+        mempool.enable(&mut recent_syncs).await;
+        assert_eq!(mempool.latest_chain_tip.best_tip_height(), Some(Height(1)));
+        assert_eq!(mempool.storage().expiry_scan_count, 1);
+
+        let block: Block = network.test_block(982681, 925483).unwrap();
+        let mut transaction = (*block.transactions[1]).clone();
+        transaction.set_expiry_height(Height(2));
+        let expiring_transaction = VerifiedUnminedTx::new(
+            Arc::new(transaction).into(),
+            Amount::try_from(1_000_000).unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .unwrap();
+        let surviving_transaction = network
+            .unmined_transactions_in_blocks(3..=3)
+            .next()
+            .unwrap();
+        let surviving_id = surviving_transaction.transaction.id;
+
+        for transaction in [expiring_transaction, surviving_transaction] {
+            mempool
+                .storage()
+                .insert(transaction, Vec::new(), Some(Height(1)))
+                .unwrap();
+            for _ in 0..4 {
+                mempool.dummy_call().await;
+                assert_eq!(mempool.storage().expiry_scan_count, 1);
+            }
+        }
+        assert_eq!(mempool.storage().transaction_count(), 2);
+
+        let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        state_service
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block2.into()))
+            .await
+            .unwrap();
+        chain_tip_change.wait_for_tip_change().await.unwrap();
+
+        for _ in 0..4 {
+            mempool.dummy_call().await;
+            assert_eq!(mempool.storage().expiry_scan_count, 2);
+        }
+        assert_eq!(mempool.latest_chain_tip.best_tip_height(), Some(Height(2)));
+        assert_eq!(
+            mempool.storage().tx_ids().collect::<HashSet<_>>(),
+            HashSet::from([surviving_id]),
+        );
+    })
+    .await
+    .expect("expiration checks must finish within the test deadline");
+}
+
 #[tokio::test]
 async fn mempool_verified_transactions_for_block_returns_requested_subset() {
     timeout(Duration::from_secs(30), async {

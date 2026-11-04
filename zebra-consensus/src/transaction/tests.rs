@@ -1492,15 +1492,14 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 
     mempool
-        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .expect_no_requests()
         .await
-        .expect("successful verification should trigger a mempool check")
-        .respond(mempool::Response::CheckedForVerifiedTransactions);
-    // The service is polled before requesting the output and before checking verified transactions.
+        .expect("verification must not trigger redundant mempool polls");
+    // The service is only polled before requesting the output.
     assert_eq!(
         mempool.poll_count(),
-        2,
-        "the mempool service should have been polled twice"
+        1,
+        "the mempool service should only be polled for the output lookup"
     );
 }
 
@@ -1702,15 +1701,14 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         .expect("should succeed after calling state service");
 
     mempool
-        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .expect_no_requests()
         .await
-        .expect("successful verification should trigger a mempool check")
-        .respond(mempool::Response::CheckedForVerifiedTransactions);
-    // The service is polled before requesting the output and before checking verified transactions.
+        .expect("verification must not trigger redundant mempool polls");
+    // The service is only polled before requesting the output.
     assert_eq!(
         mempool.poll_count(),
-        2,
-        "the mempool service should have been polled twice"
+        1,
+        "the mempool service should only be polled for the output lookup"
     );
 }
 
