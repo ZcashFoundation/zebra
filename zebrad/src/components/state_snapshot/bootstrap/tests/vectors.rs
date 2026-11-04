@@ -693,12 +693,26 @@ async fn successor_copies_come_from_distinct_peers() {
                 None,
             ))]));
     };
-    let (copies, ()) = tokio::join!(fetch_successor_copies(&peers, hash, 3), drive);
+    let (copies, ()) = tokio::join!(
+        fetch_successor_copies(
+            &peers,
+            mainnet_block(1_687_106).hash(),
+            hash,
+            Height(1_687_107),
+            2,
+        ),
+        drive
+    );
 
     let served_by: Vec<PeerSocketAddr> = copies.iter().map(|(peer, _)| *peer).collect();
     assert_eq!(served_by, vec![addr_a, addr_c]);
     for (_, copy) in &copies {
-        assert_eq!(copy.hash(), hash);
+        assert_eq!(
+            copy.as_ref()
+                .expect("the test copies are structurally valid")
+                .hash(),
+            hash
+        );
     }
     d.expect_no_requests().await;
 }
@@ -1497,6 +1511,79 @@ async fn chain_checks_try_every_successor_copy_and_accept_one_commitment() {
         peers.addrs(),
         vec![addr_b],
         "only the two bad-copy peers are excluded"
+    );
+}
+
+/// A bad copy and two misses must not hide a valid copy from the fourth eligible peer.
+#[tokio::test]
+async fn chain_checks_reach_a_valid_successor_after_bad_copy_and_misses() {
+    let _init_guard = zebra_test::init();
+
+    let history_root = ChainHistoryMmrRootHash::from([0x42; 32]);
+    let successor = successor_at_committing_to(1_687_108, &history_root);
+    let bad = successor_with_bad_auth_data(&successor);
+    let parent = mainnet_block(1_687_107);
+    let commitment = StateSnapshotCommitment {
+        height: Height(1_687_107),
+        block_hash: parent.hash(),
+        manifest: ObjectHash([0x02; 32]),
+    };
+    assert_eq!(bad.hash(), successor.hash());
+    assert!(
+        check_successor_block(parent.hash(), successor.hash(), Height(1_687_108), &bad).is_ok()
+    );
+    assert!(!check_successor_commitment(&history_root, &bad));
+
+    let network = regtest_with_checkpoints(&[(Height(1_687_108), successor.hash())]);
+    let (addr_a, mut a) = peer(1);
+    let (addr_b, mut b) = peer(2);
+    let (addr_c, mut c) = peer(3);
+    let (addr_d, mut d) = peer(4);
+    let mut peers = Peers::new(vec![
+        (addr_a, a.clone()),
+        (addr_b, b.clone()),
+        (addr_c, c.clone()),
+        (addr_d, d.clone()),
+    ]);
+    let block_request = zn::Request::BlocksByHash([successor.hash()].into_iter().collect());
+    let response = |block: &Arc<Block>| {
+        zn::Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))])
+    };
+    let missing = || zn::Response::Blocks(vec![InventoryResponse::Missing(successor.hash())]);
+    let drive = async {
+        a.expect_request(zn::Request::FindHeaders {
+            known_blocks: vec![parent.hash()],
+            stop: Some(successor.hash()),
+        })
+        .await
+        .respond(headers_response(std::slice::from_ref(&successor.header)));
+        a.expect_request(block_request.clone())
+            .await
+            .respond(response(&bad));
+        b.expect_request(block_request.clone())
+            .await
+            .respond(missing());
+        c.expect_request(block_request.clone())
+            .await
+            .respond(missing());
+        d.expect_request(block_request)
+            .await
+            .respond(response(&successor));
+    };
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            check_chain(&mut peers, &network, commitment, &history_root),
+            drive
+        )
+    })
+    .await
+    .expect("the fourth peer is consulted after a bad copy and two misses");
+
+    assert_eq!(result.expect("the fourth peer's valid copy is enough"), 0);
+    assert_eq!(
+        peers.addrs(),
+        vec![addr_b, addr_c, addr_d],
+        "only the bad-copy peer is excluded; misses are not blamed"
     );
 }
 

@@ -79,7 +79,7 @@ const MAX_BOOTSTRAP_PEERS: usize = 8;
 /// sub-ranges in flight, plus the chain checks' requests.
 const PEER_BUFFER_BOUND: usize = 8;
 
-/// The most copies of block `H + 1` fetched, from distinct peers.
+/// The most structurally valid copies of block `H + 1` retained, from distinct peers.
 const SUCCESSOR_COPIES: usize = 3;
 
 /// The most headers one version 2 `get-headers` response carries. The wire
@@ -1388,20 +1388,28 @@ where
     Ok(None)
 }
 
-/// Fetches block `successor_hash` from up to `copies` distinct peers, and
-/// returns each copy with the peer that served it.
+/// Fetches block `successor_hash` from eligible peers until `copies` structurally valid bodies
+/// have been found. Returns every fetched body with its structural check result so the caller can
+/// blame only peers that served invalid bodies.
 pub(crate) async fn fetch_successor_copies<S>(
     peers: &Peers<S>,
+    hash_h: block::Hash,
     successor_hash: block::Hash,
+    successor_height: Height,
     copies: usize,
-) -> Vec<(PeerSocketAddr, Arc<Block>)>
+) -> Vec<(PeerSocketAddr, Result<Arc<Block>, String>)>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
     let mut found = Vec::with_capacity(copies);
+    let mut valid_copies = 0;
 
-    for (peer, service) in peers.snapshot().into_iter().take(copies) {
+    for (peer, service) in peers.snapshot() {
+        if valid_copies == copies {
+            break;
+        }
+
         let request = zn::Request::BlocksByHash([successor_hash].into_iter().collect());
         let response = timeout(
             zn::constants::REQUEST_TIMEOUT,
@@ -1410,7 +1418,15 @@ where
         .await;
         match response {
             Ok(Ok(zn::Response::Blocks(blocks))) => match blocks.into_iter().next() {
-                Some(InventoryResponse::Available((block, _))) => found.push((peer, block)),
+                Some(InventoryResponse::Available((block, _))) => {
+                    let checked =
+                        check_successor_block(hash_h, successor_hash, successor_height, &block)
+                            .map(|()| block);
+                    if checked.is_ok() {
+                        valid_copies += 1;
+                    }
+                    found.push((peer, checked));
+                }
                 Some(InventoryResponse::Missing(_)) | None => {
                     info!(%peer, "a bootstrap peer does not have the block after the snapshot height");
                 }
@@ -1567,17 +1583,26 @@ where
 
     // Check 3: one matching copy is enough. Transaction authorizing data is
     // not covered by the txid Merkle root, so a bad copy can have the
-    // authenticated header yet fail the commitment check. Every copy must be
-    // checked before deciding that no peer served the real block.
-    let copies = fetch_successor_copies(peers, successor_hash, SUCCESSOR_COPIES).await;
+    // authenticated header yet fail the commitment check. Every fetched body
+    // must be checked before deciding that no peer served the real block.
+    let copies = fetch_successor_copies(
+        peers,
+        hash_h,
+        successor_hash,
+        successor_height,
+        SUCCESSOR_COPIES,
+    )
+    .await;
     let copy_count = copies.len();
     let mut matching_copy = false;
     for (peer, block) in copies {
-        if let Err(reason) = check_successor_block(hash_h, successor_hash, successor_height, &block)
-        {
-            peers.blame(peer, &reason);
-            continue;
-        }
+        let block = match block {
+            Ok(block) => block,
+            Err(reason) => {
+                peers.blame(peer, &reason);
+                continue;
+            }
+        };
 
         if check_successor_commitment(history_root, &block) {
             matching_copy = true;
