@@ -7,6 +7,9 @@
 #![allow(unknown_lints)]
 #![allow(clippy::manual_is_multiple_of)]
 
+#[macro_use]
+extern crate tracing;
+
 pub mod config;
 pub mod constants;
 #[allow(missing_docs)]
@@ -27,8 +30,9 @@ pub use request::{
 };
 pub use response::{HistoryCapabilities, KnownBlock};
 pub use service::finalized_state::{
-    FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
-    MAX_ON_DISK_HEIGHT,
+    restorable_db_versions, DiskDb, DiskWriteBatch, FromDisk, IntoDisk, OutputLocation, RawBytes,
+    ReadDisk, TransactionIndex, TransactionLocation, TypedColumnFamily, WriteDisk, WriteTypedBatch,
+    ZebraDb, MAX_ON_DISK_HEIGHT,
 };
 pub use state_snapshot::SnapshotBase;
 

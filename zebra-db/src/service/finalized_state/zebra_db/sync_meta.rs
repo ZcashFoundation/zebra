@@ -21,14 +21,11 @@ use std::ops::RangeInclusive;
 
 use zebra_chain::block::Height;
 
-use zebra_db::FinalizedBlock;
+use crate::FinalizedBlock;
 
 use crate::service::finalized_state::{
     disk_db::DiskWriteBatch, disk_format::chain::SyncMetadata, TypedColumnFamily, ZebraDb,
 };
-
-#[cfg(test)]
-mod tests;
 
 /// The column family name: `Height` → [`SyncMetadata`].
 pub const SYNC_META_BY_HEIGHT: &str = "sync_meta_by_height";
@@ -50,7 +47,7 @@ pub const MAX_SYNC_METADATA_TAIL_GAP: u32 = 32;
 
 impl ZebraDb {
     /// Returns a typed handle to the `sync_meta_by_height` column family.
-    pub(crate) fn sync_meta_cf(&self) -> SyncMetaCf<'_> {
+    pub fn sync_meta_cf(&self) -> SyncMetaCf<'_> {
         SyncMetaCf::new(&self.db, SYNC_META_BY_HEIGHT)
             .expect("column family was created when database was created")
     }

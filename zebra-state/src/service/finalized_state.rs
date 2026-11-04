@@ -20,21 +20,8 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NonNegative},
-    block,
-    parallel::tree::NoteCommitmentTrees,
-    parameters::{
-        subsidy::{block_subsidy_with_parent_pools, SubsidyError},
-        Network,
-    },
+    block, parallel::tree::NoteCommitmentTrees, parameters::Network,
     primitives::zcash_history::BlockCommitmentTreeRoots,
-    value_balance::ValueBalance,
-};
-use zebra_db::{
-    chain::BLOCK_INFO,
-    spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
-    sync_meta::SYNC_META_BY_HEIGHT,
-    transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
 use crate::{
@@ -75,13 +62,16 @@ pub use zebra_db::{
 
 // The state snapshot importer writes and checks a database below this module's API.
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) use disk_format::chain::RawHistoryTree;
+#[allow(unused_imports)]
 pub(crate) use disk_format::{
     block::{HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES},
     chain::{check_history_tree_peaks, HistoryTreeParts},
     transparent::OUTPUT_LOCATION_DISK_BYTES,
     upgrade::{CancelFormatChange, DbFormatChange, FormatCheckError},
 };
+#[allow(unused_imports)]
 pub(crate) use zebra_db::chain::SNAPSHOT_BASE;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -90,66 +80,19 @@ pub use disk_format::KV;
 pub use disk_format::upgrade::{restorable_db_source_versions, restorable_db_versions};
 
 // The state snapshot format decodes and re-encodes these values.
+#[allow(unused_imports)]
 pub(crate) use disk_format::{chain::LegacyHistoryTreeParts, transparent::AddressBalanceLocation};
 
 // The state snapshot exporter refuses databases that need a migration.
+#[allow(unused_imports)]
 pub(crate) use disk_format::upgrade::can_read_without_migration;
 
 /// Minimum Sapling, Orchard and Ironwood note commitments in a checkpoint block for its note
 /// commitment tree update to run alongside its history commitment check.
 const OVERLAP_COMMITMENT_THRESHOLD: usize = 32;
 
-/// The column families supported by the running `zebra-state` database code.
-///
-/// Existing column families that aren't listed here are preserved when the database is opened.
-pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
-    // Blocks
-    "hash_by_height",
-    "height_by_hash",
-    "block_header_by_height",
-    // Transactions
-    "tx_by_loc",
-    "hash_by_tx_loc",
-    "tx_loc_by_hash",
-    // Transparent
-    BALANCE_BY_TRANSPARENT_ADDR,
-    "tx_loc_by_transparent_addr_loc",
-    "utxo_by_out_loc",
-    "utxo_loc_by_transparent_addr_loc",
-    TX_LOC_BY_SPENT_OUT_LOC,
-    // Sprout
-    "sprout_nullifiers",
-    "sprout_anchors",
-    "sprout_note_commitment_tree",
-    // Sapling
-    "sapling_nullifiers",
-    "sapling_anchors",
-    "sapling_note_commitment_tree",
-    "sapling_note_commitment_subtree",
-    // Orchard
-    "orchard_nullifiers",
-    "orchard_anchors",
-    "orchard_note_commitment_tree",
-    "orchard_note_commitment_subtree",
-    // Ironwood (NU6.3). Always registered so the database format is stable across build
-    // flags; these stay empty until NU6.3 transactions appear.
-    "ironwood_nullifiers",
-    "ironwood_anchors",
-    "ironwood_note_commitment_tree",
-    "ironwood_note_commitment_subtree",
-    // Chain
-    "history_tree",
-    "tip_chain_value_pool",
-    BLOCK_INFO,
-    // Per-block synchronization metadata served to version 2 peers
-    SYNC_META_BY_HEIGHT,
-    // Spentness hints
-    SPENTNESS_JOURNAL,
-    SPENTNESS_ARTIFACT,
-    // Snapshot sync. Always registered, and empty unless the database was imported from a
-    // state snapshot.
-    SNAPSHOT_BASE,
-];
+pub(crate) use ::zebra_db::service::finalized_state::calculate_deferred_pool_balance_change;
+pub use ::zebra_db::service::finalized_state::STATE_COLUMN_FAMILIES_IN_CODE;
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -783,22 +726,4 @@ impl FinalizedState {
         // This is okay for now because this is test-only code
         std::process::exit(0);
     }
-}
-
-/// Calculates deferred issuance and fixed lockbox disbursements using the exact parent's pools.
-pub(crate) fn calculate_deferred_pool_balance_change(
-    height: block::Height,
-    network: &Network,
-    parent_chain_value_pools: ValueBalance<NonNegative>,
-) -> Result<DeferredPoolBalanceChange, SubsidyError> {
-    zebra_chain::parameters::subsidy::funding_stream_values(
-        height,
-        network,
-        block_subsidy_with_parent_pools(height, network, parent_chain_value_pools)?,
-    )?
-    .remove(&zebra_chain::parameters::subsidy::FundingStreamReceiver::Deferred)
-    .unwrap_or_default()
-    .checked_sub(network.lockbox_disbursement_total_amount(height))
-    .map(DeferredPoolBalanceChange::new)
-    .ok_or(SubsidyError::Underflow)
 }

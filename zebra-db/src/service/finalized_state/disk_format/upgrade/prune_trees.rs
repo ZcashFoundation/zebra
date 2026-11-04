@@ -115,7 +115,7 @@ impl DiskFormatUpgrade for PruneTrees {
                     prev_height.unwrap(),
                     tree.root()
                 ));
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::prune_trees", ?result);
             }
 
             prev_height = Some(height);
@@ -137,7 +137,7 @@ impl DiskFormatUpgrade for PruneTrees {
                     prev_height.unwrap(),
                     tree.root()
                 ));
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::prune_trees", ?result);
             }
 
             prev_height = Some(height);

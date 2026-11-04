@@ -24,7 +24,7 @@
 //! `FinalizedState` is cloned and shared, so the live map and cursor must not
 //! live in it. [`SpentnessWriter`] is owned by the block write task (the
 //! thread that commits finalized blocks), built there from the hints receiver
-//! passed to [`init_with_spentness`](crate::init_with_spentness). No locks.
+//! passed to `zebra_state::init_with_spentness`. No locks.
 //!
 //! # Recovery
 //!
@@ -43,7 +43,7 @@ use tokio::sync::watch;
 
 use zebra_chain::{block, parameters::spentness_hints::VerifiedArtifact, transparent};
 
-use zebra_db::FinalizedBlock;
+use crate::FinalizedBlock;
 
 use crate::service::finalized_state::{
     disk_db::DiskWriteBatch, disk_format::transparent::OutputLocation, ZebraDb,
@@ -51,13 +51,11 @@ use crate::service::finalized_state::{
 
 mod apply;
 mod live;
-mod record;
-
-#[cfg(test)]
-mod tests;
+pub mod record;
 
 use live::LiveOutputs;
-use record::{read_progress, Phase};
+pub use record::read_progress;
+use record::Phase;
 
 /// The omitted-output journal: `OutputLocation` → `transparent::Output` (the
 /// `utxo_by_out_loc` value format), for every omitted output that its own
@@ -87,7 +85,7 @@ const RESUME_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// height is at most the max checkpoint height; after the first non-genesis
 /// commit without hints, later values are ignored. After a restart with an
 /// incomplete hinted sync, the writer waits for the same artifact; see
-/// [`ReadStateService::has_incomplete_spentness_hints`](crate::ReadStateService::has_incomplete_spentness_hints).
+/// `zebra_state::ReadStateService::has_incomplete_spentness_hints`.
 pub type SpentnessHintsReceiver = watch::Receiver<Option<Arc<VerifiedArtifact>>>;
 
 /// The writer-owned hint state: the artifact and the live omitted-output map.
@@ -174,8 +172,8 @@ impl SpentnessWriter {
     }
 
     /// Sets how long a resumed writer waits for its artifact.
-    #[cfg(test)]
-    pub(crate) fn with_resume_timeout(mut self, timeout: Duration) -> Self {
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_resume_timeout(mut self, timeout: Duration) -> Self {
         self.resume_timeout = timeout;
         self
     }
@@ -190,20 +188,20 @@ impl SpentnessWriter {
     pub fn applies_to(&self, height: block::Height) -> bool {
         match &self.state {
             WriterState::Waiting => {
-                height <= block::Height(1)
-                    && self.hints.borrow().as_ref().is_some_and(|artifact| {
-                        let terminal_height = artifact.header().terminal_height;
-                        if terminal_height > self.max_checkpoint_height {
-                            tracing::warn!(
-                                ?terminal_height,
-                                max_checkpoint_height = ?self.max_checkpoint_height,
-                                "ignoring spentness hints above the max checkpoint height: \
-                                 syncing without hints",
-                            );
-                            return false;
-                        }
-                        height <= terminal_height
-                    })
+                height <= block::Height(1) && self.hints.borrow().as_ref().is_some_and(|artifact| {
+                    let terminal_height = artifact.header().terminal_height;
+                    if terminal_height > self.max_checkpoint_height {
+                        tracing::warn!(
+                            target: "zebra_state::service::finalized_state::zebra_db::spentness",
+                            ?terminal_height,
+                            max_checkpoint_height = ?self.max_checkpoint_height,
+                            "ignoring spentness hints above the max checkpoint height: \
+                             syncing without hints",
+                        );
+                        return false;
+                    }
+                    height <= terminal_height
+                })
             }
             WriterState::Resuming { .. } | WriterState::Broken(_) => true,
             WriterState::Applying(artifact) => height <= artifact.header().terminal_height,
@@ -262,6 +260,7 @@ impl SpentnessWriter {
         }
 
         tracing::info!(
+            target: "zebra_state::service::finalized_state::zebra_db::spentness",
             ?terminal_height,
             output_count = artifact.header().output_count,
             "applying spentness hints in the finalized writer",
@@ -290,6 +289,7 @@ impl SpentnessWriter {
             }
             if !logged {
                 tracing::info!(
+                    target: "zebra_state::service::finalized_state::zebra_db::spentness",
                     timeout = ?self.resume_timeout,
                     "waiting for the spentness hint artifact to resume an incomplete hinted sync",
                 );
@@ -302,7 +302,7 @@ impl SpentnessWriter {
 
 /// Returns `true` if `db` has an incomplete hinted construction, or a
 /// construction record that cannot be read: the node must then deliver the
-/// artifact to [`init_with_spentness`](crate::init_with_spentness) again.
+/// artifact to `zebra_state::init_with_spentness` again.
 pub fn has_incomplete_spentness_hints(db: &ZebraDb) -> bool {
     match read_progress(db) {
         Ok(None) => false,

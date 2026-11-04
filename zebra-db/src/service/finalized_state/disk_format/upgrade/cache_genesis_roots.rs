@@ -18,7 +18,10 @@ use super::CancelFormatChange;
 ///
 /// If the state is empty.
 #[allow(clippy::unwrap_in_result)]
-#[instrument(skip(upgrade_db, cancel_receiver))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::cache_genesis_roots",
+    skip(upgrade_db, cancel_receiver)
+)]
 pub fn run(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
@@ -111,7 +114,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
             "missing cached genesis root: sprout: {sprout_result:?}, {sprout_tip_result:?} \
              sapling: {sapling_result:?}, orchard: {orchard_result:?}"
         ));
-        warn!(?err);
+        warn!(target: "zebra_state::service::finalized_state::disk_format::upgrade::cache_genesis_roots", ?err);
         return err;
     }
 
@@ -142,7 +145,7 @@ pub fn detailed_check(
                 "found un-cached sprout tree root after running genesis tree root fix \
                  {root:?}"
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::cache_genesis_roots", ?result);
         }
     }
 
@@ -157,7 +160,7 @@ pub fn detailed_check(
                 "found un-cached sapling tree root after running genesis tree root fix \
                  {height:?}"
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::cache_genesis_roots", ?result);
         }
     }
 
@@ -172,7 +175,7 @@ pub fn detailed_check(
                 "found un-cached orchard tree root after running genesis tree root fix \
                  {height:?}"
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::cache_genesis_roots", ?result);
         }
     }
 

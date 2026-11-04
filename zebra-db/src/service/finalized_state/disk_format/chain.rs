@@ -538,3 +538,6 @@ impl FromDisk for SyncMetadata {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

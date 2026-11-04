@@ -23,7 +23,7 @@ use zebra_chain::{
     transparent::{Address, Input, OutPoint, Output, Script},
 };
 
-use super::{
+use crate::service::finalized_state::zebra_db::spentness::{
     read_progress,
     record::{Phase, Progress},
     SpentnessError, SpentnessHintsReceiver, SpentnessWriter, SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL,
@@ -243,10 +243,10 @@ fn artifact(
 }
 
 fn entries(state: &FinalizedState, name: &str) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let cf = state.db.db.cf_handle(name).unwrap();
+    let cf = state.db.cf_handle(name).unwrap();
     state
         .db
-        .db
+        .db()
         .zs_forward_range_iter::<_, RawBytes, RawBytes, _>(&cf, ..)
         .map(|(key, value)| (key.raw_bytes().clone(), value.raw_bytes().clone()))
         .collect()
@@ -263,7 +263,7 @@ fn assert_matches_ordinary(state: &FinalizedState, ordinary: &FinalizedState) {
 }
 
 fn has_incomplete_hints(state: &FinalizedState) -> bool {
-    super::has_incomplete_spentness_hints(&state.db)
+    crate::service::finalized_state::zebra_db::spentness::has_incomplete_spentness_hints(&state.db)
 }
 
 fn progress(state: &FinalizedState) -> Option<Progress> {

@@ -11,11 +11,9 @@ use zebra_chain::{
     subtree::{NoteCommitmentSubtree, TRACKED_SUBTREE_HEIGHT},
 };
 
-use zebra_db::FinalizedBlock;
-
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-    request::Treestate,
+    request::{FinalizedBlock, Treestate},
     service::finalized_state::{DiskWriteBatch, WriteDisk, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
     CheckpointVerifiedBlock, Config, MIN_PRUNING_RETENTION,
 };

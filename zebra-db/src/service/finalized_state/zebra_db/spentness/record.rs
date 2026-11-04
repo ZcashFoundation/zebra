@@ -42,7 +42,7 @@ const RECORD_LEN: usize = 30;
 
 /// The construction phase.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum Phase {
+pub enum Phase {
     /// Blocks through `height` are committed with hints, and `H` is not reached.
     Applying,
     /// The block at `H` is committed, and every omitted output was spent.
@@ -51,12 +51,17 @@ pub(super) enum Phase {
 
 /// The durable construction progress for one artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct Progress {
-    pub(super) phase: Phase,
-    pub(super) height: Height,
-    pub(super) next_ordinal: u64,
-    pub(super) omitted: u64,
-    pub(super) resolved: u64,
+pub struct Progress {
+    /// The construction phase.
+    pub phase: Phase,
+    /// The height of the last block committed with hints.
+    pub height: Height,
+    /// The ordinal of the next transparent output.
+    pub next_ordinal: u64,
+    /// The number of outputs omitted so far.
+    pub omitted: u64,
+    /// The number of omitted outputs resolved by spends so far.
+    pub resolved: u64,
 }
 
 impl Progress {
@@ -112,7 +117,7 @@ impl Progress {
 /// Reads the construction record and the artifact hash it is keyed by, or
 /// `None` for a database that was never hinted.
 #[allow(clippy::unwrap_in_result)]
-pub(super) fn read_progress(db: &ZebraDb) -> Result<Option<([u8; 32], Progress)>, SpentnessError> {
+pub fn read_progress(db: &ZebraDb) -> Result<Option<([u8; 32], Progress)>, SpentnessError> {
     let cf = db
         .db
         .cf_handle(SPENTNESS_ARTIFACT)
@@ -131,7 +136,7 @@ pub(super) fn read_progress(db: &ZebraDb) -> Result<Option<([u8; 32], Progress)>
 
 impl DiskWriteBatch {
     /// Stores `progress` for the artifact `commitment` with the other writes in this batch.
-    pub(super) fn prepare_spentness_progress(
+    pub fn prepare_spentness_progress(
         &mut self,
         db: &ZebraDb,
         commitment: [u8; 32],

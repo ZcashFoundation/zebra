@@ -27,7 +27,7 @@ use zebra_chain::{
     transparent::{self, Input},
 };
 
-use zebra_db::FinalizedBlock;
+use crate::FinalizedBlock;
 
 use crate::service::finalized_state::{
     disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
@@ -63,9 +63,7 @@ impl ZebraDb {
     // Column family convenience methods
 
     /// Returns a typed handle to the transaction location by spent output location column family.
-    pub(crate) fn tx_loc_by_spent_output_loc_cf(
-        &self,
-    ) -> TransactionLocationBySpentOutputLocationCf<'_> {
+    pub fn tx_loc_by_spent_output_loc_cf(&self) -> TransactionLocationBySpentOutputLocationCf<'_> {
         TransactionLocationBySpentOutputLocationCf::new(&self.db, TX_LOC_BY_SPENT_OUT_LOC)
             .expect("column family was created when database was created")
     }

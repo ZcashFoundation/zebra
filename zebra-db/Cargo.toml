@@ -35,18 +35,27 @@ elasticsearch = ["dep:elasticsearch"]
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
+crossbeam-channel = { workspace = true }
 derive-new = { workspace = true }
 dirs = { workspace = true }
+hex = { workspace = true }
+hex-literal = { workspace = true }
 humantime-serde = { workspace = true }
+human_bytes = { workspace = true }
+itertools = { workspace = true }
 lazy_static = { workspace = true }
+metrics = { workspace = true }
+rayon = { workspace = true }
 regex = { workspace = true }
+rlimit = { workspace = true }
 rocksdb = { workspace = true, features = ["lz4"] }
 semver = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 serde-big-array = { workspace = true }
+sha2 = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
 tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
@@ -59,6 +68,12 @@ zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
 zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+proptest-derive = { workspace = true }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/" }
 
 [lints]
 workspace = true

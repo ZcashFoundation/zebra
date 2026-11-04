@@ -163,7 +163,7 @@ impl DiskFormatUpgrade for AddSubtrees {
                 "missing or invalid subtree(s): \
              quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
             ));
-            warn!(?err);
+            warn!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?err);
             return Ok(err);
         }
 
@@ -175,7 +175,10 @@ impl DiskFormatUpgrade for AddSubtrees {
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
-#[instrument(skip(upgrade_db, cancel_receiver))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees",
+    skip(upgrade_db, cancel_receiver)
+)]
 pub fn reset(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
@@ -236,7 +239,7 @@ pub fn subtree_format_calculation_pre_checks_typed(db: &ZebraDb) -> Result<(), F
         let err = Err(FormatCheckError::Invalid(format!(
             "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
         )));
-        warn!(?err);
+        warn!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?err);
         return err;
     }
 
@@ -344,7 +347,7 @@ fn quick_check_sapling_subtrees(
 
     let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
-        error!(?result);
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
         return result;
     };
 
@@ -352,7 +355,7 @@ fn quick_check_sapling_subtrees(
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
-        error!(?result, ?db_subtree, ?expected_subtree);
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?db_subtree, ?expected_subtree);
         return result;
     }
 
@@ -428,7 +431,7 @@ fn quick_check_orchard_subtrees(
 
     let Some((prev_end_height, prev_tree, end_height, tree)) = first_complete_subtree else {
         let result = Err("iterator did not find complete subtree, but the tree has it");
-        error!(?result);
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
         return result;
     };
 
@@ -436,7 +439,7 @@ fn quick_check_orchard_subtrees(
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
-        error!(?result, ?db_subtree, ?expected_subtree);
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?db_subtree, ?expected_subtree);
         return result;
     }
 
@@ -471,14 +474,14 @@ fn check_sapling_subtrees(
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             result = Err("missing subtree");
-            error!(?result, index);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, index);
             continue;
         };
 
         // Check that there was a sapling note at the subtree's end height.
         let Some(tree) = db.sapling_tree_by_height(&subtree.end_height) else {
             result = Err("missing note commitment tree at subtree completion height");
-            error!(?result, ?subtree.end_height);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
             continue;
         };
 
@@ -486,25 +489,25 @@ fn check_sapling_subtrees(
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.index != index {
                 result = Err("completed subtree indexes should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
 
             if subtree.root != node {
                 result = Err("completed subtree roots should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Ok(prev_height) = subtree.end_height.previous() else {
                 result = Err("Note commitment subtrees should not end at the minimal height");
-                error!(?result, ?subtree.end_height);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
                 continue;
             };
 
             let Some(prev_tree) = db.sapling_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
-                error!(?result, ?subtree.end_height);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
                 continue;
             };
 
@@ -513,7 +516,7 @@ fn check_sapling_subtrees(
             if subtree_index <= prev_subtree_index {
                 result =
                     Err("note commitment tree at end height should have incremented subtree index");
-                error!(?result, ?subtree_index, ?prev_subtree_index,);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree_index, ?prev_subtree_index,);
             }
         }
     }
@@ -542,7 +545,7 @@ fn check_sapling_subtrees(
         // Check that there's an entry for every completed sapling subtree root in all sapling trees
         let Some(subtree) = db.sapling_subtree_by_index(index) else {
             result = Err("missing subtree");
-            error!(?result, index);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, index);
             continue;
         };
 
@@ -550,20 +553,20 @@ fn check_sapling_subtrees(
         if subtree.end_height != height {
             let is_complete = tree.is_complete_subtree();
             result = Err("bad sapling subtree end height");
-            error!(?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
         }
 
         // Check the root if the sapling note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.root != node {
                 result = Err("completed subtree roots should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
         }
     }
 
     if result.is_err() {
-        error!(
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees",
             ?result,
             ?subtree_count,
             first_incomplete_subtree_index,
@@ -602,14 +605,14 @@ fn check_orchard_subtrees(
         // Check that there's a continuous range of subtrees from index [0, first_incomplete_subtree_index)
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             result = Err("missing subtree");
-            error!(?result, index);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, index);
             continue;
         };
 
         // Check that there was a orchard note at the subtree's end height.
         let Some(tree) = db.orchard_tree_by_height(&subtree.end_height) else {
             result = Err("missing note commitment tree at subtree completion height");
-            error!(?result, ?subtree.end_height);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
             continue;
         };
 
@@ -617,25 +620,25 @@ fn check_orchard_subtrees(
         if let Some((index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.index != index {
                 result = Err("completed subtree indexes should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
 
             if subtree.root != node {
                 result = Err("completed subtree roots should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
             let Ok(prev_height) = subtree.end_height.previous() else {
                 result = Err("Note commitment subtrees should not end at the minimal height");
-                error!(?result, ?subtree.end_height);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
                 continue;
             };
 
             let Some(prev_tree) = db.orchard_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
-                error!(?result, ?subtree.end_height);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height);
                 continue;
             };
 
@@ -644,7 +647,7 @@ fn check_orchard_subtrees(
             if subtree_index <= prev_subtree_index {
                 result =
                     Err("note commitment tree at end height should have incremented subtree index");
-                error!(?result, ?subtree_index, ?prev_subtree_index,);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree_index, ?prev_subtree_index,);
             }
         }
     }
@@ -673,7 +676,7 @@ fn check_orchard_subtrees(
         // Check that there's an entry for every completed orchard subtree root in all orchard trees
         let Some(subtree) = db.orchard_subtree_by_index(index) else {
             result = Err("missing subtree");
-            error!(?result, index);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, index);
             continue;
         };
 
@@ -681,20 +684,20 @@ fn check_orchard_subtrees(
         if subtree.end_height != height {
             let is_complete = tree.is_complete_subtree();
             result = Err("bad orchard subtree end height");
-            error!(?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result, ?subtree.end_height, ?height, ?index, ?is_complete, );
         }
 
         // Check the root if the orchard note commitment tree at this height is a complete subtree.
         if let Some((_index, node)) = tree.completed_subtree_index_and_root() {
             if subtree.root != node {
                 result = Err("completed subtree roots should match");
-                error!(?result);
+                error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", ?result);
             }
         }
     }
 
     if result.is_err() {
-        error!(
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees",
             ?result,
             ?subtree_count,
             first_incomplete_subtree_index,
@@ -717,7 +720,10 @@ fn check_orchard_subtrees(
 ///
 /// If a subtree is not completed by a note commitment in the block at `end_height`.
 #[must_use = "subtree should be written to the database after it is calculated"]
-#[instrument(skip(read_db, prev_tree, tree))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees",
+    skip(read_db, prev_tree, tree)
+)]
 fn calculate_sapling_subtree(
     read_db: &ZebraDb,
     prev_end_height: Height,
@@ -842,7 +848,10 @@ fn calculate_sapling_subtree(
 ///
 /// If a subtree is not completed by a note commitment in the block at `end_height`.
 #[must_use = "subtree should be written to the database after it is calculated"]
-#[instrument(skip(read_db, prev_tree, tree))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees",
+    skip(read_db, prev_tree, tree)
+)]
 fn calculate_orchard_subtree(
     read_db: &ZebraDb,
     prev_end_height: Height,
@@ -969,10 +978,10 @@ fn write_sapling_subtree(
         .expect("writing sapling note commitment subtrees should always succeed.");
 
     if subtree.index.0 % 100 == 0 {
-        info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
+    debug!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
 }
 
 /// Writes an Orchard note commitment subtree to `upgrade_db`.
@@ -989,8 +998,8 @@ fn write_orchard_subtree(
         .expect("writing orchard note commitment subtrees should always succeed.");
 
     if subtree.index.0 % 100 == 0 {
-        info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
-    debug!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
+    debug!(target: "zebra_state::service::finalized_state::disk_format::upgrade::add_subtrees", end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
 }
