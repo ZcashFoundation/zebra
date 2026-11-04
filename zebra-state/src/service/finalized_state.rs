@@ -87,7 +87,7 @@ pub(crate) use zebra_db::chain::SNAPSHOT_BASE;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
 
-pub use disk_format::upgrade::{restorable_db_source_version, restorable_db_versions};
+pub use disk_format::upgrade::{restorable_db_source_versions, restorable_db_versions};
 
 // The state snapshot format decodes and re-encodes these values.
 pub(crate) use disk_format::{chain::LegacyHistoryTreeParts, transparent::AddressBalanceLocation};

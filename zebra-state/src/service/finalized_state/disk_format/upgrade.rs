@@ -168,20 +168,23 @@ pub fn restorable_db_versions() -> Vec<u64> {
         .collect()
 }
 
-/// Returns the source directory major for a reusable database upgrade.
+/// Returns source directory majors for a reusable database upgrade, newest first.
 ///
-/// This is the nearest earlier registered format major, not necessarily `running_major - 1`.
-/// Consequently v32 reuses v30 until the independent v31 record migration is registered; after
-/// that integration, v32 reuses v31 and the migrations remain ordered.
-pub fn restorable_db_source_version(running_major: u64) -> Option<u64> {
+/// Sources need not include `running_major - 1`. Consequently v32 prefers v30 until the
+/// independent v31 record migration is registered, then prefers v31. Older registered sources
+/// remain fallbacks, and every intervening migration still runs in version order.
+pub fn restorable_db_source_versions(running_major: u64) -> Vec<u64> {
     if !restorable_db_versions().contains(&running_major) {
-        return None;
+        return Vec::new();
     }
 
     format_upgrades(None)
+        .filter(|upgrade| {
+            upgrade.version().major < running_major && upgrade.is_reusable_major_upgrade()
+        })
+        .rev()
         .map(|upgrade| upgrade.version().major)
-        .filter(|major| *major < running_major)
-        .max()
+        .collect()
 }
 
 /// Whether the existing records can be read without applying any intervening migrations.
@@ -1055,11 +1058,12 @@ fn format_upgrades_are_in_version_order() {
 
 #[test]
 fn reusable_source_follows_the_registered_upgrade_chain() {
-    assert_eq!(restorable_db_source_version(30), Some(29));
-    assert_eq!(restorable_db_source_version(32), Some(30));
-    assert_eq!(
-        restorable_db_source_version(31),
-        None,
+    assert_eq!(restorable_db_source_versions(30).first(), Some(&29));
+    let sources = restorable_db_source_versions(32);
+    assert_eq!(sources.first(), Some(&30));
+    assert!(sources.contains(&29), "older caches remain reusable");
+    assert!(
+        restorable_db_source_versions(31).is_empty(),
         "v31 is registered by the independent variable-height migration"
     );
 }

@@ -297,6 +297,42 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
         .all(|cf| cf != SNAPSHOT_BASE));
 }
 
+/// The reusable source is the newest directory that holds a database: an empty newer directory
+/// does not hide an older database.
+#[test]
+fn reusable_source_skips_a_directory_without_a_database() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{service::finalized_state::STATE_COLUMN_FAMILIES_IN_CODE, Config};
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let db = DiskDb::new(
+        &config,
+        "state",
+        &Version::new(29, 0, 0),
+        &network,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    drop(db);
+    std::fs::create_dir_all(config.db_path("state", 30, &network)).unwrap();
+
+    assert_eq!(
+        DiskDb::newest_reusable_source(&config, "state", &network, 32),
+        Some(29)
+    );
+}
+
 /// Check that zs_iter_opts returns an upper bound one greater than provided inclusive end bounds.
 #[test]
 fn zs_iter_opts_increments_key_by_one() {

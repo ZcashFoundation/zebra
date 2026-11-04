@@ -43,9 +43,7 @@ use crate::{
     BoxError, Config, StateInitError,
 };
 
-use super::disk_format::upgrade::{
-    can_read_without_migration, restorable_db_source_version, restorable_db_versions,
-};
+use super::disk_format::upgrade::{can_read_without_migration, restorable_db_versions};
 
 /// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
 /// than parallel serialization saves.
@@ -165,8 +163,13 @@ impl ZebraDb {
         let read_previous_version = read_only && reused_version.is_some();
         if read_only {
             if let Some(disk_version) = &reused_version {
-                let directory_major = restorable_db_source_version(format_version_in_code.major)
-                    .expect("a reused database has a registered source format");
+                let directory_major = DiskDb::newest_reusable_source(
+                    config,
+                    db_kind.as_ref(),
+                    network,
+                    format_version_in_code.major,
+                )
+                .expect("a reused database was found by the same source lookup");
                 // Even compatible records cannot finish a directory transition read-only.
                 // Current-directory secondaries can follow a writable primary during an upgrade;
                 // only older-major reuse candidates require a completed transition here.

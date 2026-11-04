@@ -37,7 +37,7 @@ use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
         block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES,
-        upgrade::restorable_db_source_version, FromDisk, IntoDisk, TransactionIndex,
+        upgrade::restorable_db_source_versions, FromDisk, IntoDisk, TransactionIndex,
         TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
     write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
@@ -1417,12 +1417,30 @@ impl DiskDb {
         );
     }
 
+    /// Returns the newest source major version that a database at `running_major` can reuse,
+    /// whose directory holds a database: an existing directory without column families, such as
+    /// an empty one, is skipped, and older sources are tried.
+    pub(crate) fn newest_reusable_source(
+        config: &Config,
+        db_kind: &str,
+        network: &Network,
+        running_major: u64,
+    ) -> Option<u64> {
+        let opts = DiskDb::options();
+        restorable_db_source_versions(running_major)
+            .into_iter()
+            .find(|major| {
+                DB::list_cf(&opts, config.db_path(db_kind, *major, network))
+                    .is_ok_and(|cf| !cf.is_empty())
+            })
+    }
+
     // Private methods
 
     /// Tries to reuse an existing db after a major upgrade.
     ///
     /// If the current db version belongs to `restorable_db_versions`, the function renames the
-    /// nearest earlier registered major version's directory to the path used by the current version.
+    /// newest existing earlier registered major version's directory to the current version's path.
     /// It rewrites the version file with the old major version so the required upgrades can run.
     ///
     /// In `read_only` mode, returns the candidate's stored version without modifying either path.
@@ -1444,7 +1462,8 @@ impl DiskDb {
         {
             let db_kind = db_kind.as_ref();
 
-            let old_major_db_ver = restorable_db_source_version(major_db_ver)?;
+            let old_major_db_ver =
+                Self::newest_reusable_source(config, db_kind, network, major_db_ver)?;
             let old_path = config.db_path(db_kind, old_major_db_ver, network);
             // Exit early if the path doesn't exist or there's an error checking it.
             if !fs::exists(&old_path).unwrap_or(false) {
