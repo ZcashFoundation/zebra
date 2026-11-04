@@ -414,7 +414,6 @@ impl StateService {
 
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
-        let early_relay = early_relay::EarlyRelayState::new(Some(latest_chain_tip.clone()));
 
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
@@ -431,15 +430,13 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
-            early_relay.clone(),
         );
 
-        let mut read_service = ReadStateService::new(
+        let read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
         );
-        read_service.early_relay = early_relay;
 
         let full_verifier_utxo_lookahead = max_checkpoint_height
             - HeightDiff::try_from(checkpoint_verify_concurrency_limit)
@@ -1094,10 +1091,10 @@ impl ReadStateService {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
+            early_relay: early_relay::EarlyRelayState::new(non_finalized_state_receiver.clone()),
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
-            early_relay: early_relay::EarlyRelayState::new(None),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1720,10 +1717,7 @@ impl Service<ReadRequest> for ReadStateService {
                     true,
                 )?
                 .filter(|_| {
-                    state.best_tip().is_some_and(|(tip_height, tip_hash)| {
-                        tip_hash == header.previous_block_hash
-                            && tip_height.next().ok() == Some(height)
-                    })
+                    state.early_relay.best_tip_hash() == Some(header.previous_block_hash)
                 })
                 .ok_or("compact header does not extend the committed best tip")?;
                 Ok(ReadResponse::ValidBestTipHeader)
@@ -1746,7 +1740,7 @@ impl Service<ReadRequest> for ReadStateService {
                     block,
                     true,
                 )?
-                .filter(|_| state.best_tip().is_some_and(|(_, hash)| hash == parent))
+                .filter(|_| state.early_relay.best_tip_hash() == Some(parent))
                 .ok_or("compact body does not extend the committed best tip")?;
                 Ok(ReadResponse::ValidBestTipBlockCommitments)
             }
