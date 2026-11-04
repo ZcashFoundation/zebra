@@ -552,6 +552,14 @@ ZMQ notifications follow the same rules, and the publisher also drops messages
 when its bounded queue overflows. Subscribers must reconcile through RPC after a
 gap or a reconnect.
 
+## `[resources]`
+
+Rust API: [`zebrad::components::resources::Config`](https://docs.rs/zebrad/latest/zebrad/components/resources/struct.Config.html).
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `memory_budget` | Optional string | Absent | How much memory Zebra may use: `"auto"`, or a whole number with a unit, like `"2 GiB"` or `"1536 MiB"`. The units are `B`, `KiB`, `MiB` and `GiB` (binary) and `MB` and `GB` (decimal), in any case; a number without a unit is rejected. Absent applies no budget, and every component keeps its usual limits. |
+
 ## `[zcashd_compat]`
 
 Rust API: [`zebrad::components::zcashd_compat::Config`](https://docs.rs/zebrad/latest/zebrad/components/zcashd_compat/struct.Config.html).
