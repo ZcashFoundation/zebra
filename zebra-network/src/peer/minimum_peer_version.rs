@@ -62,6 +62,11 @@ where
         self.current_minimum
     }
 
+    /// Returns the network whose minimum peer version is tracked.
+    pub(crate) fn network(&self) -> &Network {
+        &self.network
+    }
+
     /// Returns a reference to the underlying chain tip.
     pub fn chain_tip(&self) -> &C {
         &self.chain_tip
