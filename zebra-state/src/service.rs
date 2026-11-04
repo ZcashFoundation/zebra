@@ -631,6 +631,13 @@ impl StateService {
         // Apply pending resets first, so they can't fail the block queued below.
         self.drain_finalized_resets();
 
+        let accepts_finalized = self.block_write_sender.accepts_finalized();
+        let accepts_handoff_retry = self
+            .block_write_sender
+            .accepts_finalized_retry(checkpoint_verified.hash)
+            && self.finalized_reset_next_height == Some(queued_height)
+            && queued_prev_hash == self.finalized_block_write_last_sent_hash;
+
         if let Some(next_height) = self.finalized_reset_next_height {
             if queued_height > next_height {
                 let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -639,7 +646,7 @@ impl StateService {
                     CommitBlockError::WriteTaskExited,
                 );
                 return rsp_rx;
-            } else if queued_height == next_height {
+            } else if queued_height == next_height && (accepts_finalized || accepts_handoff_retry) {
                 self.finalized_reset_next_height = None;
             }
         }
@@ -647,7 +654,7 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let mut queued = (checkpoint_verified, rsp_tx, notifications);
 
-        if self.block_write_sender.accepts_finalized() {
+        if accepts_finalized || accepts_handoff_retry {
             if let Some(previous) = self
                 .finalized_state_queued_blocks
                 .get_mut(&queued_prev_hash)
@@ -736,13 +743,16 @@ impl StateService {
             .remove(&self.finalized_block_write_last_sent_hash)
         {
             let last_sent_finalized_block_height = queued_block.0.height;
+            let is_handoff_retry = self
+                .block_write_sender
+                .accepts_finalized_retry(queued_block.0.hash);
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
 
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
             // Blocks waiting in the queue are not recorded, so they can be downloaded again.
-            if self.block_write_sender.accepts_finalized()
+            if (self.block_write_sender.accepts_finalized() || is_handoff_retry)
                 && self.is_close_to_final_checkpoint(last_sent_finalized_block_height)
             {
                 self.non_finalized_block_write_sent_hashes
@@ -765,6 +775,9 @@ impl StateService {
 
                     self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 } else {
+                    if is_handoff_retry {
+                        self.block_write_sender.finalized_retry_sent();
+                    }
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
                 };
@@ -794,6 +807,7 @@ impl StateService {
                     // Queued blocks are above the tip, and their pending responses would keep
                     // the syncer from downloading them again.
                     self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
+                    self.block_write_sender.allow_finalized_retry();
                 }
                 Err(TryRecvError::Empty) => return true,
                 Err(TryRecvError::Disconnected) => {
@@ -984,6 +998,8 @@ impl StateService {
             // The handoff is ordered after the last checkpoint in the writer channel, and semantic
             // children are ordered after the handoff. Waiting for the parent's disk write here can
             // deadlock when every semantic child arrives during that write.
+            self.block_write_sender
+                .start_handoff(self.finalized_block_write_last_sent_hash);
             if let Some(sender) = &self.block_write_sender.finalized {
                 let _ = sender.send(write::WriteMessage::Handoff);
             }
