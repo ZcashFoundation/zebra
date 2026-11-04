@@ -262,7 +262,7 @@ impl ZebraDb {
         let mut hashes = self
             .db
             .raw_iterator_cf_opt(&hash_by_tx_loc, Default::default());
-        hashes.seek_for_prev(last);
+        hashes.seek_for_prev(&last);
         hashes.status().expect("unexpected database failure");
         let Some(last_location) = hashes
             .key()
@@ -281,9 +281,9 @@ impl ZebraDb {
         let mut options = rocksdb::ReadOptions::default();
         options.set_iterate_upper_bound(upper_bound);
         let mut bodies = self.db.raw_iterator_cf_opt(&tx_by_loc, options);
-        bodies.seek(first);
+        bodies.seek(&first);
         let mut transactions = Vec::new();
-        while let Some(key) = bodies.key().filter(|key| *key <= last.as_ref()) {
+        while let Some(key) = bodies.key().filter(|key| *key <= last.as_slice()) {
             let location = TransactionLocation::from_bytes(key);
             if location.index.as_usize() != transactions.len() {
                 return self.missing_body_error(height).map_or(Ok(None), Err);
@@ -304,9 +304,9 @@ impl ZebraDb {
         if self.db.is_read_only() {
             // Secondary WAL replay can expose matching prefixes of both columns. Only the header
             // commits to the complete transaction list; primary write batches are atomically visible.
-            hashes.seek(first);
+            hashes.seek(&first);
             hashes.status().expect("unexpected database failure");
-            if hashes.key() != Some(first.as_ref()) {
+            if hashes.key() != Some(first.as_slice()) {
                 return Ok(None);
             }
             let mut remaining = expected_count;
@@ -315,7 +315,7 @@ impl ZebraDb {
                     return None;
                 }
                 let (key, value) = hashes.item()?;
-                if key > last.as_ref() {
+                if key > last.as_slice() {
                     return None;
                 }
                 let hash = transaction::Hash::from_bytes(value);

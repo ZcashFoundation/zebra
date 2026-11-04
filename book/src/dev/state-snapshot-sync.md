@@ -112,7 +112,7 @@ bounds before allocation, the running total, and key order on import.
 The **manifest** (at most 1 MiB) is:
 
 ```text
-magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (1)
+magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
 genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 [Regtest and custom testnets only: parameters_hash 32, the consensus parameters without checkpoints]
 component_count u16 (28), then per component in ComponentId order:
@@ -123,6 +123,8 @@ Decoding is strict: bounds before allocation, no trailing bytes, no unknown ids,
 exactly once in order, `entry_count == 0 ⇔ piece_count == 0`. The decoder takes the `Network`,
 because the parameters hash is present only on Regtest and custom testnets. `snapshot_format`
 changes only when shipped encodings change; the importer maps it onto the running database format.
+Format 1 shipped fixed three-byte heights. Format 2 ships the variable-width heights and locations
+of database format 33, and the decoder rejects format 1.
 
 The manifest and the optional version 2 handshake parameters record use the same hash. It binds
 every consensus parameter, including activation heights, funding streams, lockbox disbursements,
@@ -267,7 +269,7 @@ penalty. `SchedulerConfig` carries these values.
   height when the lookup by hash misses, because `block_info[L − 1]` is shipped but has no hash row.
   `zebrad` skips `request_genesis` when the state has a tip.
 - **Importer** (`zebra_state::state_snapshot::import`): temp root
-  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v32/<net>`; a raw RocksDB handle with
+  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v33/<net>`; a raw RocksDB handle with
   all column families and `DiskDb::options()`; one SST ingest per column family with `move_files`,
   into empty column families at the bottom level, auto-compactions off while ingesting; singletons
   written by batch; the marker, then the version file; close, then reopen as `ZebraDb` with a temp

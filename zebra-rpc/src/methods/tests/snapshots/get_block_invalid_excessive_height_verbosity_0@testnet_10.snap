@@ -5,6 +5,6 @@ expression: response
 {
   "Err": {
     "code": -8,
-    "message": "Block not found"
+    "message": "parse error: could not convert the input string to a hash or height"
   }
 }

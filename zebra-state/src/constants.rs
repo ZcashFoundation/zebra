@@ -38,7 +38,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 32;
+const DATABASE_FORMAT_VERSION: u64 = 33;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -49,12 +49,17 @@ const DATABASE_FORMAT_VERSION: u64 = 32;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 33.0.0: replaces fixed three-byte heights with a canonical length-prefixed, minimally
+///   big-endian encoding in 25 column families, including `snapshot_base`. The newest reusable
+///   source, v32 with v30 and v29 fallbacks, moves to `state/v33`, then rewrites those records from
+///   a persistent checkpoint before serving reads or committing blocks. The version file reaches
+///   v33 only after the rewrite. The rewrite is one-way: retain a source backup for rollback,
+///   because v32 and older readers cannot decode the new records. Snapshot-born databases must not
+///   be renamed back to v32 or any older directory.
 /// - 32.0.0: isolates snapshot-born databases in `state/v32`, so older 30.x readers cannot open
 ///   and downgrade them. Compatible fixed-height v30 state moves to v32 without record rewrites.
-///   The independent variable-height record migration owns v31; once registered, that migration
-///   runs before v32 and v31 becomes the preferred reusable source directory. Snapshot-born
-///   databases must not be renamed back to v30, v31, or v29, because those readers do not enforce
-///   the snapshot history floor.
+///   No upgrade uses format 31. Snapshot-born databases must not be renamed back to v30 or v29,
+///   because those readers do not enforce the snapshot history floor.
 /// - 30.1.0: added the `snapshot_base` column family, which marks a database imported from a
 ///   state snapshot with its window start, snapshot height, block hash and manifest. Existing
 ///   databases get the column family empty when they are opened, so the upgrade rewrites no

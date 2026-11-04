@@ -28,7 +28,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         CancelFormatChange, DbFormatChange, FormatCheckError, TransactionLocation, ZebraDb,
-        OUTPUT_LOCATION_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES,
+        OUTPUT_INDEX_DISK_BYTES,
     },
     state_snapshot::format::{ComponentId, Manifest},
     Config, FromDisk, IntoDisk,
@@ -575,7 +575,8 @@ fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), Snapsho
     let mut iterator = raw.iter_from(ComponentId::AddressTxs, &[]);
     while iterator.valid() {
         let (key, _) = item(&iterator);
-        let transaction = &key[OUTPUT_LOCATION_DISK_BYTES..];
+        let transaction = records::address_transaction_suffix(key)
+            .expect("address transaction records are validated before their SST is written");
         if !raw.contains(ComponentId::HashByTxLoc, transaction)? {
             return Err(fail(format!(
                 "an address transaction row names {:?}, which has no hash index row",
@@ -619,7 +620,11 @@ fn check_address_index(
                  snapshot height"
             )));
         }
-        let transaction = &key[..TRANSACTION_LOCATION_DISK_BYTES];
+        let transaction_len = key
+            .len()
+            .checked_sub(OUTPUT_INDEX_DISK_BYTES)
+            .expect("validated output locations contain an output index");
+        let transaction = &key[..transaction_len];
         while transactions.valid() && item(&transactions).0 < transaction {
             transactions.next();
         }

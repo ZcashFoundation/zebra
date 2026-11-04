@@ -55,8 +55,10 @@ use zebra_chain::{
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    database_format_version_on_disk,
     service::finalized_state::{
-        can_read_without_migration, FromDisk, IntoDisk, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
+        can_read_without_migration, height_from_bytes_prefix, restorable_db_source_versions,
+        IntoDisk, OutputLocation, TransactionLocation, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
     },
     Config,
 };
@@ -80,25 +82,8 @@ const READAHEAD_BYTES: usize = 4 << 20;
 /// read in full to find the rows of the window's transactions.
 const ADDRESS_TX_SCANS: u64 = 8;
 
-/// The length of an on-disk block height.
-const HEIGHT_LEN: usize = 3;
-
-/// The length of an on-disk transaction location: a height and an index.
-const TX_LOC_LEN: usize = HEIGHT_LEN + 2;
-
-/// The length of an on-disk output location: a transaction location and an
-/// output index. Address locations are output locations.
-const OUTPUT_LOC_LEN: usize = TX_LOC_LEN + 3;
-
-/// The length of an address transaction key: an address location and a
-/// transaction location.
-const ADDRESS_TX_LEN: usize = OUTPUT_LOC_LEN + TX_LOC_LEN;
-
-/// The length of a note commitment subtree value: an end height and a root.
-const SUBTREE_VALUE_LEN: usize = HEIGHT_LEN + 32;
-
 /// The on-disk genesis height.
-const GENESIS: [u8; HEIGHT_LEN] = [0; HEIGHT_LEN];
+const GENESIS: [u8; 1] = [0];
 
 /// Exports the finalized state at `height` from the database `config` names
 /// into `store`, and returns the commitment that names the snapshot: `height`,
@@ -147,6 +132,7 @@ pub(crate) fn export_with_window(
         return Err(SnapshotError::IndexerBuild);
     }
 
+    check_format_before_open(config, network)?;
     let db = ZebraDb::new(
         config,
         STATE_DATABASE_KIND,
@@ -232,17 +218,36 @@ fn db_format_major() -> u16 {
         .expect("database format major versions are small")
 }
 
+/// Checks the source version before a read-only open can reject a required migration.
+fn check_format_before_open(config: &Config, network: &Network) -> Result<(), SnapshotError> {
+    let running = state_database_format_version_in_code();
+    for major in std::iter::once(running.major).chain(restorable_db_source_versions(running.major))
+    {
+        let disk_version =
+            database_format_version_on_disk(config, STATE_DATABASE_KIND, major, network)
+                .map_err(|source| SnapshotError::FormatVersion { source })?;
+        if let Some(disk_version) = disk_version {
+            return check_disk_version(disk_version);
+        }
+    }
+    Ok(())
+}
+
 /// Refuses a state whose format this build cannot export canonically: one
 /// that needs a migration, one in a newer format, and one with a spending
 /// index.
 fn check_format(db: &ZebraDb) -> Result<(), SnapshotError> {
-    let running_version = state_database_format_version_in_code();
     let disk_version = db
         .format_version_on_disk()
         .map_err(|source| SnapshotError::FormatVersion { source })?
         .ok_or_else(|| SnapshotError::FormatVersion {
             source: "the state has no format version".into(),
         })?;
+    check_disk_version(disk_version)
+}
+
+fn check_disk_version(disk_version: Version) -> Result<(), SnapshotError> {
+    let running_version = state_database_format_version_in_code();
 
     // A state indexed by a build with the `indexer` feature stores spending transaction locations
     // as the nullifier values, so its rows are not the default index mode's.
@@ -339,13 +344,15 @@ fn point_options() -> ReadOptions {
 }
 
 /// Returns the on-disk bytes of `height`.
-fn height_bytes(height: Height) -> [u8; HEIGHT_LEN] {
+fn height_bytes(height: Height) -> Vec<u8> {
     height.as_bytes()
 }
 
 /// Returns the height in the first bytes of an on-disk key.
 fn key_height(key: &[u8]) -> Height {
-    Height::from_bytes(&key[..HEIGHT_LEN])
+    height_from_bytes_prefix(key)
+        .expect("validated height keys have a canonical prefix")
+        .0
 }
 
 /// Whether the rows of `component` are a set: keys with empty values.
@@ -700,7 +707,7 @@ impl Exporter<'_> {
     }
 
     /// The upper bound of the height-keyed rows of the snapshot: `H + 1`.
-    fn end_bytes(&self) -> [u8; HEIGHT_LEN] {
+    fn end_bytes(&self) -> Vec<u8> {
         height_bytes(
             self.height
                 .next()
@@ -830,17 +837,14 @@ impl Exporter<'_> {
         let mut next = Some(Height(0));
 
         let mut row = |key: &[u8], value: &[u8]| {
-            if key.len() != TX_LOC_LEN {
-                return Err(inconsistent(
-                    component,
-                    "a key is not a transaction location",
-                ));
-            }
-            let height = key_height(key);
+            let (location, _) = TransactionLocation::from_bytes_prefix(key)
+                .filter(|(_, rest)| rest.is_empty())
+                .ok_or_else(|| inconsistent(component, "a key is not a transaction location"))?;
+            let height = location.height;
             if current != Some(height) {
                 let expected =
                     next.ok_or_else(|| inconsistent(component, "a row is above the tip"))?;
-                if height != expected || key[HEIGHT_LEN..] != [0, 0] {
+                if height != expected || location.index.as_usize() != 0 {
                     return Err(inconsistent(
                         component,
                         format!("the coinbase transaction of the block at height {expected:?} is missing"),
@@ -852,26 +856,29 @@ impl Exporter<'_> {
             writer.push_row(key, value)
         };
 
-        let genesis_end = height_bytes(Height(1));
-        let tx_loc = |height: &[u8; HEIGHT_LEN]| [height.as_slice(), &[0, 0]].concat();
+        let tx_loc = |height: Height| TransactionLocation::min_for_height(height).as_bytes();
         if self.window_start <= Height(1) {
             self.scan(
                 cf,
-                Some(&tx_loc(&GENESIS)),
-                Some(&tx_loc(&self.end_bytes())),
+                Some(&tx_loc(Height(0))),
+                Some(&tx_loc(
+                    self.height.next().expect("the tip has a successor"),
+                )),
                 &mut row,
             )?;
         } else {
             self.scan(
                 cf,
-                Some(&tx_loc(&GENESIS)),
-                Some(&tx_loc(&genesis_end)),
+                Some(&tx_loc(Height(0))),
+                Some(&tx_loc(Height(1))),
                 &mut row,
             )?;
             self.scan(
                 cf,
-                Some(&tx_loc(&height_bytes(self.window_start))),
-                Some(&tx_loc(&self.end_bytes())),
+                Some(&tx_loc(self.window_start)),
+                Some(&tx_loc(
+                    self.height.next().expect("the tip has a successor"),
+                )),
                 &mut row,
             )?;
         }
@@ -888,25 +895,24 @@ impl Exporter<'_> {
 
     /// Exports the UTXO set, and returns the distinct transaction locations of
     /// its outputs below the window, in order.
-    fn utxos(&self) -> Result<(ComponentManifest, Vec<[u8; TX_LOC_LEN]>), SnapshotError> {
+    fn utxos(&self) -> Result<(ComponentManifest, Vec<Vec<u8>>), SnapshotError> {
         let component = ComponentId::Utxos;
-        let window = height_bytes(self.window_start);
         let mut writer = ComponentWriter::new(component, self.store);
-        let mut below_window: Vec<[u8; TX_LOC_LEN]> = Vec::new();
+        let mut below_window: Vec<Vec<u8>> = Vec::new();
 
         self.scan(component.column_family(), None, None, |key, value| {
-            if key.len() != OUTPUT_LOC_LEN {
-                return Err(inconsistent(component, "a key is not an output location"));
-            }
-            let tx_loc: [u8; TX_LOC_LEN] = key[..TX_LOC_LEN]
-                .try_into()
-                .expect("the key is longer than a transaction location");
+            let (location, _) = OutputLocation::from_bytes_prefix(key)
+                .filter(|(_, rest)| rest.is_empty())
+                .ok_or_else(|| inconsistent(component, "a key is not an output location"))?;
+            let (_, output_index) = TransactionLocation::from_bytes_prefix(key)
+                .expect("a validated output location contains a transaction location");
+            let tx_loc = &key[..key.len() - output_index.len()];
             // Genesis and window transactions are shipped whole.
-            if tx_loc[..HEIGHT_LEN] != GENESIS
-                && tx_loc[..HEIGHT_LEN] < window[..]
-                && below_window.last() != Some(&tx_loc)
+            if !location.height().is_min()
+                && location.height() < self.window_start
+                && below_window.last().map(Vec::as_slice) != Some(tx_loc)
             {
-                below_window.push(tx_loc);
+                below_window.push(tx_loc.to_vec());
             }
             writer.push_row(key, value)
         })?;
@@ -917,17 +923,15 @@ impl Exporter<'_> {
     /// Whether the transaction at the on-disk location `tx_loc` is shipped
     /// with its block: it is in genesis or in the window.
     fn in_shipped_block(&self, tx_loc: &[u8]) -> bool {
-        tx_loc[..HEIGHT_LEN] == GENESIS
-            || tx_loc[..HEIGHT_LEN] >= height_bytes(self.window_start)[..]
+        TransactionLocation::from_bytes_prefix(tx_loc).is_some_and(|(location, rest)| {
+            rest.is_empty() && (location.height.is_min() || location.height >= self.window_start)
+        })
     }
 
     /// Exports the transaction hashes of the shipped transactions: genesis,
     /// the window, and the transactions below the window with unspent outputs
     /// at `below_window`, found by a merge join with the index.
-    fn hash_by_tx_loc(
-        &self,
-        below_window: &[[u8; TX_LOC_LEN]],
-    ) -> Result<ComponentManifest, SnapshotError> {
+    fn hash_by_tx_loc(&self, below_window: &[Vec<u8>]) -> Result<ComponentManifest, SnapshotError> {
         let component = ComponentId::HashByTxLoc;
         let mut writer = ComponentWriter::new(component, self.store);
         let mut unspent = below_window.iter().peekable();
@@ -935,7 +939,8 @@ impl Exporter<'_> {
         let end = [self.end_bytes().as_slice(), &[0, 0]].concat();
 
         self.scan(component.column_family(), None, Some(&end), |key, value| {
-            if key.len() != TX_LOC_LEN {
+            if !TransactionLocation::from_bytes_prefix(key).is_some_and(|(_, rest)| rest.is_empty())
+            {
                 return Err(inconsistent(
                     component,
                     "a key is not a transaction location",
@@ -970,21 +975,24 @@ impl Exporter<'_> {
 
     /// Exports the locations of the shipped transactions by hash: one scan,
     /// whose rows are already in key order.
-    fn tx_loc_by_hash(
-        &self,
-        below_window: &[[u8; TX_LOC_LEN]],
-    ) -> Result<ComponentManifest, SnapshotError> {
+    fn tx_loc_by_hash(&self, below_window: &[Vec<u8>]) -> Result<ComponentManifest, SnapshotError> {
         let component = ComponentId::TxLocByHash;
         let mut writer = ComponentWriter::new(component, self.store);
 
         self.scan(component.column_family(), None, None, |key, value| {
-            let Ok(tx_loc) = <[u8; TX_LOC_LEN]>::try_from(value) else {
+            if !TransactionLocation::from_bytes_prefix(value)
+                .is_some_and(|(_, rest)| rest.is_empty())
+            {
                 return Err(inconsistent(
                     component,
                     "a value is not a transaction location",
                 ));
-            };
-            if self.in_shipped_block(&tx_loc) || below_window.binary_search(&tx_loc).is_ok() {
+            }
+            if self.in_shipped_block(value)
+                || below_window
+                    .binary_search_by(|location| location.as_slice().cmp(value))
+                    .is_ok()
+            {
                 writer.push_row(key, value)?;
             }
             Ok(())
@@ -1048,13 +1056,18 @@ impl Exporter<'_> {
         let mut rows = Vec::new();
 
         self.scan(component.column_family(), from, to, |key, value| {
-            if key.len() != ADDRESS_TX_LEN || !value.is_empty() {
+            let (_, transaction) = OutputLocation::from_bytes_prefix(key)
+                .ok_or_else(|| inconsistent(component, "a row has no address location"))?;
+            if !TransactionLocation::from_bytes_prefix(transaction)
+                .is_some_and(|(_, rest)| rest.is_empty())
+                || !value.is_empty()
+            {
                 return Err(inconsistent(
                     component,
                     "a row is not an address and a transaction location",
                 ));
             }
-            if self.in_shipped_block(&key[OUTPUT_LOC_LEN..]) {
+            if self.in_shipped_block(transaction) {
                 rows.push(key.to_vec());
             }
             Ok(())
@@ -1075,15 +1088,13 @@ impl Exporter<'_> {
 
         // The heights below the window that need their exact row: genesis, for the genesis root
         // checks, and the subtree end heights, for the subtree checks.
-        let mut needed = BTreeSet::from([GENESIS]);
+        let mut needed = BTreeSet::from([GENESIS.to_vec()]);
         self.scan(subtrees.column_family(), None, None, |_key, value| {
-            let end_height = value
-                .get(..HEIGHT_LEN)
-                .filter(|_| value.len() == SUBTREE_VALUE_LEN)
-                .and_then(|end_height| <[u8; HEIGHT_LEN]>::try_from(end_height).ok())
+            let (end_height, _) = height_from_bytes_prefix(value)
+                .filter(|(_, root)| root.len() == 32)
                 .ok_or_else(|| inconsistent(subtrees, "a value is not an end height and a root"))?;
-            if end_height < window {
-                needed.insert(end_height);
+            if end_height < self.window_start {
+                needed.insert(end_height.as_bytes());
             }
             Ok(())
         })?;
@@ -1095,7 +1106,7 @@ impl Exporter<'_> {
             .raw_iterator(cf, point_options())
             .ok_or(SnapshotError::MissingColumnFamily(cf))?;
         for height in needed {
-            iter.seek(height);
+            iter.seek(&height);
             match (iter.key(), iter.value()) {
                 (Some(key), Some(value)) if key == height.as_slice() => {
                     rows.insert(key.to_vec(), value.to_vec());
@@ -1126,7 +1137,7 @@ impl Exporter<'_> {
 
         let mut writer = ComponentWriter::new(component, self.store);
         for (key, value) in rows {
-            if key.len() != HEIGHT_LEN {
+            if !height_from_bytes_prefix(&key).is_some_and(|(_, rest)| rest.is_empty()) {
                 return Err(inconsistent(component, "a key is not a height"));
             }
             writer.push_row(&key, &value)?;

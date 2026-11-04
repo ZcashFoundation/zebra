@@ -16,7 +16,7 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::disk_format::{
-    block::{TransactionIndex, TransactionLocation, TRANSACTION_LOCATION_DISK_BYTES},
+    block::{TransactionIndex, TransactionLocation},
     expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
 };
 
@@ -33,9 +33,6 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 
 /// The maximum value of an on-disk serialized [`OutputIndex`].
 ///
-/// This allows us to store [`OutputLocation`]s in
-/// 8 bytes, which makes database searches more efficient.
-///
 /// # Consensus
 ///
 /// This output index is impossible with the current 2 MB block size limit.
@@ -44,13 +41,6 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 /// are rejected before reaching the database.
 pub const MAX_ON_DISK_OUTPUT_INDEX: OutputIndex =
     OutputIndex::from_index((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
-
-/// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
-/// and 3 byte output index on disk.
-///
-/// This reduces database size and increases lookup performance.
-pub const OUTPUT_LOCATION_DISK_BYTES: usize =
-    TRANSACTION_LOCATION_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES;
 
 // Transparent types
 
@@ -397,7 +387,7 @@ impl std::ops::Add for AddressBalanceLocation {
 /// We store both the address location key and unspend output location value
 /// in the RocksDB column family key. This improves insert and delete performance.
 ///
-/// This requires 8 extra bytes for each unspent output,
+/// This repeats the variable-width address location for each unspent output,
 /// because we repeat the key for each value.
 /// But RocksDB compression reduces the duplicate data size on disk.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -495,7 +485,7 @@ impl AddressUnspentOutput {
 /// We store both the address location key and transaction location value
 /// in the RocksDB column family key. This improves insert and delete performance.
 ///
-/// This requires 8 extra bytes for each transaction location,
+/// This repeats the variable-width address location for each transaction,
 /// because we repeat the key for each value.
 /// But RocksDB compression reduces the duplicate data size on disk.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -723,53 +713,62 @@ impl FromDisk for OutputIndex {
     }
 }
 
+impl OutputLocation {
+    /// Decodes an output location from the start of `disk_bytes`, returning the remaining bytes.
+    pub(crate) fn from_bytes_prefix(disk_bytes: &[u8]) -> Option<(Self, &[u8])> {
+        let (transaction_location, rest) = TransactionLocation::from_bytes_prefix(disk_bytes)?;
+        let (output_index_bytes, remaining) = rest.split_at_checked(OUTPUT_INDEX_DISK_BYTES)?;
+        let output_index = OutputIndex::from_bytes(output_index_bytes);
+
+        Some((
+            OutputLocation {
+                transaction_location,
+                output_index,
+            },
+            remaining,
+        ))
+    }
+}
+
 impl IntoDisk for OutputLocation {
-    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let transaction_location_bytes = self.transaction_location().as_bytes().to_vec();
-        let output_index_bytes = self.output_index().as_bytes().to_vec();
-
-        [transaction_location_bytes, output_index_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        [
+            self.transaction_location().as_bytes(),
+            self.output_index().as_bytes().to_vec(),
+        ]
+        .concat()
     }
 }
 
 impl FromDisk for OutputLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (transaction_location_bytes, output_index_bytes) = disk_bytes
-            .as_ref()
-            .split_at(TRANSACTION_LOCATION_DISK_BYTES);
-
-        let transaction_location = TransactionLocation::from_bytes(transaction_location_bytes);
-        let output_index = OutputIndex::from_bytes(output_index_bytes);
-
-        OutputLocation {
-            transaction_location,
-            output_index,
-        }
+        let (location, remaining) = OutputLocation::from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored output locations must use their canonical encoding");
+        assert!(
+            remaining.is_empty(),
+            "stored standalone output locations must not have trailing bytes"
+        );
+        location
     }
 }
 
 impl<C: Constraint + Copy + std::fmt::Debug> IntoDisk for AddressBalanceLocationInner<C> {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let balance_bytes = self.balance().as_bytes().to_vec();
-        let address_location_bytes = self.address_location().as_bytes().to_vec();
-        let received_bytes = self.received().to_le_bytes().to_vec();
-
-        [balance_bytes, address_location_bytes, received_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        [
+            self.balance().as_bytes().to_vec(),
+            self.address_location().as_bytes(),
+            self.received().to_le_bytes().to_vec(),
+        ]
+        .concat()
     }
 }
 
 impl IntoDisk for AddressBalanceLocation {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0.as_bytes()
@@ -777,7 +776,7 @@ impl IntoDisk for AddressBalanceLocation {
 }
 
 impl IntoDisk for AddressBalanceLocationChange {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
         self.0.as_bytes()
@@ -786,16 +785,26 @@ impl IntoDisk for AddressBalanceLocationChange {
 
 impl<C: Constraint + Copy + std::fmt::Debug> FromDisk for AddressBalanceLocationInner<C> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (balance_bytes, rest) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
-        let (address_location_bytes, rest) = rest.split_at(BALANCE_DISK_BYTES);
-        let (received_bytes, _) = rest.split_at_checked(size_of::<u64>()).unwrap_or_default();
+        let (balance_bytes, rest) = disk_bytes
+            .as_ref()
+            .split_at_checked(BALANCE_DISK_BYTES)
+            .expect("stored address balances must contain an amount");
+        let (address_location, received_bytes) = AddressLocation::from_bytes_prefix(rest)
+            .expect("stored address balances must contain a canonical address location");
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
-        let address_location = AddressLocation::from_bytes(address_location_bytes);
         // # Backwards Compatibility
         //
         // If the value is missing a `received` field, default to 0.
-        let received = u64::from_le_bytes(received_bytes.try_into().unwrap_or_default());
+        let received = match received_bytes.len() {
+            0 => 0,
+            8 => u64::from_le_bytes(
+                received_bytes
+                    .try_into()
+                    .expect("eight received bytes were checked above"),
+            ),
+            _ => panic!("stored address balances have an invalid received field length"),
+        };
 
         let mut address_balance_location = Self::new(address_location);
         *address_balance_location.balance_mut() = balance;
@@ -832,57 +841,56 @@ impl FromDisk for transparent::Output {
 }
 
 impl IntoDisk for AddressUnspentOutput {
-    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let address_location_bytes = self.address_location().as_bytes();
-        let unspent_output_location_bytes = self.unspent_output_location().as_bytes();
-
-        [address_location_bytes, unspent_output_location_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        [
+            self.address_location().as_bytes(),
+            self.unspent_output_location().as_bytes(),
+        ]
+        .concat()
     }
 }
 
 impl FromDisk for AddressUnspentOutput {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (address_location_bytes, unspent_output_location_bytes) =
-            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
-
-        let address_location = AddressLocation::from_bytes(address_location_bytes);
-        let unspent_output_location = AddressLocation::from_bytes(unspent_output_location_bytes);
+        let (address_location, rest) = AddressLocation::from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored address output indexes must contain a canonical address location");
+        let (unspent_output_location, remaining) = OutputLocation::from_bytes_prefix(rest)
+            .expect("stored address output indexes must contain a canonical output location");
+        assert!(
+            remaining.is_empty(),
+            "stored address output indexes must not have trailing bytes"
+        );
 
         AddressUnspentOutput::new(address_location, unspent_output_location)
     }
 }
 
 impl IntoDisk for AddressTransaction {
-    type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let address_location_bytes: [u8; OUTPUT_LOCATION_DISK_BYTES] =
-            self.address_location().as_bytes();
-        let transaction_location_bytes: [u8; TRANSACTION_LOCATION_DISK_BYTES] =
-            self.transaction_location().as_bytes();
-
-        address_location_bytes
-            .iter()
-            .copied()
-            .chain(transaction_location_bytes.iter().copied())
-            .collect::<Vec<u8>>()
-            .try_into()
-            .expect("concatenation of fixed-sized arrays should have the correct size")
+        [
+            self.address_location().as_bytes(),
+            self.transaction_location().as_bytes(),
+        ]
+        .concat()
     }
 }
 
 impl FromDisk for AddressTransaction {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (address_location_bytes, transaction_location_bytes) =
-            disk_bytes.as_ref().split_at(OUTPUT_LOCATION_DISK_BYTES);
-
-        let address_location = AddressLocation::from_bytes(address_location_bytes);
-        let transaction_location = TransactionLocation::from_bytes(transaction_location_bytes);
+        let (address_location, rest) = AddressLocation::from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored address transaction indexes must contain a canonical address location");
+        let (transaction_location, remaining) = TransactionLocation::from_bytes_prefix(rest)
+            .expect(
+                "stored address transaction indexes must contain a canonical transaction location",
+            );
+        assert!(
+            remaining.is_empty(),
+            "stored address transaction indexes must not have trailing bytes"
+        );
 
         AddressTransaction::new(address_location, transaction_location)
     }

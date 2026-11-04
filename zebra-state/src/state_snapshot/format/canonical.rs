@@ -22,6 +22,7 @@ use zebra_chain::{
 
 use crate::service::finalized_state::{
     AddressBalanceLocation, FromDisk, HistoryTreeParts, IntoDisk, LegacyHistoryTreeParts,
+    OutputLocation,
 };
 
 use super::{ComponentId, FormatError};
@@ -131,24 +132,25 @@ fn value_pools(value: &[u8]) -> Result<Vec<u8>, FormatError> {
     Ok(pools.as_bytes().to_vec())
 }
 
-/// Re-encodes a `balance_by_transparent_addr` value, which is 16 bytes before
-/// the `received` total and 24 bytes since.
+/// Re-encodes a `balance_by_transparent_addr` value, with or without its `received` total.
 fn address_balance(value: &[u8]) -> Result<Vec<u8>, FormatError> {
     let component = ComponentId::AddressBalances;
 
-    // `FromDisk` reads the balance and the address location from the first 16 bytes, and panics
-    // on an invalid balance, so they are checked first. A missing total reads as zero.
-    if value.len() < 16 {
-        return Err(invalid(
-            component,
-            "the value is shorter than a balance and a location",
-        ));
+    // Check the fallible fields before `FromDisk`, then let it supply a zero for a missing total.
+    let (balance, rest) = value
+        .split_at_checked(8)
+        .ok_or_else(|| invalid(component, "the value is shorter than a balance"))?;
+    let (_, received) = OutputLocation::from_bytes_prefix(rest)
+        .ok_or_else(|| invalid(component, "the address location is not canonical"))?;
+    if !matches!(received.len(), 0 | 8) {
+        return Err(invalid(component, "the received total is not 8 bytes"));
     }
-    let balance = value[..8]
-        .try_into()
-        .map_err(|_| invalid(component, "the balance is not 8 bytes"))?;
-    Amount::<NonNegative>::from_bytes(balance)
-        .map_err(|_| invalid(component, "the balance is not a valid amount"))?;
+    Amount::<NonNegative>::from_bytes(
+        balance
+            .try_into()
+            .map_err(|_| invalid(component, "the balance is not 8 bytes"))?,
+    )
+    .map_err(|_| invalid(component, "the balance is not a valid amount"))?;
 
     Ok(AddressBalanceLocation::from_bytes(value)
         .as_bytes()

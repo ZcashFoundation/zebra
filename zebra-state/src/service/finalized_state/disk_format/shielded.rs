@@ -8,14 +8,11 @@
 use bincode::Options;
 
 use zebra_chain::{
-    block::Height,
     ironwood, orchard, sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
-
-use super::block::HEIGHT_DISK_BYTES;
 
 impl IntoDisk for sprout::Nullifier {
     type Bytes = [u8; 32];
@@ -216,10 +213,8 @@ impl FromDisk for orchard::tree::Node {
 
 impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, node_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
-        Self::new(
-            Height::from_bytes(height_bytes),
-            Node::from_bytes(node_bytes),
-        )
+        let (end_height, node_bytes) = super::block::height_from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored subtree heights must use their canonical variable-width encoding");
+        Self::new(end_height, Node::from_bytes(node_bytes))
     }
 }

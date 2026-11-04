@@ -204,11 +204,14 @@ fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !db.ready_for_pruning() {
         db.check_for_panics();
-        assert!(Instant::now() < deadline, "the v32 upgrade did not finish");
+        assert!(
+            Instant::now() < deadline,
+            "the snapshot base upgrade did not finish"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    assert_eq!(db.path(), config.db_path(STATE_DATABASE_KIND, 32, &network));
+    assert_eq!(db.path(), config.db_path(STATE_DATABASE_KIND, 33, &network));
     assert!(!legacy_path.exists());
     assert_eq!(db.tip(), snapshot_tip);
     assert_eq!(db.snapshot_base(), Some(base));

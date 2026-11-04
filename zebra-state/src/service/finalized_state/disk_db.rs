@@ -36,7 +36,6 @@ use zebra_chain::{
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
-        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES,
         upgrade::restorable_db_source_versions, FromDisk, IntoDisk, TransactionIndex,
         TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
@@ -1064,6 +1063,46 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<DiskDb, StateInitError> {
+        Self::new_inner(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+            false,
+        )
+    }
+
+    /// Opens fixed-width state whose history must be decoded by the variable-height upgrader.
+    pub(crate) fn new_for_variable_height_upgrade(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+    ) -> Result<DiskDb, StateInitError> {
+        Self::new_inner(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+            true,
+        )
+    }
+
+    fn new_inner(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+        skip_history_check: bool,
+    ) -> Result<DiskDb, StateInitError> {
         config.validate_pruning(network)?;
 
         // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
@@ -1157,50 +1196,53 @@ impl DiskDb {
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
-                // Guard the lowest writable entry point before launching migrations or checks.
-                let history = db.history_capabilities()?;
-                if let Some(base) = history
-                    .snapshot_base
-                    .filter(|_| !read_only && config.prune_blocks_older_than.is_none())
-                {
-                    // A snapshot-imported database never has the history below its window, so
-                    // it can only run as a pruned node (DESIGN §7).
-                    return Err(StateInitError::SnapshotDatabase {
-                        path,
-                        height: base.height,
-                        window_start: base.window_start,
-                    });
-                }
-                if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
-                    return Err(StateInitError::PrunedDatabase {
-                        path,
-                        lowest_retained_height: history.lowest_retained_height,
-                    });
-                }
-                if !read_only && history.is_pruned() {
-                    // Hold the writer lock while checking, before any caller can commit a block.
-                    let invalid_version = |source| StateInitError::HistoryRead {
-                        path: path.clone(),
-                        source,
-                    };
-                    let disk_version = database_format_version_on_disk(
-                        config,
-                        db_kind,
-                        format_version_in_code.major,
-                        network,
-                    )
-                    .map_err(invalid_version)?
-                    .ok_or_else(|| {
-                        invalid_version("pruned state requires a stored format version".into())
-                    })?;
-                    let disk_indexer = disk_version.build.contains("indexer");
-                    let running_indexer = cfg!(feature = "indexer");
-                    if disk_indexer != running_indexer {
-                        return Err(StateInitError::PrunedIndexModeMismatch {
+                if !skip_history_check {
+                    // Guard the lowest writable entry point before launching migrations or checks.
+                    let history = db.history_capabilities()?;
+                    if let Some(base) = history
+                        .snapshot_base
+                        .filter(|_| !read_only && config.prune_blocks_older_than.is_none())
+                    {
+                        // A snapshot-imported database never has the history below its window, so
+                        // it can only run as a pruned node (DESIGN §7).
+                        return Err(StateInitError::SnapshotDatabase {
                             path,
-                            disk_indexer,
-                            running_indexer,
+                            height: base.height,
+                            window_start: base.window_start,
                         });
+                    }
+                    if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned()
+                    {
+                        return Err(StateInitError::PrunedDatabase {
+                            path,
+                            lowest_retained_height: history.lowest_retained_height,
+                        });
+                    }
+                    if !read_only && history.is_pruned() {
+                        // Hold the writer lock while checking, before any caller can commit a block.
+                        let invalid_version = |source| StateInitError::HistoryRead {
+                            path: path.clone(),
+                            source,
+                        };
+                        let disk_version = database_format_version_on_disk(
+                            config,
+                            db_kind,
+                            format_version_in_code.major,
+                            network,
+                        )
+                        .map_err(invalid_version)?
+                        .ok_or_else(|| {
+                            invalid_version("pruned state requires a stored format version".into())
+                        })?;
+                        let disk_indexer = disk_version.build.contains("indexer");
+                        let running_indexer = cfg!(feature = "indexer");
+                        if disk_indexer != running_indexer {
+                            return Err(StateInitError::PrunedIndexModeMismatch {
+                                path,
+                                disk_indexer,
+                                running_indexer,
+                            });
+                        }
                     }
                 }
 
@@ -1270,10 +1312,21 @@ impl DiskDb {
         self.db.path()
     }
 
-    /// Returns the low-level rocksdb inner database.
-    #[allow(dead_code)]
-    fn inner(&self) -> &Arc<DB> {
+    /// Returns the low-level RocksDB database for migration code.
+    pub(crate) fn inner(&self) -> &DB {
         &self.db
+    }
+
+    /// Creates a persistent, consistent checkpoint for an in-place record migration.
+    pub(crate) fn create_checkpoint(&self, path: &Path) -> Result<(), rocksdb::Error> {
+        rocksdb::checkpoint::Checkpoint::new(&*self.db)?.create_checkpoint(path)
+    }
+
+    /// Opens a migration checkpoint without allowing writes or WAL recovery.
+    pub(crate) fn open_read_only(path: &Path) -> Result<DB, rocksdb::Error> {
+        let options = Self::options();
+        let column_families = Self::construct_column_families(options.clone(), path, []);
+        DB::open_cf_descriptors_read_only(&options, path, column_families, false)
     }
 
     /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
@@ -1295,7 +1348,7 @@ impl DiskDb {
         if snapshot_base.is_none()
             && self
                 .db
-                .get_pinned_cf(&index, first)
+                .get_pinned_cf(&index, &first)
                 .map_err(|error| invalid(error.into()))?
                 .is_none()
         {
@@ -1305,12 +1358,14 @@ impl DiskDb {
             .cf_handle("tx_by_loc")
             .ok_or_else(|| invalid("indexed blocks have no transaction column family".into()))?;
         let mut bodies = self.db.raw_iterator_cf(&transactions);
-        bodies.seek(first);
+        bodies.seek(&first);
         bodies.status().map_err(|error| invalid(error.into()))?;
         let location = bodies
             .key()
-            .filter(|key| key.len() == TRANSACTION_LOCATION_DISK_BYTES)
-            .map(TransactionLocation::from_bytes)
+            .and_then(|key| {
+                let (location, remaining) = TransactionLocation::from_bytes_prefix(key)?;
+                remaining.is_empty().then_some(location)
+            })
             .ok_or_else(|| invalid("indexed blocks have no valid retained body suffix".into()))?;
         if location.index != TransactionIndex::MIN {
             return Err(invalid(
@@ -1344,10 +1399,7 @@ impl DiskDb {
         let Some(bytes) = self.db.get_pinned_cf(&marker, ().as_bytes())? else {
             return Ok(None);
         };
-        if bytes.len() != SNAPSHOT_BASE_DISK_BYTES {
-            return Err("the snapshot base marker has an invalid length".into());
-        }
-        let base = SnapshotBase::from_bytes(bytes);
+        let base = SnapshotBase::decode(&bytes).map_err(|error| -> BoxError { error.into() })?;
         if base.window_start == Height::MIN
             || base.window_start > base.height
             || base.height > MAX_ON_DISK_HEIGHT

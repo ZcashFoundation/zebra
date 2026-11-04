@@ -136,7 +136,8 @@ resumes the remaining work.
 
 The setting `[state] delete_old_database` (default `true`) makes each start
 delete older major-version directories under the cache directory, except
-registered reusable source directories (`v25` through `v30` for format 32).
+registered reusable source directories (`v25` through `v30` and `v32` for
+format 33).
 Setting it to `false` keeps every directory, but does not prevent the rename
 above. Renaming or symlinking a versioned directory by hand does not convert
 its format.
@@ -182,9 +183,10 @@ state only when it understands every persisted feature in that state. Ordinarily
 it opens a newer minor or patch format and records the downgrade (`trying to open
 newer database format: data should be compatible`).
 
-Snapshot-born state uses the v32 directory barrier and a `snapshot_base` marker.
-Never open it with an older build or rename it to v30, v31, v29, or any older
-directory: those builds would treat its incomplete history as an archive. Keep
+Snapshot-born state uses a versioned directory barrier and a `snapshot_base`
+marker. Never open it with an older build or rename it to v32, v30, v29, or any
+older directory: those builds cannot decode its records or would treat its
+incomplete history as an archive. Keep
 running a snapshot-aware release, or recover from a separate compatible archive
 backup or a full sync.
 
@@ -211,32 +213,32 @@ genesis. To restore the backup:
 
 Roll back direct readers to builds for the older format at the same time.
 
-Archives that have never been pruned or snapshot-imported are an exception for
-the fixed-height upgrades through format 32: upgrades from v29 and v30 rewrite
-no records, so the directory can be moved back for Zebra 7.0.0. See
-[format 32 and recovery](pruning.md#format-32-recovery-and-copies).
+Upgrades to format 33 cross a one-way height migration, so even an archive that
+has never been pruned or snapshot-imported cannot be moved back for an older
+release after it. See [format 33 and recovery](pruning.md#format-33-recovery-and-copies).
 
 ## Zebra 7.1.0
 
-- **State formats 29 and 30 → 32.** With no existing v32 database, the first
-  start moves the newest reusable v30 or v29 source to `state/v32/<network>`
-  without a resync. The intermediate 30.1 upgrade adds the empty `snapshot_base`
-  column family; these fixed-height upgrades rewrite no existing records. Keep
-  a separate source archive backup before upgrading if rollback matters:
-  disabling old-database cleanup does not preserve the moved directory. Format
-  v31 remains reserved for
-  [#12182's variable-height record migration](https://github.com/ZcashFoundation/zebra/pull/12182).
-- **Snapshot-born state is not downgrade-compatible.** Format 32 holds a
+- **State formats 29, 30, and 32 → 33.** With no existing v33 database, the first
+  start moves the newest reusable source to `state/v33/<network>` without a
+  resync, preferring v32, then v30, then v29. Every intervening upgrade runs in
+  order: the 30.1 upgrade adds the `snapshot_base` column family, the v32
+  upgrade adds the snapshot directory barrier, and the v33 upgrade rewrites the
+  fixed-height records of every earlier format. No release uses format 31. Keep
+  a separate stopped-node source backup before upgrading if rollback matters:
+  disabling old-database cleanup does not preserve the moved directory, and v32
+  and older readers cannot decode migrated v33 records.
+- **Snapshot-born state is not downgrade-compatible.** Format 33 holds a
   `snapshot_base` marker recording where an imported snapshot's history starts.
-  Never open that state with an older build, and never move it to `v30`, `v31`,
-  `v29`, or any older directory: those builds would treat its missing pre-window
-  bodies as a complete archive. A snapshot-born node must keep running a
-  snapshot-aware release or recover from a separate compatible archive backup
-  or a full sync.
+  Never open that state with an older build, and never move it to `v32`, `v30`,
+  `v29`, or any older directory: those builds cannot decode its records or
+  would treat its missing pre-window bodies as a complete archive. A
+  snapshot-born node must keep running a snapshot-aware release or recover from
+  a separate compatible archive backup or a full sync. State snapshots now use
+  snapshot format 2, which older releases reject.
 - **Direct database readers.** Upgrade them to a build that understands format
-  32, snapshot history boundaries, and unavailable historical bodies before
-  they open the upgraded state. The never-pruned archive rollback exception
-  above does not apply to pruned or snapshot-born databases.
+  33, snapshot history boundaries, and unavailable historical bodies before
+  they open the upgraded state.
 
 ## Zebra 7.0.0
 
