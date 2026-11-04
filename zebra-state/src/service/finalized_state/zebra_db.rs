@@ -211,17 +211,15 @@ impl ZebraDb {
             return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
         }
         let current_markers = if variable_height::is_required(&format_change) {
-            let probe = DiskDb::new_for_variable_height_upgrade(
+            DiskDb::current_height_markers_exist(
                 config,
-                STATE_DATABASE_KIND,
-                &state_database_format_version_in_code(),
+                &db_kind,
+                format_version_in_code,
                 network,
                 STATE_COLUMN_FAMILIES_IN_CODE
                     .iter()
                     .map(ToString::to_string),
-                read_only,
-            )?;
-            variable_height::current_height_markers_exist(probe.inner(), probe.path())?
+            )?
         } else {
             false
         };

@@ -1341,6 +1341,28 @@ impl DiskDb {
         DB::open_cf_descriptors_read_only(&options, path, column_families, false)
     }
 
+    /// Checks for variable-height sentinel keys without evaluating pending balance merges.
+    pub(crate) fn current_height_markers_exist(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> Result<bool, StateInitError> {
+        let path = config.db_path(db_kind, format_version_in_code.major, network);
+        let mut options = Self::options();
+        options.set_disable_auto_compactions(true);
+        let column_families =
+            Self::construct_column_families(options.clone(), &path, column_families_in_code, true);
+        let db = DB::open_cf_descriptors_read_only(&options, &path, column_families, false)
+            .map_err(|source| StateInitError::HistoryRead {
+                path: path.clone(),
+                source: Box::new(source),
+            })?;
+
+        variable_height::current_height_markers_exist(&db, &path)
+    }
+
     /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
     ///
     /// A database imported from a state snapshot has no blocks below its window start, so its

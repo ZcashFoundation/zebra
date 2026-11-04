@@ -595,6 +595,51 @@ fn versionless_current_records_are_rejected_instead_of_rewritten() {
 }
 
 #[test]
+fn versionless_current_records_with_pending_balance_merges_survive_reopen() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let db = open_test_db(&config);
+    let live = db.disk_db().inner();
+    live.put_cf(
+        live.cf_handle("hash_by_height").unwrap(),
+        Height::MIN.as_bytes(),
+        [0x55; 32],
+    )
+    .unwrap();
+
+    let location = OutputLocation::from_usize(Height(1), 0, 0);
+    let change = |balance, received| {
+        let mut change = AddressBalanceLocationChange::new(location);
+        *change.balance_mut() = Amount::<NegativeAllowed>::try_from(balance).unwrap();
+        *change.received_mut() = received;
+        change
+    };
+    let first = change(10_i64, 100_u64);
+    let second = change(20_i64, 200_u64);
+    let key = [7; 21];
+    let cf = live.cf_handle("balance_by_transparent_addr").unwrap();
+    live.merge_cf(&cf, key, first.as_bytes()).unwrap();
+    live.merge_cf(&cf, key, second.as_bytes()).unwrap();
+    let expected = (first + second).unwrap();
+
+    let version_path = db.path().join("version");
+    if version_path.exists() {
+        std::fs::remove_file(version_path).unwrap();
+    }
+    drop(db);
+
+    let reopened = open_test_db(&config);
+    let live = reopened.disk_db().inner();
+    let cf = live.cf_handle("balance_by_transparent_addr").unwrap();
+    let actual = live.get_pinned_cf(&cf, key).unwrap().unwrap();
+    assert_eq!(
+        AddressBalanceLocationChange::from_bytes(actual).as_bytes(),
+        expected.as_bytes()
+    );
+}
+
+#[test]
 fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
