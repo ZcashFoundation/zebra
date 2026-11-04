@@ -396,7 +396,7 @@ async fn block_flush_resolves_every_sapling_shard_without_timers() {
     let start = tokio::time::Instant::now();
     tests::FLUSH
         .scope(
-            Box::new(move |verifier| {
+            Arc::new(move |verifier| {
                 assert!(matches!(verifier, Verifier::Sapling));
                 count.fetch_add(1, Ordering::SeqCst);
                 flush_shards.try_flush()
