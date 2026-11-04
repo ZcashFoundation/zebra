@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Unsolicited transactions no longer interrupt downloads, and only explicit missing-inventory replies affect peer routing. Exact transaction requests match the authorization digest as well as mined effects, so a different witnessed transaction is reported missing ([#276](https://github.com/ZcashFoundation/zebra-private/pull/276)).
+time: 2026-11-04T03:50:49.219226253+01:00

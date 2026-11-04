@@ -8,7 +8,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     constants::REQUEST_TIMEOUT,
-    peer::{Connection, ErrorSlot},
+    peer::{register_inventory_status, Connection, ErrorSlot},
     peer_set::ActiveConnectionCounter,
     protocol::{external::Message, internal::InventoryResponse},
 };
@@ -279,15 +279,14 @@ async fn connection_block_error_attribution(not_found: bool) {
     peer_set.ready().await.expect("serving peer is ready");
     let connection_info = peer_set.ready_services[&addrs[0]].connection_info().clone();
     let pending = peer_set.call(request.clone());
-    let mut client_request = handles[0]
+    let client_request = handles[0]
         .try_to_receive_outbound_client_request()
         .request()
         .expect("the serving client received the download");
 
-    // The channel harness normally has an isolated collector. Connect the production response
-    // sender to this PeerSet's collector instead of fabricating a missing-inventory event.
-    client_request.inv_collector = guard.inventory_sender().as_ref().cloned();
-    client_request.transient_addr = Some(addrs[0]);
+    // Use the wire inventory filter before the connection interprets the response.
+    let inv_collector = guard.inventory_sender().as_ref().unwrap().clone();
+    let connected_addr = crate::peer::ConnectedAddr::new_inbound_direct(addrs[0]);
     let (mut client_tx, client_rx) = mpsc::channel(1);
     let (_advert_tx, advert_rx) = tokio::sync::mpsc::channel(1);
     let (mut remote_tx, remote_rx) = mpsc::channel(1);
@@ -312,7 +311,9 @@ async fn connection_block_error_attribution(not_found: bool) {
         connection_info,
         Vec::new(),
     );
-    let connection_task = tokio::spawn(connection.run(remote_rx));
+    let remote_rx = remote_rx
+        .then(move |msg| register_inventory_status(msg, connected_addr, inv_collector.clone()));
+    let connection_task = tokio::spawn(connection.run(remote_rx.boxed()));
     client_tx
         .try_send(client_request)
         .expect("the client channel has room");

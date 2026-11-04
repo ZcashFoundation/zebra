@@ -40,19 +40,17 @@ impl PeerSetHarness {
     pub async fn new(services: &[PeerServices], busy_peer: Option<usize>) -> Self {
         let mut guard = PeerSetGuard::new();
         let inventory_receiver = guard.create_inventory_receiver();
-        let inventory_sender = guard.inventory_sender().as_ref().unwrap().clone();
         let mut addrs = Vec::new();
         let mut peers = Vec::new();
         let mut changes: Vec<Result<_, BoxError>> = Vec::new();
         for (index, services) in services.iter().enumerate() {
             let host = u8::try_from(index + 1).expect("test peer count fits in an IPv4 octet");
             let addr: PeerSocketAddr = SocketAddr::from(([127, 0, 0, host], 8233)).into();
-            let (mut client, handle) = ClientTestHarness::build()
+            let (client, handle) = ClientTestHarness::build()
                 .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
                 .with_services(*services)
                 .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
                 .finish();
-            client.inv_collector = inventory_sender.clone();
             changes.push(Ok(Change::Insert(addr, client.into())));
             addrs.push(addr);
             peers.push(handle);
@@ -105,12 +103,11 @@ impl PeerSetHarness {
         let peer = self.peers.len();
         let host = u8::try_from(peer + 1).expect("test peer count fits in an IPv4 octet");
         let addr: PeerSocketAddr = SocketAddr::from(([127, 0, 0, host], 8233)).into();
-        let (mut client, handle) = ClientTestHarness::build()
+        let (client, handle) = ClientTestHarness::build()
             .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
             .with_services(services)
             .with_connected_addr(ConnectedAddr::new_inbound_direct(addr))
             .finish();
-        client.inv_collector = self.guard.inventory_sender().as_ref().unwrap().clone();
         self.discovery
             .try_send(Ok(Change::Insert(addr, client.into())))
             .expect("the discovery channel has room for a test peer");
@@ -170,6 +167,19 @@ impl PeerSetHarness {
             .as_ref()
             .unwrap()
             .send(InventoryChange::new_available(
+                InventoryHash::Block(hash),
+                self.addrs[peer],
+            ))
+            .expect("the real inventory registry is still connected");
+    }
+
+    /// Publishes the missing block inventory explicitly reported by a test peer.
+    pub fn notfound(&mut self, peer: usize, hash: block::Hash) {
+        self.guard
+            .inventory_sender()
+            .as_ref()
+            .unwrap()
+            .send(InventoryChange::new_missing(
                 InventoryHash::Block(hash),
                 self.addrs[peer],
             ))

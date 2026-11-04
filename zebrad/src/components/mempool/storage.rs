@@ -718,6 +718,7 @@ impl Storage {
         tx_ids.into_iter().filter_map(|tx_id| {
             self.transactions()
                 .get(&tx_id.mined_id())
+                .filter(|tx| tx.transaction.id == tx_id)
                 .map(|tx| &tx.transaction)
         })
     }

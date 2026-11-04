@@ -151,8 +151,6 @@ async fn connection_state_metrics_return_to_zero() {
                 .try_send(ClientRequest {
                     request: Request::Peers,
                     tx: response_tx,
-                    inv_collector: None,
-                    transient_addr: None,
                     span: Span::none(),
                 })
                 .expect("the connection is listening for client requests");
@@ -329,8 +327,6 @@ async fn connection_run_loop_message_ok() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -426,8 +422,6 @@ async fn empty_mempool_reply_unblocks_queued_block_request() {
         .try_send(ClientRequest {
             request: Request::MempoolTransactionIds,
             tx: mempool_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .unwrap();
@@ -447,8 +441,6 @@ async fn empty_mempool_reply_unblocks_queued_block_request() {
                 advertiser: None,
             },
             tx: block_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .unwrap();
@@ -488,8 +480,6 @@ async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
         .try_send(ClientRequest {
             request: Request::MempoolTransactionIds,
             tx: mempool_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .unwrap();
@@ -509,8 +499,6 @@ async fn cancelled_mempool_reply_does_not_complete_find_blocks() {
                 stop: None,
             },
             tx: find_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::current(),
         })
         .await
@@ -699,8 +687,6 @@ async fn block_advert_while_awaiting_response() {
             .try_send(ClientRequest {
                 request: Request::Peers,
                 tx: request_tx,
-                inv_collector: None,
-                transient_addr: None,
                 span: Span::current(),
             })
             .unwrap();
@@ -1079,8 +1065,6 @@ async fn connection_run_loop_send_timeout_nil_response() {
     let request = ClientRequest {
         request: Request::AdvertiseTransactionIds(HashSet::new(), None),
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -1153,8 +1137,6 @@ async fn connection_run_loop_send_timeout_expect_response() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -1230,8 +1212,6 @@ async fn connection_run_loop_cancelled_during_send() {
     let request = ClientRequest {
         request: Request::AdvertiseTransactionIds(HashSet::new(), None),
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -1311,8 +1291,6 @@ async fn connection_run_loop_receive_timeout() {
     let request = ClientRequest {
         request: Request::Peers,
         tx: request_tx,
-        inv_collector: None,
-        transient_addr: None,
         span: Span::current(),
     };
 
@@ -1611,8 +1589,6 @@ async fn connection_ping_pong_round_trip() {
         .send(ClientRequest {
             request: Request::Ping(nonce),
             tx: response_tx,
-            inv_collector: None,
-            transient_addr: None,
             span: Span::none(),
         })
         .await
@@ -1790,8 +1766,6 @@ async fn cancelled_notfound_then_response(
             .send(ClientRequest {
                 request,
                 tx,
-                inv_collector: None,
-                transient_addr: None,
                 span: Span::none(),
             })
             .await
@@ -1821,6 +1795,235 @@ async fn cancelled_notfound_then_response(
     drop(peer_tx);
     let _ = connection.await;
     response
+}
+
+/// Unrequested and duplicate transactions use the unsolicited path without ending a download.
+#[tokio::test(start_paused = true)]
+async fn unsolicited_transactions_leave_download_pending() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let transactions: Vec<UnminedTx> = [
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.as_slice(),
+            zebra_test::vectors::BLOCK_MAINNET_2_BYTES.as_slice(),
+            zebra_test::vectors::BLOCK_MAINNET_3_BYTES.as_slice(),
+        ]
+        .into_iter()
+        .map(|bytes| {
+            let block: Block = bytes
+                .zcash_deserialize_into()
+                .expect("block vectors are valid");
+            UnminedTx::from(&block.transactions[0])
+        })
+        .collect();
+        let (connection, mut client_tx, mut inbound_service, mut outbound, error_slot) =
+            new_test_connection();
+        let (mut peer_tx, peer_rx) = mpsc::channel(1);
+        let connection_task = tokio::spawn(connection.run(peer_rx));
+        let (response_tx, mut response_rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request: Request::TransactionsById(HashSet::from([
+                    transactions[0].id,
+                    transactions[1].id,
+                ])),
+                tx: response_tx,
+                span: Span::none(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(outbound.next().await, Some(Message::GetData(_))));
+
+        // Check an unrelated transaction before any response, then a duplicate and another
+        // unrelated transaction after the first requested transaction.
+        for (index, transaction) in [&transactions[2], &transactions[0], &transactions[2]]
+            .into_iter()
+            .enumerate()
+        {
+            peer_tx
+                .send(Ok(Message::Tx(transaction.clone())))
+                .await
+                .unwrap();
+            inbound_service
+                .expect_request(Request::PushTransaction(transaction.clone(), None))
+                .await
+                .respond(Response::Nil);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(1), &mut response_rx)
+                    .await
+                    .is_err(),
+                "unsolicited transactions must leave the download pending",
+            );
+            if index == 0 {
+                peer_tx
+                    .send(Ok(Message::Tx(transactions[0].clone())))
+                    .await
+                    .unwrap();
+            }
+        }
+        peer_tx
+            .send(Ok(Message::Tx(transactions[1].clone())))
+            .await
+            .unwrap();
+        assert_eq!(
+            response_rx.await.unwrap().unwrap(),
+            Response::Transactions(
+                transactions[..2]
+                    .iter()
+                    .cloned()
+                    .map(|tx| InventoryResponse::Available((tx, None)))
+                    .collect(),
+            ),
+        );
+        assert!(error_slot.try_get_error().is_none());
+        connection_task.abort();
+        assert!(connection_task.await.unwrap_err().is_cancelled());
+    })
+    .await
+    .expect("the requested transactions must complete the download");
+}
+
+/// Only IDs explicitly named on the wire may affect missing-inventory routing.
+#[tokio::test(flavor = "multi_thread")]
+async fn synthesized_missing_inventory_is_not_registered() {
+    use tokio::sync::broadcast;
+    use tokio_util::codec::Framed;
+    use tower::{Service, ServiceExt};
+    use zebra_chain::{
+        parameters::Network,
+        transaction::{self, UnminedTxId},
+    };
+
+    use crate::{
+        peer::{ConnectedAddr, Handshake, HandshakeRequest},
+        peer_set::{ActiveConnectionCounter, InventoryChange},
+        protocol::external::Codec,
+        types::PeerServices,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = Network::Mainnet;
+        let addr = "127.0.0.1:8233".parse().unwrap();
+        let (inv_collector, mut inv_receiver) = broadcast::channel(16);
+        let handshake = Handshake::builder()
+            .with_config(crate::Config {
+                network: network.clone(),
+                ..Default::default()
+            })
+            .with_inbound_service(tower::service_fn(|_| async {
+                Ok::<_, crate::BoxError>(Response::Nil)
+            }))
+            .with_inventory_collector(inv_collector)
+            .finish()
+            .expect("the mandatory handshake configuration is supplied");
+        let (local_stream, remote_stream) = tokio::io::duplex(65536);
+        let mut remote = Framed::new(
+            remote_stream,
+            Codec::builder().for_network(&network).finish(),
+        );
+        let (client, ()) = tokio::join!(
+            handshake.oneshot(HandshakeRequest {
+                data_stream: local_stream,
+                connected_addr: ConnectedAddr::new_outbound_direct(addr),
+                connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+            }),
+            async {
+                let Some(Ok(Message::Version(mut version))) = remote.next().await else {
+                    panic!("the local peer starts with a version message");
+                };
+                version.nonce.0 ^= 1;
+                version.services = PeerServices::NODE_NETWORK;
+                remote.send(Message::Version(version)).await.unwrap();
+                remote.send(Message::Verack).await.unwrap();
+                assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+            },
+        );
+        let mut client = client.expect("the remote peer completes the handshake");
+        remote.codec_mut().reconfigure_full_body_len();
+
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .expect("the block vector is valid");
+        let tx = UnminedTx::from(&block.transactions[0]);
+        for (available, ids) in [
+            (
+                Message::Block(block.clone()),
+                [
+                    InventoryHash::Block(block.hash()),
+                    InventoryHash::Block(block::Hash([2; 32])),
+                    InventoryHash::Block(block::Hash([3; 32])),
+                ],
+            ),
+            (
+                Message::Tx(tx.clone()),
+                [
+                    tx.id.into(),
+                    UnminedTxId::Legacy(transaction::Hash([2; 32])).into(),
+                    UnminedTxId::Legacy(transaction::Hash([3; 32])).into(),
+                ],
+            ),
+        ] {
+            for partial in [false, true] {
+                let requested = if partial { &ids[..] } else { &ids[1..] };
+                let request = match &available {
+                    Message::Block(_) => Request::BlocksByHash(
+                        requested
+                            .iter()
+                            .map(|id| id.block_hash().unwrap())
+                            .collect(),
+                    ),
+                    Message::Tx(_) => Request::TransactionsById(
+                        requested
+                            .iter()
+                            .map(|id| id.unmined_tx_id().unwrap())
+                            .collect(),
+                    ),
+                    _ => unreachable!("the cases only contain blocks or transactions"),
+                };
+                let response = client.ready().await.unwrap().call(request);
+                assert!(matches!(
+                    remote.next().await.unwrap().unwrap(),
+                    Message::GetData(_)
+                ));
+                if partial {
+                    remote.send(available.clone()).await.unwrap();
+                }
+                remote.send(Message::NotFound(vec![ids[1]])).await.unwrap();
+                let response = response.await;
+                if partial {
+                    let missing = match response.unwrap() {
+                        Response::Blocks(items) => {
+                            items.iter().filter_map(|item| item.missing()).count()
+                        }
+                        Response::Transactions(items) => {
+                            items.iter().filter_map(|item| item.missing()).count()
+                        }
+                        response => panic!("unexpected inventory response: {response:?}"),
+                    };
+                    assert_eq!(
+                        missing, 2,
+                        "the response synthesizes the unreported missing ID"
+                    );
+                } else {
+                    assert!(response
+                        .unwrap_err()
+                        .inner_debug()
+                        .contains("NotFoundResponse"));
+                }
+                assert_eq!(
+                    inv_receiver.try_recv().unwrap(),
+                    InventoryChange::new_missing(ids[1], addr),
+                );
+                assert_eq!(
+                    inv_receiver.try_recv(),
+                    Err(broadcast::error::TryRecvError::Empty),
+                    "synthesized missing IDs must not be registered",
+                );
+            }
+        }
+    })
+    .await
+    .expect("the wire inventory responses must complete promptly");
 }
 
 /// Creates a new [`Connection`] instance for unit tests.
