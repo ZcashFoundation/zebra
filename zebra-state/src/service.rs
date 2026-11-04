@@ -743,16 +743,28 @@ impl StateService {
             .remove(&self.finalized_block_write_last_sent_hash)
         {
             let last_sent_finalized_block_height = queued_block.0.height;
+            let accepts_finalized = self.block_write_sender.accepts_finalized();
             let is_handoff_retry = self
                 .block_write_sender
                 .accepts_finalized_retry(queued_block.0.hash);
+            if !accepts_finalized && !is_handoff_retry {
+                Self::send_checkpoint_verified_block_error(
+                    queued_block,
+                    CommitBlockError::new_duplicate(None, KnownBlock::Finalized),
+                );
+                self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                    None,
+                    KnownBlock::Finalized,
+                ));
+                return;
+            }
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
 
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
             // Blocks waiting in the queue are not recorded, so they can be downloaded again.
-            if (self.block_write_sender.accepts_finalized() || is_handoff_retry)
+            if (accepts_finalized || is_handoff_retry)
                 && self.is_close_to_final_checkpoint(last_sent_finalized_block_height)
             {
                 self.non_finalized_block_write_sent_hashes
@@ -1096,8 +1108,23 @@ impl StateService {
                     .dequeue_children(parent_hash);
 
                 for queued_child in ready.take().into_iter().chain(queued_children) {
+                    let can_dispatch = self
+                        .non_finalized_block_write_sent_hashes
+                        .can_fork_chain_at_hashes
+                        || self.can_fork_chain_at(&parent_hash);
+                    if !can_dispatch {
+                        Self::send_semantically_verified_block_error(
+                            queued_child,
+                            CommitBlockError::WriteTaskExited,
+                        );
+                        self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
+                        return;
+                    }
+
                     let (SemanticallyVerifiedBlock { hash, .. }, _, _, _) = queued_child;
 
+                    self.non_finalized_block_write_sent_hashes
+                        .can_fork_chain_at_hashes = true;
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
                     let send_result =
