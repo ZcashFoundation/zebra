@@ -2,7 +2,12 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crossbeam_channel::{Receiver, TryRecvError};
 use rocksdb::{IteratorMode, ReadOptions, WriteBatch};
@@ -10,6 +15,7 @@ use semver::Version;
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
     block::{self, Height},
+    common::atomic_write,
     state_snapshot::ObjectHash,
 };
 
@@ -36,6 +42,8 @@ const LEGACY_ADDRESS_TRANSACTION_DISK_BYTES: usize = 13;
 const LEGACY_ADDRESS_UNSPENT_OUTPUT_DISK_BYTES: usize = 16;
 const LEGACY_SUBTREE_DISK_BYTES: usize = 35;
 const LEGACY_SNAPSHOT_BASE_DISK_BYTES: usize = 2 * LEGACY_HEIGHT_DISK_BYTES + 32 + 32 + 1;
+const MIGRATION_METADATA_FILE_NAME: &str = "zebra-fixed-height-migration";
+static NEXT_MIGRATION_OPERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Implements the v33 variable-width height migration.
 pub struct Upgrade;
@@ -210,8 +218,8 @@ impl DiskFormatUpgrade for Upgrade {
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        let source = open_source(db)
-            .expect("the fixed-width checkpoint must be readable during its migration");
+        let source =
+            open_source(db).expect("the fixed-width checkpoint must be readable during its migration");
         let live = db.disk_db().inner();
 
         for family in AFFECTED_FAMILIES {
@@ -271,6 +279,44 @@ pub(crate) fn is_required(change: &DbFormatChange) -> bool {
     older_disk_version < &v33 && newer_running_version >= &v33
 }
 
+fn migration_metadata_path(db: &ZebraDb) -> PathBuf {
+    checkpoint_paths(db).0.with_extension("migration")
+}
+
+fn new_migration_operation() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("migration operation timestamps must be after the Unix epoch")
+        .as_nanos();
+    let sequence = NEXT_MIGRATION_OPERATION.fetch_add(1, Ordering::Relaxed);
+    format!("{timestamp}-{}-{sequence}", std::process::id())
+}
+
+fn write_migration_metadata(path: PathBuf, operation: &str) -> Result<(), BoxError> {
+    atomic_write(path, operation.as_bytes())??;
+    Ok(())
+}
+
+fn check_migration_metadata(db: &ZebraDb, checkpoint: &Path) -> Result<(), StateInitError> {
+    let invalid = |source: BoxError| StateInitError::HistoryRead {
+        path: db.path().to_path_buf(),
+        source,
+    };
+    let live_operation = fs::read_to_string(migration_metadata_path(db))
+        .map_err(|source| invalid(Box::new(source)))?;
+    let checkpoint_operation = fs::read_to_string(checkpoint.join(MIGRATION_METADATA_FILE_NAME))
+        .map_err(|source| invalid(Box::new(source)))?;
+    if live_operation.is_empty() || live_operation != checkpoint_operation {
+        return Err(invalid(
+            "migration checkpoint operation metadata is missing or does not match the active \
+             migration; remove only the derived checkpoint before restarting the migration"
+                .into(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Creates or reopens the immutable checkpoint, checks pruned-state settings, and reads its tip.
 ///
 /// The checkpoint is renamed into place only after RocksDB finishes it. If checkpoint creation is
@@ -282,6 +328,15 @@ pub(crate) fn prepare(db: &ZebraDb) -> Result<Option<Height>, StateInitError> {
         db.disk_db()
             .create_checkpoint(&temporary)
             .expect("creating the fixed-width migration checkpoint must succeed");
+        let operation = new_migration_operation();
+        write_migration_metadata(migration_metadata_path(db), &operation)
+            .and_then(|()| {
+                write_migration_metadata(temporary.join(MIGRATION_METADATA_FILE_NAME), &operation)
+            })
+            .map_err(|source| StateInitError::HistoryRead {
+                path: db.path().to_path_buf(),
+                source,
+            })?;
         fs::rename(&temporary, &checkpoint)
             .expect("a completed migration checkpoint must be renameable into place");
     }
@@ -324,6 +379,7 @@ pub(crate) fn finish(db: &ZebraDb) {
     let (checkpoint, temporary) = checkpoint_paths(db);
     remove_directory(&checkpoint);
     remove_directory(&temporary);
+    remove_file(&migration_metadata_path(db));
 }
 
 fn checkpoint_paths(db: &ZebraDb) -> (PathBuf, PathBuf) {
@@ -346,8 +402,17 @@ fn remove_directory(path: &PathBuf) {
     }
 }
 
+fn remove_file(path: &PathBuf) {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("removing migration metadata {path:?} must succeed: {error}"),
+    }
+}
+
 fn open_source(db: &ZebraDb) -> Result<DB, StateInitError> {
     let (checkpoint, _) = checkpoint_paths(db);
+    check_migration_metadata(db, &checkpoint)?;
     let source =
         DiskDb::open_read_only(&checkpoint).map_err(|source| StateInitError::HistoryRead {
             path: db.path().to_path_buf(),
@@ -373,7 +438,50 @@ fn open_source(db: &ZebraDb) -> Result<DB, StateInitError> {
         ));
     }
 
+    if current_height_markers_exist(&source, db.path())? {
+        return Err(invalid(
+            "migration source contains variable-height records; restore its format version \
+             instead of running the legacy migration again"
+                .into(),
+        ));
+    }
+
     Ok(source)
+}
+
+pub(crate) fn current_height_markers_exist(db: &DB, path: &Path) -> Result<bool, StateInitError> {
+    let Some(hashes) = db.cf_handle("hash_by_height") else {
+        return Ok(false);
+    };
+    for height in [Height::MIN, Height(1)] {
+        if db
+            .get_pinned_cf(&hashes, height.as_bytes())
+            .map_err(|source| StateInitError::HistoryRead {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?
+            .is_some()
+        {
+            return Ok(true);
+        }
+    }
+
+    let mut heights = db.raw_iterator_cf(&hashes);
+    heights.seek_to_first();
+    if heights
+        .key()
+        .is_some_and(|key| key.len() != LEGACY_HEIGHT_DISK_BYTES)
+    {
+        return Ok(true);
+    }
+    heights
+        .status()
+        .map_err(|source| StateInitError::HistoryRead {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })?;
+
+    Ok(false)
 }
 
 fn legacy_tip(db: &ZebraDb, source: &DB) -> Result<Option<Height>, StateInitError> {
