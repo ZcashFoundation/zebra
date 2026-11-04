@@ -113,7 +113,7 @@ async fn shielded_block_transaction_batch_does_not_wait_for_idle() {
                         &Network::Mainnet,
                         Default::default(),
                     )?;
-                Ok(zebra_state::Response::ValidBlockProposal(Box::new(
+                Ok(zebra_state::Response::ValidBlockProposal(Arc::new(
                     contextual,
                 )))
             }

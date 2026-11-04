@@ -1597,6 +1597,11 @@ impl Chain {
         self.blocks.values().next_back().map(Arc::as_ref)
     }
 
+    /// Returns the shared allocation of the block at the tip of this chain, if any.
+    pub(crate) fn tip_block_arc(&self) -> Option<Arc<ContextuallyVerifiedBlock>> {
+        self.blocks.values().next_back().cloned()
+    }
+
     /// Returns true if the non-finalized part of this chain is empty.
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()

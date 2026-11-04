@@ -48,7 +48,7 @@ pub(super) async fn cache_proposal(
     key: [u8; 32],
     block: Arc<block::Block>,
     transaction_bytes: usize,
-    contextual: Box<zs::ContextuallyVerifiedBlock>,
+    contextual: Arc<zs::ContextuallyVerifiedBlock>,
 ) {
     let (contextual, wire, retained_bytes) = AbortOnDropHandle::new({
         let block = block.clone();
@@ -78,7 +78,7 @@ pub(super) async fn cache_proposal(
             key,
             transaction_bytes,
             block,
-            contextual: Arc::from(contextual),
+            contextual,
             wire,
             retained_bytes,
         });

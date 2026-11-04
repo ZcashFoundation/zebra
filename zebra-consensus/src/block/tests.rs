@@ -1914,9 +1914,16 @@ async fn check_proposal_commits(mined: bool, replacement: Option<usize>, peer: b
                     None => {}
                     _ => unreachable!("the test only replaces, evicts, or changes caches"),
                 }
+                // The state's prepared chain can share the entry's data, so a match is live
+                // only while this verifier's cache still holds the entry.
+                let entry = decoded.matched.as_ref().unwrap().0.as_ptr();
                 assert_eq!(
-                    decoded.matched.as_ref().unwrap().0.upgrade().is_some(),
-                    replacement.is_none() || replacement == Some(1),
+                    verifier
+                        .proposals
+                        .borrow()
+                        .iter()
+                        .any(|proposal| Arc::as_ptr(&proposal.contextual) == entry),
+                    replacement.is_none(),
                 );
             }
             let reuse = cached && !matches!(replacement, Some(0 | 1));
@@ -2427,7 +2434,7 @@ fn cancelled_proposal_is_not_cached() {
             [0; 32],
             block,
             0,
-            Box::new(contextual),
+            Arc::new(contextual),
         ));
         // Queue accounting without polling its result, just as a tip change can win the select.
         assert!(caching.as_mut().now_or_never().is_none());
@@ -2521,7 +2528,7 @@ async fn full_size_transparent_proposals_keep_eight_entries() {
             [key; 32],
             block.clone(),
             block.transactions.zcash_serialized_size(),
-            Box::new(contextual.clone()),
+            Arc::new(contextual.clone()),
         )
         .await;
     }
@@ -2561,7 +2568,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
             [key; 32],
             ordinary.clone(),
             ordinary.transactions.zcash_serialized_size(),
-            Box::new(small.clone()),
+            Arc::new(small.clone()),
         )
         .await;
     }
@@ -2631,7 +2638,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
             [key; 32],
             large.clone(),
             large.transactions.zcash_serialized_size(),
-            Box::new(large_contextual.clone()),
+            Arc::new(large_contextual.clone()),
         )
         .await;
     }

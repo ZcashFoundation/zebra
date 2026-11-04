@@ -950,7 +950,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                             Response::Utxo(utxo.utxo)
                         }
                         Request::CheckBlockProposalValidity(block) => {
-                            Response::ValidBlockProposal(Box::new(
+                            Response::ValidBlockProposal(Arc::new(
                                 ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                                     block,
                                     HashMap::from([(outpoint, utxo)]),
