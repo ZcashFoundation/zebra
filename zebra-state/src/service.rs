@@ -1277,13 +1277,13 @@ impl Service<Request> for StateService {
         req.count_metric();
         let span = Span::current();
         let (req, contextual, notifications) = match req {
-            Request::CommitContextuallyVerifiedBlock(mut contextual) => {
-                // Move the output map into the queue's shared semantic metadata, without copying it.
+            Request::CommitContextuallyVerifiedBlock(contextual) => {
+                // Share the cached output map with the queue's semantic metadata.
                 let prepared = SemanticallyVerifiedBlock {
                     block: contextual.block.clone(),
                     hash: contextual.hash,
                     height: contextual.height,
-                    new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut contextual.new_outputs)),
+                    new_outputs: contextual.new_outputs.clone(),
                     transaction_hashes: contextual.transaction_hashes.clone(),
                     received_time: contextual.received_time,
                 };

@@ -35,7 +35,6 @@ pub type QueuedCheckpointVerified = (
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
-    // During queueing, the first field owns the cached result's new outputs.
     Option<Box<ContextuallyVerifiedBlock>>,
     Option<MinedBlockNotifications>,
 );
