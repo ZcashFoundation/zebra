@@ -115,6 +115,54 @@ Prometheus also generates `up{job="zebra"}` for scrape success. Alert on zero
 or missing scrape data separately from chain progress. This metric comes
 from Prometheus, not Zebra.
 
+## Block timing
+
+These histograms show how quickly a node accepts new blocks. Official release builds
+also send them to [Sentry](tracing.md#sentry-production-monitoring) as distributions
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
+
+| Metric | Unit | Description |
+|---|---|---|
+| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+
+The header time is set by the block's miner, so a single value is only approximate.
+Nodes that follow the same chain see the same header times, so comparing these
+values across nodes over the same period shows which nodes accept blocks sooner.
+In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
+`chain.height`, so nodes can be compared block by block.
+
+## Sync stall metrics
+
+These metrics show why the syncer stopped advancing the chain tip. Their labels have a fixed
+set of values. Block heights and hashes are in the matching log fields instead.
+
+Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter as
+one total per minute for each set of labels, and each gauge's latest value once a minute, along
+with `sync.downloads.in_flight`.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `sync.restart.count` | counter | `reason`, `made_progress` | Sync rounds that ended, by why they ended and whether the state tip advanced during the round |
+| `sync.block.error.count` | counter | `kind` | Block download and verify errors, including the ones the syncer recovers from without restarting |
+| `sync.downloads.oldest_age_seconds` | gauge | none | How long the oldest block still being downloaded or verified has been waiting, or 0 when none are |
+
+`reason` is one of:
+
+- `exhausted_tips`: the syncer downloaded every block its peers advertised. This is the normal end of a round.
+- `obtain_tips_timeout` or `obtain_tips_error`: asking peers for new block hashes timed out or failed. If a block they returned was still waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
+- `extend_tips_error`: asking peers to extend the known hashes failed.
+- `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang. If a block was waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
+- `block_error`: a block download or verify error restarted the sync. The error's `kind` is in the `waiting to restart sync` log.
+
+`kind` names the error, for example `not_found`, `download_timed_out`, `invalid`, `verify_timeout`,
+`utxo_lookup_timeout`, `already_verified`, or `cancelled`.
+
+When a round fails without advancing the state tip, Zebra logs a `sync failed without advancing the
+state tip` warning with the `reason`, `kind`, and `error`. The `chain updates have stalled` warning
+includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
+`oldest_in_flight_secs`.
+
 ## Network metric aggregation
 
 Network metrics omit per-peer labels to bound the number of time series.

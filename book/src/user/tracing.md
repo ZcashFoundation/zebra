@@ -147,8 +147,8 @@ export if exporter initialization fails.
 
 ## Sentry production monitoring
 
-[Sentry](https://sentry.io/) receives error reports, diagnostic logs, and
-release health sessions. With the [`sentry` feature](install.md#cargo-features),
+[Sentry](https://sentry.io/) receives error reports, diagnostic logs,
+release health sessions, and metrics. With the [`sentry` feature](install.md#cargo-features),
 set `SENTRY_DSN` to a valid project ingestion address to enable reporting.
 Leave it unset to disable reporting.
 
@@ -166,10 +166,19 @@ With Sentry enabled, Zebra sends:
   Sessions share a random identifier per run, so crash-free users measures
   runs, not people. A process killed before shutdown handling cannot send its
   final session update.
+- The [block timing](metrics.md#block-timing) and
+  [sync stall](metrics.md#sync-stall-metrics) metrics as Sentry metrics, along
+  with these metrics once a minute, which help compare nodes:
+  `sync.verified.block.count`, `gossip.verified.block.count`,
+  `zcash.mempool.size.transactions`, and
+  `zebra.state.rocksdb.total_disk_size_bytes`.
 
 Events carry `chain.network` and, once the progress task observes a chain tip,
 `chain.height` and `chain.network_upgrade`. Logs carry the same information
-as attributes; the height is numeric for aggregation.
+as attributes; the height is numeric for aggregation. Metrics carry
+`chain.network` and, once the node has a chain tip, `chain.network_upgrade`.
+They also carry `process.uptime_seconds`, the whole seconds since `zebrad`
+started, so queries can leave out the values recorded just after a restart.
 
 | Environment variable | Effect |
 | --- | --- |
