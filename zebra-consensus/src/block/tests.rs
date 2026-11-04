@@ -198,6 +198,125 @@ async fn proposal_error_waits_for_dispatched_transaction_siblings() {
     );
 }
 
+/// Byte admission happens before the blocking decoder can allocate a block.
+#[tokio::test]
+async fn proposal_bytes_are_admitted_before_deserialization() {
+    use std::sync::atomic::Ordering;
+
+    let _init_guard = zebra_test::init();
+    let state = tower::service_fn(|_| std::future::pending::<Result<zs::Response, BoxError>>());
+    let transactions = tower::service_fn(|_| {
+        std::future::pending::<Result<transaction::BlockResponse, BoxError>>()
+    });
+    let verifier = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+        .with_proposal_cache_bytes(1);
+    let cache = verifier.prepared_blocks();
+    let held = cache
+        .proposal_work
+        .as_ref()
+        .unwrap()
+        .try_admit(1)
+        .expect("the only proposal slot is initially available");
+    let bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+
+    assert!(matches!(
+        cache.deserialize_proposal(bytes.clone()).await,
+        Err(VerifyBlockError::ProposalMemoryPressure)
+    ));
+    assert_eq!(
+        verifier.proposal_deserializations.load(Ordering::SeqCst),
+        0,
+        "an over-budget proposal must not allocate a decoded block"
+    );
+
+    drop(held);
+    let proposal = cache
+        .deserialize_proposal(bytes.clone())
+        .await
+        .expect("capacity is released with the previous owner")
+        .expect("the valid test block decodes");
+    assert_eq!(proposal.block().zcash_serialize_to_vec().unwrap(), bytes);
+    assert_eq!(verifier.proposal_deserializations.load(Ordering::SeqCst), 1);
+}
+
+/// Concurrent no-PoW proposals are byte-bounded until all active work finishes, even if their
+/// callers stop waiting.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_no_pow_proposals_hold_admission_until_work_finishes() {
+    use tokio::sync::{mpsc, watch};
+
+    let _init_guard = zebra_test::init();
+    let network = zebra_chain::parameters::testnet::Parameters::build()
+        .with_disable_pow(true)
+        .to_network()
+        .unwrap();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let mut block = (*block).clone();
+    Arc::make_mut(&mut block.header).solution = equihash::Solution::for_proposal();
+    let block = Arc::new(block);
+
+    let (entered_tx, mut entered_rx) = mpsc::unbounded_channel();
+    let (release_tx, release_rx) = watch::channel(false);
+    let state = tower::service_fn(move |request| {
+        assert!(matches!(request, zs::Request::KnownBlock(_)));
+        let entered = entered_tx.clone();
+        let mut release = release_rx.clone();
+        async move {
+            let _ = entered.send(());
+            while !*release.borrow_and_update() {
+                release.changed().await.unwrap();
+            }
+            Err::<zs::Response, BoxError>("stop the test proposal".into())
+        }
+    });
+    let transactions = tower::service_fn(|_| {
+        std::future::pending::<Result<transaction::BlockResponse, BoxError>>()
+    });
+    let mut verifier =
+        SemanticBlockVerifier::new(&network, state, transactions).with_proposal_cache_bytes(1);
+    let cache = verifier.prepared_blocks();
+
+    let first = verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CheckProposal(block.clone()));
+    let first = tokio::spawn(first);
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx.recv())
+        .await
+        .expect("the first no-PoW proposal starts")
+        .expect("the state worker is running");
+    let second = verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CheckProposal(block));
+    assert!(matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), second).await,
+        Ok(Err(VerifyBlockError::ProposalMemoryPressure))
+    ));
+    assert_eq!(cache.proposal_work.as_ref().unwrap().available(), 0);
+
+    first.abort();
+    let _ = first.await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        cache.proposal_work.as_ref().unwrap().available(),
+        0,
+        "caller cancellation must not release the active worker's charge"
+    );
+    release_tx.send(true).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while cache.proposal_work.as_ref().unwrap().available() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("finishing state work releases the proposal charge");
+}
+
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
@@ -2449,6 +2568,7 @@ fn cancelled_proposal_is_not_cached() {
             block,
             0,
             Box::new(contextual),
+            None,
         ));
         // Queue accounting without polling its result, just as a tip change can win the select.
         assert!(caching.as_mut().now_or_never().is_none());
@@ -2544,6 +2664,7 @@ async fn full_size_transparent_proposals_keep_eight_entries() {
             block.clone(),
             block.transactions.zcash_serialized_size(),
             Box::new(contextual.clone()),
+            None,
         )
         .await;
     }
@@ -2585,6 +2706,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
             ordinary.clone(),
             ordinary.transactions.zcash_serialized_size(),
             Box::new(small.clone()),
+            None,
         )
         .await;
     }
@@ -2656,6 +2778,7 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
             large.clone(),
             large.transactions.zcash_serialized_size(),
             Box::new(large_contextual.clone()),
+            None,
         )
         .await;
     }
@@ -2677,6 +2800,19 @@ async fn proposal_cache_spent_outputs_share_the_byte_bound() {
 #[test]
 fn default_proposal_cache_bytes_is_eight_72_mib_proposals() {
     assert_eq!(DEFAULT_PROPOSAL_CACHE_BYTES, 603_979_776);
+}
+
+/// Applying the default cache limit does not enable proposal-work admission.
+#[test]
+fn default_proposal_cache_limit_leaves_work_unbounded() {
+    let state = tower::service_fn(|_| std::future::pending::<Result<zs::Response, BoxError>>());
+    let transactions = tower::service_fn(|_| {
+        std::future::pending::<Result<transaction::BlockResponse, BoxError>>()
+    });
+    let verifier = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+        .with_proposal_cache_bytes(DEFAULT_PROPOSAL_CACHE_BYTES);
+    assert!(verifier.proposal_work.is_none());
+    assert!(verifier.prepared_blocks().proposal_work.is_none());
 }
 
 /// The cache keeps only the newest proposals whose charges fit in its configured byte bound.
@@ -2708,6 +2844,7 @@ async fn proposal_cache_keeps_the_newest_proposals_within_its_byte_bound() {
                 block.clone(),
                 block.transactions.zcash_serialized_size(),
                 Box::new(contextual.clone()),
+                None,
             )
             .await;
         }

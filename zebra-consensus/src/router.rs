@@ -166,6 +166,7 @@ impl RouterError {
             RouterError::Block { source } => matches!(
                 **source,
                 VerifyBlockError::Commit(zebra_state::CommitBlockError::OrphanQueueFull)
+                    | VerifyBlockError::ProposalMemoryPressure
             ),
         }
     }
@@ -284,7 +285,7 @@ where
                 | Request::CommitDecoded(_, None) => {
                     self.checkpoint.call(block).map_err(Into::into).boxed()
                 }
-                Request::CheckProposal(_) => {
+                Request::CheckProposal(_) | Request::CheckProposalAdmitted(_) => {
                     unreachable!("proposals below the checkpoint were rejected")
                 }
             },

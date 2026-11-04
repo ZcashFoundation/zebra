@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use zebra_chain::block::Block;
 
-use super::DecodedBlock;
+use super::{AdmittedProposal, DecodedBlock};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 /// A request to the chain or block verifier
 pub enum Request {
     /// Performs semantic validation, then asks the state to validate context and commit the block.
@@ -38,6 +38,32 @@ pub enum Request {
     /// then asks the state to perform contextual validation.
     /// Does not commit the block to the state.
     CheckProposal(Arc<Block>),
+    /// Validates a proposal whose decoded body already owns work admission.
+    CheckProposalAdmitted(AdmittedProposal),
+}
+
+impl Clone for Request {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Commit(block) => Self::Commit(block.clone()),
+            Self::CommitWithRetention(block, retention) => {
+                Self::CommitWithRetention(block.clone(), retention.clone())
+            }
+            Self::CommitEarlyRelay(block) => Self::CommitEarlyRelay(block.clone()),
+            Self::CommitEarlyRelayWithRetention(block, retention) => {
+                Self::CommitEarlyRelayWithRetention(block.clone(), retention.clone())
+            }
+            Self::CommitMined(block, notifications) => {
+                Self::CommitMined(block.clone(), notifications.clone())
+            }
+            Self::CommitDecoded(block, notifications) => {
+                Self::CommitDecoded(block.clone(), notifications.clone())
+            }
+            Self::CheckProposal(block) => Self::CheckProposal(block.clone()),
+            // Every cloned request must acquire its own work admission at verification.
+            Self::CheckProposalAdmitted(proposal) => Self::CheckProposal(proposal.block()),
+        }
+    }
 }
 
 impl Request {
@@ -51,6 +77,7 @@ impl Request {
             | Request::CommitMined(block, _)
             | Request::CheckProposal(block) => Arc::clone(block),
             Request::CommitDecoded(decoded, _) => decoded.block(),
+            Request::CheckProposalAdmitted(proposal) => proposal.block(),
         }
     }
 
@@ -63,7 +90,8 @@ impl Request {
             | Request::CommitEarlyRelay(_)
             | Request::CommitMined(_, _)
             | Request::CommitDecoded(_, _)
-            | Request::CheckProposal(_) => None,
+            | Request::CheckProposal(_)
+            | Request::CheckProposalAdmitted(_) => None,
         }
     }
 
@@ -76,7 +104,7 @@ impl Request {
             | Request::CommitEarlyRelayWithRetention(_, _)
             | Request::CommitMined(_, _)
             | Request::CommitDecoded(_, _) => false,
-            Request::CheckProposal(_) => true,
+            Request::CheckProposal(_) | Request::CheckProposalAdmitted(_) => true,
         }
     }
 }
