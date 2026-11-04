@@ -667,7 +667,7 @@ where
             mempool: None,
             mempool_setup_rx: None,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
-            blocking_checks: Arc::new(Semaphore::new(4)),
+            blocking_checks: Arc::new(Semaphore::new(8)),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
             #[cfg(test)]
