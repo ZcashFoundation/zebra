@@ -18,8 +18,6 @@ use crate::{BoxError, WatchReceiver};
 mod tests;
 
 const LIFETIME: Duration = Duration::from_secs(15);
-const REJECTION_LIFETIME: Duration = Duration::from_secs(60);
-const MAX_REJECTIONS: usize = 8;
 // Includes wire contents and decoded metadata, using the shared conservative retention charge.
 const MAX_RETAINED_BYTES: usize = 64 * 1024 * 1024;
 
@@ -31,27 +29,11 @@ struct Entry {
     deadline: tokio::time::Instant,
 }
 
-#[derive(Debug)]
-struct Rejections {
-    entries: [Option<(block::Hash, tokio::time::Instant)>; MAX_REJECTIONS],
-    next: usize,
-}
-
-impl Rejections {
-    fn contains(&self, hash: block::Hash, now: tokio::time::Instant) -> bool {
-        self.entries
-            .iter()
-            .flatten()
-            .any(|(rejected, deadline)| *rejected == hash && now < *deadline)
-    }
-}
-
 /// Internal cache ownership does not enable publication; only external subscriptions do.
 #[derive(Debug)]
 pub(super) struct EarlyRelayState {
     snapshot: WatchReceiver<NonFinalizedState>,
     entry: Mutex<Option<Entry>>,
-    rejections: Mutex<Rejections>,
     changes: watch::Sender<Option<block::Hash>>,
     slot: Arc<Semaphore>,
     computation: Arc<Semaphore>,
@@ -62,10 +44,6 @@ impl EarlyRelayState {
         Arc::new(Self {
             snapshot,
             entry: Mutex::new(None),
-            rejections: Mutex::new(Rejections {
-                entries: [None; MAX_REJECTIONS],
-                next: 0,
-            }),
             changes: watch::Sender::new(None),
             slot: Arc::new(Semaphore::new(1)),
             computation: Arc::new(Semaphore::new(1)),
@@ -87,11 +65,51 @@ impl EarlyRelayState {
         })
     }
 
-    pub(super) fn is_rejected(&self, hash: block::Hash) -> bool {
-        self.rejections
+    fn rejections(&self) -> Arc<Mutex<super::non_finalized_state::RejectedBlocks>> {
+        self.snapshot
+            .borrow_mapped(|state| state.rejected_blocks.clone())
+    }
+
+    pub(super) fn allows_early_relay(&self, hash: block::Hash) -> bool {
+        let rejected = self.rejections();
+        let rejected = rejected
             .lock()
-            .expect("early relay rejection lock is not poisoned")
-            .contains(hash, tokio::time::Instant::now())
+            .expect("authenticated rejection lock is not poisoned");
+        !rejected.is_full() && !rejected.contains(hash)
+    }
+
+    fn reject(&self, hash: block::Hash, height: block::Height) -> bool {
+        let rejected = self.rejections();
+        let (full, became_full) = {
+            let mut rejected = rejected
+                .lock()
+                .expect("authenticated rejection lock is not poisoned");
+            let was_full = rejected.is_full();
+            let full = rejected.reject(hash, height);
+            (full, full && !was_full)
+        };
+        if became_full {
+            tracing::warn!(
+                capacity = super::non_finalized_state::MAX_EARLY_RELAY_REJECTIONS,
+                "early relay and speculative mining disabled because rejection tracking is full"
+            );
+        }
+        self.withdraw((!full).then_some(hash));
+        full
+    }
+
+    fn withdraw(&self, hash: Option<block::Hash>) {
+        let mut slot = self
+            .entry
+            .lock()
+            .expect("early relay cache lock is not poisoned");
+        if slot
+            .as_ref()
+            .is_some_and(|entry| hash.is_none_or(|hash| entry.hash == hash))
+        {
+            *slot = None;
+            self.changes.send_replace(None);
+        }
     }
 
     fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
@@ -109,12 +127,7 @@ impl EarlyRelayState {
         let parent = block.header.previous_block_hash;
         let alive = guard.alive.subscribe();
         let deadline = tokio::time::Instant::now() + LIFETIME;
-        // Keep rejection lookup and publication atomic with rejection-driven withdrawal.
-        let rejections = self
-            .rejections
-            .lock()
-            .expect("early relay rejection lock is not poisoned");
-        if rejections.contains(hash, tokio::time::Instant::now()) {
+        if !self.allows_early_relay(hash) {
             return;
         }
         let mut slot = self
@@ -130,10 +143,14 @@ impl EarlyRelayState {
             alive: alive.clone(),
             deadline,
         });
-        // Store before notifying: an observed advertisement must already be servable.
-        self.changes.send_replace(Some(hash));
         drop(slot);
-        drop(rejections);
+        // Recheck after storing without nesting the rejection and cache locks. Notifications
+        // remain hints: serving checks rejection again, including a concurrent withdrawal.
+        if !self.allows_early_relay(hash) {
+            self.withdraw(Some(hash));
+            return;
+        }
+        self.changes.send_replace(Some(hash));
         let state = self.clone();
         tokio::spawn(async move {
             let _permit = permit;
@@ -222,7 +239,13 @@ impl EarlyRelayCache {
             self.state.changes.send_replace(None);
             return None;
         }
-        (entry.hash == *hash).then(|| entry.block.clone())
+        let block = (entry.hash == *hash).then(|| entry.block.clone())?;
+        drop(slot);
+        if !self.state.allows_early_relay(*hash) {
+            self.state.withdraw(Some(*hash));
+            return None;
+        }
+        Some(block)
     }
 
     /// Subscribes to the current candidate hash and withdrawals (`None`).
@@ -242,46 +265,30 @@ pub struct EarlyRelayGuard {
     alive: watch::Sender<()>,
     state: Arc<EarlyRelayState>,
     hash: block::Hash,
+    height: block::Height,
 }
 
 impl EarlyRelayGuard {
-    /// Returns whether this authenticated hash has a recent deterministic validation failure.
+    /// Returns whether this authenticated hash was deterministically rejected.
+    ///
+    /// Capacity alone does not reject an unknown block: ordinary full validation must remain
+    /// available so commits and finalization can free rejection capacity.
     pub fn is_rejected(&self) -> bool {
-        let now = tokio::time::Instant::now();
-        self.state
-            .rejections
+        let rejected = self.state.rejections();
+        let rejected = rejected
             .lock()
-            .expect("early relay rejection lock is not poisoned")
-            .contains(self.hash, now)
+            .expect("authenticated rejection lock is not poisoned");
+        rejected.contains(self.hash)
     }
 
-    /// Suppresses this authenticated hash for 60 seconds without retaining its body.
+    /// Suppresses this authenticated hash until its height is finalized, without retaining its body.
     ///
     /// Call only for deterministic validation failures, never time, state availability, lookup,
-    /// infrastructure, or cancellation errors. Eight hashes are retained in insertion order;
-    /// repeated rejection does not extend the deadline. A matching published body is withdrawn
-    /// immediately, including one retained by another verifier.
+    /// infrastructure, or cancellation errors. A matching published body is withdrawn immediately,
+    /// including one retained by another verifier. Overflow disables all early relay until the
+    /// unrecorded rejections' heights are finalized.
     pub fn reject(&self) {
-        let now = tokio::time::Instant::now();
-        let mut rejections = self
-            .state
-            .rejections
-            .lock()
-            .expect("early relay rejection lock is not poisoned");
-        if !rejections.contains(self.hash, now) {
-            let next = rejections.next;
-            rejections.entries[next] = Some((self.hash, now + REJECTION_LIFETIME));
-            rejections.next = (next + 1) % MAX_REJECTIONS;
-        }
-        let mut entry = self
-            .state
-            .entry
-            .lock()
-            .expect("early relay cache lock is not poisoned");
-        if entry.as_ref().is_some_and(|entry| entry.hash == self.hash) {
-            *entry = None;
-            self.state.changes.send_replace(None);
-        }
+        self.state.reject(self.hash, self.height);
     }
 }
 
@@ -293,6 +300,59 @@ impl PartialEq for EarlyRelayGuard {
 impl Eq for EarlyRelayGuard {}
 
 impl ReadStateService {
+    /// Authenticates a verifier-reported deterministic failure without publishing speculative work.
+    pub(super) async fn reject_block(self, block: Arc<Block>) -> bool {
+        let permit = self
+            .early_relay
+            .computation
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("the authentication semaphore is never closed");
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let Some(height) = block.coinbase_height() else {
+                return false;
+            };
+            let merkle_root: block::merkle::Root =
+                block.transactions.iter().map(|tx| tx.hash()).collect();
+            if merkle_root != block.header.merkle_root {
+                return false;
+            }
+            let snapshot = self.latest_non_finalized_state();
+            let Some(tip) = read::best_tip(&snapshot, &self.db) else {
+                return false;
+            };
+            let hash = block.hash();
+            if read::difficulty::mining_candidate_header_context(
+                &snapshot,
+                &self.db,
+                &self.network,
+                block,
+                tip,
+            )
+            .is_none()
+            {
+                return false;
+            }
+            let full = self.early_relay.reject(hash, height);
+            self.mining_candidate.send_if_modified(|candidate| {
+                if candidate
+                    .as_ref()
+                    .is_some_and(|(_, info, _, _)| full || info.tip_hash == hash)
+                {
+                    *candidate = None;
+                    true
+                } else {
+                    false
+                }
+            });
+            true
+        })
+        .await
+        .expect("rejection authentication uses validated state snapshots")
+    }
+
     pub(super) async fn early_relay(
         self,
         block: Arc<Block>,
@@ -343,6 +403,7 @@ impl ReadStateService {
             alive: watch::Sender::new(()),
             state: self.early_relay.clone(),
             hash: block.hash(),
+            height,
         };
         if guard.is_rejected() {
             return Ok(Some(guard));

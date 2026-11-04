@@ -142,13 +142,24 @@ async fn decoded_size_skips_only_size_serialization() {
                         ))
                     }
                 });
-                let state = tower::service_fn(|request| async move {
-                    match request {
-                        zs::Request::KnownBlock(_) => {
-                            Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+                let rejections = Arc::new(AtomicUsize::new(0));
+                let rejected = rejections.clone();
+                let state = tower::service_fn(move |request| {
+                    let rejected = rejected.clone();
+                    async move {
+                        match request {
+                            zs::Request::KnownBlock(_) => {
+                                Ok::<_, BoxError>(zs::Response::KnownBlock(None))
+                            }
+                            zs::Request::MiningCandidate(_) => {
+                                Ok(zs::Response::MiningCandidate(None))
+                            }
+                            zs::Request::RejectBlock(_) => {
+                                rejected.fetch_add(1, Ordering::SeqCst);
+                                Ok(zs::Response::Rejected(false))
+                            }
+                            _ => panic!("ordinary decoding must not authorize a contextual commit"),
                         }
-                        zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
-                        _ => panic!("ordinary decoding must not authorize a contextual commit"),
                     }
                 });
                 let mut verifier =
@@ -174,6 +185,10 @@ async fn decoded_size_skips_only_size_serialization() {
                 }
                 assert_eq!(calls.load(Ordering::SeqCst), usize::from(!changed_body));
                 assert_eq!(
+                    rejections.load(Ordering::SeqCst),
+                    usize::from(!changed_body)
+                );
+                assert_eq!(
                     verifier.block_size_serializations.load(Ordering::SeqCst),
                     usize::from(constructed)
                 );
@@ -190,6 +205,10 @@ async fn decoded_size_skips_only_size_serialization() {
                     Err(VerifyBlockError::OversizedBlock)
                 ));
                 assert_eq!(calls.load(Ordering::SeqCst), usize::from(!changed_body));
+                assert_eq!(
+                    rejections.load(Ordering::SeqCst),
+                    usize::from(!changed_body)
+                );
             }
         }
     })
