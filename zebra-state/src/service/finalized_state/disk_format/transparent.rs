@@ -23,6 +23,30 @@ use crate::service::finalized_state::disk_format::{
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// The name of the [balance](AddressBalanceLocation) by transparent address column family.
+pub const BALANCE_BY_TRANSPARENT_ADDR: &str = "balance_by_transparent_addr";
+
+/// The name of the [`BALANCE_BY_TRANSPARENT_ADDR`] column family's merge operator
+pub const BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP: &str = "fetch_add_balance_and_received";
+
+/// A RocksDB merge operator for the [`BALANCE_BY_TRANSPARENT_ADDR`] column family.
+pub fn fetch_add_balance_and_received(
+    _: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &rocksdb::MergeOperands,
+) -> Option<Vec<u8>> {
+    // # Correctness
+    //
+    // Merge operands are ordered, but may be combined without an existing value in partial merges, so
+    // we may need to return a negative balance here.
+    existing_val
+        .into_iter()
+        .chain(operands)
+        .map(AddressBalanceLocationChange::from_bytes)
+        .reduce(|a, b| (a + b).expect("address balance/received should not overflow"))
+        .map(|address_balance_location| address_balance_location.as_bytes().to_vec())
+}
+
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
 

@@ -33,15 +33,13 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             transparent::{
-                AddressBalanceLocation, AddressBalanceLocationChange, AddressBalanceLocationInner,
-                AddressBalanceLocationUpdates, AddressLocation, AddressTransaction,
-                AddressUnspentOutput, OutputLocation,
+                AddressBalanceLocation, AddressBalanceLocationInner, AddressBalanceLocationUpdates,
+                AddressLocation, AddressTransaction, AddressUnspentOutput, OutputLocation,
             },
             TransactionLocation,
         },
         zebra_db::ZebraDb,
     },
-    FromDisk, IntoDisk,
 };
 
 use super::super::TypedColumnFamily;
@@ -49,29 +47,11 @@ use super::super::TypedColumnFamily;
 /// The name of the transaction hash by spent outpoints column family.
 pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
 
-/// The name of the [balance](AddressBalanceLocation) by transparent address column family.
-pub const BALANCE_BY_TRANSPARENT_ADDR: &str = "balance_by_transparent_addr";
-
-/// The name of the [`BALANCE_BY_TRANSPARENT_ADDR`] column family's merge operator
-pub const BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP: &str = "fetch_add_balance_and_received";
-
-/// A RocksDB merge operator for the [`BALANCE_BY_TRANSPARENT_ADDR`] column family.
-pub fn fetch_add_balance_and_received(
-    _: &[u8],
-    existing_val: Option<&[u8]>,
-    operands: &rocksdb::MergeOperands,
-) -> Option<Vec<u8>> {
-    // # Correctness
-    //
-    // Merge operands are ordered, but may be combined without an existing value in partial merges, so
-    // we may need to return a negative balance here.
-    existing_val
-        .into_iter()
-        .chain(operands)
-        .map(AddressBalanceLocationChange::from_bytes)
-        .reduce(|a, b| (a + b).expect("address balance/received should not overflow"))
-        .map(|address_balance_location| address_balance_location.as_bytes().to_vec())
-}
+#[allow(unused_imports)]
+pub use crate::service::finalized_state::disk_format::transparent::{
+    fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+};
 
 /// The type for reading value pools from the database.
 ///

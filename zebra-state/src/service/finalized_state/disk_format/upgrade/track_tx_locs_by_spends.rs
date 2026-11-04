@@ -1,16 +1,11 @@
 //! Tracks transaction locations by their inputs and revealed nullifiers.
 
-use std::sync::Arc;
-
 use crossbeam_channel::{Receiver, TryRecvError};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use zebra_chain::block::Height;
 
-use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain, read},
-    Spend,
-};
+use crate::{service::finalized_state::ZebraDb, Spend};
 
 use super::{super::super::DiskWriteBatch, CancelFormatChange};
 
@@ -56,9 +51,7 @@ pub fn run(
                         .chain(tx.ironwood_nullifiers().map(Spend::from))
                         .next()
                     {
-                        if read::spending_transaction_hash::<Arc<Chain>>(None, zebra_db, spend)
-                            .is_some()
-                        {
+                        if zebra_db.spending_transaction_hash(&spend).is_some() {
                             // Skip transactions in blocks with existing indexes
                             return Ok(());
                         } else {
