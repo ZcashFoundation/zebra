@@ -93,7 +93,7 @@ pub trait DiskFormatUpgrade {
         self.needs_migration()
     }
 
-    /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
+    /// Returns true if the upgrade is a major upgrade that can reuse an earlier registered cache.
     fn is_reusable_major_upgrade(&self) -> bool {
         let version = self.version();
         version.minor == 0 && version.patch == 0
@@ -120,7 +120,7 @@ fn format_upgrades(
         // the database is opened, but the genesis Ironwood tree and anchor must be backfilled so an
         // upgraded database matches a genesis-synced one (otherwise ironwood_tree_for_tip() panics
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
-        // major-version upgrade that is restorable from the previous major database format version.
+        // major-version upgrade that is restorable from an earlier registered database format.
         Box::new(add_ironwood_tree::Upgrade),
         // Legacy value pools and block info default the absent NSM balance to zero, so existing
         // records need no rewrite even though new writes use the wider v29 layout.
@@ -156,8 +156,7 @@ fn format_upgrades(
         .filter(move |upgrade| upgrade.version() > min_version())
 }
 
-/// Returns a list of all the major db format versions that can restored from the
-/// previous major database format.
+/// Returns the destination major versions that can reuse an earlier registered database format.
 pub fn restorable_db_versions() -> Vec<u64> {
     format_upgrades(None)
         .filter_map(|upgrade| {
