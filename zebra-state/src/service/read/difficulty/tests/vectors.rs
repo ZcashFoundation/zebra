@@ -222,8 +222,12 @@ fn mining_candidate_matches_committed_block() {
             );
         }
 
-        let committed =
-            get_block_template_chain_info(&non_finalized, &finalized.db, &network).unwrap();
+        let committed = get_block_template_chain_info(
+            &NonFinalizedState::new(&network),
+            &finalized.db,
+            &network,
+        )
+        .unwrap();
         assert_eq!(early.tip_hash, committed.tip_hash);
         assert_eq!(early.tip_height, committed.tip_height);
         assert_eq!(early.expected_difficulty, committed.expected_difficulty);
@@ -347,6 +351,8 @@ fn mining_candidate_batch_trees_match_scalar_updates() {
             batch.create_orchard_tree(db, &height, &trees.orchard);
             batch.create_ironwood_tree(db, &height, &trees.ironwood);
             db.write_batch(batch).unwrap();
+            let mut non_finalized = non_finalized.clone();
+            non_finalized.set_test_snapshot_parent(parent.clone(), db);
             let snapshot = trees.clone();
             let sapling_result = candidate
                 .sapling_note_commitments()
@@ -511,7 +517,51 @@ fn mining_candidate_rejects_invalid_parent_auth_data_and_work() {
     );
 }
 
-/// Seed a real finalized parent with empty note trees and a full synthetic header window.
+/// A finalized tip is not sufficient parent context while the published snapshot is empty.
+#[test]
+fn candidate_authentication_requires_a_snapshot_parent() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let parent = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let candidate = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let (finalized, snapshot, candidate) = mining_candidate_parent_state(&parent, candidate);
+    assert!(authenticated_candidate_header(
+        &snapshot,
+        &finalized.db,
+        &network,
+        candidate.clone(),
+        true,
+    )
+    .unwrap()
+    .is_some());
+    for best_tip_only in [false, true] {
+        assert!(authenticated_candidate_header(
+            &NonFinalizedState::new(&network),
+            &finalized.db,
+            &network,
+            candidate.clone(),
+            best_tip_only,
+        )
+        .unwrap()
+        .is_none());
+    }
+    assert!(
+        mining_candidate_chain_info(
+            &NonFinalizedState::new(&network),
+            &finalized.db,
+            &network,
+            candidate,
+        )
+        .is_some(),
+        "speculative mining work remains available without authorizing early relay",
+    );
+}
+
+/// Seeds a snapshot parent with empty note trees and a full synthetic finalized header window.
 fn mining_candidate_parent_state(
     parent: &Arc<Block>,
     mut candidate: Arc<Block>,
@@ -530,7 +580,7 @@ fn mining_candidate_parent_state(
         primitives::zcash_history::BlockCommitmentTreeRoots,
     };
 
-    let (finalized, non_finalized, _) = new_state_with_mainnet_genesis();
+    let (finalized, mut non_finalized, _) = new_state_with_mainnet_genesis();
     let db = &finalized.db;
     let height = parent.coinbase_height().unwrap();
     let mut batch = DiskWriteBatch::new();
@@ -546,9 +596,19 @@ fn mining_candidate_parent_state(
     );
     // Missing historical headers would force powLimit and hide retargeting regressions.
     // Keep the real parent, and adjust the candidate's target to the synthesized older context.
+    let mut ancestor_hash = parent.hash();
     for index in 0..MAX_POW_ADJUSTMENT_BLOCK_SPAN {
         let mut header = *parent.header;
         header.time -= chrono::Duration::seconds(i64::try_from(index).unwrap() * 75);
+        if index > 0 {
+            header.previous_block_hash = [u8::try_from(index).unwrap(); 32].into();
+        }
+        batch.zs_insert(
+            &db.db().cf_handle("height_by_hash").unwrap(),
+            ancestor_hash,
+            (height - i64::try_from(index).unwrap()).unwrap(),
+        );
+        ancestor_hash = header.previous_block_hash;
         batch.zs_insert(
             &db.db().cf_handle("block_header_by_height").unwrap(),
             (height - i64::try_from(index).unwrap()).unwrap(),
@@ -594,6 +654,7 @@ fn mining_candidate_parent_state(
         batch.update_history_tree(db, &history);
         db.write_batch(batch).unwrap();
     }
+    non_finalized.set_test_snapshot_parent(parent.clone(), db);
     (finalized, non_finalized, candidate)
 }
 

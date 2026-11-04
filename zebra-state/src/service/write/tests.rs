@@ -96,15 +96,8 @@ async fn write_worker_survives_rejected_root_invalidation() {
     let before = state.clone();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
-        finalized,
-        state,
-        tip_sender,
-        state_sender,
-        false,
-        None,
-        super::super::early_relay::EarlyRelayState::new(None),
-    );
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -170,15 +163,8 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     let (finalized, state, genesis) = new_state_with_mainnet_genesis();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
-        finalized,
-        state,
-        tip_sender,
-        state_sender,
-        false,
-        None,
-        super::super::early_relay::EarlyRelayState::new(None),
-    );
+    let (sender, _resets, _rejections, worker) =
+        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -300,7 +286,6 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        early_relay: super::super::early_relay::EarlyRelayState::new(None),
     };
     tracing::subscriber::with_default(
         CloseStateOnError {
@@ -498,7 +483,6 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
     };
     // Observe the synchronous batch write even when release builds compile out trace events.
     let recorder = FinalizedWriteRecorder(Arc::new(AtFinalizedWrite {
