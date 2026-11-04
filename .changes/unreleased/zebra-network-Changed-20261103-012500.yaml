@@ -1,0 +1,9 @@
+project: zebra-network
+kind: Changed
+body: >-
+  Raised `DEFAULT_PEERSET_INITIAL_TARGET_SIZE` from 25 to 250 peers. The default
+  `Config` now allows 750 outbound and 1,250 inbound connections, 2,000 in total.
+  `PEER_ADDR_RESPONSE_LIMIT` is now 375 addresses per `getaddr` response, half the new
+  default outbound limit, up from 37. Each connection uses half the configured outbound
+  limit, so setting `peerset_initial_target_size = 25` keeps the previous response limit.
+time: 2026-11-03T06:25:00Z

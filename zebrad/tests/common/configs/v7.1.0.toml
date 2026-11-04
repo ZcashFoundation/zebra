@@ -78,7 +78,7 @@ initial_testnet_peers = [
 listen_addr = "[::]:8233"
 max_connections_per_ip = 1
 network = "Mainnet"
-peerset_initial_target_size = 25
+peerset_initial_target_size = 250
 
 [notify]
 

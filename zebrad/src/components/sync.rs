@@ -283,7 +283,9 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // 2/3 of the default outbound peer limit.
+            // Limits the memory and bandwidth used by in-flight block downloads: at most 50 blocks
+            // of up to 2 MB each, 100 MB in total. This limit is independent of the peer connection
+            // limits, so it does not change with the default peer set size.
             download_concurrency_limit: 50,
 
             // A few max-length checkpoints.

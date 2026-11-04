@@ -56,6 +56,10 @@ zebrad generate --output-file "${XDG_CONFIG_HOME:-$HOME/.config}/zebrad.toml"
 
 Keep only fields that need an explicit setting.
 
+The default peer limits allow up to 2,000 connections, so raise the process
+open file limit to at least 4,096 before starting; see
+[open file limit](requirements.md#open-file-limit).
+
 The `[network] network` field selects `"Mainnet"` by default. To use public
 Testnet, set:
 

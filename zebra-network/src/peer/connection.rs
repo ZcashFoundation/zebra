@@ -24,8 +24,8 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
-        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
+        MAX_CACHED_ADDRS_PER_PEER, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
+        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -154,6 +154,7 @@ impl Handler {
         msg: Message,
         cached_addrs: &mut Vec<MetaAddr>,
         transient_addr: Option<PeerSocketAddr>,
+        peer_addr_response_limit: usize,
     ) -> Option<Message> {
         let mut ignored_msg = None;
         // TODO: can this be avoided?
@@ -184,13 +185,13 @@ impl Handler {
                 // Security: This method performs security-sensitive operations, see its comments
                 // for details.
                 let response_addrs =
-                    Handler::update_addr_cache(cached_addrs, &new_addrs, PEER_ADDR_RESPONSE_LIMIT);
+                    Handler::update_addr_cache(cached_addrs, &new_addrs, peer_addr_response_limit);
 
                 debug!(
                     new_addrs = new_addrs.len(),
                     response_addrs = response_addrs.len(),
                     remaining_addrs = cached_addrs.len(),
-                    PEER_ADDR_RESPONSE_LIMIT,
+                    peer_addr_response_limit,
                     "responding to Peers request using new and cached addresses",
                 );
 
@@ -492,13 +493,15 @@ impl Handler {
 
         // # Security
         //
-        // The cache size is limited to avoid memory denial of service.
-        //
+        // Limit both the cache length and its retained allocation. Copy only the retained entries
+        // into a right-sized vector instead of keeping the larger combined backing allocation.
         // It's ok to just partially shuffle the cache, because it doesn't actually matter which
         // peers we drop. Having excess peers is rare, because most peers only send one large
         // unsolicited peer message when they first connect.
-        *cached_addrs = remaining.to_vec();
-        cached_addrs.truncate(MAX_ADDRS_IN_MESSAGE);
+        let cache_len = remaining.len().min(MAX_CACHED_ADDRS_PER_PEER);
+        let mut bounded_cache = Vec::with_capacity(cache_len);
+        bounded_cache.extend(remaining[..cache_len].iter().cloned());
+        *cached_addrs = bounded_cache;
 
         response.to_vec()
     }
@@ -608,6 +611,9 @@ where
     /// The cache size is limited to avoid denial of service attacks.
     pub(super) cached_addrs: Vec<MetaAddr>,
 
+    /// The maximum number of addresses returned to the address book by one `getaddr` response.
+    peer_addr_response_limit: usize,
+
     /// The `inbound` service, used to answer requests from this connection's peer.
     pub(super) svc: S,
 
@@ -708,7 +714,7 @@ where
         peer_tx: Tx,
         connection_tracker: ConnectionTracker,
         connection_info: Arc<ConnectionInfo>,
-        initial_cached_addrs: Vec<MetaAddr>,
+        (initial_cached_addrs, peer_addr_response_limit): (Vec<MetaAddr>, usize),
     ) -> Self {
         let metrics_label = connection_info.connected_addr.get_transient_addr_label();
 
@@ -718,6 +724,7 @@ where
             sending_request_tx: None,
             request_timer: None,
             cached_addrs: initial_cached_addrs,
+            peer_addr_response_limit,
             svc: inbound_service,
             client_rx: client_rx.into(),
             block_advert_rx,
@@ -1044,7 +1051,14 @@ where
                             let request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
+                                } => span.in_scope(|| {
+                                    handler.process_message(
+                                        peer_msg,
+                                        &mut self.cached_addrs,
+                                        self.connection_info.connected_addr.get_transient_addr(),
+                                        self.peer_addr_response_limit,
+                                    )
+                                }),
                                 _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
@@ -1255,12 +1269,16 @@ where
             (AwaitingRequest, Peers) if !self.cached_addrs.is_empty() => {
                 // Security: This method performs security-sensitive operations, see its comments
                 // for details.
-                let response_addrs = Handler::update_addr_cache(&mut self.cached_addrs, None, PEER_ADDR_RESPONSE_LIMIT);
+                let response_addrs = Handler::update_addr_cache(
+                    &mut self.cached_addrs,
+                    None,
+                    self.peer_addr_response_limit,
+                );
 
                 debug!(
                     response_addrs = response_addrs.len(),
                     remaining_addrs = self.cached_addrs.len(),
-                    PEER_ADDR_RESPONSE_LIMIT,
+                    self.peer_addr_response_limit,
                     "responding to Peers request using some cached addresses",
                 );
 

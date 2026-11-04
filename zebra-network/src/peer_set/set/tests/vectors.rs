@@ -1015,7 +1015,7 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
         }),
         ActiveConnectionCounter::new_counter().track_connection(),
         client.connection_info.clone(),
-        Vec::new(),
+        (Vec::new(), crate::constants::PEER_ADDR_RESPONSE_LIMIT),
     );
     (client, harness, connection.run(stream::pending()), wire_rx)
 }

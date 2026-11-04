@@ -1,0 +1,9 @@
+project: zebra-state
+kind: Changed
+body: >-
+  Raised the soft open file limit that `zebra-state` requests for its process when it opens the
+  database from 1,024 to 8,192 descriptors, bounded by the hard limit, so the default
+  `zebra-network` connection limits fit beside the database files. The database still gets half
+  of the limit, so on hosts whose soft limit was 1,024, RocksDB can now keep up to 4,072 table
+  files open instead of 488, which uses more memory for their index and filter blocks.
+time: 2026-11-03T07:40:00Z

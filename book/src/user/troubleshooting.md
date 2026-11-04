@@ -94,6 +94,7 @@ For `initial sync can't download and verify the genesis block` or
 | No successful peer activity | Peer connectivity is failing | Check DNS errors, `resolved seed peer IP addresses`, configured seed addresses, and outbound connectivity. |
 | Block-header times are rejected | A header is more than two hours ahead of the node's clock, violating the [protocol rule][blockheader] | Correct the time source if the clock is skewed; do not disable validation. Clock skew also distorts progress estimates. |
 | Storage errors or resource saturation accompany the stall | The node cannot sustain downloads, verification, or state writes | Check capacity and permissions; compare [system requirements](requirements.md) and [limit contention](#limit-resource-contention). |
+| `Too many open files` in the logs | The process open file limit is below the peer connections and database files Zebra holds open | Raise the limit to at least 4,096, see [open file limit](requirements.md#open-file-limit), or lower `[network] peerset_initial_target_size`. |
 | `Zebra refuses to run` | The Mainnet release has reached [end of support](run.md#end-of-support) | [Upgrade](upgrading.md); restarting the same binary does not help. |
 | A restored node starts from genesis | Zebra did not open the intended snapshot | Follow [snapshot troubleshooting](snapshots.md#troubleshooting) before allowing another full download. |
 
