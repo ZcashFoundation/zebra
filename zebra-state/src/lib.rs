@@ -50,9 +50,9 @@ pub use error::{
     StateInitError, ValidateContextError,
 };
 pub use request::{
-    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitAids, CommitSemanticallyVerifiedBlockRequest,
-    HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
-    SemanticallyVerifiedBlock,
+    block_retained_charge, AwaitUtxoRequest, CheckpointVerifiedBlock, CommitAids,
+    CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest, MinedBlockNotifications,
+    ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
@@ -69,11 +69,11 @@ pub use service::{
     early_relay::{EarlyRelayCache, EarlyRelayGuard},
     finalized_state::FinalizedState,
     finalized_state::{SpentnessError, SpentnessHintsReceiver},
-    init, init_read_only, init_with_spentness,
+    init, init_read_only, init_with_limits, init_with_spentness,
     non_finalized_state::NonFinalizedState,
     spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
+    MemoryLimits, OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
 };
 
 // Allow use in the scanner and external tests

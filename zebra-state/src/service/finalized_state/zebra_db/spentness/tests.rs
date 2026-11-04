@@ -628,6 +628,7 @@ async fn state_service_resumes_with_a_late_artifact() {
         Height::MAX,
         0,
         receiver,
+        crate::MemoryLimits::default(),
     )
     .await;
     assert!(read_state.has_incomplete_spentness_hints());
@@ -964,6 +965,7 @@ async fn commit_through_state_service(
         Height::MAX,
         0,
         receiver,
+        crate::MemoryLimits::default(),
     )
     .await;
 
@@ -997,6 +999,7 @@ async fn state_service_ignores_an_artifact_above_the_max_checkpoint() {
         (fixture.terminal_height() - 1).unwrap(),
         0,
         receiver,
+        crate::MemoryLimits::default(),
     )
     .await;
 

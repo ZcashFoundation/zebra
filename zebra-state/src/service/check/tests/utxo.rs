@@ -197,6 +197,7 @@ fn remaining_transaction_value_scales_linearly() {
         new_outputs: HashMap::new(),
         transaction_hashes: vec![transaction::Hash([0; 32]); TX_COUNT + 1].into(),
         received_time: None,
+        retained_charge: None,
     };
 
     let start = Instant::now();

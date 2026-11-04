@@ -623,6 +623,7 @@ impl StartCmd {
                         max_checkpoint_height,
                         state_checkpoint_verify_concurrency_limit,
                         spentness_hints_receiver,
+                        zebra_state::MemoryLimits::default(),
                     )
                     .await
                 }
