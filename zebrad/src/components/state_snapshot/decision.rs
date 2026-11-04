@@ -207,8 +207,8 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
 }
 
 /// Returns the path of a state database the bootstrap must not overwrite: the
-/// running major version's directory, or the previous major version's when
-/// the running version restores it.
+/// running major version's directory, or any source directory the running
+/// version restores.
 ///
 /// Existence is probed by path, never by opening the database, because opening
 /// a missing database creates it. A directory that exists but holds no
@@ -220,30 +220,27 @@ fn existing_state_database(
 ) -> Option<std::path::PathBuf> {
     let running_major = zebra_state::state_database_format_version_in_code().major;
 
-    let mut majors = vec![running_major];
-    if zebra_state::restorable_db_versions().contains(&running_major) {
-        majors.push(running_major.saturating_sub(1));
-    }
-
-    majors.into_iter().find_map(|major| {
-        let on_disk = zebra_state::database_format_version_on_disk(
-            config,
-            zebra_state::constants::STATE_DATABASE_KIND,
-            major,
-            network,
-        );
-        match on_disk {
-            // A readable version file or a database directory.
-            Ok(Some(_)) => {}
-            // No database at this major version.
-            Ok(None) => return None,
-            // An unreadable version file: something is there, so leave it alone.
-            Err(error) => {
-                warn!(?error, major, "could not read the state database version");
+    std::iter::once(running_major)
+        .chain(zebra_state::restorable_db_source_versions(running_major))
+        .find_map(|major| {
+            let on_disk = zebra_state::database_format_version_on_disk(
+                config,
+                zebra_state::constants::STATE_DATABASE_KIND,
+                major,
+                network,
+            );
+            match on_disk {
+                // A readable version file or a database directory.
+                Ok(Some(_)) => {}
+                // No database at this major version.
+                Ok(None) => return None,
+                // An unreadable version file: something is there, so leave it alone.
+                Err(error) => {
+                    warn!(?error, major, "could not read the state database version");
+                }
             }
-        }
-        Some(config.db_path(zebra_state::constants::STATE_DATABASE_KIND, major, network))
-    })
+            Some(config.db_path(zebra_state::constants::STATE_DATABASE_KIND, major, network))
+        })
 }
 
 /// Returns the commitment to trust: the configured one where it
