@@ -554,7 +554,10 @@ impl ResponseSend {
     }
 }
 
-/// Serves a `get-headers` request.
+/// Serves a `get-headers` request with a non-empty locator. An empty locator
+/// is refused, as the draft permits, until the inbound service has a
+/// header-by-hash lookup; fetching a whole block for its header would let a
+/// small request cause a much larger state read.
 ///
 /// Transaction IDs are not supplied yet: with `tx_ids = 1`, every entry has
 /// `has_txs = 0`, and the requester falls back to `get-blocks`.
@@ -566,52 +569,35 @@ async fn serve_headers<S>(
 where
     S: Service<Request, Response = Response, Error = BoxError>,
 {
-    let mut headers: Vec<_> = if request.locator_hashes.is_empty() {
-        // An empty locator asks for the single header `hash_stop` names. There is no
-        // header-by-hash request, so fetch the block and keep its header.
-        let answer = call_service(
-            service,
-            Request::BlocksByHash([request.hash_stop].into_iter().collect()),
-        )
-        .await?;
-        match answer {
-            Response::Blocks(blocks) => blocks
-                .into_iter()
-                .filter_map(|block| match block {
-                    InventoryResponse::Available((block, _)) => Some(block.header.clone()),
-                    InventoryResponse::Missing(_) => None,
-                })
-                .collect(),
-            _ => Vec::new(),
+    if request.locator_hashes.is_empty() {
+        return Err(Outcome::Refuse(ErrorCode::Refused));
+    }
+
+    let stop = (request.hash_stop != block::Hash([0; 32])).then_some(request.hash_stop);
+    let answer = call_service(
+        service,
+        Request::FindHeaders {
+            known_blocks: request.locator_hashes,
+            stop,
+        },
+    )
+    .await?;
+    let mut headers: Vec<_> = match answer {
+        Response::BlockHeaders(headers) => {
+            headers.into_iter().map(|counted| counted.header).collect()
         }
-    } else {
-        let stop = (request.hash_stop != block::Hash([0; 32])).then_some(request.hash_stop);
-        let answer = call_service(
-            service,
-            Request::FindHeaders {
-                known_blocks: request.locator_hashes,
-                stop,
-            },
-        )
-        .await?;
-        let mut headers: Vec<_> = match answer {
-            Response::BlockHeaders(headers) => {
-                headers.into_iter().map(|counted| counted.header).collect()
-            }
-            _ => Vec::new(),
-        };
-        // If no locator hash is in the best chain, headers start at height 1 (draft,
-        // "`get-headers`"), but the state starts from the genesis block. Only the genesis header
-        // has an all-zeros previous block hash, and the state only returns it when no locator
-        // hash matched, so dropping it here gives the draft's start.
-        if headers
-            .first()
-            .is_some_and(|header| header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH)
-        {
-            headers.remove(0);
-        }
-        headers
+        _ => Vec::new(),
     };
+    // If no locator hash is in the best chain, headers start at height 1 (draft,
+    // "`get-headers`"), but the state starts from the genesis block. Only the genesis header
+    // has an all-zeros previous block hash, and the state only returns it when no locator
+    // hash matched, so dropping it here gives the draft's start.
+    if headers
+        .first()
+        .is_some_and(|header| header.previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH)
+    {
+        headers.remove(0);
+    }
 
     headers.truncate(MAX_HEADERS_PER_RESPONSE);
 
