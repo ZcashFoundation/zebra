@@ -197,3 +197,11 @@ cargo check --locked -p zebra-fuzz-targets --all-targets
 3. Prefer public APIs. The `fuzzing` feature exists only for the two modules
    listed above; widening it is a change to Zebra's API surface and should be
    discussed first.
+
+## Generating V6 seeds
+
+Run `cargo run --manifest-path zebra-fuzz/fuzz/Cargo.toml --bin generate_v6_seeds -- <output_dir>`
+from the repository root with a fresh output directory. The generator reports
+written and skipped candidates and exits unsuccessfully if any candidate is
+skipped. On failure, discard the partial output and fix the rejected candidates
+before publishing the corpus.
