@@ -114,15 +114,21 @@ fn mempool_valid_state_response_releases_proof_verification() {
                     );
                 tokio::pin!(verification);
                 assert!(futures::poll!(&mut verification).is_pending());
-                let response = state
-                    .expect_request_that(|request| {
-                        matches!(
-                            request,
-                            zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
-                        )
-                    })
-                    .await
-                    .expect("mempool verification must check nullifiers and anchors");
+                // Preparation runs on a blocking thread, so keep polling until the state request.
+                let request = state.expect_request_that(|request| {
+                    matches!(
+                        request,
+                        zebra_state::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
+                });
+                let response = tokio::select! {
+                    response = request => {
+                        response.expect("mempool verification must check nullifiers and anchors")
+                    }
+                    result = &mut verification => {
+                        panic!("verification must wait for the state response: {result:?}")
+                    }
+                };
                 assert_eq!(
                     crate::primitives::sapling::inner_calls_for(&verifier, &item),
                     0,
