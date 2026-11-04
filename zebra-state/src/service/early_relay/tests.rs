@@ -1,7 +1,7 @@
 //! Early relay retention and verifier lifetime contracts.
 
 use super::*;
-use crate::{ChainTipBlock, ChainTipSender, CheckpointVerifiedBlock};
+use crate::{arbitrary::Prepare, ChainTipBlock, ChainTipSender};
 use zebra_chain::{
     parameters::Network,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
@@ -10,20 +10,21 @@ use zebra_chain::{
 fn cache() -> (
     Arc<EarlyRelayState>,
     EarlyRelayCache,
-    ChainTipSender,
+    watch::Sender<NonFinalizedState>,
     Arc<Block>,
 ) {
-    let parent: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+    let (finalized, mut non_finalized, _) = crate::tests::setup::new_state_with_mainnet_genesis();
+    let parent: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
         .zcash_deserialize_into()
         .unwrap();
-    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
         .zcash_deserialize_into()
         .unwrap();
-    let (tip, latest, _) = ChainTipSender::new(
-        Some(ChainTipBlock::from(CheckpointVerifiedBlock::from(parent))),
-        &Network::Mainnet,
-    );
-    let state = EarlyRelayState::new(Some(latest));
+    non_finalized
+        .commit_new_chain(parent.prepare(), &finalized.db)
+        .unwrap();
+    let (tip, snapshot) = watch::channel(non_finalized);
+    let state = EarlyRelayState::new(WatchReceiver::new(snapshot));
     let cache = state.cache();
     (state, cache, tip, block)
 }
@@ -76,7 +77,7 @@ async fn early_relay_cache_expires_and_cancels() {
 #[tokio::test(start_paused = true)]
 async fn early_relay_rejection_bounds_replay_until_deadline_or_tip_change() {
     for advance_tip in [false, true] {
-        let (state, cache, mut tip, block) = cache();
+        let (state, cache, tip, block) = cache();
         let lease = guard(&state, block.hash());
         state.publish(block.clone(), &lease, 1);
         drop(lease);
@@ -88,9 +89,7 @@ async fn early_relay_rejection_bounds_replay_until_deadline_or_tip_change() {
             "replaying a rejected body must not immediately obtain another advertisement"
         );
         if advance_tip {
-            tip.set_best_non_finalized_tip(ChainTipBlock::from(CheckpointVerifiedBlock::from(
-                block,
-            )));
+            tip.send_replace(NonFinalizedState::new(&Network::Mainnet));
         } else {
             tokio::time::advance(LIFETIME).await;
         }
@@ -104,7 +103,7 @@ async fn early_relay_rejection_bounds_replay_until_deadline_or_tip_change() {
 
 #[tokio::test]
 async fn early_relay_cache_bounds_and_stale_parent() {
-    let (state, cache, mut tip, block) = cache();
+    let (state, cache, tip, block) = cache();
     let lease = guard(&state, block.hash());
     state.publish(block.clone(), &lease, MAX_RETAINED_BYTES + 1);
     assert!(cache.get(&block.hash()).is_none());
@@ -128,9 +127,7 @@ async fn early_relay_cache_bounds_and_stale_parent() {
         "one slot cannot retain competitors"
     );
     assert!(cache.get(&block.hash()).is_some());
-    tip.set_best_non_finalized_tip(ChainTipBlock::from(CheckpointVerifiedBlock::from(
-        block.clone(),
-    )));
+    tip.send_replace(NonFinalizedState::new(&Network::Mainnet));
     assert!(
         cache.get(&block.hash()).is_none(),
         "committed state must now serve the body"
@@ -149,7 +146,9 @@ async fn early_relay_subscribers_enable_without_mining() {
     drop(lease);
     // The receiver count, not state ownership, is the opt-in switch.
     assert_eq!(state.changes.receiver_count(), 0);
-    let state = EarlyRelayState::new(None);
+    let state = EarlyRelayState::new(WatchReceiver::new(
+        watch::channel(NonFinalizedState::new(&Network::Mainnet)).1,
+    ));
     let lease = guard(&state, block.hash());
     state.publish(block, &lease, 1);
     assert!(state.entry.lock().unwrap().is_none());
@@ -195,7 +194,9 @@ fn early_relay_retains_large_small_transaction_blocks() {
 
 #[tokio::test(start_paused = true)]
 async fn early_relay_rejections_have_fixed_count_and_unextended_expiry() {
-    let state = EarlyRelayState::new(None);
+    let state = EarlyRelayState::new(WatchReceiver::new(
+        watch::channel(NonFinalizedState::new(&Network::Mainnet)).1,
+    ));
     let lease = |byte| EarlyRelayGuard {
         alive: watch::Sender::new(()),
         state: state.clone(),
@@ -249,13 +250,13 @@ async fn early_relay_rejection_withdraws_live_body_and_prevents_republication() 
 
 #[tokio::test(start_paused = true)]
 async fn early_relay_tip_change_releases_slot_with_live_verifier() {
-    let (state, cache, mut tip, block) = cache();
+    let (state, cache, tip, block) = cache();
     let lease = guard(&state, block.hash());
     let mut changes = cache.subscribe();
     state.publish(block.clone(), &lease, 1);
     assert_eq!(*changes.borrow_and_update(), Some(block.hash()));
     tokio::task::yield_now().await;
-    tip.set_best_non_finalized_tip(ChainTipBlock::from(CheckpointVerifiedBlock::from(block)));
+    tip.send_replace(NonFinalizedState::new(&Network::Mainnet));
     tokio::time::timeout(Duration::from_secs(1), changes.changed())
         .await
         .unwrap()
@@ -266,7 +267,7 @@ async fn early_relay_tip_change_releases_slot_with_live_verifier() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn early_relay_declines_unpublished_writer_context() {
+async fn early_relay_declines_finalized_only_parent() {
     use tower::ServiceExt;
     use zebra_chain::{
         parameters::testnet::ConfiguredActivationHeights,
@@ -342,103 +343,24 @@ async fn early_relay_declines_unpublished_writer_context() {
             .early_relay(block.clone(), true, true)
             .await
             .unwrap()
-            .is_some());
-        // Model the interval between an authoritative mutation and its snapshot publication.
-        let update = read.early_relay.updating_context();
-        assert!(read
-            .clone()
-            .early_relay(block.clone(), true, true)
-            .await
-            .unwrap()
             .is_none());
-        drop(update);
-        assert!(read
-            .clone()
-            .early_relay(block, true, true)
-            .await
-            .unwrap()
-            .is_some());
+        for request in [
+            crate::ReadRequest::CheckBestTipHeader {
+                header: block.header.clone(),
+                height,
+            },
+            crate::ReadRequest::CheckBestTipBlockCommitments(block),
+        ] {
+            assert!(read.clone().oneshot(request).await.is_err());
+        }
     })
     .await
-    .expect("writer-context admission must finish");
+    .expect("snapshot admission must finish");
 }
 
-/// The response can wake a replay before `send` returns on the writer thread.
+/// Both completion channels must observe a published checkpoint tip.
 #[test]
-fn early_relay_rejected_commit_releases_context_before_response() {
-    use std::{
-        future::Future,
-        pin::Pin,
-        task::{Context, Wake, Waker},
-    };
-
-    use crate::{
-        arbitrary::Prepare,
-        service::write::{BlockWriteSender, NonFinalizedWriteMessage},
-        tests::setup::new_state_with_mainnet_genesis,
-    };
-
-    struct ContextAtWake {
-        state: Arc<EarlyRelayState>,
-        version: std::sync::mpsc::Sender<u64>,
-    }
-
-    impl Wake for ContextAtWake {
-        fn wake(self: Arc<Self>) {
-            self.version
-                .send(self.state.context_version.load(Ordering::SeqCst))
-                .unwrap();
-        }
-    }
-
-    let _init_guard = zebra_test::init();
-    let (finalized, non_finalized, genesis) = new_state_with_mainnet_genesis();
-    let (tip_sender, _, _) = ChainTipSender::new(None, &Network::Mainnet);
-    let (state_sender, _snapshot) = watch::channel(non_finalized.clone());
-    let relay = EarlyRelayState::new(None);
-    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
-        finalized,
-        non_finalized,
-        tip_sender,
-        state_sender,
-        false,
-        None,
-        relay.clone(),
-        None,
-    );
-    let (version_tx, version_rx) = std::sync::mpsc::channel();
-    let waker = Waker::from(Arc::new(ContextAtWake {
-        state: relay,
-        version: version_tx,
-    }));
-    let (rsp_tx, mut rsp_rx) = tokio::sync::oneshot::channel();
-    assert!(Pin::new(&mut rsp_rx)
-        .poll(&mut Context::from_waker(&waker))
-        .is_pending());
-    // Genesis is already finalized, so this commit must be rejected.
-    sender
-        .non_finalized
-        .as_ref()
-        .unwrap()
-        .send(NonFinalizedWriteMessage::Commit(
-            (genesis.block.clone().prepare(), rsp_tx, None, None),
-            std::time::Instant::now(),
-        ))
-        .unwrap();
-    let version = version_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    assert!(rsp_rx.try_recv().unwrap().is_err());
-    drop(sender);
-    Arc::try_unwrap(worker.unwrap()).unwrap().join().unwrap();
-    assert_eq!(
-        version % 2,
-        0,
-        "rejection must not wake an unauthenticated replay"
-    );
-}
-
-/// Both completion channels must observe a published checkpoint tip and usable authentication.
-#[test]
-fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
+fn early_relay_checkpoint_commit_publishes_tip_before_notifications() {
     use std::{
         future::Future,
         pin::Pin,
@@ -451,18 +373,14 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
     };
 
     struct PublishedContextAtWake {
-        state: Arc<EarlyRelayState>,
-        observed: std::sync::mpsc::Sender<(u64, Option<block::Hash>)>,
+        tip: crate::LatestChainTip,
+        observed: std::sync::mpsc::Sender<Option<block::Hash>>,
     }
 
     impl Wake for PublishedContextAtWake {
         fn wake(self: Arc<Self>) {
-            self.observed
-                .send((
-                    self.state.context_version.load(Ordering::SeqCst),
-                    self.state.tip.as_ref().and_then(ChainTip::best_tip_hash),
-                ))
-                .unwrap();
+            use zebra_chain::chain_tip::ChainTip;
+            self.observed.send(self.tip.best_tip_hash()).unwrap();
         }
     }
 
@@ -471,7 +389,6 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
     let (tip_sender, tip, _) =
         ChainTipSender::new(Some(ChainTipBlock::from(genesis)), &Network::Mainnet);
     let (state_sender, _snapshot) = watch::channel(non_finalized.clone());
-    let relay = EarlyRelayState::new(Some(tip));
     let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
         finalized,
         non_finalized,
@@ -479,12 +396,11 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
         state_sender,
         true,
         None,
-        relay.clone(),
         None,
     );
     let (observed_tx, observed_rx) = std::sync::mpsc::channel();
     let waker = Waker::from(Arc::new(PublishedContextAtWake {
-        state: relay,
+        tip,
         observed: observed_tx,
     }));
     let mut cx = Context::from_waker(&waker);
@@ -515,12 +431,7 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
     assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), hash);
     drop(sender);
     Arc::try_unwrap(worker.unwrap()).unwrap().join().unwrap();
-    for (version, tip) in observations {
-        assert_eq!(
-            version % 2,
-            0,
-            "checkpoint completion must allow authentication"
-        );
+    for tip in observations {
         assert_eq!(
             tip,
             Some(hash),

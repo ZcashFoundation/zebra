@@ -1055,7 +1055,7 @@ impl Eq for MinedBlockNotifications {}
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
 pub enum Request {
-    /// Authenticates a NU5-or-later body against its committed parent's header context.
+    /// Authenticates a NU5-or-later body against its parent in the published non-finalized state.
     ///
     /// The caller must first check PoW/Equihash, size, cheap structure/resource limits, transaction
     /// Merkle root, duplicates, and branch consistency. Returns [`Response::EarlyRelay`]; only
@@ -1063,18 +1063,17 @@ pub enum Request {
     EarlyRelay {
         /// The immutable block whose transaction authorization commitment must be checked.
         block: Arc<Block>,
-        /// If true, authenticate even when caching is disabled or full, against any retained
-        /// committed parent context. Missing or changing context returns no guard. Finalized
-        /// history roots are retained only for the tip.
+        /// If true, authenticate even when caching is disabled or full, against a parent retained
+        /// in any published non-finalized chain. Missing snapshot context returns no guard.
         /// If false, skip disabled caching and restrict admission to the current best tip.
         require_authentication: bool,
     },
 
     /// Authenticates an early-relay body without publishing it or reserving publication capacity.
     ///
-    /// Uses the same caller preconditions and response as [`Request::EarlyRelay`], against any
-    /// retained committed parent. Missing or changing context returns no guard; callers bound
-    /// any retries. Use this before assigning peer punishment after deferred authentication.
+    /// Uses the same caller preconditions and response as [`Request::EarlyRelay`], against a parent
+    /// in any published non-finalized chain. Missing snapshot context returns no guard; callers
+    /// bound any retries. Use this before assigning peer punishment after deferred authentication.
     AuthenticateEarlyRelay(Arc<Block>),
 
     /// Announces a block after proof-of-work and transaction Merkle-root checks.
@@ -1512,7 +1511,7 @@ pub enum ReadRequest {
     /// or one of its subscribers is held. Independent of mining and never enabled by default.
     EarlyRelayCache,
 
-    /// Checks height and contextual difficulty/time for a direct child of the committed best tip.
+    /// Checks height and contextual difficulty/time for a child of the published best-chain tip.
     /// Rejects locally invalidated or recently deterministically rejected block hashes.
     ///
     /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
@@ -1524,7 +1523,7 @@ pub enum ReadRequest {
         height: block::Height,
     },
 
-    /// Authenticates a NU5-or-later body's history and authorization commitments at the best tip.
+    /// Authenticates a NU5-or-later body's history and authorization commitments at the snapshot tip.
     ///
     /// Callers must first bound the body and check transaction Merkle roots and duplicates.
     /// Returns [`ReadResponse::ValidBestTipBlockCommitments`] or an error. Neither result updates

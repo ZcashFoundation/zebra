@@ -109,7 +109,6 @@ async fn write_worker_survives_rejected_root_invalidation() {
         state_sender,
         false,
         None,
-        super::super::early_relay::EarlyRelayState::new(None),
         None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
@@ -184,7 +183,6 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
         state_sender,
         false,
         None,
-        super::super::early_relay::EarlyRelayState::new(None),
         None,
     );
     let tx = sender.non_finalized.as_ref().unwrap();
@@ -314,7 +312,6 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        early_relay: super::super::early_relay::EarlyRelayState::new(None),
         pruning_wake: None,
     };
     tracing::subscriber::with_default(
@@ -412,7 +409,6 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
         pruning_wake: None,
     };
     worker.run();
@@ -604,7 +600,6 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
         pruning_wake: Some(pruning_wake),
     };
     // Observe the synchronous batch write even when release builds compile out trace events.

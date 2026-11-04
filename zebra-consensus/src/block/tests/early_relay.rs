@@ -27,6 +27,15 @@ async fn state() -> (Network, ProposalTestState, zs::ReadStateService) {
         ))
         .await
         .unwrap();
+    // Early relay authenticates only against published non-finalized parents.
+    let parent = candidate(&network, &read, false).await;
+    state
+        .clone()
+        .oneshot(zs::Request::CommitSemanticallyVerifiedBlock(
+            zs::CheckpointVerifiedBlock::from(parent).into(),
+        ))
+        .await
+        .unwrap();
     (network, state, read)
 }
 
