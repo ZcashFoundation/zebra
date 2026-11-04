@@ -317,6 +317,173 @@ async fn concurrent_no_pow_proposals_hold_admission_until_work_finishes() {
     .expect("finishing state work releases the proposal charge");
 }
 
+/// Mined submission bytes are admitted before cache lookup or deserialization.
+#[tokio::test]
+async fn submission_bytes_are_admitted_before_deserialization() {
+    use std::sync::atomic::Ordering;
+
+    let _init_guard = zebra_test::init();
+    let state = tower::service_fn(|_| std::future::pending::<Result<zs::Response, BoxError>>());
+    let transactions = tower::service_fn(|_| {
+        std::future::pending::<Result<transaction::BlockResponse, BoxError>>()
+    });
+    let verifier = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+        .with_proposal_cache_bytes(1);
+    let cache = verifier.prepared_blocks();
+    let held = cache
+        .proposal_work
+        .as_ref()
+        .unwrap()
+        .try_admit(1)
+        .expect("the only submission slot is initially available");
+    let bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+
+    assert!(matches!(
+        cache
+            .deserialize_with_admission_timeout(bytes.clone(), Duration::from_millis(10))
+            .await,
+        Err(VerifyBlockError::ProposalMemoryPressure)
+    ));
+    assert_eq!(
+        verifier.proposal_deserializations.load(Ordering::SeqCst),
+        0,
+        "an over-budget submission must not allocate a decoded block"
+    );
+
+    drop(held);
+    let decoded = cache
+        .deserialize_with_admission(bytes.clone())
+        .await
+        .expect("capacity is released with the previous owner")
+        .expect("the valid test block decodes");
+    assert_eq!(decoded.block().zcash_serialize_to_vec().unwrap(), bytes);
+    assert_eq!(verifier.proposal_deserializations.load(Ordering::SeqCst), 1);
+}
+
+/// A mined submission waits for an in-flight proposal's capacity instead of failing, while a
+/// concurrent proposal still fails at once.
+#[tokio::test]
+async fn mined_submission_waits_for_in_flight_proposal_work() {
+    let _init_guard = zebra_test::init();
+    let state = tower::service_fn(|_| std::future::pending::<Result<zs::Response, BoxError>>());
+    let transactions = tower::service_fn(|_| {
+        std::future::pending::<Result<transaction::BlockResponse, BoxError>>()
+    });
+    let verifier = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+        .with_proposal_cache_bytes(1);
+    let cache = verifier.prepared_blocks();
+    let bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+
+    let in_flight_proposal = cache
+        .deserialize_proposal(bytes.clone())
+        .await
+        .expect("the first proposal is admitted")
+        .expect("the valid test block decodes");
+    assert!(matches!(
+        cache.deserialize_proposal(bytes.clone()).await,
+        Err(VerifyBlockError::ProposalMemoryPressure)
+    ));
+
+    let submission = tokio::spawn({
+        let cache = cache.clone();
+        let bytes = bytes.clone();
+        async move { cache.deserialize_with_admission(bytes).await }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !submission.is_finished(),
+        "the submission waits for the proposal's capacity"
+    );
+
+    drop(in_flight_proposal);
+    let decoded = tokio::time::timeout(Duration::from_secs(5), submission)
+        .await
+        .expect("the submission is admitted once the proposal finishes")
+        .expect("the submission task does not panic")
+        .expect("the submission is admitted")
+        .expect("the valid test block decodes");
+    assert_eq!(decoded.block().zcash_serialize_to_vec().unwrap(), bytes);
+}
+
+/// A cancelled mined submission neither publishes early work nor commits while its active worker
+/// drains and retains the byte charge.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelled_submission_has_no_side_effects_and_releases_after_work() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{mpsc, watch};
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let (entered_tx, mut entered_rx) = mpsc::unbounded_channel();
+    let (release_tx, release_rx) = watch::channel(false);
+    let side_effects = Arc::new(AtomicUsize::new(0));
+    let state = tower::service_fn({
+        let side_effects = side_effects.clone();
+        move |request| {
+            let entered = entered_tx.clone();
+            let mut release = release_rx.clone();
+            let side_effects = side_effects.clone();
+            async move {
+                match request {
+                    zs::Request::KnownBlock(_) => {
+                        let _ = entered.send(());
+                        while !*release.borrow_and_update() {
+                            release.changed().await.unwrap();
+                        }
+                        Ok(zs::Response::KnownBlock(None))
+                    }
+                    request => {
+                        side_effects.fetch_add(1, Ordering::SeqCst);
+                        Err(format!("cancelled submission reached {request:?}").into())
+                    }
+                }
+            }
+        }
+    });
+    let transactions = tower::service_fn(|_| async {
+        Err::<transaction::BlockResponse, BoxError>(TransactionError::BadBalance.into())
+    });
+    let mut verifier = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
+        .with_proposal_cache_bytes(1);
+    let cache = verifier.prepared_blocks();
+
+    let first = verifier
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::CommitDecoded(DecodedBlock::from(block), None));
+    let first = tokio::spawn(first);
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx.recv())
+        .await
+        .expect("the submission starts")
+        .expect("the state worker is running");
+    assert_eq!(cache.proposal_work.as_ref().unwrap().available(), 0);
+
+    first.abort();
+    let _ = first.await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        cache.proposal_work.as_ref().unwrap().available(),
+        0,
+        "caller cancellation must not release the active worker's charge"
+    );
+    release_tx.send(true).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while cache.proposal_work.as_ref().unwrap().available() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("finishing state work releases the submission charge");
+    assert_eq!(
+        side_effects.load(Ordering::SeqCst),
+        0,
+        "a cancelled submission must not publish mining work or commit"
+    );
+}
+
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block: Arc<_> =
