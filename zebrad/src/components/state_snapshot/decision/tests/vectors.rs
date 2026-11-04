@@ -153,8 +153,7 @@ fn each_failing_condition_skips_with_its_reason() {
     }
 }
 
-/// A current-major database directory, even an empty one, skips the bootstrap,
-/// and so does a previous-major directory the running version restores.
+/// A current-major database directory, even an empty one, skips the bootstrap.
 #[test]
 fn existing_state_database_skips() {
     let _init_guard = zebra_test::init();
@@ -171,18 +170,38 @@ fn existing_state_database_skips() {
         decide(&config, dir.path()),
         Decision::Bootstrap { .. }
     ));
+}
 
-    let previous = config.state.db_path("state", running_major - 1, &network);
-    std::fs::create_dir_all(&previous).unwrap();
-    let expected = if zebra_state::restorable_db_versions().contains(&running_major) {
-        skip(SkipReason::ExistingState)
-    } else {
-        Decision::Bootstrap {
-            commitment: commitment(),
-            peers: vec!["127.0.0.1:18233".to_string()],
-        }
-    };
-    assert_eq!(decide(&config, dir.path()), expected);
+/// Every registered source directory is protected, including sources older
+/// than the reserved major immediately before the running version.
+#[test]
+fn restorable_state_databases_skip() {
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+    let network = regtest(Some(1), Some(LAST_CHECKPOINT));
+    let config = bootstrapping_config(network.clone(), dir.path());
+
+    let running_major = zebra_state::state_database_format_version_in_code().major;
+    assert_eq!(running_major, 32);
+    let sources = zebra_state::restorable_db_source_versions(running_major);
+    assert_eq!(sources.first(), Some(&30));
+    assert!(sources.contains(&29));
+    assert!(!sources.contains(&31), "v31 remains reserved");
+
+    for source_major in [30, 29] {
+        let source = config.state.db_path("state", source_major, &network);
+        std::fs::create_dir_all(&source).unwrap();
+        assert_eq!(
+            decide(&config, dir.path()),
+            skip(SkipReason::ExistingState),
+            "v{source_major} must be found when v{running_major} is current"
+        );
+        std::fs::remove_dir_all(&source).unwrap();
+        assert!(matches!(
+            decide(&config, dir.path()),
+            Decision::Bootstrap { .. }
+        ));
+    }
 }
 
 /// On Mainnet, a configured commitment that is not pinned needs
