@@ -504,10 +504,11 @@ fn is_zebra_source(path: &str) -> bool {
                 .any(|prefix| dir.starts_with(prefix))
     };
 
-    path.split(['/', '\\'])
-        .collect::<Vec<_>>()
-        .windows(2)
-        .any(|dirs| dirs[1] == "src" && is_zebra_crate(dirs[0]))
+    let dirs = || path.split(['/', '\\']);
+
+    dirs()
+        .zip(dirs().skip(1))
+        .any(|(dir, next)| next == "src" && is_zebra_crate(dir))
 }
 
 /// Merge `attrs` into `log.attributes`, letting existing keys win.
