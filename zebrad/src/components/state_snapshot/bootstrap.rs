@@ -1,6 +1,5 @@
-//! The bootstrap flow (design, §6): dial the bootstrap peers, fetch and check
-//! the manifest, run the chain checks, download and verify the pieces, import
-//! them, and clean up.
+//! The bootstrap flow: dial the bootstrap peers, fetch and check the manifest,
+//! run the chain checks, download and verify the pieces, import them, and clean up.
 //!
 //! A failure the snapshot caused marks its manifest as rejected; any failure
 //! deletes the temporary import directory, and the caller follows
@@ -12,10 +11,12 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    fs,
+    future::Future,
+    io,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -23,7 +24,7 @@ use std::{
 
 use thiserror::Error;
 use tokio::{
-    sync::{mpsc, Semaphore},
+    sync::{mpsc, Notify, Semaphore},
     task::{JoinHandle, JoinSet},
     time::{sleep_until, timeout},
 };
@@ -61,28 +62,24 @@ use super::{
 mod tests;
 
 /// The manifest must be fetched and verified within this long of the bootstrap
-/// peers connecting (design, §6 "Failure handling").
+/// peers connecting.
 pub const MANIFEST_DEADLINE: Duration = Duration::from_secs(60);
 
 /// The history tree piece, fetched directly before the chain checks, gets the
 /// same budget as the manifest.
 const HISTORY_TREE_DEADLINE: Duration = Duration::from_secs(60);
 
-/// How long dialling and handshaking with every bootstrap peer may take in
-/// all, so an unreachable peer cannot hold the start up for longer.
-const BOOTSTRAP_DIAL_TIMEOUT: Duration = Duration::from_secs(60);
-
 /// How long one `host:port` string may take to resolve.
 const PEER_RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The most bootstrap peers dialled (design, §5 "Bootstrap dialer").
+/// The most bootstrap peers dialled.
 const MAX_BOOTSTRAP_PEERS: usize = 8;
 
 /// How many requests may queue on one bootstrap peer: the scheduler's two
 /// sub-ranges in flight, plus the chain checks' requests.
 const PEER_BUFFER_BOUND: usize = 8;
 
-/// The most copies of block `H + 1` fetched, from distinct peers (design, §2).
+/// The most copies of block `H + 1` fetched, from distinct peers.
 const SUCCESSOR_COPIES: usize = 3;
 
 /// The most headers one version 2 `get-headers` response carries. The wire
@@ -103,6 +100,16 @@ const OBJECT_SKIP_BACKOFF: Duration = Duration::from_secs(30);
 /// Distinguishes same-process workspaces even when their clock readings match.
 static NEXT_IMPORT_NONCE: AtomicU64 = AtomicU64::new(0);
 
+/// The shutdown bit in [`INSTALL_LIFECYCLE`]. The other bits count installations that have passed
+/// their final shutdown check and must finish before process shutdown cancels the bootstrap.
+const INSTALL_SHUTTING_DOWN: usize = 1 << (usize::BITS - 1);
+
+/// Whether shutdown has started, and how many final snapshot installations are still active.
+static INSTALL_LIFECYCLE: AtomicUsize = AtomicUsize::new(0);
+
+/// Notifies shutdown when the last active installation finishes.
+static INSTALLS_QUIESCED: Notify = Notify::const_new();
+
 /// How many verified pieces may be running or waiting for an SST build before
 /// the verified-piece channel is allowed to fill and hold the scheduler back.
 const VERIFIED_PIECE_CHANNEL_BOUND: usize = 64;
@@ -117,9 +124,9 @@ pub type PeerService = Buffer<zn::Client, zn::Request>;
 /// Why a bootstrap did not install a snapshot.
 #[derive(Debug, Error)]
 pub enum BootstrapError {
-    /// The snapshot's contents failed a check of the trust model (design,
-    /// §2), which is the snapshot's fault: its manifest is marked as
-    /// rejected before the fallback applies.
+    /// The snapshot's contents failed a check of the trust model, which is
+    /// the snapshot's fault: its manifest is marked as rejected before the
+    /// fallback applies.
     #[error("state snapshot rejected: {0}")]
     Rejected(String),
 
@@ -136,6 +143,79 @@ pub enum BootstrapError {
     /// Storing, building, or importing the snapshot failed.
     #[error(transparent)]
     Snapshot(#[from] SnapshotError),
+}
+
+/// A final installation that shutdown must let finish before cancelling the bootstrap.
+#[must_use = "dropping the guard releases shutdown"]
+struct SnapshotInstall;
+
+impl SnapshotInstall {
+    /// Starts the final installation, unless shutdown won the lifecycle race first.
+    fn begin() -> Result<Self, BootstrapError> {
+        let mut lifecycle = INSTALL_LIFECYCLE.load(Ordering::SeqCst);
+        loop {
+            if lifecycle & INSTALL_SHUTTING_DOWN != 0 || zebra_chain::shutdown::is_shutting_down() {
+                return Err(shutdown_before_install());
+            }
+
+            let active = lifecycle
+                .checked_add(1)
+                .expect("the process can not run usize::MAX snapshot installations");
+            match INSTALL_LIFECYCLE.compare_exchange_weak(
+                lifecycle,
+                active,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return Ok(SnapshotInstall),
+                Err(current) => lifecycle = current,
+            }
+        }
+    }
+}
+
+impl Drop for SnapshotInstall {
+    fn drop(&mut self) {
+        let previous = INSTALL_LIFECYCLE.fetch_sub(1, Ordering::SeqCst);
+        let active = previous & !INSTALL_SHUTTING_DOWN;
+        debug_assert!(active > 0, "every guard owns one active installation");
+        if active == 1 && previous & INSTALL_SHUTTING_DOWN != 0 {
+            INSTALLS_QUIESCED.notify_one();
+        }
+    }
+}
+
+/// Prevents new final installations and records process shutdown in lifecycle order.
+pub(crate) fn begin_snapshot_shutdown() {
+    INSTALL_LIFECYCLE.fetch_or(INSTALL_SHUTTING_DOWN, Ordering::SeqCst);
+    zebra_chain::shutdown::set_shutting_down();
+}
+
+/// Waits for any installation that won its final shutdown check to finish.
+pub(crate) async fn wait_for_snapshot_install() {
+    wait_for_snapshot_install_with_hook(|| {}).await;
+}
+
+async fn wait_for_snapshot_install_with_hook<F>(mut after_lifecycle_load: F)
+where
+    F: FnMut(),
+{
+    loop {
+        let notified = INSTALLS_QUIESCED.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if INSTALL_LIFECYCLE.load(Ordering::SeqCst) & !INSTALL_SHUTTING_DOWN == 0 {
+            return;
+        }
+        after_lifecycle_load();
+        notified.await;
+    }
+}
+
+fn shutdown_before_install() -> BootstrapError {
+    BootstrapError::Aborted(
+        "Zebra is shutting down; the staged state snapshot was not installed".to_string(),
+    )
 }
 
 /// Maps a snapshot error to rejection only when the snapshot's contents are
@@ -182,8 +262,7 @@ impl<S: Clone> Peers<S> {
         self.clients.is_empty()
     }
 
-    /// Excludes `peer` for the rest of the bootstrap (design, §6 "Failure
-    /// handling").
+    /// Excludes `peer` for the rest of the bootstrap.
     fn blame(&mut self, peer: PeerSocketAddr, reason: &str) {
         warn!(%peer, reason, "excluding a bootstrap peer");
         self.clients.retain(|(addr, _)| *addr != peer);
@@ -240,19 +319,11 @@ pub async fn bootstrap(
         )));
     }
 
-    let mut bootstrap_peers = timeout(
-        BOOTSTRAP_DIAL_TIMEOUT,
-        zn::v2_bootstrap_clients(&config.network, &addrs, user_agent()),
-    )
-    .await
-    .map_err(|_elapsed| {
-        BootstrapError::Aborted(format!(
-            "no bootstrap peer completed a version 2 handshake within {BOOTSTRAP_DIAL_TIMEOUT:?}"
-        ))
-    })?
-    .map_err(|error| {
-        BootstrapError::Aborted(format!("could not connect to a bootstrap peer: {error}"))
-    })?;
+    let mut bootstrap_peers = zn::v2_bootstrap_clients(&config.network, &addrs, user_agent())
+        .await
+        .map_err(|error| {
+            BootstrapError::Aborted(format!("could not connect to a bootstrap peer: {error}"))
+        })?;
     let clients = std::mem::take(&mut bootstrap_peers.clients);
     if clients.is_empty() {
         bootstrap_peers.close().await;
@@ -269,47 +340,60 @@ pub async fn bootstrap(
         Stage::PeersReady
     );
 
-    let workspace = create_import_workspace(&import_root).await?;
-    let temp_root = workspace.path.clone();
-    let result = run(
-        config,
-        &network,
-        &store,
-        &temp_root,
-        commitment,
-        peers,
-        connected_at,
-    )
-    .await;
+    let result = async {
+        let workspace = create_import_workspace(&import_root).await?;
+        let temp_root = workspace.path.clone();
+        let result = run(
+            config,
+            &network,
+            &store,
+            &temp_root,
+            commitment,
+            peers,
+            connected_at,
+        )
+        .await;
 
-    match &result {
-        Ok(()) => {}
-        Err(BootstrapError::Rejected(reason)) => {
-            error!(
-                manifest = %commitment.manifest,
-                reason,
-                "the state snapshot failed a check of its contents: marking it as rejected"
-            );
-            if let Err(error) = store.mark_rejected(commitment.manifest) {
-                warn!(?error, "could not mark the state snapshot as rejected");
+        match &result {
+            Ok(()) => {}
+            Err(BootstrapError::Rejected(reason)) => {
+                error!(
+                    manifest = %commitment.manifest,
+                    reason,
+                    "the state snapshot failed a check of its contents: marking it as rejected"
+                );
+                if let Err(error) = store.mark_rejected(commitment.manifest) {
+                    warn!(?error, "could not mark the state snapshot as rejected");
+                }
+            }
+            Err(error) => {
+                error!(%error, "the state snapshot bootstrap did not finish");
             }
         }
-        Err(error) => {
-            error!(%error, "the state snapshot bootstrap did not finish");
+        if result.is_err() {
+            if let Err(error) = remove_dir(&temp_root).await {
+                warn!(
+                    ?error,
+                    "could not delete this attempt's state snapshot import workspace"
+                );
+            }
         }
+        // A workspace that could not be deleted is left to the next attempt's sweep.
+        workspace.release().await;
+        result
     }
-    if result.is_err() {
-        if let Err(error) = remove_dir(&temp_root).await {
-            warn!(
-                ?error,
-                "could not delete this attempt's state snapshot import workspace"
-            );
-        }
-    }
-    // A workspace that could not be deleted is left to the next attempt's sweep.
-    workspace.release().await;
+    .await;
 
-    bootstrap_peers.close().await;
+    // Every exit after dialling, including workspace creation failure, closes and drains the
+    // short-lived endpoints before the caller can start genesis fallback.
+    close_bootstrap_after(result, bootstrap_peers.close()).await
+}
+
+async fn close_bootstrap_after<T>(
+    result: Result<T, BootstrapError>,
+    close: impl Future<Output = ()>,
+) -> Result<T, BootstrapError> {
+    close.await;
     result
 }
 
@@ -374,7 +458,7 @@ where
     }
     let history_root = history_tree.hash();
 
-    // 4. The chain checks (§2 checks 1 and 3).
+    // 4. The block-hash and successor-commitment checks.
     let deferred_checks = check_chain(&mut peers, network, commitment, &history_root).await?;
     if peers.is_empty() {
         return Err(BootstrapError::Aborted(
@@ -637,11 +721,21 @@ async fn install_staged_snapshot(
     target: PathBuf,
     backup: Option<PathBuf>,
 ) -> Result<(), BootstrapError> {
+    install_staged_snapshot_with_hook(staged, target, backup, || {}).await
+}
+
+async fn install_staged_snapshot_with_hook<F>(
+    staged: PathBuf,
+    target: PathBuf,
+    backup: Option<PathBuf>,
+    before_rename: F,
+) -> Result<(), BootstrapError>
+where
+    F: FnOnce() + Send + 'static,
+{
     tokio::task::spawn_blocking(move || {
         if zebra_chain::shutdown::is_shutting_down() {
-            return Err(BootstrapError::Aborted(
-                "Zebra is shutting down; the staged state snapshot was not installed".to_string(),
-            ));
+            return Err(shutdown_before_install());
         }
 
         let parent = target.parent().ok_or_else(|| {
@@ -673,10 +767,13 @@ async fn install_staged_snapshot(
         }
 
         if zebra_chain::shutdown::is_shutting_down() {
-            return Err(BootstrapError::Aborted(
-                "Zebra is shutting down; the staged state snapshot was not installed".to_string(),
-            ));
+            return Err(shutdown_before_install());
         }
+
+        // Shutdown either wins before this guard and prevents the rename, or waits for this guard
+        // to finish. There is no detached rename left racing runtime teardown after a SIGINT.
+        let _install = SnapshotInstall::begin()?;
+        before_rename();
         fs::rename(&staged, &target).map_err(|source| SnapshotError::Io {
             path: target.clone(),
             source,
@@ -771,7 +868,7 @@ async fn resolve_peers(peers: &[String]) -> Vec<PeerSocketAddr> {
 
 /// Fetches the manifest from the first peer that serves it with the
 /// commitment's hash, decodes it, and checks it against the commitment and the
-/// network (design, §6 step 3).
+/// network.
 pub(crate) async fn fetch_manifest<S>(
     peers: &mut Peers<S>,
     commitment: StateSnapshotCommitment,
@@ -1012,7 +1109,7 @@ where
 }
 
 /// Checks the manifest's fields against the commitment, the network, and the
-/// running database format (design, §2 "Self-consistency checks").
+/// running database format.
 ///
 /// A manifest that contradicts the commitment or the network is the
 /// snapshot's fault and is rejected. A manifest in another database format
@@ -1068,7 +1165,7 @@ pub(crate) fn check_manifest(
 }
 
 /// Returns the first height with a complete block in a snapshot at `height`:
-/// `L = max(1, H - 2303)` (design, §3).
+/// `L = max(1, H - 2303)`.
 pub(crate) fn window_start(height: Height) -> Height {
     Height(
         height
@@ -1112,7 +1209,7 @@ pub(crate) enum ChainCheckError {
 }
 
 /// Checks that `headers` are the headers of heights `H + 1..=C`, chaining
-/// from `hash_h` to the `checkpoint` `(C, hash(C))` (design, §2 check 1).
+/// from `hash_h` to the `checkpoint` `(C, hash(C))`.
 pub(crate) fn check_header_chain(
     hash_h: block::Hash,
     h: Height,
@@ -1301,7 +1398,7 @@ where
 
 /// Checks that `block` is block `H + 1`: it hashes to the authenticated
 /// `successor_hash`, chains from `hash_h`, has the successor's coinbase
-/// height, and its merkle root covers its transactions (design, §2 check 3).
+/// height, and its merkle root covers its transactions.
 pub(crate) fn check_successor_block(
     hash_h: block::Hash,
     successor_hash: block::Hash,
@@ -1348,8 +1445,8 @@ pub(crate) fn check_successor_commitment(
     block.header.commitment_bytes.0 == <[u8; 32]>::from(expected)
 }
 
-/// Runs the chain checks (design, §2 checks 1 and 3) and returns the
-/// [`SnapshotBase`] `DEFERRED_*` bits of the checks no peer could serve.
+/// Runs the chain checks and returns the [`SnapshotBase`] `DEFERRED_*` bits of
+/// the checks no peer could serve.
 ///
 /// A snapshot whose `hash(H)` differs from the checkpoint at `H` is rejected.
 /// A successor check succeeds when any fetched copy commits to the history

@@ -1,5 +1,5 @@
 //! Dialling version 2 peers for a state-snapshot bootstrap, before the peer
-//! set exists (DESIGN.md §5, "Bootstrap dialer").
+//! set exists.
 //!
 //! The bootstrap downloads a state snapshot from a few configured peers
 //! before the node has a state, an address book, or a peer set. It dials
@@ -100,7 +100,10 @@ impl BootstrapPeers {
 /// close.
 pub const BOOTSTRAP_CLOSE_GRACE: Duration = Duration::from_secs(2);
 
-/// The most peers a bootstrap dials (DESIGN.md §5, "Bootstrap dialer"): the
+/// How long dialling and handshaking with every bootstrap peer may take in all.
+pub const BOOTSTRAP_DIAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The most peers a bootstrap dials: the
 /// scheduler downloads from at most this many at once.
 pub const MAX_BOOTSTRAP_PEERS: usize = 8;
 
@@ -125,7 +128,9 @@ pub(in crate::peer_set::initialize) fn bootstrap_minimum_peer_version(
 /// disconnected, but there is no address book to ban it in. Peers are dialled
 /// once per IP address, in order, at most `MAX_BOOTSTRAP_PEERS` (eight) of
 /// them, all at once; each attempt is bounded by the transport and application
-/// handshake timeouts.
+/// handshake timeouts. The whole set is bounded by [`BOOTSTRAP_DIAL_TIMEOUT`],
+/// whose error path joins the aborted attempts and closes the connected clients
+/// and endpoints before returning.
 ///
 /// Returns the peers that completed the handshake, which may be none: each
 /// failed attempt is logged. Fails if there is no peer to dial, the user
@@ -136,6 +141,16 @@ pub async fn v2_bootstrap_clients(
     config: &Config,
     peers: &[PeerSocketAddr],
     user_agent: String,
+) -> Result<BootstrapPeers, BoxError> {
+    v2_bootstrap_clients_with_timeout(config, peers, user_agent, BOOTSTRAP_DIAL_TIMEOUT).await
+}
+
+/// The timeout-parameterized implementation, shared with the dial-timeout regression test.
+pub(in crate::peer_set::initialize) async fn v2_bootstrap_clients_with_timeout(
+    config: &Config,
+    peers: &[PeerSocketAddr],
+    user_agent: String,
+    dial_timeout: Duration,
 ) -> Result<BootstrapPeers, BoxError> {
     // The record encoder relies on this bound, which the peer set checks when it starts.
     if user_agent.len() > MAX_USER_AGENT_LENGTH {
@@ -165,6 +180,12 @@ pub async fn v2_bootstrap_clients(
         .filter(|addr| endpoints.for_addr(*addr).is_some())
         .collect();
     if peers.is_empty() {
+        BootstrapPeers {
+            clients: Vec::new(),
+            endpoints: endpoints.into_vec(),
+        }
+        .close()
+        .await;
         return Err(
             "no state snapshot bootstrap peer is reachable from this host's address families"
                 .into(),
@@ -222,31 +243,43 @@ pub async fn v2_bootstrap_clients(
         );
     }
 
-    let mut clients = Vec::new();
-    while let Some(finished) = attempts.join_next().await {
-        // A panic in an attempt is this node's bug, and is resumed here.
-        if let Ok((addr, result)) = finished.panic_if_task_has_panicked() {
-            match result {
-                Ok(client) => {
-                    tracing::info!(?addr, "connected to state snapshot bootstrap peer");
-                    clients.push((addr, client));
-                }
-                Err(error) => {
-                    tracing::info!(?addr, %error, "state snapshot bootstrap peer connection failed");
+    let mut bootstrap = BootstrapPeers {
+        clients: Vec::new(),
+        endpoints: endpoints.into_vec(),
+    };
+    let dial = async {
+        while let Some(finished) = attempts.join_next().await {
+            // A panic in an attempt is this node's bug, and is resumed here.
+            if let Ok((addr, result)) = finished.panic_if_task_has_panicked() {
+                match result {
+                    Ok(client) => {
+                        tracing::info!(?addr, "connected to state snapshot bootstrap peer");
+                        bootstrap.clients.push((addr, client));
+                    }
+                    Err(error) => {
+                        tracing::info!(?addr, %error, "state snapshot bootstrap peer connection failed");
+                    }
                 }
             }
         }
+    };
+
+    if tokio::time::timeout(dial_timeout, dial).await.is_err() {
+        attempts.abort_all();
+        while attempts.join_next().await.is_some() {}
+        bootstrap.close().await;
+        return Err(format!(
+            "state snapshot bootstrap dialling did not finish within {dial_timeout:?}"
+        )
+        .into());
     }
 
-    Ok(BootstrapPeers {
-        clients,
-        endpoints: endpoints.into_vec(),
-    })
+    Ok(bootstrap)
 }
 
 /// The peers a bootstrap dials, from the configured `peers`: canonical
 /// addresses, the first for each IP address in order, at most
-/// [`MAX_BOOTSTRAP_PEERS`] of them (DESIGN.md §5, "Bootstrap dialer").
+/// [`MAX_BOOTSTRAP_PEERS`] of them.
 pub(in crate::peer_set::initialize) fn select_peers(
     peers: &[PeerSocketAddr],
 ) -> Vec<PeerSocketAddr> {

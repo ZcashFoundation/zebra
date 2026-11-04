@@ -1,5 +1,4 @@
-//! Tests for the state-snapshot bootstrap dialer (DESIGN §5, "Bootstrap
-//! dialer").
+//! Tests for the state-snapshot bootstrap dialer.
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -26,7 +25,7 @@ use crate::{
                 self,
                 bootstrap::{
                     bootstrap_minimum_peer_version, select_peers, spawn_report_log,
-                    MAX_BOOTSTRAP_PEERS,
+                    v2_bootstrap_clients_with_timeout, MAX_BOOTSTRAP_PEERS,
                 },
                 v2_bootstrap_clients,
             },
@@ -270,6 +269,50 @@ async fn bootstrap_dialer_connects_to_artifact_servers_the_normal_dialer_decline
     pruned_task.abort();
     archive_task.abort();
     dialer_task.abort();
+}
+
+/// A whole-dial timeout closes an already-connected peer before returning the error to a caller
+/// that might immediately start ordinary sync.
+#[tokio::test]
+async fn bootstrap_dial_timeout_closes_connected_peers_before_returning() {
+    let _init_guard = zebra_test::init();
+    let [artifact_addr] = free_udp_addrs();
+    let (mut artifact_rx, artifact_task) = spawn_v2_node(
+        v2_test_config(artifact_addr, &[]),
+        PeerServices::NODE_SYNC_ARTIFACTS,
+    );
+    let config = Config {
+        network: Network::Mainnet,
+        ..Config::default()
+    };
+    // A distinct TEST-NET IP keeps this attempt open until the whole-dial timeout, while the
+    // loopback artifact server completes its handshake.
+    let silent = test_addr(Ipv4Addr::new(192, 0, 2, 1), 9);
+    let peers = [PeerSocketAddr::from(artifact_addr), silent];
+
+    let error = v2_bootstrap_clients_with_timeout(
+        &config,
+        &peers,
+        "/bootstrap test/".to_string(),
+        Duration::from_secs(1),
+    )
+    .await
+    .expect_err("the silent peer holds the dial open until its overall deadline");
+    assert!(error.to_string().contains("did not finish"), "{error}");
+
+    let (_, mut seen_by_artifact) = artifact_rx
+        .next()
+        .now_or_never()
+        .flatten()
+        .expect("the artifact server accepted the bootstrap before the timeout");
+    assert!(
+        matches!(
+            ServiceExt::<Request>::ready(&mut seen_by_artifact).now_or_never(),
+            Some(Err(_))
+        ),
+        "the connected peer is already closed when the timeout error returns"
+    );
+    artifact_task.abort();
 }
 
 /// A bootstrap whose peers are unreachable returns no clients, once each
