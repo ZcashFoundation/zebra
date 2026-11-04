@@ -276,7 +276,7 @@ where
 ///
 /// Returns a block verifier, mempool transaction verifier,
 /// a [`BackgroundTaskHandles`] with state checkpoint checking, accepted-commit supervision and
-/// Halo2 key preload tasks,
+/// proof parameter preload tasks,
 /// the maximum configured checkpoint verification height, and the shared prepared-block decoder.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
@@ -551,8 +551,8 @@ pub struct BackgroundTaskHandles {
     /// This ongoing task must be polled to propagate state invariant panics.
     pub checkpoint_commit_handle: JoinHandle<()>,
 
-    /// A handle to background construction of the existing Halo2 verifying keys.
-    /// Finishes after initializing the NU6.3 key, then both historical keys.
+    /// A handle to background construction of Halo2 verifying keys and Sapling parameters.
+    /// Finishes after initializing the NU6.3 key, both historical keys, and the Sapling prover.
     /// Once started, this blocking task cannot be aborted.
     pub halo2_key_preload_handle: JoinHandle<()>,
 }

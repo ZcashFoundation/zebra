@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: '`BackgroundTaskHandles::halo2_key_preload_handle` now also completes after loading the bundled Sapling parameters.'
+time: 2026-11-05T04:51:38.015005071+01:00
