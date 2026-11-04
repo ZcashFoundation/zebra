@@ -345,11 +345,9 @@ pub struct Chain {
     /// Partial transparent address index data from `blocks`.
     pub(super) partial_transparent_transfers: HashMap<transparent::Address, TransparentTransfers>,
 
-    /// The cumulative work represented by `blocks`.
+    /// Work from a shared origin through the chain tip, including finalized roots.
     ///
-    /// Since the best chain is determined by the largest cumulative work,
-    /// the work represented by finalized blocks can be ignored,
-    /// because they are common to all non-finalized chains.
+    /// Root removal preserves this work, so shared snapshots and trimmed chains compare equally.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
     /// The chain value pool balances of the tip of this [`Chain`],
@@ -385,7 +383,7 @@ Remove the lowest height block of the non-finalized portion of a chain.
 
 2. Update cumulative data members
    - Remove the block's hash from `self.height_by_hash`
-   - Subtract work from `self.partial_cumulative_work`
+   - Preserve `self.partial_cumulative_work`: finalized roots remain a common work prefix
    - For each `transaction` in `block`
      - Remove `transaction.hash` from `tx_loc_by_hash`
      - Remove created utxos from `self.created_utxos`
@@ -449,6 +447,12 @@ handled by `#[derive(Default)]`.
 
 **Note:** The `ChainState` can be empty after a restart, because the
 non-finalized state is empty.
+
+When the non-finalized state starts a chain at the database tip, it initializes
+`partial_cumulative_work` with its maintained finalized-work offset. Finalization
+advances that offset without changing chain ordering or copying published best-chain
+windows. Extending a chain removes finalized overlap from the copy already needed
+for the new block; unrelated writes leave the shared best chain untouched.
 
 ### `NonFinalizedState` Type
 

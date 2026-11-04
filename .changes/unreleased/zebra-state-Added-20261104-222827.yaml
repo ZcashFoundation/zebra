@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `NonFinalizedState::prune_finalized` to reconcile follower chains with the finalized database and `ChainTipSender::update_best_tip` to publish the best in-memory tip or fall back to the finalized tip.
+time: 2026-11-04T22:28:27.155481242+01:00

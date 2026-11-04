@@ -21,7 +21,7 @@ use zebra_chain::{
 
 use crate::{
     request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver, BoxError,
-    CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, NonFinalizedState, SemanticallyVerifiedBlock, ZebraDb,
 };
 
 use TipAction::*;
@@ -212,25 +212,47 @@ impl ChainTipSender {
         let new_tip = new_tip.into();
         self.record_fields(&new_tip);
 
-        // An absent update does not change the selected tip. The write task uses
-        // `clear_best_non_finalized_tip` to explicitly fall back to the finalized state.
+        // An absent update does not change the selected tip. `update_best_tip` handles an
+        // empty non-finalized state using the current finalized database.
         if new_tip.is_some() {
             self.has_non_finalized_tip = true;
             self.update(new_tip)
         }
     }
 
-    /// Select the current finalized tip when the non-finalized state is empty.
+    /// Publishes the best in-memory tip, falling back to the current finalized database tip.
     ///
-    /// The caller supplies the current database tip, which may have advanced since
-    /// the last checkpointed block. If both states are empty, clear any old tip.
-    pub(crate) fn clear_best_non_finalized_tip(&mut self, finalized_tip: Option<ChainTipBlock>) {
-        self.has_non_finalized_tip = false;
-        if finalized_tip.is_some() {
-            self.update(finalized_tip);
-        } else {
-            let _ = self.sender.send(None);
+    /// Unchanged tips do not reread block bodies or notify subscribers. An incomplete secondary
+    /// database tip leaves the previous tip selected until its complete body is available.
+    /// Returns the selected height, or `None` if both states are empty or the tip is incomplete.
+    pub fn update_best_tip(
+        &mut self,
+        non_finalized_state: &NonFinalizedState,
+        finalized_state: &ZebraDb,
+    ) -> Option<block::Height> {
+        let active_hash = self.sender.borrow().as_ref().map(|tip| tip.hash);
+        if let Some(tip) = non_finalized_state.best_tip_block() {
+            self.has_non_finalized_tip = true;
+            if active_hash != Some(tip.hash) {
+                self.set_best_non_finalized_tip(ChainTipBlock::from(tip.clone()));
+            }
+            return Some(tip.height);
         }
+        let Some((height, hash)) = finalized_state.tip() else {
+            self.has_non_finalized_tip = false;
+            if active_hash.is_some() {
+                let _ = self.sender.send(None);
+            }
+            return None;
+        };
+        if active_hash != Some(hash) {
+            let tip = finalized_state
+                .block(height.into())
+                .expect("primary finalized tips have complete stored bodies")?;
+            self.update(Some(CheckpointVerifiedBlock::with_hash(tip, hash).into()));
+        }
+        self.has_non_finalized_tip = false;
+        Some(height)
     }
 
     /// Possibly send an update to listeners.

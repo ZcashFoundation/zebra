@@ -240,11 +240,10 @@ pub struct ChainInner {
 
     // Chain Work
     //
-    /// The cumulative work represented by `blocks`.
+    /// Work from the state's common origin through this chain's tip.
     ///
-    /// Since the best chain is determined by the largest cumulative work,
-    /// the work represented by finalized blocks can be ignored,
-    /// because they are common to all non-finalized chains.
+    /// Finalizing or removing a root preserves its work. New chains inherit the finalized
+    /// offset from `NonFinalizedState`, so physical overlap never affects fork choice.
     pub(super) partial_cumulative_work: PartialCumulativeWork,
 
     // Chain Pools
@@ -418,6 +417,13 @@ impl Chain {
         (block, treestate)
     }
 
+    /// Removes finalized overlap without changing this chain's work or tip.
+    pub(super) fn pop_roots_through(&mut self, height: Height) {
+        while !self.is_empty() && self.non_finalized_root_height() <= height {
+            self.pop_root();
+        }
+    }
+
     /// Returns the block at the provided height and all of its descendant blocks.
     pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
         self.blocks
@@ -434,7 +440,9 @@ impl Chain {
         let block_height = self.height_by_hash(block_hash)?;
         let mut new_chain = self.fork(block_hash)?;
         new_chain.pop_tip();
-        new_chain.last_fork_height = self.last_fork_height.min(Some(block_height));
+        new_chain.last_fork_height = self
+            .last_fork_height
+            .min(Some(new_chain.non_finalized_tip_height()));
         Some((new_chain, self.child_blocks(&block_height)))
     }
 
@@ -1399,7 +1407,7 @@ impl Chain {
         }
     }
 
-    fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+    pub(super) fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
@@ -2007,14 +2015,15 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             "hash must be present if block was added to chain"
         );
 
-        // TODO: move this to a Work or block header UpdateWith.revert...()?
-        // remove work from partial_cumulative_work
-        let block_work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("work has already been validated");
-        self.partial_cumulative_work -= block_work;
+        // Finalized roots remain part of the common work prefix, even after physical removal.
+        if position == RevertPosition::Tip {
+            let block_work = block
+                .header
+                .difficulty_threshold
+                .to_work()
+                .expect("work has already been validated");
+            self.partial_cumulative_work -= block_work;
+        }
 
         let transactions = block.transactions.iter().zip(transaction_hashes.iter());
         let mut transactions = transactions.clone().skip(1).chain(transactions.take(1));

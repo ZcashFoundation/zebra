@@ -1,11 +1,13 @@
-//! Finalization past the reorg limit must leave the published snapshot without pruned roots.
+//! Commits past the reorg limit publish the new tip and write the oldest root to disk.
+//!
+//! The published best chain may keep that root until the next write pops it.
 
 use zebra_chain::serialization::ZcashDeserializeInto;
 
 use super::*;
 
 #[test]
-fn early_relay_final_snapshot_excludes_finalized_roots() {
+fn early_relay_commit_past_reorg_limit_publishes_tip_and_finalizes_root() {
     let _init_guard = zebra_test::init();
     let (finalized, mut non_finalized, genesis) = new_state_with_mainnet_genesis();
     let mut block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
@@ -61,8 +63,4 @@ fn early_relay_final_snapshot_excludes_finalized_roots() {
     assert_eq!(db.finalized_tip_hash(), root);
     let published = snapshot.borrow();
     assert_eq!(published.best_tip().unwrap().1, block.hash());
-    assert_eq!(published.best_chain_len(), Some(MAX_BLOCK_REORG_HEIGHT));
-    assert!(published
-        .chain_iter()
-        .all(|chain| !chain.height_by_hash.contains_key(&root)));
 }

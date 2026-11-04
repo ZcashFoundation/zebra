@@ -25,7 +25,7 @@ use crate::{
         InvalidateError, ReconsiderError,
     },
     tests::FakeChainHelper,
-    Config,
+    Config, ValidateContextError,
 };
 
 #[test]
@@ -894,6 +894,483 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
 
     assert!(state.best_chain().is_none());
 
+    Ok(())
+}
+
+/// Finalizing past the reorg limit leaves published chains shared. Extending a chain removes
+/// its finalized overlap from the copy that commit already makes.
+#[test]
+fn finalization_keeps_published_best_chain_until_next_write() -> Result<()> {
+    use crate::tests::setup::new_state_with_mainnet_genesis;
+
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let child = root.make_fake_child();
+    let tip = child.make_fake_child().set_work(10);
+    let side_tip = child.make_fake_child().set_work(1);
+    let conflicting_root = root.clone().set_work(1);
+    state.commit_new_chain(root.clone().prepare(), &finalized.db)?;
+    for block in [&child, &tip, &side_tip] {
+        state.commit_block(block.clone().prepare(), &finalized.db)?;
+    }
+    state.commit_new_chain(conflicting_root.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.chain_count(), 3);
+    let snapshot = state.clone();
+
+    let finalizable = state.finalize_keeping_best_chain(Height(1));
+
+    assert!(Arc::ptr_eq(
+        state.best_chain().unwrap(),
+        snapshot.best_chain().unwrap()
+    ));
+    assert_eq!(state.chain_count(), 2);
+    assert!(!state.any_chain_contains(&conflicting_root.hash()));
+    let side_chain = state.chain_iter().nth(1).unwrap();
+    assert!(side_chain.contains_block_hash(side_tip.hash()));
+    assert!(!side_chain.contains_block_hash(root.hash()));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+
+    // Committing to a side chain leaves the published best chain shared.
+    let mut side_commit = state.clone();
+    side_commit.commit_block(
+        side_tip.make_fake_child().set_work(1).prepare(),
+        &finalized.db,
+    )?;
+    assert!(Arc::ptr_eq(
+        side_commit.best_chain().unwrap(),
+        state.best_chain().unwrap(),
+    ));
+    assert_eq!(side_commit.best_tip().unwrap().1, tip.hash());
+
+    let next = tip.make_fake_child().set_work(10);
+    state.commit_block(next.clone().prepare(), &finalized.db)?;
+
+    assert!(!state.any_chain_contains(&root.hash()));
+    assert_eq!(state.root_height(), Some(Height(2)));
+    assert_eq!(state.best_tip().unwrap().1, next.hash());
+    assert!(snapshot.any_chain_contains(&root.hash()));
+
+    assert_eq!(state.best_chain_len(), Some(3));
+    Ok(())
+}
+
+/// Returns a state whose best chain keeps its finalized root, of work 100, below two blocks of
+/// work 3 each. A side chain forked at the root has the same non-finalized work, but was received
+/// later. A block of work 1 on the first best chain block was invalidated.
+///
+/// Also returns the root, the best chain's blocks, the invalidated block, and the side chain's tip.
+fn state_keeping_finalized_root() -> Result<(FinalizedState, NonFinalizedState, [Arc<Block>; 5])> {
+    use crate::tests::setup::new_state_with_mainnet_genesis;
+
+    let prepare = |block: &Arc<Block>| {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(std::time::Instant::now());
+        prepared
+    };
+    let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let root = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()?
+        .set_work(100);
+    let child = root.make_fake_child().set_work(3);
+    let invalidated = child.make_fake_child().set_work(1);
+    let tip = child.make_fake_child().set_work(3);
+    let side_root = root
+        .make_fake_child()
+        .set_work(3)
+        .set_block_commitment([1; 32]);
+    let side_tip = side_root.make_fake_child().set_work(3);
+    state.commit_new_chain(prepare(&root), &finalized.db)?;
+    for block in [&child, &invalidated] {
+        state.commit_block(prepare(block), &finalized.db)?;
+    }
+    state.invalidate_block(invalidated.hash())?;
+    for block in [&tip, &side_root, &side_tip] {
+        state.commit_block(prepare(block), &finalized.db)?;
+    }
+    assert_eq!(state.chain_count(), 2);
+    let finalizable = state.finalize_keeping_best_chain(Height(1));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+    assert_eq!(state.best_tip().unwrap().1, tip.hash());
+
+    Ok((finalized, state, [root, child, tip, invalidated, side_tip]))
+}
+
+/// Removing finalized overlap cannot change fork choice, including direct chain comparisons.
+#[test]
+fn removing_finalized_roots_preserves_chain_order() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_, state, _) = state_keeping_finalized_root()?;
+    let best = state.best_chain().unwrap();
+    let mut trimmed = best.as_ref().clone();
+    trimmed.pop_root();
+    assert_eq!(best.as_ref().cmp(&trimmed), std::cmp::Ordering::Equal);
+    assert_eq!(state.root_height(), Some(Height(2)));
+    assert_eq!(state.best_chain_len(), Some(2));
+    Ok(())
+}
+
+/// Unrelated and rejected writes must not copy a published best-chain window.
+#[test]
+fn competing_writes_preserve_shared_best_chain() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (finalized, state, [root, _, tip, invalidated, side_tip]) = state_keeping_finalized_root()?;
+    let best = state.best_chain().unwrap();
+    for operation in 0..5 {
+        let mut updated = state.clone();
+        match operation {
+            0 => updated.commit_block(
+                side_tip.make_fake_child().set_work(1).prepare(),
+                &finalized.db,
+            )?,
+            1 => updated
+                .commit_new_chain(root.make_fake_child().set_work(1).prepare(), &finalized.db)?,
+            2 => assert!(updated
+                .commit_block(invalidated.clone().prepare(), &finalized.db,)
+                .is_err()),
+            3 => {
+                updated.invalidate_block(side_tip.hash())?;
+            }
+            4 => {
+                updated.reconsider_block(invalidated.hash(), &finalized.db)?;
+            }
+            _ => unreachable!(),
+        }
+        let unchanged = updated
+            .find_chain(|chain| chain.non_finalized_tip_hash() == tip.hash())
+            .expect("the original best chain was not changed");
+        assert!(Arc::ptr_eq(best, &unchanged));
+    }
+    Ok(())
+}
+
+/// Both public finalization entry paths skip retained roots and keep matching sibling forks.
+#[test]
+fn public_finalize_skips_retained_finalized_roots() -> Result<()> {
+    use crate::tests::setup::new_state_with_mainnet_genesis;
+
+    let _init_guard = zebra_test::init();
+    for follower in [false, true] {
+        let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+        let root: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+        let child = root.make_fake_child();
+        let first = child.make_fake_child().set_work(10);
+        let second = child.make_fake_child().set_work(1);
+        state.commit_new_chain(root.clone().prepare(), &finalized.db)?;
+        for block in [&child, &first, &second] {
+            state.commit_block(block.clone().prepare(), &finalized.db)?;
+        }
+        let mut writer = state.clone();
+        let finalizable = writer.finalize_keeping_best_chain(Height(1));
+        finalized.commit_finalized_direct(finalizable, None, "test")?;
+        if follower {
+            assert!(state.prune_finalized(&finalized.db));
+            assert!(!state.prune_finalized(&finalized.db));
+        } else {
+            state = writer;
+        }
+        let snapshot = state.clone();
+        assert_eq!(state.finalize().inner_block(), child);
+        assert_eq!(state.root_height(), Some(Height(3)));
+        assert_eq!(state.best_chain_len(), Some(1));
+        assert_eq!(state.chain_count(), 2);
+        assert!(state.any_chain_contains(&first.hash()));
+        assert!(state.any_chain_contains(&second.hash()));
+        assert!(!state.any_chain_contains(&root.hash()));
+        assert!(snapshot.any_chain_contains(&root.hash()));
+    }
+    Ok(())
+}
+
+/// Starting at a database tip that advanced since reconciliation inherits the same work prefix.
+#[test]
+fn new_chain_reconciles_an_advanced_finalized_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, [_, child, ..]) = state_keeping_finalized_root()?;
+    let mut writer = state.clone();
+    let finalizable = writer.finalize_keeping_best_chain(Height(2));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+    let new_tip = child.make_fake_child().set_work(4);
+    state.commit_new_chain(new_tip.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.best_tip().unwrap().1, new_tip.hash());
+    assert_eq!(state.root_height(), Some(Height(3)));
+    assert_eq!(state.best_chain_len(), Some(1));
+    Ok(())
+}
+
+/// Starting chains must share the work offset left after reconciliation drops a finalized tip.
+#[test]
+fn new_chains_share_work_offset_after_finalized_tip_invalidation() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, [_, child, tip, ..]) = state_keeping_finalized_root()?;
+    let mut writer = state.clone();
+    let finalizable = writer.finalize_keeping_best_chain(Height(2));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+    state.invalidate_block(tip.hash())?;
+
+    let lighter = child.make_fake_child().set_work(2);
+    state.commit_new_chain(lighter.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.best_tip().unwrap().1, lighter.hash());
+    let heavier = child.make_fake_child().set_work(4);
+    state.commit_new_chain(heavier.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.best_tip().unwrap().1, heavier.hash());
+    Ok(())
+}
+
+/// A rejected new chain must not reconcile or prune an otherwise unchanged snapshot.
+#[test]
+fn rejected_new_chain_keeps_unreconciled_finalized_state() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, [_, child, ..]) = state_keeping_finalized_root()?;
+    let rejected = child.make_fake_child().set_work(4);
+    state.commit_block(rejected.clone().prepare(), &finalized.db)?;
+    state.invalidate_block(rejected.hash())?;
+
+    let mut writer = state.clone();
+    let finalizable = writer.finalize_keeping_best_chain(Height(2));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+    let previous = state.clone();
+
+    assert!(matches!(
+        state.commit_new_chain(rejected.prepare(), &finalized.db),
+        Err(ValidateContextError::BlockPreviouslyInvalidated { .. })
+    ));
+    assert!(state.eq_internal_state(&previous));
+    Ok(())
+}
+
+/// Extending before a follower reconciles a newer database tip must not lose finalized work.
+#[test]
+fn unreconciled_finalized_roots_preserve_fork_choice_after_extension() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for operation in 0..3 {
+        let (mut finalized, mut state, [_, child, tip, ..]) = state_keeping_finalized_root()?;
+        let extension = tip.make_fake_child().set_work(1);
+        let contextual = if operation == 1 {
+            let mut proposal = state.clone();
+            proposal.commit_block(extension.clone().prepare(), &finalized.db)?;
+            Some(proposal.best_tip_block().unwrap().clone())
+        } else {
+            None
+        };
+        if operation == 2 {
+            state.commit_block(extension.clone().prepare(), &finalized.db)?;
+            state.invalidate_block(extension.hash())?;
+        }
+
+        let mut writer = state.clone();
+        let finalizable = writer.finalize_keeping_best_chain(Height(2));
+        finalized.commit_finalized_direct(finalizable, None, "test")?;
+        match operation {
+            0 => state.commit_block(extension.clone().prepare(), &finalized.db)?,
+            1 => state.commit_prevalidated_contextual(contextual.unwrap(), &finalized.db, None)?,
+            2 => {
+                state.reconsider_block(extension.hash(), &finalized.db)?;
+            }
+            _ => unreachable!(),
+        }
+        assert!(state.prune_finalized(&finalized.db));
+        assert_eq!(state.best_tip().unwrap().1, extension.hash());
+
+        let competing_root = child.make_fake_child().set_work(2);
+        state.commit_new_chain(competing_root.clone().prepare(), &finalized.db)?;
+        assert_eq!(state.best_tip().unwrap().1, extension.hash());
+        let competing_tip = competing_root.make_fake_child().set_work(3);
+        state.commit_block(competing_tip.clone().prepare(), &finalized.db)?;
+        assert_eq!(state.best_tip().unwrap().1, competing_tip.hash());
+        assert_eq!(state.root_height(), Some(Height(3)));
+        assert_eq!(state.best_chain_len(), Some(2));
+    }
+    Ok(())
+}
+
+/// Reconsideration restores sibling descendants of a shared non-root block as well as roots.
+#[test]
+fn reconsider_shared_non_root_restores_all_forks() -> Result<()> {
+    use crate::tests::setup::new_state_with_mainnet_genesis;
+
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let shared = root.make_fake_child();
+    let first = shared.make_fake_child().set_work(10);
+    let second = shared.make_fake_child().set_work(1);
+    state.commit_new_chain(root.prepare(), &finalized.db)?;
+    for block in [&shared, &first, &second] {
+        state.commit_block(block.clone().prepare(), &finalized.db)?;
+    }
+    state.invalidate_block(shared.hash())?;
+    let restored = state.reconsider_block(shared.hash(), &finalized.db)?;
+    assert_eq!(restored.len(), 3);
+    assert_eq!(state.chain_count(), 2);
+    assert!(state.any_chain_contains(&second.hash()));
+    assert_eq!(state.best_tip().unwrap().1, first.hash());
+    Ok(())
+}
+
+/// Fork retention must not evict an unfinished replay prefix when live forks fill every slot.
+#[test]
+fn reconsider_branching_subtree_with_saturated_live_forks() -> Result<()> {
+    use crate::{
+        constants::MAX_NON_FINALIZED_CHAIN_FORKS, tests::setup::new_state_with_mainnet_genesis,
+    };
+
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let root = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()?
+        .set_work(100);
+    let shared = root.make_fake_child().set_work(1);
+    let first = shared.make_fake_child().set_work(1);
+    let first_tip = first.make_fake_child().set_work(20);
+    let second = shared.make_fake_child().set_work(2);
+    let second_tip = second.make_fake_child().set_work(30);
+    state.commit_new_chain(root.clone().prepare(), &finalized.db)?;
+    for block in [&shared, &first, &first_tip, &second, &second_tip] {
+        state.commit_block(block.clone().prepare(), &finalized.db)?;
+    }
+    state.invalidate_block(shared.hash())?;
+
+    for index in 0..MAX_NON_FINALIZED_CHAIN_FORKS {
+        let live_fork = root
+            .make_fake_child()
+            .set_work(5)
+            .set_block_commitment([u8::try_from(index)?; 32]);
+        state.commit_block(live_fork.prepare(), &finalized.db)?;
+    }
+    assert_eq!(state.chain_count(), MAX_NON_FINALIZED_CHAIN_FORKS);
+
+    let restored = state.reconsider_block(shared.hash(), &finalized.db)?;
+    assert_eq!(restored.len(), 5);
+    for block in [&shared, &first, &first_tip, &second, &second_tip] {
+        assert!(restored.contains(&block.hash()));
+        assert!(state.any_chain_contains(&block.hash()));
+    }
+    assert_eq!(state.best_tip().unwrap().1, second_tip.hash());
+    assert_eq!(state.chain_count(), MAX_NON_FINALIZED_CHAIN_FORKS);
+    Ok(())
+}
+
+/// Writes that don't extend the best chain compare chains without its retained finalized root,
+/// so another chain with more non-finalized work becomes the best chain.
+#[test]
+fn chains_are_compared_without_retained_finalized_root() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (finalized, mut state, [.., side_tip]) = state_keeping_finalized_root()?;
+    let side_child = side_tip.make_fake_child().set_work(1);
+    state.commit_block(side_child.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.best_tip().unwrap().1, side_child.hash());
+
+    let (finalized, mut state, [root, ..]) = state_keeping_finalized_root()?;
+    let new_chain = root.make_fake_child().set_work(7);
+    state.commit_new_chain(new_chain.clone().prepare(), &finalized.db)?;
+    assert_eq!(state.best_tip().unwrap().1, new_chain.hash());
+
+    let (_finalized, mut state, [_, _, tip, _, side_tip]) = state_keeping_finalized_root()?;
+    state.invalidate_block(tip.hash())?;
+    assert_eq!(state.best_tip().unwrap().1, side_tip.hash());
+
+    Ok(())
+}
+
+/// A cached proposal for a side chain is compared without the retained finalized root.
+#[test]
+fn prevalidated_side_commit_compares_chains_without_retained_finalized_root() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, [.., side_tip]) = state_keeping_finalized_root()?;
+    let side_child = side_tip.make_fake_child().set_work(1);
+    let mut proposal = state.clone();
+    proposal.commit_block(side_child.clone().prepare(), &finalized.db)?;
+    let contextual = proposal
+        .find_chain(|chain| chain.contains_block_hash(side_child.hash()))
+        .unwrap()
+        .block(side_child.hash().into())
+        .unwrap()
+        .clone();
+
+    state.commit_prevalidated_contextual(contextual, &finalized.db, None)?;
+
+    assert_eq!(state.best_tip().unwrap().1, side_child.hash());
+    Ok(())
+}
+
+/// A reconsidered fork survives finalization while unrelated retained roots stay shared.
+#[test]
+fn reconsider_block_restores_fork_without_retained_finalized_root() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, [_, _, _, invalidated, _]) = state_keeping_finalized_root()?;
+    let snapshot = state.clone();
+
+    assert_eq!(
+        state.reconsider_block(invalidated.hash(), &finalized.db)?,
+        vec![invalidated.hash()]
+    );
+
+    assert!(Arc::ptr_eq(
+        state.best_chain().unwrap(),
+        snapshot.best_chain().unwrap()
+    ));
+    let _ = state.finalize_keeping_best_chain(Height(2));
+    assert!(state.any_chain_contains(&invalidated.hash()));
+    Ok(())
+}
+
+/// Invalidating a root shared by retained forks removes every fork, or refuses to empty the state.
+#[test]
+fn invalidate_shared_root_after_retention_finalization() -> Result<()> {
+    use crate::tests::setup::new_state_with_mainnet_genesis;
+
+    let _init_guard = zebra_test::init();
+    for keep_other_root in [false, true] {
+        let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+        let root: Arc<Block> =
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+        let shared = root.make_fake_child();
+        let first = shared.make_fake_child().set_work(10);
+        let second = shared.make_fake_child().set_work(1);
+        let other = root
+            .make_fake_child()
+            .set_work(1)
+            .set_block_commitment([1; 32]);
+        state.commit_new_chain(root.clone().prepare(), &finalized.db)?;
+        for block in [&shared, &first, &second] {
+            state.commit_block(block.clone().prepare(), &finalized.db)?;
+        }
+        if keep_other_root {
+            state.commit_block(other.clone().prepare(), &finalized.db)?;
+        }
+        let finalizable = state.finalize_keeping_best_chain(Height(1));
+        finalized.commit_finalized_direct(finalizable, None, "test")?;
+
+        let result = state.invalidate_block(shared.hash());
+        if keep_other_root {
+            assert_eq!(result?, shared.hash());
+            assert_eq!(state.chain_count(), 1);
+            assert_eq!(state.best_tip().unwrap().1, other.hash());
+            for removed in [&shared, &first, &second] {
+                assert!(!state.any_chain_contains(&removed.hash()));
+            }
+            assert!(state
+                .commit_block(second.make_fake_child().prepare(), &finalized.db)
+                .is_err());
+            let restored = state.reconsider_block(shared.hash(), &finalized.db)?;
+            assert_eq!(restored.len(), 3);
+            assert_eq!(state.chain_count(), 3);
+            for restored in [&shared, &first, &second] {
+                assert!(state.any_chain_contains(&restored.hash()));
+            }
+            assert_eq!(state.best_tip().unwrap().1, first.hash());
+        } else {
+            assert!(
+                matches!(result, Err(InvalidateError::OnlyChainRoot(hash)) if hash == shared.hash())
+            );
+            assert_eq!(state.chain_count(), 2);
+            assert!(state.any_chain_contains(&first.hash()));
+            assert!(state.any_chain_contains(&second.hash()));
+        }
+    }
     Ok(())
 }
 
