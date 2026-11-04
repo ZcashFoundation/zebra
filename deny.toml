@@ -184,6 +184,7 @@ allow-git = [
     "https://github.com/upbqdn/halo2",
     "https://github.com/upbqdn/sinsemilla",
     "https://github.com/upbqdn/sapling-crypto",
+    "https://github.com/upbqdn/bellman",
 ]
 
 [sources.allow-org]

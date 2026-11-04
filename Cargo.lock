@@ -376,8 +376,7 @@ checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 [[package]]
 name = "bellman"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "973b16549796a1274a63e00159a03250e66e8263e2ac6344b1c9fdfe9b7a8325"
+source = "git+https://github.com/upbqdn/bellman?rev=fec2939e484b230069f76e0639ba2097c4bd79cf#fec2939e484b230069f76e0639ba2097c4bd79cf"
 dependencies = [
  "bitvec",
  "blake2s_simd",
@@ -1980,8 +1979,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 [[package]]
 name = "groth16"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bb1e0bde2dbacd81474ae216c5dd4901307bd1c75fd26ed49590e88048c8442"
+source = "git+https://github.com/upbqdn/bellman?rev=fec2939e484b230069f76e0639ba2097c4bd79cf#fec2939e484b230069f76e0639ba2097c4bd79cf"
 dependencies = [
  "bellman",
  "byteorder",
