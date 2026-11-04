@@ -48,10 +48,12 @@ If the PR touches a Tower `Service` implementation:
 
 - Prefer `thiserror` with `#[from]` / `#[source]`
 - `expect()` messages must explain **why** the invariant holds:
+
   ```rust
   .expect("block hash exists because we just inserted it")  // good
   .expect("failed to get block")                            // bad
   ```
+
 - Don't turn invariant violations into misleading `None`/defaults
 
 ### Numeric Safety
