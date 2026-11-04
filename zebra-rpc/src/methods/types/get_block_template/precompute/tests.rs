@@ -1166,6 +1166,87 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
     );
 }
 
+/// A served build that fails its check is replaced by the last valid work for its parent: the
+/// parent's coinbase-only work, or a build that passed its check after newer work was served.
+#[test]
+fn failed_served_work_falls_back_to_the_last_valid_work() {
+    let cache = TemplateCache::default();
+    let mut changes = cache.subscribe();
+
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    cache.update(full_template(0));
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    changes.take_changed();
+    assert!(cache.reject(&first));
+    assert!(
+        changes.take_changed(),
+        "withdrawing failed work wakes long polls"
+    );
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(next_work(&cache).is_none());
+
+    // A build that passes its check after newer work was served is not served, but it is the
+    // work served again if the newer work fails.
+    cache.update(full_template(1));
+    let checked = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.promote(&checked, Some(&checked)));
+    cache.update(full_template(2));
+    let later = next_work(&cache).expect("a later build waits for validation");
+    cache.clear();
+    cache.update(template());
+    cache.update(full_template(3));
+    let newer = served_work(&cache).expect("newer work is served");
+    assert!(!cache.promote(&later, Some(&checked)));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
+    assert!(cache.reject(&newer));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &later)));
+
+    // Rejecting work that is not served changes nothing.
+    assert!(!cache.reject(&newer));
+}
+
+/// The validation worker withdraws a served build that fails its check.
+#[tokio::test]
+async fn served_work_that_fails_its_check_is_withdrawn() {
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(template().previous_block_hash);
+        let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build()
+                .with_max_request_delay(Duration::from_secs(10))
+                .for_unit_tests();
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.clone(),
+            Network::Mainnet,
+            verifier.clone(),
+            tip,
+        ));
+
+        cache.update(template());
+        let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+        cache.update(full_template(0));
+        let mut changes = cache.subscribe();
+        verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await
+            .respond_error("rejected".into());
+        changes.changed().await;
+        assert!(
+            served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)),
+            "the parent's coinbase-only work is served again"
+        );
+        tasks.abort_all();
+    })
+    .await
+    .expect("withdrawing failed work must not wait for a backstop");
+}
+
 /// After a clock rollback narrows the served work's header time, the narrowed work is queued for
 /// validation once, so its verdict can replace the served work, unless the served work changed or
 /// a newer build is already waiting.
