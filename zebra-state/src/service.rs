@@ -1010,11 +1010,13 @@ impl StateService {
             rsp_rx
         };
 
-        // Start the handoff only for a semantic child of the configured maximum checkpoint.
+        // Start the handoff for a semantic child of the configured maximum checkpoint.
         // Checking the parent's height as well as its hash rejects height-skipping orphans whose
-        // parent is merely an intermediate checkpoint.
+        // parent is merely an intermediate checkpoint. An unspecified maximum retains hash-based
+        // detection for callers that do not use checkpoint heights.
         if self.block_write_sender.accepts_finalized()
-            && self.finalized_block_write_last_sent_height == Some(self.max_checkpoint_height)
+            && (self.max_checkpoint_height == block::Height::MAX
+                || self.finalized_block_write_last_sent_height == Some(self.max_checkpoint_height))
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
