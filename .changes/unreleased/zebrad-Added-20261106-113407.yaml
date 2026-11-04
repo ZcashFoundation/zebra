@@ -3,7 +3,7 @@ kind: Added
 body: >-
   Added the `[resources] memory_budget` setting (`"auto"` or a size like `"2 GiB"`, also
   `ZEBRA_RESOURCES__MEMORY_BUDGET`), from which Zebra derives the memory limits of RocksDB, the
-  sync pipeline, the network, the mempool and the RPC proposal cache, and logs them at startup.
+  sync pipeline, the network, mempool transactions and RPC proposal work, and logs them at startup.
   Absent by default, which keeps every limit unchanged. A budget of at least 1,113 MiB runs initial
   sync and switches to a tip profile at the last checkpoint; 963 MiB to 1,112 MiB only runs a node
   at the tip; a smaller budget refuses to start unless `zebrad start --unsafe-low-specs`. `"auto"`

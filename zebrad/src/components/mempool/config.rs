@@ -48,6 +48,13 @@ pub struct Config {
     /// If unset, defaults to [`DEFAULT_MAX_DATACARRIER_BYTES`]. This size includes the OP_RETURN
     /// opcode and pushdata overhead. Matches zcashd's `-datacarriersize` default behavior.
     pub max_datacarrier_bytes: Option<u32>,
+
+    /// The derived byte bound for transactions waiting for download or verification.
+    ///
+    /// This is internal memory-plan state, not a user configuration field.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub pending_bytes: Option<u64>,
 }
 
 impl Default for Config {
@@ -68,6 +75,8 @@ impl Default for Config {
             debug_enable_at_height: None,
 
             max_datacarrier_bytes: Some(DEFAULT_MAX_DATACARRIER_BYTES),
+
+            pending_bytes: None,
         }
     }
 }
