@@ -25,7 +25,9 @@ use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 use crate::transaction;
 
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
+use super::limits::{GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT};
 use super::*;
+use zebra_chain::{parameters::subsidy::SubsidyError, work::equihash};
 
 mod decoded_size;
 mod early_relay;

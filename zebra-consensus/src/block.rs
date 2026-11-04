@@ -10,9 +10,8 @@
 use std::{
     collections::{HashMap, VecDeque},
     future::Future,
-    io::{self, Write},
     pin::Pin,
-    sync::{Arc, Weak},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -20,7 +19,6 @@ use std::{
 use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
-use thiserror::Error;
 use tokio::sync::{oneshot, watch, Semaphore};
 use tokio_util::task::AbortOnDropHandle;
 use tower::{util::BoxCloneService, Service, ServiceExt};
@@ -29,11 +27,10 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    parameters::{subsidy::SubsidyError, Network, NetworkUpgrade},
-    serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
+    parameters::{Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
     transaction::{UnminedTxId, WtxId},
     transparent,
-    work::equihash,
 };
 use zebra_node_services::mempool;
 use zebra_state as zs;
@@ -41,12 +38,26 @@ use zebra_state as zs;
 use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
+mod error;
+mod limits;
+mod proposal;
 pub mod request;
 
+pub use error::VerifyBlockError;
+pub use limits::{ShieldedActionCounts, MAX_BLOCK_SIGOPS};
+pub use proposal::{DecodedBlock, PreparedBlockCache};
 pub use request::Request;
+
+use error::map_commit_error;
+use proposal::{cache_proposal, normalized_proposal_header, proposal_key_and_size, ProposalCache};
+#[cfg(test)]
+use proposal::{PreparedProposal, MAX_PROPOSAL_BYTES};
 
 #[cfg(test)]
 mod tests;
+
+/// Cache availability must not hold up block verification.
+const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
 
 /// Asynchronous semantic block verification.
 #[derive(Debug)]
@@ -110,521 +121,6 @@ where
     })
     .await
     .unwrap_or(Ok(None))
-}
-
-type ProposalCache = VecDeque<PreparedProposal>;
-
-/// Cache availability must not hold up block verification.
-const MEMPOOL_REUSE_TIMEOUT: Duration = Duration::from_millis(10);
-
-#[derive(Debug)]
-struct PreparedProposal {
-    key: [u8; 32],
-    transaction_bytes: usize,
-    block: Arc<block::Block>,
-    contextual: Arc<zs::ContextuallyVerifiedBlock>,
-    /// The proposal's wire bytes, so a submission is compared without serializing again.
-    wire: Arc<[u8]>,
-    retained_bytes: usize,
-}
-
-/// Bound retained proposal data, including unusually large spent-output scripts.
-///
-/// The shared conservative charge, not measured heap usage, is 66,198,006 bytes for a MAX_BLOCK_BYTES
-/// proposal with 19,215 transactions using 104-byte one-input/one-P2PKH-output payments. Eight such
-/// ordinary transparent proposals need about 505 MiB; 8 * 72 MiB leaves about 14% layout headroom.
-/// Smaller consensus-valid transactions can pack more decoded structs into a block and retain fewer
-/// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
-const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
-
-/// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
-async fn cache_proposal(
-    proposals: &watch::Sender<ProposalCache>,
-    key: [u8; 32],
-    block: Arc<block::Block>,
-    transaction_bytes: usize,
-    contextual: Box<zs::ContextuallyVerifiedBlock>,
-) {
-    let (contextual, wire, retained_bytes) = AbortOnDropHandle::new({
-        let block = block.clone();
-        tokio::task::spawn_blocking(move || {
-            // A proposal from the template updater is built as a decoded block, so it has no
-            // wire bytes yet. Encode it once here, off the submission path, so that
-            // `PreparedBlockCache::reuse` can match a submission by decoding only its header
-            // and comparing the rest of its bytes, without decoding or encoding transactions.
-            let wire: Arc<[u8]> = block
-                .zcash_serialize_to_vec()
-                .expect("verified blocks serialize")
-                .into();
-            let retained_bytes = contextual.retained_bytes().saturating_add(wire.len());
-            (contextual, wire, retained_bytes)
-        })
-    })
-    .await
-    .expect("proposal retention accounting uses saturating content-size arithmetic");
-    proposals.send_modify(|proposals| {
-        // Proposals are validated against the best tip, so entries for other parents can only
-        // match a submission that forks the chain, and full verification covers those.
-        let parent = block.header.previous_block_hash;
-        proposals.retain(|proposal| {
-            proposal.key != key && proposal.block.header.previous_block_hash == parent
-        });
-        proposals.push_front(PreparedProposal {
-            key,
-            transaction_bytes,
-            block,
-            contextual: Arc::from(contextual),
-            wire,
-            retained_bytes,
-        });
-        let mut retained_bytes = 0usize;
-        let retained = proposals
-            .iter()
-            .take(8)
-            .take_while(|proposal| {
-                retained_bytes = retained_bytes.saturating_add(proposal.retained_bytes);
-                retained_bytes <= MAX_PROPOSAL_BYTES
-            })
-            .count();
-        proposals.truncate(retained);
-    });
-}
-
-/// A decoded submission, optionally carrying its consumed size or an exact proposal match.
-///
-/// The private match is bound to this immutable block, including its submitted header. It proves
-/// byte identity only: the verifier must still check proof of work, time, and live state. A weak
-/// handle does not retain contextual data after cache eviction or authorize reuse by another cache.
-///
-/// Ordinary decoding records only the consumed wire size, not any validation or authorization.
-#[derive(Clone, Debug)]
-pub struct DecodedBlock {
-    block: Arc<block::Block>,
-    consumed_size: Option<usize>,
-    matched: Option<(Weak<zs::ContextuallyVerifiedBlock>, usize)>,
-}
-
-impl DecodedBlock {
-    /// Decodes a block with the consensus byte limit, retaining its consumed wire size.
-    ///
-    /// Trailing bytes are accepted but excluded from the size. All other semantic and contextual
-    /// checks still run. Call from a blocking worker.
-    pub fn deserialize(mut bytes: &[u8]) -> Result<Self, SerializationError> {
-        let input_size = bytes.len();
-        let block = Arc::new(block::Block::zcash_deserialize(&mut bytes)?);
-        Ok(Self {
-            block,
-            consumed_size: Some(input_size - bytes.len()),
-            matched: None,
-        })
-    }
-
-    /// Returns the decoded block without exposing or transferring its private evidence.
-    pub fn block(&self) -> Arc<block::Block> {
-        self.block.clone()
-    }
-}
-
-impl From<Arc<block::Block>> for DecodedBlock {
-    fn from(block: Arc<block::Block>) -> Self {
-        Self {
-            block,
-            consumed_size: None,
-            matched: None,
-        }
-    }
-}
-
-impl PartialEq for DecodedBlock {
-    fn eq(&self, other: &Self) -> bool {
-        self.block == other.block
-            && self.consumed_size == other.consumed_size
-            && self
-                .matched
-                .as_ref()
-                .map(|(entry, size)| (entry.as_ptr(), size))
-                == other
-                    .matched
-                    .as_ref()
-                    .map(|(entry, size)| (entry.as_ptr(), size))
-    }
-}
-
-impl Eq for DecodedBlock {}
-
-/// Read-only access to successfully validated proposals for decoding mined submissions.
-///
-/// This shares the verifier's bounded cache, not its validation authority: decoded blocks must
-/// still pass the normal verifier, including checks of the submitted proof of work and live state.
-#[derive(Clone, Debug)]
-pub struct PreparedBlockCache(Arc<watch::Sender<ProposalCache>>);
-
-impl PreparedBlockCache {
-    /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
-    ///
-    /// Transaction-section length and the header with only nonce and solution normalized select a
-    /// candidate. Exact streaming byte comparison permits reuse; the returned block keeps the
-    /// submitted header and a private cache handle for [`Request::CommitDecoded`]. Misses, evictions
-    /// and malformed input use ordinary deserialization.
-    /// No full-body hash pass or transaction-byte allocation is needed. Call from a blocking worker.
-    pub fn deserialize(&self, bytes: &[u8]) -> Result<DecodedBlock, SerializationError> {
-        self.reuse(bytes)
-            .map(Ok)
-            .unwrap_or_else(|| DecodedBlock::deserialize(bytes))
-    }
-
-    /// Decodes a block only if its complete wire bytes match a validated proposal, as
-    /// [`Self::deserialize()`] does on a hit.
-    ///
-    /// A hit parses the header and compares the transaction bytes, which is cheap enough to run
-    /// inline; a miss returns `None` without decoding, so the caller can decode off the executor.
-    pub fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
-        if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
-            || self.0.borrow().is_empty()
-        {
-            return None;
-        }
-        let mut transactions = bytes;
-        let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
-        let normalized_header = normalized_proposal_header(&header);
-        let (block, matched, wire) = {
-            let proposals = self.0.borrow();
-            let proposal = proposals.iter().find(|proposal| {
-                proposal.transaction_bytes == transactions.len()
-                    && normalized_proposal_header(&proposal.block.header) == normalized_header
-            })?;
-            (
-                proposal.block.clone(),
-                Arc::downgrade(&proposal.contextual),
-                proposal.wire.clone(),
-            )
-        };
-
-        // Candidate selection is not authority to substitute different transaction bytes.
-        let header_bytes = wire.len().checked_sub(transactions.len())?;
-        if wire.get(header_bytes..)? != transactions {
-            return None;
-        }
-        let block = if *block.header == header {
-            block
-        } else {
-            Arc::new(block::Block {
-                header: Arc::new(header),
-                transactions: block.transactions.clone(),
-            })
-        };
-        Some(DecodedBlock {
-            block,
-            consumed_size: None,
-            matched: Some((matched, bytes.len())),
-        })
-    }
-}
-
-/// Block verification errors.
-// TODO: dedupe with crate::error::BlockError
-#[non_exhaustive]
-#[allow(missing_docs)]
-#[derive(Debug, Error)]
-pub enum VerifyBlockError {
-    #[error("unable to verify depth for block {hash} from chain state during block verification")]
-    Depth { source: BoxError, hash: block::Hash },
-
-    #[error(transparent)]
-    Block {
-        #[from]
-        source: BlockError,
-    },
-
-    #[error(transparent)]
-    Equihash {
-        #[from]
-        source: equihash::Error,
-    },
-
-    #[error(transparent)]
-    Time(zebra_chain::block::BlockTimeError),
-
-    #[error("block exceeds the maximum serialized size")]
-    OversizedBlock,
-
-    /// An authenticated early-relay body failed later transaction or contextual verification.
-    #[error("authenticated early-relay block failed validation: {0}")]
-    EarlyRelay(#[source] Box<VerifyBlockError>),
-
-    /// Header/body authentication failed before the early-relay scoring exemption.
-    #[error("early-relay authentication failed: {0}")]
-    EarlyRelayAdmission(#[source] zs::ValidateContextError),
-
-    /// A negotiated body's later failure could not be attributed without current parent context.
-    #[error("early-relay authentication context is unavailable: {0}")]
-    EarlyRelayUnavailable(#[source] Box<VerifyBlockError>),
-
-    /// This authenticated hash recently failed deterministic transaction validation.
-    #[error("authenticated early-relay block was already rejected")]
-    EarlyRelayRejected,
-
-    /// Error when attempting to commit a block after semantic verification.
-    #[error("unable to commit block after semantic verification: {0}")]
-    Commit(#[from] zs::CommitBlockError),
-
-    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals): {0}")]
-    // TODO: make this into a concrete type (see #5732)
-    ValidateProposal(#[source] BoxError),
-
-    #[error("invalid transaction: {0}")]
-    Transaction(#[from] TransactionError),
-
-    #[error("invalid block subsidy: {0}")]
-    Subsidy(#[from] SubsidyError),
-
-    /// Errors originating from the state service, which may arise from general failures in interacting with the state.
-    /// This is for errors that are not specifically related to block depth or commit failures.
-    #[error("state service error for block {hash}: {source}")]
-    StateService { source: BoxError, hash: block::Hash },
-}
-
-impl VerifyBlockError {
-    /// Returns `true` if this is definitely a duplicate request.
-    /// Some duplicate requests might not be detected, and therefore return `false`.
-    pub fn is_duplicate_request(&self) -> bool {
-        match self {
-            VerifyBlockError::EarlyRelay(source) => source.is_duplicate_request(),
-            VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
-            VerifyBlockError::Commit(commit_err) => commit_err.is_duplicate_request(),
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if the block's authorizing data doesn't match the commitment in
-    /// its header.
-    ///
-    /// See [`zs::ValidateContextError::is_auth_commitment_mismatch()`].
-    pub fn is_auth_commitment_mismatch(&self) -> bool {
-        match self {
-            VerifyBlockError::EarlyRelay(source) => source.is_auth_commitment_mismatch(),
-            VerifyBlockError::EarlyRelayAdmission(source) => source.is_auth_commitment_mismatch(),
-            VerifyBlockError::Commit(commit_err) => commit_err.is_auth_commitment_mismatch(),
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if the block was rejected only because an ancestor's authorizing
-    /// data didn't match the commitment in its header.
-    ///
-    /// See [`zs::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
-    pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
-        match self {
-            VerifyBlockError::EarlyRelay(source) => {
-                source.is_descendant_of_auth_commitment_mismatch()
-            }
-            VerifyBlockError::Commit(commit_err) => {
-                commit_err.is_descendant_of_auth_commitment_mismatch()
-            }
-            _ => false,
-        }
-    }
-
-    /// Returns a suggested misbehaviour score increment for a certain error.
-    pub fn misbehavior_score(&self) -> u32 {
-        use VerifyBlockError::*;
-        match self {
-            Block { source } => source.misbehavior_score(),
-            Equihash { .. } | Subsidy(_) => 100,
-            Transaction(err) => err.mempool_misbehavior_score(),
-            Commit(err) => err.misbehavior_score(),
-            EarlyRelayAdmission(error) => match error {
-                zs::ValidateContextError::TimeTooEarly { .. }
-                | zs::ValidateContextError::TimeTooLate { .. }
-                | zs::ValidateContextError::BlockPreviouslyInvalidated { .. } => 0,
-                _ => 100,
-            },
-            OversizedBlock => 100,
-            _other => 0,
-        }
-    }
-
-    /// Includes content-derived totals and subsidy checks, but not unavailable state or time rules.
-    fn is_deterministic_rejection(&self) -> bool {
-        match self {
-            Self::Transaction(error)
-            | Self::Block {
-                source: BlockError::Transaction(error),
-            } => error.is_deterministic_for_block(),
-            Self::Block {
-                source:
-                    BlockError::TooManyTransparentSignatureOperations { .. }
-                    | BlockError::SummingMinerFees { .. },
-            } => true,
-            Self::Commit(zs::CommitBlockError::ValidateContextError(error)) => matches!(
-                error.as_ref(),
-                zs::ValidateContextError::InvalidSubsidy { .. }
-                    | zs::ValidateContextError::DuplicateTransparentSpend { .. }
-                    | zs::ValidateContextError::MissingTransparentOutput { .. }
-                    | zs::ValidateContextError::EarlyTransparentSpend { .. }
-                    | zs::ValidateContextError::UnshieldedTransparentCoinbaseSpend { .. }
-                    | zs::ValidateContextError::ImmatureTransparentCoinbaseSpend { .. }
-                    | zs::ValidateContextError::DuplicateSproutNullifier { .. }
-                    | zs::ValidateContextError::DuplicateSaplingNullifier { .. }
-                    | zs::ValidateContextError::DuplicateOrchardNullifier { .. }
-                    | zs::ValidateContextError::DuplicateIronwoodNullifier { .. }
-                    | zs::ValidateContextError::UnknownSproutAnchor { .. }
-                    | zs::ValidateContextError::UnknownSaplingAnchor { .. }
-                    | zs::ValidateContextError::UnknownOrchardAnchor { .. }
-                    | zs::ValidateContextError::UnknownIronwoodAnchor { .. }
-            ),
-            _ => false,
-        }
-    }
-
-    /// Only authenticated bodies receive the negotiated post-admission scoring exemption.
-    fn for_early_relay(self, authenticated: bool) -> Self {
-        if authenticated && self.misbehavior_score() != 0 && !self.is_auth_commitment_mismatch() {
-            Self::EarlyRelay(Box::new(self))
-        } else {
-            self
-        }
-    }
-}
-
-/// Converts a semantic, contextual, or mined state commit error into a [`VerifyBlockError`].
-///
-/// The state boxes commit errors as [`zs::CommitSemanticallyVerifiedError`], a
-/// newtype around [`zs::CommitBlockError`], so the wrapper must be unwrapped
-/// here for `is_duplicate_request()` and `misbehavior_score()` to classify
-/// duplicate blocks as benign.
-fn map_commit_error(source: BoxError, hash: block::Hash) -> VerifyBlockError {
-    if let Some(commit_err) = source
-        .downcast_ref::<zs::CommitSemanticallyVerifiedError>()
-        .map(zs::CommitSemanticallyVerifiedError::inner)
-        .or_else(|| source.downcast_ref::<zs::CommitBlockError>())
-    {
-        return VerifyBlockError::Commit(commit_err.clone());
-    }
-
-    VerifyBlockError::StateService { source, hash }
-}
-
-/// The maximum number of transparent signature operations allowed in a block.
-///
-/// # Consensus
-///
-/// For every block, the sum of legacy and P2SH transparent signature operations across all
-/// transactions must not exceed [20_000].
-///
-/// ## Notes
-///
-/// This rule is inherited from pre-SegWit Bitcoin, and is not explicitly stated in the Zcash
-/// protocol spec. It is covered implicitly in [§7.6], which closes with "Other rules inherited from
-/// Bitcoin". The inclusion of this rule is tracked in [`zcash/zips#568`].
-///
-/// Zebra mirrors `zcashd`'s `ConnectBlock`, which sums `GetLegacySigOpCount()` and
-/// `GetP2SHSigOpCount()` per transaction before comparing against this constant.
-///
-/// [20_000]: <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
-/// [`zcash/zips#568`]: <https://github.com/zcash/zips/issues/568>
-/// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
-pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
-
-/// The [ZIP 218] per-pool and global shielded action limits, which apply from NU7 activation.
-///
-/// `GlobalShieldedBudget`, `OrchardProtocolBlockActionLimit`, `SaplingBlockIOLimit` and
-/// `SproutBlockJoinSplitLimit` in the ZIP. Orchard and Ironwood share the global budget and
-/// have the same per-pool action limit. Sprout JoinSplits are prohibited.
-///
-/// [ZIP 218]: https://zips.z.cash/zip-0218
-pub const GLOBAL_SHIELDED_BUDGET: usize = 330;
-/// The per-pool action limit for both Orchard and Ironwood. See [`GLOBAL_SHIELDED_BUDGET`].
-pub const ORCHARD_BLOCK_ACTION_LIMIT: usize = 330;
-/// See [`GLOBAL_SHIELDED_BUDGET`].
-pub const SAPLING_BLOCK_IO_LIMIT: usize = 300;
-/// See [`GLOBAL_SHIELDED_BUDGET`].
-pub const SPROUT_BLOCK_JOIN_SPLIT_LIMIT: usize = 0;
-
-/// The shielded components that the [ZIP 218] action limits count.
-///
-/// Shared by the block verifier's limit check and by `getblocktemplate` transaction selection, so
-/// that a template can not be built from transactions the verifier would then reject.
-///
-/// [ZIP 218]: https://zips.z.cash/zip-0218
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ShieldedActionCounts {
-    /// The number of Orchard actions.
-    pub orchard_actions: usize,
-    /// The number of Ironwood actions.
-    pub ironwood_actions: usize,
-    /// The number of Sapling inputs plus outputs.
-    pub sapling_io: usize,
-    /// The number of Sprout JoinSplits.
-    pub joinsplits: usize,
-}
-
-impl ShieldedActionCounts {
-    /// Returns the counts for `transaction`.
-    pub fn from_transaction(transaction: &zebra_chain::transaction::Transaction) -> Self {
-        Self {
-            orchard_actions: transaction.orchard_actions().count(),
-            ironwood_actions: transaction.ironwood_actions().count(),
-            sapling_io: transaction
-                .sapling_spends_count()
-                .saturating_add(transaction.sapling_outputs().count()),
-            joinsplits: transaction.joinsplit_count(),
-        }
-    }
-
-    /// Returns these counts plus `other`.
-    ///
-    /// Saturating, so that a malformed count can not wrap back below a limit.
-    pub fn saturating_add(self, other: Self) -> Self {
-        Self {
-            orchard_actions: self.orchard_actions.saturating_add(other.orchard_actions),
-            ironwood_actions: self.ironwood_actions.saturating_add(other.ironwood_actions),
-            sapling_io: self.sapling_io.saturating_add(other.sapling_io),
-            joinsplits: self.joinsplits.saturating_add(other.joinsplits),
-        }
-    }
-
-    /// Returns the total shielded cost, which each JoinSplit contributes twice to, because it
-    /// produces two shielded outputs.
-    pub fn shielded_cost(&self) -> usize {
-        self.orchard_actions
-            .saturating_add(self.ironwood_actions)
-            .saturating_add(self.sapling_io)
-            .saturating_add(self.joinsplits.saturating_mul(2))
-    }
-
-    /// Returns the first limit these counts exceed, as `(pool, count, limit)`.
-    pub fn exceeded_limit(&self) -> Option<(&'static str, usize, usize)> {
-        [
-            (
-                "Orchard actions",
-                self.orchard_actions,
-                ORCHARD_BLOCK_ACTION_LIMIT,
-            ),
-            (
-                "Ironwood actions",
-                self.ironwood_actions,
-                ORCHARD_BLOCK_ACTION_LIMIT,
-            ),
-            (
-                "Sapling inputs and outputs",
-                self.sapling_io,
-                SAPLING_BLOCK_IO_LIMIT,
-            ),
-            (
-                "Sprout JoinSplits",
-                self.joinsplits,
-                SPROUT_BLOCK_JOIN_SPLIT_LIMIT,
-            ),
-            (
-                "shielded actions across all pools",
-                self.shielded_cost(),
-                GLOBAL_SHIELDED_BUDGET,
-            ),
-        ]
-        .into_iter()
-        .find(|&(_, count, limit)| count > limit)
-    }
 }
 
 impl<S, V> SemanticBlockVerifier<S, V>
@@ -1292,46 +788,5 @@ where
         }
         .instrument(span)
         .boxed()
-    }
-}
-
-/// Hash wire bytes with normalized nonce and solution, counting the actual block size in one pass.
-fn proposal_key_and_size(block: &block::Block) -> ([u8; 32], usize) {
-    struct Writer(sha256d::Writer, usize);
-    impl Write for Writer {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let len = self.0.write(buf)?;
-            self.1 += len;
-            Ok(len)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.0.flush()
-        }
-    }
-
-    let header = normalized_proposal_header(&block.header);
-    let mut writer = Writer(sha256d::Writer::default(), 0);
-    header
-        .zcash_serialize(&mut writer)
-        .expect("hash writers cannot fail");
-    block
-        .transactions
-        .zcash_serialize(&mut writer)
-        .expect("hash writers cannot fail");
-    // The key always hashes a Common solution, but Regtest's actual wire solution is shorter.
-    if matches!(block.header.solution, equihash::Solution::Regtest(_)) {
-        writer.1 -=
-            equihash::Solution::SERIALIZED_SIZE - equihash::Solution::REGTEST_SERIALIZED_SIZE;
-    }
-    (writer.0.finish(), writer.1)
-}
-
-/// Keep byte-based decoding and parsed proposal lookup on the same normalized header.
-fn normalized_proposal_header(header: &block::Header) -> block::Header {
-    block::Header {
-        nonce: [0; 32].into(),
-        solution: equihash::Solution::Common([0; 1344]),
-        ..*header
     }
 }
