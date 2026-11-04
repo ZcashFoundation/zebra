@@ -1611,6 +1611,57 @@ async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
     .expect("the semantic handoff regression finishes");
 }
 
+/// Semantic children must keep flowing after the local handoff, even before the writer
+/// acknowledges it. Checkpoint retry admission remains independent of this semantic transition.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_dispatches_children_before_writer_acknowledgement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Commit the last checkpoint on the real writer, but detach the sender used for Handoff.
+        // The writer never acknowledges the handoff, which holds `accepts_finalized()` open for
+        // checkpoint retries and deterministically exercises the semantic admission interval.
+        let checkpoint = state.queue_and_commit_to_finalized_state(blocks[1].clone().into(), None);
+        let (handoff_sender, handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
+        checkpoint.await.unwrap().unwrap();
+        assert!(state.block_write_sender.accepts_finalized());
+
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[2].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the first semantic child commits");
+        assert!(state.block_write_sender.accepts_finalized());
+
+        let next =
+            state.queue_and_commit_to_non_finalized_state(blocks[3].clone().prepare(), None, None);
+        tokio::time::timeout(Duration::from_secs(1), next)
+            .await
+            .expect(
+                "the next semantic child must not wait for the writer's handoff acknowledgement",
+            )
+            .unwrap()
+            .expect("the next semantic child commits");
+        assert_eq!(state.best_tip(), Some((Height(3), blocks[3].hash())));
+        drop(handoff_receiver);
+    })
+    .await
+    .expect("the unacknowledged handoff regression finishes");
+}
+
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =
