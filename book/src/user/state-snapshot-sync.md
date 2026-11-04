@@ -33,8 +33,10 @@ Before the downloaded database is used, Zebra checks these parts against the cha
 - The history tree at `H`, and through it the Sapling, Orchard, and Ironwood note commitment
   trees. Block `H + 1` commits to the history tree, and the history tree commits to the tree
   roots, which Zebra recomputes from the shipped trees rather than reading cached values. Zebra
-  fetches block `H + 1` from up to three peers for this check. If no peer serves it, the check
-  runs when block `H + 1` is first committed.
+  asks its bootstrap peers for block `H + 1` until it has three structurally valid copies or has
+  tried every peer, so a structurally invalid copy does not prevent it from trying the remaining
+  peers. One copy that also commits to the history tree is enough. If no peer serves the block,
+  the check runs when block `H + 1` is first committed.
 - The window of blocks `L..=H`, where `L = max(1, H − 2303)`: the headers link to each other, each
   body's transaction IDs and merkle root match, and the genesis block hashes to the network's
   genesis hash.
@@ -147,17 +149,21 @@ order:
 | `last checkpoint reached` | The node is past its checkpoints and verifies blocks fully. |
 | `sync target reached` | The node reached a configured sync target. |
 
-While it runs, the download lives in `<cache_dir>/state-snapshot-import/`. Zebra deletes a
-leftover import directory at the next start. The manifest must arrive within a minute of the first
-connection, and the download is abandoned if no piece completes for five minutes or every peer has
-been excluded. A peer that serves bytes with the wrong hash is disconnected and excluded for the
-rest of the bootstrap; a peer that does not have an object is retried later.
+While it runs, each attempt uses a fresh, uniquely named workspace under
+`<cache_dir>/state-snapshot-import/`. After success, an abort, or a rejection, Zebra deletes only
+that attempt's workspace. It never deletes the shared import root or a sibling workspace, which
+another bootstrap could still be using. If cleanup fails, Zebra logs a warning and leaves that
+attempt's workspace in place; later attempts use fresh sibling directories. The manifest must
+arrive within a minute of the first connection, and the download is abandoned if no piece completes
+for five minutes or every peer has been excluded. A peer that serves bytes with the wrong hash is
+disconnected and excluded for the rest of the bootstrap; a peer that does not have an object is
+retried later.
 
 If the snapshot's contents fail a check, the snapshot is **rejected**: Zebra records the manifest
 hash under `<cache_dir>/state-snapshots/<network>/rejected/` and does not try that snapshot again
 in this `cache_dir`. A download that cannot complete is **aborted** and records nothing. In both
-cases the import directory is deleted, and `[sync] state_snapshot_fallback` decides what happens
-next. With `"error"`, Zebra exits with an actionable message. An aborted download leaves no state,
+cases `[sync] state_snapshot_fallback` decides what happens next. With `"error"`, Zebra exits with
+an actionable message. An aborted download leaves no state,
 so the next start retries it; a rejected snapshot still exits on later starts until you configure a
 different trusted commitment, or investigate the failure and remove its rejection marker. With
 `"genesis"`, Zebra continues with a normal sync from genesis and does not retry a rejected
