@@ -8,6 +8,7 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use rocksdb::{IteratorMode, ReadOptions, WriteBatch};
 use semver::Version;
 use zebra_chain::{
+    amount::{Amount, NegativeAllowed},
     block::{self, Height},
     state_snapshot::ObjectHash,
 };
@@ -15,10 +16,14 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         disk_db::{DiskDb, DB},
-        disk_format::{upgrade::DbFormatChange, IntoDisk},
+        disk_format::{
+            transparent::{AddressBalanceLocationChange, OutputLocation},
+            upgrade::DbFormatChange,
+            IntoDisk,
+        },
         ZebraDb,
     },
-    BoxError, HistoryCapabilities, SnapshotBase, StateInitError,
+    BoxError, HistoryCapabilities, SnapshotBase, StateInitError, TransactionLocation,
 };
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
@@ -496,6 +501,93 @@ fn legacy_height_bytes(height: Height) -> Vec<u8> {
         "legacy snapshot markers contain three-byte heights"
     );
     height.0.to_be_bytes()[1..].to_vec()
+}
+
+/// Merges fixed-width address balances while the live database and its checkpoint are open.
+///
+/// Both inputs and outputs stay in the legacy format, so RocksDB never decodes legacy operands with
+/// the variable-width merge operator. Converted records are written as puts, which hide their older
+/// merge operands, and normal v33 block writes use puts rather than merge operations.
+pub(crate) fn fetch_add_legacy_balance_and_received(
+    _: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &rocksdb::MergeOperands,
+) -> Option<Vec<u8>> {
+    existing_val
+        .into_iter()
+        .chain(operands)
+        .map(legacy_address_balance_change)
+        .reduce(|a, b| (a + b).expect("address balance/received should not overflow"))
+        .map(|change| legacy_address_balance(&change))
+}
+
+fn legacy_address_balance_change(bytes: &[u8]) -> AddressBalanceLocationChange {
+    assert!(
+        bytes.len() == 16 || bytes.len() == 24,
+        "legacy address balances contain 16 or 24 bytes"
+    );
+    let balance = Amount::<NegativeAllowed>::from_bytes(
+        bytes[..8]
+            .try_into()
+            .expect("legacy address balances contain an eight-byte amount"),
+    )
+    .expect("stored address balances contain a valid amount");
+    let location = decode_legacy_output_location(&bytes[8..16]);
+    let received = if bytes.len() == 24 {
+        u64::from_le_bytes(
+            bytes[16..]
+                .try_into()
+                .expect("a 24-byte legacy address balance contains eight received bytes"),
+        )
+    } else {
+        0
+    };
+    let mut change = AddressBalanceLocationChange::new(location);
+    *change.balance_mut() = balance;
+    *change.received_mut() = received;
+
+    change
+}
+
+fn legacy_address_balance(change: &AddressBalanceLocationChange) -> Vec<u8> {
+    [
+        change.balance().as_bytes().to_vec(),
+        legacy_output_location(change.address_location()),
+        change.received().to_le_bytes().to_vec(),
+    ]
+    .concat()
+}
+
+fn decode_legacy_output_location(bytes: &[u8]) -> OutputLocation {
+    require_len(bytes, LEGACY_OUTPUT_LOCATION_DISK_BYTES);
+    let (height, transaction_index) =
+        decode_legacy_transaction_location(&bytes[..LEGACY_TRANSACTION_LOCATION_DISK_BYTES])
+            .expect("legacy output locations contain a valid transaction location");
+    let output_index = u32::from_be_bytes([
+        0,
+        bytes[LEGACY_TRANSACTION_LOCATION_DISK_BYTES],
+        bytes[LEGACY_TRANSACTION_LOCATION_DISK_BYTES + 1],
+        bytes[LEGACY_TRANSACTION_LOCATION_DISK_BYTES + 2],
+    ]);
+
+    OutputLocation::from_output_index(
+        TransactionLocation::from_index(height, transaction_index),
+        output_index,
+    )
+}
+
+fn legacy_output_location(location: OutputLocation) -> Vec<u8> {
+    assert!(
+        location.height().0 <= 0x00ff_ffff,
+        "legacy address locations contain three-byte heights"
+    );
+    let height = location.height().0.to_be_bytes();
+    [
+        height[1..].to_vec(),
+        location.transaction_index().as_bytes().to_vec(),
+        location.output_index().as_bytes().to_vec(),
+    ]
+    .concat()
 }
 
 fn rewrite_pass(

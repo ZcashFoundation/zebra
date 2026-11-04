@@ -147,7 +147,10 @@ commits. Directory reuse moves the source to `state/v33`, but the version file
 reaches v33 only after this rewrite finishes. The checkpoint provides an
 unambiguous legacy source even where old and new key bytes collide. Three passes
 insert converted records, delete legacy keys, then restore converted records whose
-keys collided with those deletions.
+keys collided with those deletions. Migration handles use the fixed-width
+address-balance merge operator, so pending legacy operands are never decoded by
+the current merge callback. Converted puts hide those older operands, and normal
+v33-or-newer block writes use puts.
 
 An interrupted rewrite keeps its checkpoint and pre-v33 version marker, so the
 next start can safely repeat it. The checkpoint is removed only after v33 is
