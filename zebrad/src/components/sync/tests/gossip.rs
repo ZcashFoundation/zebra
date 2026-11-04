@@ -445,66 +445,57 @@ async fn transaction_gossip_batches_at_configured_interval() {
     gossip.abort();
 }
 
-/// Backpressure must retain committed inventory rather than silently coalesce unrelated forks.
-#[tokio::test(start_paused = true)]
-async fn gossip_backpressures_committed_blocks_without_ready_peers() {
+async fn drain_committed_blocks_without_ready_peers(equal_height: bool) {
     let _init_guard = zebra_test::init();
     let (_tip_sender, _latest_tip, tip_change) = ChainTipSender::new(None, &Network::Mainnet);
     let (sync_status, _recent_syncs) = SyncStatus::new();
     let (peer_set, mut requests) = GatedPeerSet::new();
-    let channel = SubmitBlockChannel::new();
-    let sender = channel.sender();
+    let (sender, receiver) = mpsc::channel(2);
     let gossip = tokio::spawn(gossip_best_tip_block_hashes(
         sync_status,
         tip_change,
         peer_set.clone(),
-        Some(channel.receiver()),
+        Some(receiver),
         Default::default(),
     ));
 
-    let mut accepted = std::collections::HashSet::new();
-    let mut backpressured = false;
-    for n in 0..MORE_THAN_CHANNEL_CAPACITY {
-        let block = (mined_block(n).0, Height(1));
-        match sender.try_send(block) {
-            Ok(()) => assert!(accepted.insert(block.0)),
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                backpressured = true;
-                break;
-            }
-            Err(error) => panic!("gossip must keep the submission channel open: {error}"),
-        }
+    // Both the pending queue and producer channel hold two notifications.
+    let newest = 6;
+    for n in 1..=newest {
+        let (hash, height) = mined_block(n);
+        sender
+            .try_send((hash, if equal_height { Height(1) } else { height }))
+            .expect("unavailable peers must not fill the committed notification channel");
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
-    if !backpressured {
-        gossip.abort();
-    }
-    assert!(
-        backpressured,
-        "unavailable peers must eventually backpressure independent committed submissions"
-    );
-    assert_eq!(
-        accepted.len(),
-        sender.max_capacity() + 16,
-        "a full first-attempt queue must stop receiving committed notifications"
-    );
     assert!(requests.try_recv().is_err());
 
     peer_set.set_readiness(Readiness::Ready);
     tokio::time::timeout(TIPS_RESPONSE_TIMEOUT * 2, async {
-        while !accepted.is_empty() {
-            let Some(zn::Request::AdvertiseBlockToAll(hash)) = requests.recv().await else {
-                panic!("committed inventory must use all-peer delivery");
-            };
-            assert!(
-                accepted.remove(&hash),
-                "each accepted fork needs one attempt"
+        for n in newest - 1..=newest {
+            assert_eq!(
+                requests.recv().await,
+                Some(zn::Request::AdvertiseBlockToAll(mined_block(n).0)),
+                "only the two newest pending committed hashes must be retained",
             );
         }
     })
     .await
-    .expect("backpressure must not discard already accepted committed forks");
+    .expect("the newest committed blocks must be advertised when peers become ready");
     gossip.abort();
+    assert!(requests.try_recv().is_err());
+}
+
+/// A disconnected miner must keep committing, retaining the newest announcements for reconnection.
+#[tokio::test(start_paused = true)]
+async fn gossip_drains_committed_blocks_without_ready_peers() {
+    drain_committed_blocks_without_ready_peers(false).await;
+}
+
+/// At capacity, competing forks lose their oldest pending first attempts, not newer notifications.
+#[tokio::test(start_paused = true)]
+async fn gossip_drains_competing_committed_forks_without_ready_peers() {
+    drain_committed_blocks_without_ready_peers(true).await;
 }
 
 /// Equal-height committed hashes carry no ancestry information and cannot supersede each other.

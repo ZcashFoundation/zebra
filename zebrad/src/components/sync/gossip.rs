@@ -54,10 +54,13 @@ pub enum BlockGossipError {
 
 /// Run continuously, gossiping committed tips and consensus-validated submitted blocks.
 ///
-/// Latest best-chain tips are coalesced while syncing. Every independent committed submission gets
-/// an initial all-peer attempt and up to one retry, spaced by the existing response timeout. New
-/// submissions can exhaust the oldest pending retry at capacity, never an unattempted submission.
-/// Exhaustion is reported explicitly; latest-tip recovery continues until delivery or supersession.
+/// Latest best-chain tips are coalesced while syncing. Committed submissions get all-peer attempts
+/// and up to one retry, spaced by the existing response timeout. Pending plus in-flight committed
+/// announcements are bounded by the channel capacity, up to 16 blocks. At capacity, new submissions
+/// exhaust the oldest pending retry first. Without a pending retry, they replace the oldest pending
+/// first attempt, including competing forks, so unavailable peers cannot stop mined notifications.
+/// In-flight announcements are never replaced. Latest-tip recovery continues until delivery or
+/// supersession; peers can fetch missing ancestors through sync.
 ///
 /// Trusted validated-body notifications use sampled fanout before the commit reply. Only committed
 /// mined blocks use all-peer delivery, so early adverts cannot replace their pending
@@ -170,21 +173,24 @@ where
             }
 
             Some(block) = recv_mined_block(&mut mined_block_receiver),
-                if pending_mined.len() + mined_in_flight.len() < committed_capacity
-                    || oldest_retry.is_some() => {
+                if !pending_mined.is_empty() || mined_in_flight.len() < committed_capacity => {
                 debug!(hash = ?block.0, height = ?block.1, "received mined block for broadcast");
                 if !mined_in_flight.contains(&block.0)
                     && !pending_mined.iter().any(|(pending, _, _, _)| pending.0 == block.0)
                 {
                     if pending_mined.len() + mined_in_flight.len() == committed_capacity {
-                        let ((hash, _), _, _, _) = pending_mined
-                            .remove(oldest_retry.expect("a full queue only receives with a pending retry"))
-                            .expect("the oldest pending retry is still queued");
-                        debug!(
-                            ?hash,
-                            error = "retry capacity reclaimed for a new committed block",
-                            "committed block advertisement exhausted its retry"
-                        );
+                        let ((hash, _), _, _, retried) = pending_mined
+                            .remove(oldest_retry.unwrap_or(0))
+                            .expect("a full queue only receives with a pending announcement");
+                        if retried {
+                            debug!(
+                                ?hash,
+                                error = "retry capacity reclaimed for a new committed block",
+                                "committed block advertisement exhausted its retry"
+                            );
+                        } else {
+                            debug!(?hash, "replaced oldest pending committed block advertisement");
+                        }
                     }
                     let accepted_at = Instant::now();
                     pending_mined.push_back((block, accepted_at, accepted_at, false));
