@@ -65,6 +65,16 @@ fn test_config(cache: &tempfile::TempDir) -> Config {
     }
 }
 
+fn running_version() -> Version {
+    crate::constants::state_database_format_version_in_code()
+}
+
+fn v30() -> Version {
+    let mut version = running_version();
+    version.major = 30;
+    version
+}
+
 fn open_test_db(config: &Config) -> ZebraDb {
     open_db(config, false)
 }
@@ -77,7 +87,7 @@ fn open_db(config: &Config, read_only: bool) -> ZebraDb {
     ZebraDb::new(
         config,
         STATE_DATABASE_KIND,
-        &Version::new(33, 0, 0),
+        &running_version(),
         &Network::Mainnet,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE
@@ -209,8 +219,7 @@ fn assert_records(db: &ZebraDb, expected: &Records) {
 fn apply_height_upgrade(db: &ZebraDb) {
     let initial_tip = prepare(db).unwrap();
     let (_sender, receiver) = bounded(1);
-    let change =
-        DbFormatChange::open_database(&Version::new(33, 0, 0), Some(Version::new(30, 0, 0)));
+    let change = DbFormatChange::open_database(&running_version(), Some(v30()));
     change
         .apply_format_upgrade(db, initial_tip, &receiver)
         .unwrap();
@@ -231,14 +240,13 @@ fn migration_rewrites_all_records_collisions_and_survives_reopen() {
     let db = open_test_db(&config);
     let legacy = seed_legacy_records(&db);
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    db.update_format_version_on_disk(&v30()).unwrap();
 
     apply_height_upgrade(&db);
 
     assert_eq!(
         db.format_version_on_disk().unwrap(),
-        Some(Version::new(33, 0, 0))
+        Some(running_version())
     );
     assert_records(&db, &expected);
     let (checkpoint, temporary) = checkpoint_paths(&db);
@@ -257,14 +265,13 @@ fn read_only_open_rejects_unmigrated_v30_records() {
     let config = test_config(&cache);
     let db = open_test_db(&config);
     seed_legacy_records(&db);
-    db.update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    db.update_format_version_on_disk(&v30()).unwrap();
     drop(db);
 
     let error = ZebraDb::new(
         &config,
         STATE_DATABASE_KIND,
-        &Version::new(33, 0, 0),
+        &running_version(),
         &Network::Mainnet,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE
@@ -284,7 +291,7 @@ fn read_only_open_rejects_unmigrated_v30_records() {
                 .join("version")
         )
         .unwrap(),
-        "30.0.0"
+        v30().to_string()
     );
 }
 
@@ -295,9 +302,7 @@ fn read_only_open_and_refresh_preserve_completed_migration_checkpoint() {
     let config = test_config(&cache);
     let primary = open_test_db(&config);
     seed_legacy_records(&primary);
-    primary
-        .update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    primary.update_format_version_on_disk(&v30()).unwrap();
     apply_height_upgrade(&primary);
     let (checkpoint, _) = checkpoint_paths(&primary);
     primary.disk_db().create_checkpoint(&checkpoint).unwrap();
@@ -343,8 +348,7 @@ fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
     let db = open_test_db(&config);
     let legacy = seed_legacy_records(&db);
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    db.update_format_version_on_disk(&v30()).unwrap();
 
     let _initial_tip = prepare(&db).unwrap();
     let source = open_source(&db).unwrap();
@@ -367,10 +371,7 @@ fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
         Upgrade.run(Height(0), &db, &receiver),
         Err(CancelFormatChange)
     );
-    assert_eq!(
-        db.format_version_on_disk().unwrap(),
-        Some(Version::new(30, 0, 0))
-    );
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(v30()));
     assert!(checkpoint_paths(&db).0.exists());
 
     apply_height_upgrade(&db);
@@ -384,8 +385,7 @@ fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     let config = test_config(&cache);
     let db = open_test_db(&config);
     seed_legacy_records(&db);
-    db.update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    db.update_format_version_on_disk(&v30()).unwrap();
     let _initial_tip = prepare(&db).unwrap();
     let live_path = db.path().to_path_buf();
     let checkpoint = checkpoint_paths(&db).0;
@@ -394,18 +394,13 @@ fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     std::fs::remove_dir_all(live_path).unwrap();
     let replacement = open_test_db(&config);
     seed_legacy_records(&replacement);
-    replacement
-        .update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    replacement.update_format_version_on_disk(&v30()).unwrap();
     let error = prepare(&replacement).unwrap_err();
     assert!(
         matches!(error, crate::StateInitError::HistoryRead { .. }),
         "unexpected error: {error}"
     );
-    assert_eq!(
-        replacement.format_version_on_disk().unwrap(),
-        Some(Version::new(30, 0, 0))
-    );
+    assert_eq!(replacement.format_version_on_disk().unwrap(), Some(v30()));
     assert!(checkpoint.exists());
 }
 
@@ -429,8 +424,7 @@ fn pruned_v30_records_migrate_without_full_history() {
         legacy.get_mut(name).unwrap().push(record);
     }
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&Version::new(30, 0, 0))
-        .unwrap();
+    db.update_format_version_on_disk(&v30()).unwrap();
 
     assert!(!Upgrade.requires_full_history());
     apply_height_upgrade(&db);
@@ -549,7 +543,7 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
 
     let cache = tempfile::tempdir().unwrap();
     let config = test_config(&cache);
-    let old_version = Version::new(30, 0, 0);
+    let old_version = v30();
     let old_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
     let legacy = DiskDb::new(
         &config,
