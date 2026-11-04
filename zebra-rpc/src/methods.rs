@@ -3045,6 +3045,7 @@ where
         {
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
+                self.prepared_blocks.clone(),
                 read_state,
                 block_proposal_bytes,
                 &self.network,

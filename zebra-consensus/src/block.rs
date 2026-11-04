@@ -21,8 +21,8 @@ use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
-use tokio::sync::{oneshot, watch, Semaphore};
-use tokio_util::task::AbortOnDropHandle;
+use tokio::sync::{oneshot, watch, OwnedSemaphorePermit, Semaphore};
+use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 use tower::{util::BoxCloneService, Service, ServiceExt};
 use tracing::Instrument;
 
@@ -30,7 +30,9 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::SubsidyError, Network, NetworkUpgrade},
-    serialization::{sha256d, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+    },
     transaction::{UnminedTxId, WtxId},
     transparent,
     work::equihash,
@@ -62,8 +64,12 @@ pub struct SemanticBlockVerifier<S, V> {
     proposals: Arc<watch::Sender<ProposalCache>>,
     /// The bound on the retained bytes of the cached proposals.
     proposal_cache_bytes: usize,
+    /// The optional bound on proposals being decoded or verified.
+    proposal_work: Option<ProposalWorkBudget>,
     /// Admission remains owned by blocking checks even if their requesting future is cancelled.
     blocking_checks: Arc<Semaphore>,
+    #[cfg(test)]
+    proposal_deserializations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     proposal_key_computations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -137,6 +143,79 @@ struct PreparedProposal {
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
 pub const DEFAULT_PROPOSAL_CACHE_BYTES: usize = 8 * 72 * 1024 * 1024;
 
+/// The conservative retained charge per serialized proposal byte.
+const PROPOSAL_WORK_CHARGE_RATIO: usize = 36;
+
+/// Immediate byte admission for decoded and active proposal work.
+#[derive(Clone, Debug)]
+struct ProposalWorkBudget {
+    limit: usize,
+    slots: Arc<Semaphore>,
+}
+
+impl ProposalWorkBudget {
+    fn new(limit: usize) -> Self {
+        let limit = limit.min(Semaphore::MAX_PERMITS);
+        Self {
+            limit,
+            slots: Arc::new(Semaphore::new(limit.max(1))),
+        }
+    }
+
+    /// Returns the permits charged for `serialized_size` bytes of proposal work, at most the
+    /// whole bound.
+    fn charge(&self, serialized_size: usize) -> u32 {
+        let charge = serialized_size
+            .saturating_mul(PROPOSAL_WORK_CHARGE_RATIO)
+            .max(1)
+            .min(self.limit.max(1));
+        u32::try_from(charge).unwrap_or(u32::MAX)
+    }
+
+    /// Admits proposal work now, or fails with memory pressure.
+    fn try_admit(&self, serialized_size: usize) -> Result<ProposalAdmission, VerifyBlockError> {
+        let permit = self
+            .slots
+            .clone()
+            .try_acquire_many_owned(self.charge(serialized_size))
+            .map_err(|_| VerifyBlockError::ProposalMemoryPressure)?;
+        Ok(ProposalAdmission { _permit: permit })
+    }
+
+    #[cfg(test)]
+    fn available(&self) -> usize {
+        self.slots.available_permits()
+    }
+}
+
+/// Owned proposal-work capacity, released after decoding and all verification work finish.
+#[derive(Debug)]
+struct ProposalAdmission {
+    _permit: OwnedSemaphorePermit,
+}
+
+/// A decoded proposal and its optional work admission.
+#[derive(Debug)]
+pub struct AdmittedProposal {
+    block: Arc<block::Block>,
+    _admission: Option<ProposalAdmission>,
+}
+
+impl AdmittedProposal {
+    /// Returns the decoded block, retaining this proposal's admission in the request.
+    pub fn block(&self) -> Arc<block::Block> {
+        self.block.clone()
+    }
+}
+
+impl PartialEq for AdmittedProposal {
+    fn eq(&self, other: &Self) -> bool {
+        self.block == other.block
+    }
+}
+
+impl Eq for AdmittedProposal {}
+
 /// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
 ///
 /// Keeps the newest proposals whose charges sum to at most `proposal_cache_bytes`.
@@ -147,7 +226,14 @@ async fn cache_proposal(
     block: Arc<block::Block>,
     transaction_bytes: usize,
     contextual: Box<zs::ContextuallyVerifiedBlock>,
+    cancellation: Option<CancellationToken>,
 ) {
+    if cancellation
+        .as_ref()
+        .is_some_and(CancellationToken::is_cancelled)
+    {
+        return;
+    }
     let (contextual, retained_bytes) =
         AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
             let retained_bytes = contextual.retained_bytes();
@@ -155,6 +241,12 @@ async fn cache_proposal(
         }))
         .await
         .expect("proposal retention accounting uses saturating content-size arithmetic");
+    if cancellation
+        .as_ref()
+        .is_some_and(CancellationToken::is_cancelled)
+    {
+        return;
+    }
     proposals.send_modify(|proposals| {
         proposals.retain(|proposal| proposal.key != key);
         proposals.push_front(PreparedProposal {
@@ -244,9 +336,60 @@ impl Eq for DecodedBlock {}
 /// This shares the verifier's bounded cache, not its validation authority: decoded blocks must
 /// still pass the normal verifier, including checks of the submitted proof of work and live state.
 #[derive(Clone, Debug)]
-pub struct PreparedBlockCache(Arc<watch::Sender<ProposalCache>>);
+pub struct PreparedBlockCache {
+    proposals: Arc<watch::Sender<ProposalCache>>,
+    proposal_work: Option<ProposalWorkBudget>,
+    #[cfg(test)]
+    proposal_deserializations: Arc<std::sync::atomic::AtomicUsize>,
+}
 
 impl PreparedBlockCache {
+    /// Returns an empty cache whose proposal and mined-submission work is bounded by
+    /// `proposal_work_bytes`, for tests of its callers.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_work_limit(proposal_work_bytes: usize) -> Self {
+        Self {
+            proposals: Arc::new(watch::Sender::new(ProposalCache::default())),
+            proposal_work: Some(ProposalWorkBudget::new(proposal_work_bytes)),
+            #[cfg(test)]
+            proposal_deserializations: Arc::default(),
+        }
+    }
+
+    /// Admits and decodes a proposal, using a blocking worker when work is byte-bounded.
+    ///
+    /// The outer error reports exhausted proposal-work capacity. The inner error reports malformed
+    /// bytes. The decoder owns any admission until it returns, including when its caller is cancelled.
+    /// Without a work bound, decoding is synchronous and owns no admission.
+    pub async fn deserialize_proposal(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Result<Result<AdmittedProposal, SerializationError>, VerifyBlockError> {
+        let Some(proposal_work) = self.proposal_work.as_ref() else {
+            return Ok(bytes
+                .zcash_deserialize_into()
+                .map(|block| AdmittedProposal {
+                    block: Arc::new(block),
+                    _admission: None,
+                }));
+        };
+        let admission = Some(proposal_work.try_admit(bytes.len())?);
+        #[cfg(test)]
+        let proposal_deserializations = self.proposal_deserializations.clone();
+        let (decoded, admission) = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            proposal_deserializations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let decoded = bytes.zcash_deserialize_into();
+            (decoded, admission)
+        })
+        .await
+        .expect("block proposal deserialization reports malformed input rather than panicking");
+        Ok(decoded.map(|block| AdmittedProposal {
+            block: Arc::new(block),
+            _admission: admission,
+        }))
+    }
+
     /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
     ///
     /// Transaction-section length and the header with only nonce and solution normalized select a
@@ -262,7 +405,7 @@ impl PreparedBlockCache {
 
     fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
         if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
-            || self.0.borrow().is_empty()
+            || self.proposals.borrow().is_empty()
         {
             return None;
         }
@@ -270,7 +413,7 @@ impl PreparedBlockCache {
         let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
         let normalized_header = normalized_proposal_header(&header);
         let (block, matched) = {
-            let proposals = self.0.borrow();
+            let proposals = self.proposals.borrow();
             let proposal = proposals.iter().find(|proposal| {
                 proposal.transaction_bytes == transactions.len()
                     && normalized_proposal_header(&proposal.block.header) == normalized_header
@@ -340,6 +483,10 @@ pub enum VerifyBlockError {
 
     #[error("block exceeds the maximum serialized size")]
     OversizedBlock,
+
+    /// Proposal decoding and verification work is at its configured byte bound.
+    #[error("proposal verification is at its memory limit; retry after active proposals finish")]
+    ProposalMemoryPressure,
 
     /// An authenticated early-relay body failed later transaction or contextual verification.
     #[error("authenticated early-relay block failed validation: {0}")]
@@ -640,7 +787,10 @@ where
             mempool_setup_rx: None,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
             proposal_cache_bytes: DEFAULT_PROPOSAL_CACHE_BYTES,
+            proposal_work: None,
             blocking_checks: Arc::new(Semaphore::new(4)),
+            #[cfg(test)]
+            proposal_deserializations: Default::default(),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
             #[cfg(test)]
@@ -657,16 +807,24 @@ where
         self
     }
 
-    /// Bounds the retained bytes of the cached successful proposals by `proposal_cache_bytes`,
-    /// instead of [`DEFAULT_PROPOSAL_CACHE_BYTES`].
+    /// Bounds cached and active proposal bytes by `proposal_cache_bytes`.
+    ///
+    /// The default cache bound leaves active work unbounded, preserving behavior without a budget.
     pub(crate) fn with_proposal_cache_bytes(mut self, proposal_cache_bytes: usize) -> Self {
         self.proposal_cache_bytes = proposal_cache_bytes;
+        self.proposal_work = (proposal_cache_bytes != DEFAULT_PROPOSAL_CACHE_BYTES)
+            .then(|| ProposalWorkBudget::new(proposal_cache_bytes));
         self
     }
 
     /// Returns a read-only decoder sharing this verifier's successful proposal cache.
     pub fn prepared_blocks(&self) -> PreparedBlockCache {
-        PreparedBlockCache(self.proposals.clone())
+        PreparedBlockCache {
+            proposals: self.proposals.clone(),
+            proposal_work: self.proposal_work.clone(),
+            #[cfg(test)]
+            proposal_deserializations: self.proposal_deserializations.clone(),
+        }
     }
 }
 
@@ -693,6 +851,27 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        let request = match request {
+            Request::CheckProposal(block) if self.proposal_work.is_some() => {
+                let admission = self
+                    .proposal_work
+                    .as_ref()
+                    .expect("the guarded proposal work budget is present")
+                    .try_admit(block.zcash_serialized_size());
+                match admission {
+                    Ok(admission) => Request::CheckProposalAdmitted(AdmittedProposal {
+                        block,
+                        _admission: Some(admission),
+                    }),
+                    Err(error) => return async move { Err(error) }.boxed(),
+                }
+            }
+            request => request,
+        };
+        let detach_proposal = self.proposal_work.is_some() && request.is_proposal();
+        let cancellation = detach_proposal.then(CancellationToken::new);
+        let verification_cancellation = cancellation.clone();
+
         // Stamp the time the verifier received this block: the non-finalized state's
         // `Chain::cmp` uses it to prefer the first-received chain on equal-work ties.
         let received_time = Instant::now();
@@ -724,7 +903,7 @@ where
         // We don't include the block hash, because it's likely already in a parent span
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
 
-        async move {
+        let verification = async move {
             let mut early_relay_authenticated = false;
             let mut early_relay = None;
             let mut pending_authentication = None;
@@ -976,7 +1155,9 @@ where
                     | Request::CommitDecoded(_, None) => {
                         zs::Request::CommitContextuallyVerifiedBlock(Box::new(contextual))
                     }
-                    Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
+                    Request::CheckProposal(_) | Request::CheckProposalAdmitted(_) => {
+                        unreachable!("proposals never reuse the cache")
+                    }
                 };
                 let result = state_service.oneshot(commit).await;
                 metrics::histogram!(
@@ -1063,6 +1244,15 @@ where
                     Ok::<_, TransactionError>(candidates)
                 }).await.expect("candidate checks operate on decoded transactions")?
             };
+
+            // A cancelled caller's work stops before dispatching transaction checks: once they are
+            // dispatched, their CPU work continues, so its admission is held until they finish.
+            if verification_cancellation
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Ok(hash);
+            }
 
             // Send transactions to the transaction verifier to be checked
             let mut async_checks = FuturesUnordered::new();
@@ -1220,6 +1410,7 @@ where
                             block,
                             transaction_bytes,
                             contextual,
+                            verification_cancellation,
                         )
                         .await;
                         Ok(hash)
@@ -1241,7 +1432,9 @@ where
                 | Request::CommitDecoded(_, None) => {
                     zs::Request::CommitSemanticallyVerifiedBlock(prepared_block)
                 }
-                Request::CheckProposal(_) => unreachable!("proposals return after validation"),
+                Request::CheckProposal(_) | Request::CheckProposalAdmitted(_) => {
+                    unreachable!("proposals return after validation")
+                }
             };
 
             let phase_start = Instant::now();
@@ -1296,8 +1489,27 @@ where
             }
             Err(error.for_early_relay(early_relay_authenticated))
         }
-        .instrument(span)
-        .boxed()
+        .instrument(span);
+
+        if detach_proposal {
+            let (result_sender, result_receiver) = oneshot::channel();
+            let caller_cancellation = cancellation
+                .expect("detached proposals have a cancellation token")
+                .drop_guard();
+            tokio::spawn(async move {
+                let result = verification.await;
+                let _ = result_sender.send(result);
+            });
+            async move {
+                let _caller_cancellation = caller_cancellation;
+                result_receiver
+                    .await
+                    .expect("proposal verification tasks stay alive until they return a result")
+            }
+            .boxed()
+        } else {
+            verification.boxed()
+        }
     }
 }
 
