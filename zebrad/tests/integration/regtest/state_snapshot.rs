@@ -1,5 +1,4 @@
-//! Bootstrap an empty pruned node from a state snapshot served over the version 2 protocol
-//! (design, §10 "Regtest e2e").
+//! Bootstrap an empty pruned node from a state snapshot served over the version 2 protocol.
 //!
 //! Node A mines a Regtest chain, stops at a finalized tip of `H`, exports a snapshot with
 //! `zebrad export-state-snapshot`, and restarts serving it. Node B starts empty with the exported
@@ -74,14 +73,14 @@ use crate::common::{
 /// it have no bodies on the snapshot-born node.
 const H: u32 = 2_400;
 
-/// The window start `L = max(1, H - 2303)` (design, §3).
+/// The window start `L = max(1, H - 2303)`.
 const L: u32 = H + 1 - NODE_NETWORK_LIMITED_BLOCKS;
 
 /// Node A's retention: at least `NODE_NETWORK_LIMITED_BLOCKS`, so it advertises limited service to
 /// version 2 peers, and more than A's highest finalized tip in the test, so A never deletes a body.
-/// The exporter refuses a database pruned below `L` (design, §7), and the third node syncs from
+/// The exporter refuses a database pruned below `L`, and the third node syncs from
 /// genesis with A as its only peer, which stops offering blocks at its first missing body.
-/// Configured pruning alone withdraws `NODE_NETWORK`, so A still counts as pruned (design, §10).
+/// Configured pruning alone withdraws `NODE_NETWORK`, so A still counts as pruned.
 const RETENTION_A: u32 = 4_000;
 
 /// Node B's initial retention, larger than the chain through the spend block, so its floor stays
@@ -99,7 +98,7 @@ const SEMANTIC_TAIL: u32 = MAX_BLOCK_REORG_HEIGHT;
 /// The gap between the Regtest checkpoints generated from A's chain above `H + 2`.
 const CHECKPOINT_GAP: u32 = 250;
 
-// The constants fit together as the design requires (§3, §7, §10).
+// The constants fit the snapshot window, export, and end-to-end test requirements.
 const _: () = assert!(L == H - 2303, "L is the window start");
 const _: () = assert!(
     RETENTION_A >= NODE_NETWORK_LIMITED_BLOCKS,
@@ -399,13 +398,19 @@ fn metric(body: &str, name: &str, command: Option<&str>) -> Result<Option<u64>> 
     Ok(None)
 }
 
-/// Checks actual object response traffic against the unique manifest and piece bytes.
-fn assert_snapshot_traffic(metrics_a: &str, metrics_b: &str, expected_bytes: u64) -> Result<()> {
+/// Checks actual object response payloads against the unique manifest and piece bytes. The counter
+/// excludes request bytes, response framing, QUIC packets, and UDP/IP overhead, so this is not a
+/// total-wire-byte assertion.
+fn assert_snapshot_traffic(
+    metrics_a: &str,
+    metrics_b: &str,
+    expected_payload_bytes: u64,
+) -> Result<()> {
     let required = |body, name, command| {
         metric(body, name, command)?
             .ok_or_else(|| eyre!("missing required Prometheus counter {name}"))
     };
-    let transport_bytes = required(metrics_a, "zebra.net.out.objects.bytes", None)?;
+    let payload_bytes = required(metrics_a, "zebra.net.out.objects.bytes", None)?;
     let requests_a = required(metrics_a, "zebra.net.in.requests", Some("get-object"))?;
     let responses_a = required(metrics_a, "zebra.net.out.responses", Some("get-object"))?;
     let requests_b = required(metrics_b, "zebra.net.out.requests", Some("Object"))?;
@@ -419,8 +424,8 @@ fn assert_snapshot_traffic(metrics_a: &str, metrics_b: &str, expected_bytes: u64
         .ok_or_else(|| eyre!("A sent more object responses than it received requests"))?;
 
     assert_eq!(
-        transport_bytes, expected_bytes,
-        "actual response payload bytes"
+        payload_bytes, expected_payload_bytes,
+        "actual response payload bytes, excluding protocol and QUIC wire overhead"
     );
     assert_eq!(requests_a, requests_b, "A and B count the same requests");
     assert_eq!(responses_a, responses_b, "A and B count the same responses");
@@ -435,11 +440,11 @@ fn assert_snapshot_traffic(metrics_a: &str, metrics_b: &str, expected_bytes: u64
         "no duplicate or abandoned downloads on the happy path"
     );
     tracing::info!(
-        transport_bytes,
-        expected_bytes,
+        payload_bytes,
+        expected_payload_bytes,
         requests_a,
         responses_a,
-        "snapshot transport traffic"
+        "snapshot object response payloads, not total QUIC wire traffic"
     );
     Ok(())
 }
@@ -582,7 +587,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         ))?;
 
         // Regtest checkpoints from A's chain: genesis, `H`, and heights from `H + 2` up to the
-        // last finalized height, so `H + 1 <= max_checkpoint_height` holds (design, §2).
+        // last finalized height, so `H + 1 <= max_checkpoint_height` holds.
         let mut checkpoints = vec![
             (Height(0), network.genesis_hash()),
             (Height(H), commitment.block_hash),
@@ -679,7 +684,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             let error = get_block_error(&b, L - 1, verbosity).await?;
             // The snapshot ships no body below `L`. Whether the RPC reports it as pruned data
             // (-32603, like a pruned node) or as a block it does not know (-8) depends on the
-            // hash rows the snapshot carries, which the design leaves to the importer.
+            // hash rows the snapshot carries, which are an importer implementation detail.
             assert!(
                 error["code"] == -32603 && error["message"] == "Block not available (pruned data)"
                     || error["code"] == -8,
@@ -914,8 +919,39 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
     .await?
 }
 
+/// A failed export is a process failure with its diagnostic on stderr, not a successful command
+/// whose stdout only looks like an error log.
+#[test]
+fn export_failure_uses_stderr_and_a_nonzero_exit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut config = ZebradConfig::default();
+    config.state.ephemeral = false;
+    let output = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["export-state-snapshot", "--height", "1"])?
+        .with_timeout(Duration::from_secs(30))?
+        .wait_with_output()?
+        .assert_failure()?;
+    assert_ne!(
+        output.output.status.code(),
+        Some(0),
+        "the failed export exits unsuccessfully"
+    );
+    let stderr = String::from_utf8_lossy(&output.output.stderr);
+    assert!(
+        stderr.contains("state snapshot export failed:"),
+        "stderr carries the export diagnostic: {stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&output.output.stdout);
+    assert!(
+        !stdout.contains("state snapshot export failed:"),
+        "stdout is reserved for a successful commitment: {stdout}"
+    );
+    Ok(())
+}
+
 /// The stages the test waits for are the contract's stages, in the contract's order, and the
-/// window start it checks is the design's `L = max(1, H - 2303)`.
+/// window start it checks is `L = max(1, H - 2303)`.
 #[test]
 fn expected_stages_follow_the_contract() {
     let _init_guard = zebra_test::init();
