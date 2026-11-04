@@ -13,6 +13,7 @@ Contents:
 - [Running zebra](#running-zebra)
 - [Testing the setup](#testing-the-setup)
 - [Run a mining pool](#run-a-mining-pool)
+- [Miner sentiment polls](#miner-sentiment-polls)
 
 ## Download Zebra
 
@@ -81,7 +82,7 @@ You can confirm the marker is applied by calling `getblocktemplate` and checking
 
 [#miner-memo]: #miner-memo
 
-`miner_memo` sets the shielded memo field attached to the miner's reward output, for pools or solo miners who want to leave a message that's only visible to whoever can view the shielded output (rather than in plaintext on-chain, like `extra_coinbase_data`).
+`miner_memo` sets the memo field attached to the miner's shielded reward output. Like `extra_coinbase_data`, it is public: consensus requires shielded coinbase outputs to decrypt with an all-zero outgoing viewing key, so anyone can read the memo.
 
 ```toml
 [mining]
@@ -229,3 +230,34 @@ Just point your mining pool software to the Zebra RPC endpoint (127.0.0.1:8232).
 If you want to run an experimental `s-nomp` mining pool with Zebra on testnet, please refer to [this document](mining-testnet-s-nomp.md) for a very detailed guide. `s-nomp` is not compatible with NU5, so some mining functions are disabled.
 
 If your mining pool software needs additional support, or if you as a miner need additional RPC methods, then please open a ticket in the [Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new).
+
+## Miner sentiment polls
+
+[#miner-sentiment-polls]: #miner-sentiment-polls
+
+Miners can answer the questions of ZCAP polls on upcoming network upgrades by putting a ballot in the blocks they mine, as specified in the [draft ZIP "Miner Sentiment Polling"](https://github.com/zcash/zips/pull/1421). Each poll announces an Election Identifier, its questions, and a Voting Period of block heights. Every block in the Voting Period counts as one vote.
+
+A ballot is `zpoll:<election>:<answers>`, with one answer per question, in order: `1` to `9` select options 1 to 9, `A` to `Z` select options 10 to 35, and `-` leaves the question unanswered. For an Election `nu8` with five questions, `zpoll:nu8:2311-` selects options 2, 3, 1, and 1 for the first four questions, and leaves the fifth unanswered. The answer to a question that allows selecting several options lists them in ascending order in parentheses, such as `(135)` for options 1, 3, and 5.
+
+[`miner-poll encode`](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#miner-poll) builds the ballot from the selected options, and rejects options that don't exist:
+
+```console
+$ miner-poll encode --election nu8 --options 4,4,4,3,4 --answers 2,3,1,1,-
+zpoll:nu8:2311-
+```
+
+Put the ballot in the [extra coinbase data](#extra-coinbase-data), the [miner memo](#miner-memo), or both. If both have a ballot, the one in the coinbase data counts.
+
+```toml
+[mining]
+extra_coinbase_data = "/MyPoolName/ zpoll:nu8:2311-"
+```
+
+- End the text with the ballot, or follow the ballot with a character other than `1`-`9`, `A`-`Z`, `-`, `(`, or `)`, such as a space or `/`.
+- A ballot in `miner_memo` only counts if the block reward goes to a shielded receiver.
+- Ballots are public, and linked to the blocks that carry them.
+- Configure the ballot before the Voting Period starts. Blocks mined without a valid ballot count as not answering any question.
+
+Before the Voting Period, check the ballot with [`miner-poll check`](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#miner-poll). During and after it, [`miner-poll tally`](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils/README.md#miner-poll) shows how many blocks carried a ballot.
+
+Mining software that builds its own coinbase transactions can append the ballot to the data after the block height in the coinbase script.
