@@ -52,6 +52,7 @@ use crate::{
         PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    quic::QuicWindows,
     types::PeerServices,
     AddressBook, BanList, BoxError, Config, MisbehaviorReport, NetworkService, PeerSocketAddr,
     Request, Response,
@@ -76,6 +77,23 @@ pub use v2::{close_v2_endpoint, v2_bootstrap_clients, BootstrapPeers};
 /// - The connection limits don't include failed connections
 /// - tower::Discover interprets an error as stream termination
 type DiscoveredPeer = (PeerSocketAddr, peer::Client);
+
+/// Memory limits for the network, derived from zebrad's memory budget and passed to
+/// [`init_with_limits`].
+///
+/// [`MemoryLimits::default()`] is today's behaviour: [`init`] starts the network with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryLimits {
+    /// Replaces [`Config::peerset_initial_target_size`], which scales every connection limit.
+    ///
+    /// `None` keeps the configured value.
+    pub peerset_initial_target_size: Option<usize>,
+
+    /// The flow-control windows of every version 2 QUIC connection.
+    ///
+    /// A window below its [`QuicWindows::compact()`] minimum is raised to it, with a warning.
+    pub quic: QuicWindows,
+}
 
 /// Initialize a peer set, using a network `config`, `local_services`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -177,6 +195,55 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    init_with_limits(
+        config,
+        local_services,
+        inbound_service,
+        latest_chain_tip,
+        user_agent,
+        block_gossip_peer_ips,
+        MemoryLimits::default(),
+    )
+    .await
+}
+
+/// Initialize a peer set like [`init_with_block_gossip_peer_ips`], with the memory limits in
+/// `limits`.
+///
+/// The version 2 endpoint, when `config.v2_listen_addr` enables it, uses the flow-control
+/// windows in `limits.quic` for every connection it accepts or opens, after raising any window
+/// below its [`QuicWindows::compact()`] minimum to it, with a warning.
+///
+/// [`MemoryLimits::default()`] is today's behaviour.
+pub async fn init_with_limits<S, C>(
+    config: Config,
+    local_services: PeerServices,
+    inbound_service: S,
+    latest_chain_tip: C,
+    user_agent: String,
+    block_gossip_peer_ips: Vec<IpAddr>,
+    limits: MemoryLimits,
+) -> (
+    NetworkService,
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<MisbehaviorReport>,
+    super::BlockAdvertiser<C>,
+)
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    let quic = limits.quic.at_least_compact();
+    if quic != limits.quic {
+        warn!(
+            requested = ?limits.quic,
+            used = ?quic,
+            "raising the version 2 flow-control windows below their minimum, which can stall \
+             streams on flow control"
+        );
+    }
+
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     // Legacy peers are not told about `NODE_NETWORK_LIMITED`: ZIP 204 does not define it, so only
@@ -328,6 +395,7 @@ where
         misbehavior_tx.clone(),
         peerset_tx.clone(),
         connected_peers.clone(),
+        quic,
     );
     peer_set.extend_tasks(v2_task.iter().map(JoinHandle::abort_handle));
 

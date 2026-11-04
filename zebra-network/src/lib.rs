@@ -205,8 +205,9 @@ pub use crate::{
         SharedPeerError,
     },
     peer_set::{
-        close_v2_endpoint, init, init_with_block_gossip_peer_ips, v2_bootstrap_clients,
-        BlockAdvertiser, BootstrapPeers, NetworkResponseFuture, NetworkService,
+        close_v2_endpoint, init, init_with_block_gossip_peer_ips, init_with_limits,
+        v2_bootstrap_clients, BlockAdvertiser, BootstrapPeers, MemoryLimits, NetworkResponseFuture,
+        NetworkService,
     },
     policies::RetryLimit,
     protocol::{
@@ -214,6 +215,7 @@ pub use crate::{
         internal::{BlockAuthorization, InventoryResponse, Request, Response},
         v2::object::{ObjectEntry, ObjectHash, ObjectIndex, ObjectSource},
     },
+    quic::QuicWindows,
 };
 
 pub use crate::sync_peer::{SyncPeer, SyncPeerError, SyncPeers, SyncPeersSender};

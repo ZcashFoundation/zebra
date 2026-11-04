@@ -59,6 +59,7 @@ use crate::{
         ActiveConnectionCounter, ConnectedPeers, ConnectionTracker,
     },
     protocol::types::PeerServices,
+    quic::QuicWindows,
     AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
@@ -3637,7 +3638,9 @@ async fn v2_dialer_gives_banned_initial_peer_no_slot() {
 async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
     // No `zebra_test::init()`: `traced_test` installs the subscriber that records the logs.
     let config = v2_test_config(any_udp_addr(), &[*test_v2_addr(1)]);
-    let endpoint = crate::quic::bind(&config.network, any_udp_addr()).expect("a UDP port is free");
+    let endpoint =
+        crate::quic::bind_with_windows(&config.network, any_udp_addr(), QuicWindows::default())
+            .expect("a UDP port is free");
     let identity = LocalIdentity {
         user_agent: "v2 test node".to_string(),
         services: PeerServices::NODE_NETWORK,
@@ -4405,6 +4408,7 @@ fn spawn_v2_node_with(
         misbehavior_tx,
         peerset_tx,
         connected_peers,
+        QuicWindows::default(),
         reconnection_delay,
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
     )
@@ -4482,8 +4486,11 @@ async fn closing_the_v2_endpoint_tells_peers() {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
 
-    let server = crate::quic::bind(&network, "127.0.0.1:0".parse().unwrap()).expect("binds");
-    let client = crate::quic::bind(&network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let windows = QuicWindows::default();
+    let server = crate::quic::bind_with_windows(&network, "127.0.0.1:0".parse().unwrap(), windows)
+        .expect("binds");
+    let client = crate::quic::bind_with_windows(&network, "127.0.0.1:0".parse().unwrap(), windows)
+        .expect("binds");
     let server_addr = server.local_addr().expect("bound");
     v2::OPEN_ENDPOINT
         .set(server.clone())

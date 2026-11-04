@@ -1,0 +1,11 @@
+project: zebra-network
+kind: Added
+body: >-
+  Added `MemoryLimits`, `QuicWindows` and `init_with_limits`, which starts the network like
+  `init_with_block_gossip_peer_ips` with memory limits: `MemoryLimits::peerset_initial_target_size`
+  replaces the configured `peerset_initial_target_size`, which scales every connection limit, and
+  `MemoryLimits::quic` sets the flow-control windows of every version 2 (QUIC) connection, no
+  smaller than `QuicWindows::compact()`, the smallest windows that still fit one maximum-size
+  record per stream. `init` and `init_with_block_gossip_peer_ips` use `MemoryLimits::default()`,
+  which keeps today's limits.
+time: 2026-11-06T11:34:03Z

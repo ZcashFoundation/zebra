@@ -2,6 +2,7 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use futures::FutureExt;
 use quinn::{crypto::rustls::QuicServerConfig, Connection, Endpoint, VarInt};
 use rustls::{
     crypto::ring::sign::any_ecdsa_type,
@@ -12,7 +13,7 @@ use rustls::{
 
 use zebra_chain::parameters::{testnet, Network};
 
-use crate::protocol::external::types::PeerServices;
+use crate::protocol::{external::types::PeerServices, v2::constants::MAX_RECORD_PAYLOAD_LEN};
 
 use super::{
     bind, client_endpoint, connect, tls, transport_config, ConnectError, EndpointError, Windows,
@@ -51,7 +52,7 @@ async fn accept_one(endpoint: &Endpoint) -> Result<Connection, quinn::Connection
 #[test]
 fn transport_config_caps_the_send_window() {
     let config = format!("{:?}", transport_config(Windows::DEFAULT));
-    let send_window = Windows::DEFAULT.send;
+    let send_window = Windows::DEFAULT.send_window;
     assert!(
         config.contains(&format!("send_window: {send_window},")),
         "got {config}"
@@ -67,13 +68,16 @@ fn serving_nodes_get_a_larger_send_window() {
         PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS,
     );
     assert_eq!(serving, Windows::SERVING);
-    assert_eq!(serving.send, 8 << 20);
-    assert_eq!(serving.stream_receive, Windows::DEFAULT.stream_receive);
+    assert_eq!(serving.send_window, 8 << 20);
     assert_eq!(
-        serving.connection_receive,
-        Windows::DEFAULT.connection_receive
+        serving.stream_receive_window,
+        Windows::DEFAULT.stream_receive_window
     );
-    assert_ne!(serving.send, Windows::DEFAULT.send);
+    assert_eq!(
+        serving.connection_receive_window,
+        Windows::DEFAULT.connection_receive_window
+    );
+    assert_ne!(serving.send_window, Windows::DEFAULT.send_window);
 
     assert_eq!(
         Windows::for_services(PeerServices::NODE_NETWORK),
@@ -87,7 +91,7 @@ fn serving_nodes_get_a_larger_send_window() {
     // The window reaches the transport configuration.
     let config = format!("{:?}", transport_config(Windows::SERVING));
     assert!(
-        config.contains(&format!("send_window: {},", Windows::SERVING.send)),
+        config.contains(&format!("send_window: {},", Windows::SERVING.send_window)),
         "got {config}"
     );
 }
@@ -96,18 +100,18 @@ fn serving_nodes_get_a_larger_send_window() {
 /// transport configuration.
 #[test]
 fn bootstrap_windows_widen_the_receive_side() {
-    assert_eq!(Windows::BOOTSTRAP.stream_receive, 8 << 20);
-    assert_eq!(Windows::BOOTSTRAP.connection_receive, 16 << 20);
-    assert_eq!(Windows::BOOTSTRAP.send, Windows::DEFAULT.send);
+    assert_eq!(Windows::BOOTSTRAP.stream_receive_window, 8 << 20);
+    assert_eq!(Windows::BOOTSTRAP.connection_receive_window, 16 << 20);
+    assert_eq!(Windows::BOOTSTRAP.send_window, Windows::DEFAULT.send_window);
 
     let config = format!("{:?}", transport_config(Windows::BOOTSTRAP));
     assert!(
         config.contains(&format!(
             "stream_receive_window: {},",
-            Windows::BOOTSTRAP.stream_receive
+            Windows::BOOTSTRAP.stream_receive_window
         )) && config.contains(&format!(
             "receive_window: {},",
-            Windows::BOOTSTRAP.connection_receive
+            Windows::BOOTSTRAP.connection_receive_window
         )),
         "got {config}"
     );
@@ -138,6 +142,168 @@ async fn client_endpoints_dial_but_do_not_accept() {
             matches!(error, ConnectError::Timeout | ConnectError::Handshake(_)),
             "got {error:?}"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// The compact windows still fit one maximum-size record with its framing per stream, two streams
+/// per connection, and a `get-blocks` response, in less memory than the defaults.
+#[test]
+fn compact_windows_fit_a_record_per_stream_and_the_largest_response() {
+    let compact = Windows::compact();
+    let default = Windows::default();
+    let record = u32::try_from(MAX_RECORD_PAYLOAD_LEN).expect("a record is 2 MiB");
+
+    // The draft's minimum `initial_max_stream_data`: a maximum-size record plus framing headroom.
+    assert_eq!(compact.stream_receive_window, 2_228_224);
+    assert!(compact.stream_receive_window > record);
+    assert_eq!(
+        compact.connection_receive_window,
+        2 * compact.stream_receive_window
+    );
+    // A `get-blocks` response is at most its 1 MB byte budget plus one maximum-size block.
+    assert!(compact.send_window >= 1_000_000 + u64::from(record));
+    assert_eq!(compact.send_window, 3 * 1024 * 1024);
+
+    assert!(compact.stream_receive_window < default.stream_receive_window);
+    assert!(compact.connection_receive_window < default.connection_receive_window);
+    assert!(compact.send_window < default.send_window);
+}
+
+/// The default windows are the constants every connection used before the windows could be
+/// chosen: 4 MiB per stream, 8 MiB per connection, and a 6 MiB send buffer.
+#[test]
+fn default_windows_are_the_window_constants() {
+    assert_eq!(
+        Windows::default(),
+        Windows {
+            stream_receive_window: 4 * 1024 * 1024,
+            connection_receive_window: 8 * 1024 * 1024,
+            send_window: 6 * 1024 * 1024,
+        }
+    );
+}
+
+/// Raising windows to the compact minimum keeps windows at or above it, and raises each one
+/// below it on its own.
+#[test]
+fn windows_below_the_compact_ones_are_raised_to_them() {
+    let compact = Windows::compact();
+    let default = Windows::default();
+
+    assert_eq!(compact.at_least_compact(), compact);
+    assert_eq!(default.at_least_compact(), default);
+
+    let below_compact = Windows {
+        stream_receive_window: 1,
+        connection_receive_window: 1,
+        send_window: 1,
+    };
+    assert_eq!(below_compact.at_least_compact(), compact);
+
+    for (raised, expected) in [
+        (
+            Windows {
+                stream_receive_window: 1,
+                ..default
+            },
+            Windows {
+                stream_receive_window: compact.stream_receive_window,
+                ..default
+            },
+        ),
+        (
+            Windows {
+                connection_receive_window: 1,
+                ..default
+            },
+            Windows {
+                connection_receive_window: compact.connection_receive_window,
+                ..default
+            },
+        ),
+        (
+            Windows {
+                send_window: 1,
+                ..default
+            },
+            Windows {
+                send_window: compact.send_window,
+                ..default
+            },
+        ),
+    ] {
+        assert_eq!(raised.at_least_compact(), expected);
+    }
+}
+
+/// The server and client configurations carry the windows they are built with.
+///
+/// quinn exposes no getters for them, so this reads their `Debug` output, which a quinn upgrade
+/// can change.
+#[test]
+fn endpoint_configurations_use_their_windows() {
+    for windows in [Windows::default(), Windows::compact()] {
+        let server =
+            super::server_config(b"zcash/main", &rcgen::PKCS_ED25519, windows).expect("valid");
+        let client = super::client_config(b"zcash/main", windows).expect("valid");
+
+        for config in [format!("{server:?}"), format!("{client:?}")] {
+            for field in [
+                format!("stream_receive_window: {},", windows.stream_receive_window),
+                format!(", receive_window: {},", windows.connection_receive_window),
+                format!("send_window: {},", windows.send_window),
+            ] {
+                assert!(config.contains(&field), "{field} is missing from {config}");
+            }
+        }
+    }
+}
+
+/// Writes on a new unidirectional stream of `connection` until the peer, which never reads it,
+/// stops granting flow-control credit, and checks that the peer granted exactly `window` bytes.
+pub(crate) async fn assert_peer_grants_stream_window(connection: &Connection, window: u32) {
+    let window = usize::try_from(window).expect("a u32 window fits in a usize");
+    let mut stream = connection
+        .open_uni()
+        .await
+        .expect("the peer allows unidirectional streams");
+
+    stream
+        .write_all(&vec![0; window])
+        .await
+        .expect("the peer granted its stream receive window when the connection opened");
+    assert!(
+        stream.write(&[0]).now_or_never().is_none(),
+        "the peer granted no more than {window} bytes to a stream it does not read",
+    );
+}
+
+/// An endpoint bound with some windows grants its peers that stream receive window, on the
+/// connections it accepts and on the connections it opens.
+#[tokio::test]
+async fn bound_endpoints_grant_their_stream_receive_window() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        for windows in [Windows::compact(), Windows::default()] {
+            let node = super::bind_with_windows(&network, loopback(), windows).expect("binds");
+            let peer = bind_loopback(&network);
+
+            let node_addr = node.local_addr().expect("bound");
+            let (to_node, accepted) = tokio::join!(connect(&peer, node_addr), accept_one(&node));
+            let to_node = to_node.expect("the peer connects");
+            let _accepted = accepted.expect("the node accepts");
+            assert_peer_grants_stream_window(&to_node, windows.stream_receive_window).await;
+
+            let peer_addr = peer.local_addr().expect("bound");
+            let (opened, from_node) = tokio::join!(connect(&node, peer_addr), accept_one(&peer));
+            let _opened = opened.expect("the node connects");
+            let from_node = from_node.expect("the peer accepts");
+            assert_peer_grants_stream_window(&from_node, windows.stream_receive_window).await;
+        }
     })
     .await
     .expect("the test completes well within the timeout");

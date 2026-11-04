@@ -64,7 +64,7 @@ use crate::{
         external::{canonical_peer_addr, types::PeerServices, MAX_USER_AGENT_LENGTH},
         v2::types::ErrorCode,
     },
-    quic::{self, ConnectError},
+    quic::{self, ConnectError, QuicWindows},
     sync_peer::{ConnectionId, SyncPeer, SyncPeersSender},
     v2_address_book::{self, Group, Provenance, V2BookHandle, V2BookStats},
     BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
@@ -202,8 +202,8 @@ pub async fn close_v2_endpoint(grace: Duration) {
     }
 }
 
-/// Opens the version 2 endpoint if it is configured, and spawns its listener
-/// and initial peer dialer as one task.
+/// Opens the version 2 endpoint if it is configured, with the flow-control `quic_windows`, and
+/// spawns its listener and initial peer dialer as one task.
 ///
 /// # Panics
 ///
@@ -223,6 +223,7 @@ pub(super) fn start<S, C>(
     misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     connected_peers: ConnectedPeers,
+    quic_windows: QuicWindows,
 ) -> Option<JoinHandle<Result<(), BoxError>>>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -240,6 +241,7 @@ where
         misbehavior_tx,
         peerset_tx,
         connected_peers,
+        quic_windows,
         constants::MIN_PEER_RECONNECTION_DELAY,
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
     )
@@ -259,6 +261,7 @@ pub(super) fn start_with_intervals<S, C>(
     misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     connected_peers: ConnectedPeers,
+    quic_windows: QuicWindows,
     reconnection_delay: Duration,
     inbound_interval: Duration,
 ) -> Option<JoinHandle<Result<(), BoxError>>>
@@ -283,8 +286,12 @@ where
         relay: true,
     };
 
-    // A node that serves snapshot objects gets the larger send window.
-    let windows = quic::Windows::for_services(identity.services);
+    // The default limits preserve the larger send window of snapshot-serving nodes.
+    let windows = if quic_windows == quic::Windows::default() {
+        quic::Windows::for_services(identity.services)
+    } else {
+        quic_windows
+    };
     let endpoint = match quic::bind_with_windows(&config.network, listen_addr, windows) {
         Ok(endpoint) => endpoint,
         Err(error) => panic!(
