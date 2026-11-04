@@ -234,10 +234,14 @@ penalty. `SchedulerConfig` carries these values.
 ## State changes
 
 - A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height,
-  block_hash, manifest, deferred_checks }` (71 bytes on disk). The database format goes from
-  30.0.0 to 30.1.0, a version bump only, because `create_missing_column_families` already creates
-  the column family. A snapshot database must not be opened by older v30 builds or renamed to v29:
-  they cannot tell that the history below `L` is missing.
+  block_hash, manifest, deferred_checks }` (71 bytes on disk). The intermediate 30.1.0 upgrade adds
+  the column family without rewriting records because `create_missing_column_families` already
+  creates it. The current 32.0.0 major format puts snapshot-born databases in `state/v32`, enforcing
+  the compatibility barrier instead of relying on operators not to open them with older 30.x builds.
+  Existing v30 and older registered sources move to v32 and run every intervening upgrade. Format
+  v31 remains reserved for #12182's variable-height record migration. Snapshot-born databases must
+  not be renamed to v30, v31, v29, or any older directory: those readers cannot tell that the
+  history below `L` is missing.
 - `HistoryCapabilities` gains `lowest_known_height` and `snapshot_base: Option<SnapshotBase>`. With
   a marker, the retained floor is `max(L, first body)` and the database counts as pruned.
 - Fixes: `legacy_chain` and `PruningWitness::update` treat reaching the snapshot base as the
@@ -249,7 +253,7 @@ penalty. `SchedulerConfig` carries these values.
   height when the lookup by hash misses, because `block_info[L − 1]` is shipped but has no hash row.
   `zebrad` skips `request_genesis` when the state has a tip.
 - **Importer** (`zebra_state::state_snapshot::import`): temp root
-  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v30/<net>`; a raw RocksDB handle with
+  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v32/<net>`; a raw RocksDB handle with
   all column families and `DiskDb::options()`; one SST ingest per column family with `move_files`,
   into empty column families at the bottom level, auto-compactions off while ingesting; singletons
   written by batch; the marker, then the version file; close, then reopen as `ZebraDb` with a temp
