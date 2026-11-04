@@ -1511,8 +1511,10 @@ where
                     }
                 };
                 if error.is_unchecked_commit_failure() {
-                    child.new_outputs =
-                        transparent::new_ordered_outputs(&child.block, &child.transaction_hashes);
+                    child.new_outputs = Arc::new(transparent::new_ordered_outputs(
+                        &child.block,
+                        &child.transaction_hashes,
+                    ));
                     let failure = CommitFailure {
                         epoch,
                         tip,

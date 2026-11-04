@@ -461,7 +461,10 @@ async fn side_fork_child_authenticates_and_remembers_rejection() {
         };
         guard.reject();
         let Response::EarlyRelay(Some(replay)) = state
-            .oneshot(Request::EarlyRelay {
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::EarlyRelay {
                 block: child,
                 require_authentication: true,
             })
