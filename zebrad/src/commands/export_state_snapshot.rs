@@ -1,5 +1,5 @@
 //! `export-state-snapshot` subcommand - exports a state snapshot of a stopped
-//! node's finalized state (design, §7 "Exporter").
+//! node's finalized state.
 //!
 //! The state is opened read-only, so the node must be stopped, and its
 //! finalized tip must be exactly the snapshot height. The snapshot's pieces
