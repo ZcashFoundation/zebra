@@ -46,9 +46,10 @@ use crate::components::state_snapshot::{
         check_successor_block, check_successor_commitment, close_bootstrap_after,
         create_import_workspace, download_and_build_with, fetch_header_chain, fetch_manifest,
         fetch_object, fetch_piece, fetch_successor_copies, finish_install, install_staged_snapshot,
-        install_staged_snapshot_with_hook, quiesce_download_tasks, snapshot_fault,
-        wait_for_snapshot_install_with_hook, window_start, BootstrapError, ChainCheckError,
-        FetchError, Peers, SstBuilder, INSTALLS_QUIESCED, VERIFIED_PIECE_CHANNEL_BOUND,
+        install_staged_snapshot_with_hook, interleave_resolved_peers, quiesce_download_tasks,
+        snapshot_fault, wait_for_snapshot_install_with_hook, window_start, BootstrapError,
+        ChainCheckError, FetchError, Peers, SstBuilder, INSTALLS_QUIESCED,
+        VERIFIED_PIECE_CHANNEL_BOUND,
     },
     scheduler::{PieceDescriptor, SchedulerError, VerifiedPiece},
 };
@@ -121,6 +122,28 @@ fn peer(n: u8) -> (PeerSocketAddr, MockPeer) {
         PeerSocketAddr::from(([10, 0, 0, n], 8233)),
         MockService::build().for_unit_tests(),
     )
+}
+
+/// Every configured hostname gets a turn before any hostname contributes
+/// another address, duplicates count once, and the total is still capped.
+#[test]
+fn dns_answers_are_interleaved_and_deduplicated() {
+    let _init_guard = zebra_test::init();
+
+    let host_a: Vec<_> = (1..=8)
+        .map(|n| PeerSocketAddr::from(([10, 0, 0, n], 8233)))
+        .collect();
+    let host_b = vec![PeerSocketAddr::from(([192, 0, 2, 1], 8233))];
+    let host_c = vec![host_a[0], PeerSocketAddr::from(([192, 0, 2, 2], 8233))];
+    let selected = interleave_resolved_peers(vec![host_a.clone(), host_b.clone(), host_c.clone()]);
+
+    assert_eq!(
+        selected,
+        vec![
+            host_a[0], host_b[0], host_a[1], host_c[1], host_a[2], host_a[3], host_a[4], host_a[5],
+        ]
+    );
+    assert_eq!(selected.len(), 8);
 }
 
 /// A valid Mainnet manifest at `height` with no pieces.

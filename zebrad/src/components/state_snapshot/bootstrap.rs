@@ -838,16 +838,11 @@ async fn finish_install(
 /// warning.
 async fn resolve_peers(peers: &[String]) -> Vec<PeerSocketAddr> {
     let mut resolved = Vec::new();
-    let mut seen_ips = HashSet::new();
 
     for host in peers {
         match timeout(PEER_RESOLVE_TIMEOUT, tokio::net::lookup_host(host.as_str())).await {
             Ok(Ok(addrs)) => {
-                for addr in addrs {
-                    if seen_ips.insert(addr.ip()) {
-                        resolved.push(PeerSocketAddr::from(addr));
-                    }
-                }
+                resolved.push(addrs.map(PeerSocketAddr::from).collect());
             }
             Ok(Err(error)) => {
                 warn!(?error, host, "could not resolve a state snapshot peer");
@@ -862,8 +857,38 @@ async fn resolve_peers(peers: &[String]) -> Vec<PeerSocketAddr> {
         }
     }
 
-    resolved.truncate(MAX_BOOTSTRAP_PEERS);
-    resolved
+    interleave_resolved_peers(resolved)
+}
+
+/// Selects resolved addresses round-robin by host, keeping only the first
+/// address for each IP, up to [`MAX_BOOTSTRAP_PEERS`]. One hostname with many
+/// answers therefore cannot eclipse the other configured peers.
+fn interleave_resolved_peers(hosts: Vec<Vec<PeerSocketAddr>>) -> Vec<PeerSocketAddr> {
+    let mut selected = Vec::new();
+    let mut seen_ips = HashSet::new();
+    let mut next = vec![0; hosts.len()];
+
+    while selected.len() < MAX_BOOTSTRAP_PEERS {
+        let mut progressed = false;
+        for (host, addrs) in hosts.iter().enumerate() {
+            let Some(addr) = addrs.get(next[host]).copied() else {
+                continue;
+            };
+            next[host] += 1;
+            progressed = true;
+            if seen_ips.insert(addr.ip()) {
+                selected.push(addr);
+                if selected.len() == MAX_BOOTSTRAP_PEERS {
+                    break;
+                }
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+
+    selected
 }
 
 /// Fetches the manifest from the first peer that serves it with the
