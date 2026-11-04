@@ -22,6 +22,7 @@ use crate::{
         set::{tests::PeerSetBuilder, MorePeers},
         ActiveConnectionCounter,
     },
+    types::PeerServices,
     BoxError, Config, NetworkService, PeerSocketAddr, Request, Response,
 };
 
@@ -174,7 +175,7 @@ async fn check_background_owner(crawler_only: bool) {
 
     let (owned_task, background_tasks) = if crawler_only {
         let (_address_book, _bans, address_updater, address_service, _metrics, address_task) =
-            AddressBookUpdater::spawn(&config, config.listen_addr);
+            AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
         let (next_peer, crawl_service) = crawler_services(
             address_service.clone(),
             last_external_handle.background_service(),
@@ -300,7 +301,13 @@ async fn dropping_network_handles_stops_owned_tasks() {
     };
     let (network, address_book, misbehavior, advertiser) = timeout(
         SHUTDOWN_BOUND,
-        crate::init(config, inbound, NoChainTip, "lifecycle test".to_owned()),
+        crate::init(
+            config,
+            PeerServices::NODE_NETWORK,
+            inbound,
+            NoChainTip,
+            "lifecycle test".to_owned(),
+        ),
     )
     .await
     .expect("local-only initialization must finish");

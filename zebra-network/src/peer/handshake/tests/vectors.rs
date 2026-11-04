@@ -25,11 +25,12 @@ fn serialization_error_metric_labels_ignore_details() {
 const REMOTE_START_HEIGHT: block::Height = block::Height(2_500_000);
 
 /// Spawns a scripted remote peer on `remote_stream` that answers a handshake with a version
-/// message advertising `remote_services`, then a verack.
+/// message advertising `remote_services` and `address_services`, then a verack.
 fn spawn_remote_peer(
     remote_stream: tokio::io::DuplexStream,
     network: &Network,
     remote_services: PeerServices,
+    address_services: PeerServices,
 ) -> tokio::task::JoinHandle<()> {
     let mut remote_conn = Framed::new(
         remote_stream,
@@ -52,7 +53,7 @@ fn spawn_remote_peer(
             services: remote_services,
             timestamp: Utc::now(),
             address_recv: AddrInVersion::new(listen_addr, PeerServices::NODE_NETWORK),
-            address_from: AddrInVersion::new(listen_addr, remote_services),
+            address_from: AddrInVersion::new(listen_addr, address_services),
             nonce: Nonce::default(),
             user_agent: "/test-remote/".to_string(),
             start_height: REMOTE_START_HEIGHT,
@@ -94,7 +95,7 @@ async fn negotiate_with_remote_services(
     };
 
     let (local_stream, remote_stream) = tokio::io::duplex(65536);
-    let remote_peer = spawn_remote_peer(remote_stream, &network, remote_services);
+    let remote_peer = spawn_remote_peer(remote_stream, &network, remote_services, remote_services);
 
     let mut local_conn = Framed::new(
         local_stream,
@@ -303,6 +304,135 @@ async fn early_block_relay_requires_bilateral_handshake() {
     .expect("bilateral handshakes must complete within the test deadline");
 }
 
+/// The version and sender address use the same capabilities for archive and pruned nodes.
+#[tokio::test]
+async fn local_version_advertises_explicit_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for archive in [false, true] {
+            for experimental_early_block_relay in [false, true] {
+                let config = Config {
+                    listen_addr: "127.0.0.1:8233".parse().unwrap(),
+                    experimental_early_block_relay,
+                    ..Config::default()
+                };
+                let mut services = PeerServices::NODE_EARLY_BLOCK_RELAY;
+                services.set(PeerServices::NODE_NETWORK, archive);
+                let mut expected = services;
+                expected.set(
+                    PeerServices::NODE_EARLY_BLOCK_RELAY,
+                    experimental_early_block_relay,
+                );
+                let listen_addr = config.listen_addr;
+                let codec = Codec::builder().for_network(&config.network).finish();
+                let handshake = Handshake::builder()
+                    .with_config(config)
+                    .with_advertised_services(services)
+                    .with_inbound_service(service_fn(|_req| async {
+                        Ok::<Response, BoxError>(Response::Nil)
+                    }))
+                    .finish()
+                    .expect("the config and inbound service are set");
+                let (local, remote) = tokio::io::duplex(65536);
+                let mut remote = Framed::new(remote, codec);
+                let (client, ()) = tokio::join!(
+                    handshake.oneshot(HandshakeRequest {
+                        data_stream: local,
+                        connected_addr: ConnectedAddr::new_outbound_direct(listen_addr.into()),
+                        connection_tracker: ActiveConnectionCounter::new_counter()
+                            .track_connection(),
+                    }),
+                    async {
+                        let Message::Version(mut version) = remote.next().await.unwrap().unwrap()
+                        else {
+                            panic!("the handshake starts with a version message");
+                        };
+                        assert_eq!(version.services, expected);
+                        assert_eq!(
+                            version.address_from,
+                            AddrInVersion::new(listen_addr, expected),
+                        );
+                        version.services.insert(PeerServices::NODE_NETWORK);
+                        version.nonce = Nonce::default();
+                        remote.send(Message::Version(version)).await.unwrap();
+                        remote.send(Message::Verack).await.unwrap();
+                        assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+                    },
+                );
+                let client = client.expect("the remote peer advertises archive service");
+                assert_eq!(
+                    client.connection_info.early_block_relay,
+                    experimental_early_block_relay
+                );
+            }
+        }
+    })
+    .await
+    .expect("service capability handshakes must finish within the test deadline");
+}
+
+/// Cached alternate listeners use top-level version services even if address services disagree.
+#[tokio::test]
+async fn alternate_listener_cache_uses_handshake_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for (services, address_services) in [
+            (PeerServices::empty(), PeerServices::NODE_NETWORK),
+            (
+                PeerServices::NODE_EARLY_BLOCK_RELAY,
+                PeerServices::NODE_NETWORK,
+            ),
+            (PeerServices::NODE_NETWORK, PeerServices::empty()),
+            (
+                PeerServices::NODE_NETWORK | PeerServices::NODE_EARLY_BLOCK_RELAY,
+                PeerServices::empty(),
+            ),
+        ] {
+            let network = Network::Mainnet;
+            let handshake = Handshake::builder()
+                .with_config(Config {
+                    network: network.clone(),
+                    ..Config::default()
+                })
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .finish()
+                .expect("the config and inbound service are set");
+            let (local, remote) = tokio::io::duplex(65536);
+            let _remote_peer = AbortOnDropHandle::new(spawn_remote_peer(
+                remote,
+                &network,
+                services,
+                address_services,
+            ));
+            let mut client = handshake
+                .oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: ConnectedAddr::new_inbound_direct(
+                        "127.0.0.2:41234".parse().unwrap(),
+                    ),
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                })
+                .await
+                .expect("inbound handshakes accept pruned peers");
+            // Keep the client alive: dropping it shuts down the connection before the reply.
+            let response = client.ready().await.unwrap().call(Request::Peers).await;
+            let Response::Peers(peers) = response.unwrap() else {
+                panic!("peer requests return cached listener addresses");
+            };
+
+            // Both the canonical listener and the TCP-IP-derived listener keep the services.
+            assert_eq!(peers.len(), 2);
+            for peer in peers {
+                assert_eq!(peer.services(), Some(services));
+            }
+        }
+    })
+    .await
+    .expect("cached listener requests must finish within the test deadline");
+}
+
 /// Successful handshakes publish the remote start height for inbound and outbound peers.
 #[tokio::test]
 async fn handshake_records_start_height() {
@@ -328,7 +458,12 @@ async fn handshake_records_start_height() {
             .finish()
             .expect("provided mandatory builder parameters");
         let (local_stream, remote_stream) = tokio::io::duplex(65536);
-        let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::NODE_NETWORK);
+        let remote_peer = spawn_remote_peer(
+            remote_stream,
+            &network,
+            PeerServices::NODE_NETWORK,
+            PeerServices::NODE_NETWORK,
+        );
         let client = timeout(
             TEST_TIMEOUT,
             handshake.oneshot(HandshakeRequest {
@@ -391,7 +526,12 @@ async fn rejected_non_serving_peer_is_not_recorded_with_services() {
         .expect("provided mandatory builder parameters");
 
     let (local_stream, remote_stream) = tokio::io::duplex(65536);
-    let remote_peer = spawn_remote_peer(remote_stream, &network, PeerServices::empty());
+    let remote_peer = spawn_remote_peer(
+        remote_stream,
+        &network,
+        PeerServices::empty(),
+        PeerServices::empty(),
+    );
 
     let book_addr: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
     let connected_addr = ConnectedAddr::new_outbound_direct(book_addr);

@@ -1,0 +1,7 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added `ReadRequest::BlockQuery` and `ReadResponse::BlockQuery`, with `BlockQueryFields` and
+  `QueriedBlock`, reading any combination of a block's parts in one request under one chain
+  snapshot. Exhaustive matches on `ReadRequest`/`ReadResponse` must add the variants.
+time: 2026-11-03T04:35:39.499716269-05:00

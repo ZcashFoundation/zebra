@@ -80,6 +80,78 @@ fn hex_serde_matches_reference() {
     }
 }
 
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct OptionalHex {
+    #[serde(
+        default,
+        with = "super::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    data: Option<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct OptionalHexWithNull {
+    #[serde(with = "super::option")]
+    data: Option<Vec<u8>>,
+}
+
+#[test]
+fn optional_hex_serde() {
+    for (json, expected) in [
+        (r#"{}"#, None),
+        (r#"{"data":null}"#, None),
+        (r#"{"data":""}"#, Some(Vec::new())),
+        (r#"{"data":"00aBcDeF"}"#, Some(vec![0x00, 0xab, 0xcd, 0xef])),
+    ] {
+        assert_eq!(
+            serde_json::from_str::<OptionalHex>(json).unwrap(),
+            OptionalHex { data: expected },
+            "input: {json}"
+        );
+    }
+
+    // Invalid strings fail with the same text as the non-optional form.
+    for data in [r#""0""#, r#""0g""#, r#""0x00""#] {
+        let optional = serde_json::from_str::<OptionalHex>(&format!(r#"{{"data":{data}}}"#))
+            .unwrap_err()
+            .to_string();
+        let required = serde_json::from_str::<HexData>(data)
+            .unwrap_err()
+            .to_string();
+        let required = required
+            .split(" at line")
+            .next()
+            .expect("split returns at least one part");
+        assert!(optional.starts_with(required), "{optional} / {required}");
+    }
+    for data in ["true", "42", "[]", "{}"] {
+        assert!(
+            serde_json::from_str::<OptionalHex>(&format!(r#"{{"data":{data}}}"#)).is_err(),
+            "input: {data}"
+        );
+    }
+
+    let bytes: Vec<u8> = (0..=255).collect();
+    let json = serde_json::to_string(&OptionalHex {
+        data: Some(bytes.clone()),
+    })
+    .unwrap();
+    assert_eq!(json, format!(r#"{{"data":"{}"}}"#, hex::encode(&bytes)));
+    assert_eq!(
+        serde_json::from_str::<OptionalHex>(&json).unwrap().data,
+        Some(bytes)
+    );
+    assert_eq!(
+        serde_json::to_string(&OptionalHex { data: None }).unwrap(),
+        "{}"
+    );
+    assert_eq!(
+        serde_json::to_string(&OptionalHexWithNull { data: None }).unwrap(),
+        r#"{"data":null}"#
+    );
+}
+
 /// Run with `cargo test -p zebra-rpc --release benchmark_large_hex -- --ignored --nocapture`.
 #[test]
 #[ignore = "release-mode microbenchmark, not a timing assertion"]

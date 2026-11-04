@@ -97,6 +97,38 @@ where
     deserializer.deserialize_str(HexVisitor(PhantomData))
 }
 
+/// Serialize and deserialize optional byte-backed RPC data as a hex string, or `null` for `None`.
+pub(crate) mod option {
+    use serde::{de, Deserialize, Deserializer, Serializer};
+
+    /// Serialize `Some` data as a hex string, and `None` as `null`.
+    pub(crate) fn serialize<S, T>(data: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: AsRef<[u8]>,
+    {
+        match data {
+            Some(data) => super::serialize(data, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    /// Deserialize a hex string into `Some` data, and `null` into `None`.
+    pub(crate) fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: From<Vec<u8>>,
+    {
+        Option::<String>::deserialize(deserializer)?
+            .map(|data| {
+                super::decode(data.as_bytes())
+                    .map(T::from)
+                    .map_err(de::Error::custom)
+            })
+            .transpose()
+    }
+}
+
 /// Deserialize hex-encoded strings to bytes.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,

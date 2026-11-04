@@ -207,6 +207,70 @@ async fn test_z_get_treestate() {
     // 1. Request a non-empty Sapling treestate.
     // 2. Request an empty Orchard treestate at an NU5 activation height.
     // 3. Request a non-empty Orchard treestate.
+
+    // Request the block and its header at Sapling activation. These Testnet blocks have zero
+    // commitment bytes in their headers, while `blockcommitments` before Heartwood is the Sapling
+    // tree root, so this pins that `blockcommitments` is derived from the tree.
+    let get_block = rpc
+        .get_block(
+            SAPLING_ACTIVATION_HEIGHT.to_string(),
+            Some(GetBlockQuery::Verbosity(1)),
+        )
+        .await
+        .expect("the block is in the state");
+    let get_block_header = rpc
+        .get_block_header(SAPLING_ACTIVATION_HEIGHT.to_string(), Some(true))
+        .await
+        .expect("the block is in the state");
+
+    let empty_sapling_root: [u8; 32] = zebra_chain::sapling::tree::NoteCommitmentTree::default()
+        .root()
+        .into();
+    let mut empty_sapling_root = empty_sapling_root;
+    empty_sapling_root.reverse();
+    let empty_sapling_root = hex::encode(empty_sapling_root);
+    for response in [
+        serde_json::to_value(&get_block).unwrap(),
+        serde_json::to_value(&get_block_header).unwrap(),
+    ] {
+        assert_eq!(response["blockcommitments"], empty_sapling_root);
+        assert_eq!(response["finalsaplingroot"], empty_sapling_root);
+    }
+    let sapling_activation_index =
+        usize::try_from(SAPLING_ACTIVATION_HEIGHT).expect("the height is a small constant");
+    assert_eq!(
+        &blocks[sapling_activation_index]
+            .header
+            .zcash_serialize_to_vec()
+            .unwrap()[68..100],
+        &[0; 32],
+        "the header commitment bytes differ from the tree root",
+    );
+
+    settings.bind(|| insta::assert_json_snapshot!("get_block_verbose_height_2", get_block));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_block_header_height_2_verbose", get_block_header)
+    });
+}
+
+/// Snapshot of the `getblock` parameters published by `rpc.discover`, so a change to the
+/// published schema of `GetBlockQuery` or to the parameter description shows up in review.
+#[test]
+fn test_get_block_openrpc_params() {
+    let _init_guard = zebra_test::init();
+
+    let mut generator = openrpsee::openrpc::Generator::new();
+    let params = (METHODS["getblock"].params)(&mut generator);
+    let components = generator.into_components();
+
+    // zebrad's dev-dependencies enable `serde_json/preserve_order`, so sort the maps to keep the
+    // snapshot independent of the packages a test run selects.
+    insta::with_settings!({ sort_maps => true }, {
+        insta::assert_json_snapshot!(
+            "get_block_openrpc_params",
+            serde_json::json!({ "params": params, "components": components })
+        );
+    });
 }
 
 async fn test_rpc_response_data_for_network(network: &Network) {
@@ -325,7 +389,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getblock`, verbosity=0, height
     let get_block = rpc
-        .get_block(BLOCK_HEIGHT.to_string(), Some(0u8))
+        .get_block(BLOCK_HEIGHT.to_string(), Some(GetBlockQuery::Verbosity(0)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_data(
@@ -336,13 +400,16 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     );
 
     let get_block = rpc
-        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(0u8))
+        .get_block(
+            EXCESSIVE_BLOCK_HEIGHT.to_string(),
+            Some(GetBlockQuery::Verbosity(0)),
+        )
         .await;
     snapshot_rpc_getblock_invalid("excessive_height_verbosity_0", get_block, &settings);
 
     // `getblock`, verbosity=0, hash
     let get_block = rpc
-        .get_block(block_hash.to_string(), Some(0u8))
+        .get_block(block_hash.to_string(), Some(GetBlockQuery::Verbosity(0)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_data(
@@ -354,38 +421,44 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getblock`, verbosity=1, height
     let get_block = rpc
-        .get_block(BLOCK_HEIGHT.to_string(), Some(1u8))
+        .get_block(BLOCK_HEIGHT.to_string(), Some(GetBlockQuery::Verbosity(1)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("height_verbosity_1", get_block, &settings);
 
     let get_block = rpc
-        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(1u8))
+        .get_block(
+            EXCESSIVE_BLOCK_HEIGHT.to_string(),
+            Some(GetBlockQuery::Verbosity(1)),
+        )
         .await;
     snapshot_rpc_getblock_invalid("excessive_height_verbosity_1", get_block, &settings);
 
     // `getblock`, verbosity=1, hash
     let get_block = rpc
-        .get_block(block_hash.to_string(), Some(1u8))
+        .get_block(block_hash.to_string(), Some(GetBlockQuery::Verbosity(1)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("hash_verbosity_1", get_block, &settings);
 
     // `getblock`, verbosity=2, height
     let get_block = rpc
-        .get_block(BLOCK_HEIGHT.to_string(), Some(2u8))
+        .get_block(BLOCK_HEIGHT.to_string(), Some(GetBlockQuery::Verbosity(2)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("height_verbosity_2", get_block, &settings);
 
     let get_block = rpc
-        .get_block(EXCESSIVE_BLOCK_HEIGHT.to_string(), Some(2u8))
+        .get_block(
+            EXCESSIVE_BLOCK_HEIGHT.to_string(),
+            Some(GetBlockQuery::Verbosity(2)),
+        )
         .await;
     snapshot_rpc_getblock_invalid("excessive_height_verbosity_2", get_block, &settings);
 
     // `getblock`, verbosity=2, hash
     let get_block = rpc
-        .get_block(block_hash.to_string(), Some(2u8))
+        .get_block(block_hash.to_string(), Some(GetBlockQuery::Verbosity(2)))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("hash_verbosity_2", get_block, &settings);
@@ -436,6 +509,101 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblockheader("height_verbose", get_block_header, &settings);
+
+    // `getblock` field queries, parsed from their JSON form
+    let field_query = |names: &[&str]| -> GetBlockQuery {
+        serde_json::from_value(serde_json::json!(names)).expect("the names are getblock fields")
+    };
+    let block_bytes = block_data[&BLOCK_HEIGHT];
+    let all_fields_with_txdetails: Vec<&str> = [
+        "hash",
+        "confirmations",
+        "size",
+        "height",
+        "version",
+        "merkleroot",
+        "blockcommitments",
+        "authdataroot",
+        "finalsaplingroot",
+        "finalorchardroot",
+        "nTx",
+        "txdetails",
+        "time",
+        "nonce",
+        "solution",
+        "bits",
+        "difficulty",
+        "chainSupply",
+        "valuePools",
+        "trees",
+        "previousblockhash",
+        "nextblockhash",
+        "hex",
+    ]
+    .to_vec();
+
+    for (variant, names, expected_block_data) in [
+        ("lightwalletd", vec!["hash", "tx", "trees"], None),
+        (
+            "header",
+            vec![
+                "version",
+                "merkleroot",
+                "time",
+                "nonce",
+                "solution",
+                "bits",
+                "difficulty",
+                "previousblockhash",
+            ],
+            None,
+        ),
+        ("authdataroot", vec!["authdataroot", "height"], None),
+        (
+            "hex_tx_trees",
+            vec!["hex", "tx", "trees"],
+            Some(block_bytes),
+        ),
+        ("all", all_fields_with_txdetails, Some(block_bytes)),
+    ] {
+        let get_block = loop {
+            // The network snapshots run concurrently and share the process-wide body-query permit.
+            match rpc
+                .get_block(BLOCK_HEIGHT.to_string(), Some(field_query(&names)))
+                .await
+            {
+                Err(error) if error.message() == GETBLOCK_BODY_QUERY_BUSY => {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                response => break response.expect("the block is in the state"),
+            }
+        };
+        snapshot_rpc_getblock_fields(variant, get_block, expected_block_data, &settings);
+    }
+
+    for (variant, hash_or_height, names) in [
+        ("fields_empty", BLOCK_HEIGHT.to_string(), vec![]),
+        (
+            "fields_conflict",
+            BLOCK_HEIGHT.to_string(),
+            vec!["tx", "txdetails"],
+        ),
+        (
+            "fields_excessive_height",
+            EXCESSIVE_BLOCK_HEIGHT.to_string(),
+            vec!["hash"],
+        ),
+        (
+            "fields_unknown_hash",
+            Hash([0; 32]).to_string(),
+            vec!["hash"],
+        ),
+    ] {
+        let get_block = rpc
+            .get_block(hash_or_height, Some(field_query(&names)))
+            .await;
+        snapshot_rpc_getblock_invalid(variant, get_block, &settings);
+    }
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
@@ -801,6 +969,33 @@ fn snapshot_rpc_getblock_verbose(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
+}
+
+/// Check a `getblock` field query response using `cargo insta`, asserting that its `hex` is
+/// `expected_block_data` and redacting it.
+fn snapshot_rpc_getblock_fields(
+    variant: &'static str,
+    block: GetBlockResponse,
+    expected_block_data: Option<&[u8]>,
+    settings: &insta::Settings,
+) {
+    let expected_block_data = expected_block_data.map(hex::encode);
+    assert_eq!(
+        serde_json::to_value(&block).unwrap().get("hex").cloned(),
+        expected_block_data.clone().map(serde_json::Value::from),
+        "the response has the block data exactly when it was requested",
+    );
+
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_fields_{variant}"), block, {
+            ".hex" => dynamic_redaction(move |value, _path| {
+                // assert that the block data matches, without creating a 1.5 kB snapshot file
+                assert_eq!(Some(value.as_str().unwrap()), expected_block_data.as_deref());
+                // replace with:
+                "[BlockData]"
+            }),
+        })
+    });
 }
 
 /// Check valid `getblockheader` response using `cargo insta`.

@@ -5222,6 +5222,7 @@ name = "zebra-state"
 version = "16.0.0"
 dependencies = [
  "bincode",
+ "bitflags",
  "chrono",
  "crossbeam-channel",
  "derive-getters",

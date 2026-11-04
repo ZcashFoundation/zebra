@@ -387,7 +387,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         address_book_service,
         _address_metrics,
         _address_book_updater_task_handle,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Exercise the startup loader without opening sockets or handshaking with public peers.
     let initial_peers = limit_initial_peers(&config, &address_book_service).await;
@@ -771,7 +771,7 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Add enough candidates for the initial fill and the replacement dials.
     let candidate_count = outbound_limit * 2 + 1;
@@ -913,7 +913,7 @@ async fn crawler_does_not_readd_initial_peers_after_finding_candidates() {
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     let peer_set = service_fn(move |req| async move {
         match req {
@@ -1286,7 +1286,7 @@ where
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    ) = AddressBookUpdater::spawn(&config, unused_v4, PeerServices::NODE_NETWORK);
 
     if add_to_address_book {
         let initial_peers = limit_initial_peers(&config, &address_book_service).await;
@@ -1982,6 +1982,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     let (mut peer_set, address_book, misbehavior_tx, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         peers_inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2654,6 +2655,7 @@ async fn add_initial_peers_deadlock() {
 
     let init_future = init(
         config,
+        PeerServices::NODE_NETWORK,
         nil_inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2683,6 +2685,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 
     let (_peer_service, address_book, _, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2714,7 +2717,8 @@ async fn local_listener_bound_port_with(listen_addr: SocketAddr, network: Networ
         ..Config::default()
     };
     let (listener, bound_addr) = open_listener(&config).await;
-    let (address_book, _, _, _, _, updater_task) = AddressBookUpdater::spawn(&config, bound_addr);
+    let (address_book, _, _, _, _, updater_task) =
+        AddressBookUpdater::spawn(&config, bound_addr, PeerServices::NODE_NETWORK);
     let local_listener = address_book
         .lock()
         .unwrap()
@@ -2771,6 +2775,7 @@ where
 
     let (peer_service, address_book, _, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2822,7 +2827,7 @@ where
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -3127,7 +3132,7 @@ where
         address_book_service,
         _address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    ) = AddressBookUpdater::spawn(&config, unused_v4, PeerServices::NODE_NETWORK);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_service);
     let add_task_handle = tokio::spawn(add_fut);

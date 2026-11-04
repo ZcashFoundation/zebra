@@ -1,6 +1,7 @@
 //! Fixed test vectors for RPC methods.
 
 use std::{
+    collections::BTreeSet,
     str::FromStr,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
@@ -20,8 +21,8 @@ use zcash_protocol::consensus::NetworkType;
 use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
-    block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    amount::{Amount, NegativeAllowed, NonNegative},
+    block::{Block, Commitment, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     block_info::BlockInfo,
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
@@ -31,8 +32,11 @@ use zebra_chain::{
         Network::*,
         NetworkKind,
     },
-    serialization::{DateTime32, Duration32, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserializeInto, ZcashSerialize,
+    },
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
+    value_balance::ValueBalance,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -387,6 +391,509 @@ async fn get_block_data(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_rejects_incomplete_stored_bodies() {
+    use zebra_state::{DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks[1].clone();
+        let recent_block = blocks[2].clone();
+        let height = block.coinbase_height().unwrap();
+        let floor = recent_block.coinbase_height().unwrap();
+        let addresses = vec![block.transactions[0].outputs()[1]
+            .address(&Mainnet)
+            .unwrap()
+            .to_string()];
+        let (state, read_state, tip, _) =
+            zebra_state::populated_state_with_debug(blocks, &Mainnet, true).await;
+        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            tip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+
+        let archive_info = rpc.get_blockchain_info().await.unwrap();
+        assert!(!archive_info.pruned);
+        assert_eq!(archive_info.prune_height, None);
+        assert!(serde_json::to_value(archive_info)
+            .unwrap()
+            .get("pruneheight")
+            .is_none());
+
+        let retained_queries = |query: String| {
+            let rpc = &rpc;
+            let addresses = &addresses;
+            async move {
+                (
+                    rpc.get_block(query.clone(), Some(GetBlockQuery::Verbosity(1)))
+                        .await
+                        .unwrap(),
+                    rpc.z_get_treestate(query).await.unwrap(),
+                    rpc.get_address_tx_ids(GetAddressTxIdsRequest {
+                        addresses: addresses.clone(),
+                        start: Some(1),
+                        end: Some(floor.0),
+                    })
+                    .await
+                    .unwrap(),
+                    rpc.get_address_balance(GetAddressBalanceRequest::new(addresses.clone()))
+                        .await
+                        .unwrap(),
+                    rpc.get_address_utxos(GetAddressUtxosRequest::new(addresses.clone(), false))
+                        .await
+                        .unwrap(),
+                )
+            }
+        };
+        let retained = retained_queries(height.0.to_string()).await;
+        let GetBlockResponse::Object(historical_block) = &retained.0 else {
+            panic!("verbosity one returns a block object");
+        };
+        assert_eq!(historical_block.n_tx, Some(block.transactions.len()));
+        assert_eq!(
+            historical_block.tx,
+            Some(
+                block
+                    .transactions
+                    .iter()
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert_eq!(retained.2.len(), 2);
+        assert!(retained.3.balance() > 0);
+        let GetAddressUtxosResponse::Utxos(utxos) = &retained.4 else {
+            panic!("the request does not include chain information");
+        };
+        assert_eq!(utxos.len(), 2);
+
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &read_state.db().cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(floor),
+        );
+        read_state.db().write_batch(batch).unwrap();
+
+        for query in [height.0.to_string(), block.hash().to_string()] {
+            assert_eq!(retained_queries(query.clone()).await, retained);
+            for verbosity in [0, 2, 3] {
+                let error = rpc
+                    .get_block(query.clone(), Some(GetBlockQuery::Verbosity(verbosity)))
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code(), -32603);
+                assert_eq!(error.message(), "Block not available (pruned data)");
+            }
+
+            // Field queries of index-backed fields keep working, and body fields fail like the
+            // verbosity levels that need the body.
+            let indexed = rpc
+                .get_block(query.clone(), Some(field_query(&["tx", "nTx", "size"])))
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(indexed).unwrap(),
+                serde_json::json!({
+                    "hash": block.hash().to_string(),
+                    "size": block.zcash_serialized_size(),
+                    "nTx": block.transactions.len(),
+                    "tx": block
+                        .transactions
+                        .iter()
+                        .map(|tx| tx.hash().to_string())
+                        .collect::<Vec<_>>(),
+                }),
+            );
+            for names in [
+                &["hex"][..],
+                &["authdataroot"],
+                &["txdetails"],
+                &["txprevouts"],
+                &["hash", "tx", "hex"],
+            ] {
+                let error = rpc
+                    .get_block(query.clone(), Some(field_query(names)))
+                    .await
+                    .unwrap_err();
+                assert_eq!(
+                    (error.code(), error.message()),
+                    (-32603, "Block not available (pruned data)"),
+                    "{names:?}"
+                );
+            }
+        }
+        for (query, expected_code) in [("3".to_owned(), -8), (block::Hash([0; 32]).to_string(), -5)]
+        {
+            let error = rpc
+                .get_block(query, Some(field_query(&["hash"])))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                (error.code(), error.message()),
+                (expected_code, "Block not found")
+            );
+        }
+        for verbosity in [0, 1, 2, 3] {
+            for (query, expected_code) in [
+                ("3".to_owned(), -8),
+                (
+                    block::Hash([0; 32]).to_string(),
+                    if verbosity == 0 { -8 } else { -5 },
+                ),
+            ] {
+                let error = rpc
+                    .get_block(query, Some(GetBlockQuery::Verbosity(verbosity)))
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code(), expected_code);
+                assert_eq!(
+                    error.message(),
+                    if verbosity == 0 {
+                        "Block not found"
+                    } else {
+                        "block height not in best chain"
+                    }
+                );
+            }
+        }
+
+        let pruned_info = rpc.get_blockchain_info().await.unwrap();
+        assert!(pruned_info.pruned);
+        assert_eq!(pruned_info.prune_height, Some(floor));
+        assert_eq!(
+            serde_json::to_value(pruned_info).unwrap()["pruneheight"],
+            floor.0
+        );
+
+        let txid = block.transactions[0].hash();
+        let unknown_txid = transaction::Hash::from([0; 32]);
+        for verbose in [0, 1] {
+            for block_hash in [None, Some(block.hash().to_string())] {
+                for (txid, expected_code, expected_message) in [
+                    (txid, -32603, "Transaction not available (pruned data)"),
+                    (
+                        unknown_txid,
+                        -5,
+                        if block_hash.is_some() {
+                            "txid not found"
+                        } else {
+                            "Transaction not found in mempool or best chain"
+                        },
+                    ),
+                ] {
+                    let mempool_query = async {
+                        if block_hash.is_none() {
+                            mempool
+                                .expect_request(mempool::Request::TransactionsByMinedId(
+                                    [txid].into(),
+                                ))
+                                .await
+                                .respond(mempool::Response::Transactions(vec![]));
+                        }
+                    };
+                    let (response, _) = tokio::join!(
+                        rpc.get_raw_transaction(
+                            txid.encode_hex(),
+                            Some(verbose),
+                            block_hash.clone()
+                        ),
+                        mempool_query
+                    );
+                    let error = response.unwrap_err();
+                    assert_eq!(error.code(), expected_code);
+                    assert_eq!(error.message(), expected_message);
+                }
+            }
+        }
+
+        let recent_tx = &recent_block.transactions[0];
+        for block_hash in [None, Some(recent_block.hash().to_string())] {
+            let mempool_query = async {
+                if block_hash.is_none() {
+                    mempool
+                        .expect_request(mempool::Request::TransactionsByMinedId(
+                            [recent_tx.hash()].into(),
+                        ))
+                        .await
+                        .respond(mempool::Response::Transactions(vec![]));
+                }
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_raw_transaction(recent_tx.hash().encode_hex(), Some(0), block_hash.clone()),
+                mempool_query
+            );
+            let GetRawTransactionResponse::Raw(raw_tx) = response.unwrap() else {
+                panic!("non-verbose requests return serialized transactions");
+            };
+            assert_eq!(raw_tx.as_ref(), recent_tx.zcash_serialize_to_vec().unwrap());
+        }
+        rpc_tx_queue.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_body_reads_preserve_operational_errors() {
+    use zebra_state::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_tx, rx) = tokio::sync::watch::channel(None);
+        let (rpc, rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state, 1),
+            Buffer::new(read_state.clone(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            rx,
+            None,
+        );
+        let height = Height(1);
+        let txid = transaction::Hash::from([1; 32]);
+        for transaction in [false, true] {
+            for source in [
+                BoxError::from("database read failed"),
+                BoxError::from(BlockReadError::CorruptBlock { height }),
+                BoxError::from(BlockReadError::BlockBodyUnavailable { height }.to_string()),
+            ] {
+                let expected = source.to_string();
+                let query = async {
+                    if transaction {
+                        rpc.get_raw_transaction(txid.encode_hex(), Some(0), None)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        rpc.get_block(height.0.to_string(), Some(GetBlockQuery::Verbosity(0)))
+                            .await
+                            .map(|_| ())
+                    }
+                };
+                let handler = async {
+                    let request = if transaction {
+                        mempool
+                            .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
+                            .await
+                            .respond(mempool::Response::Transactions(vec![]));
+                        ReadRequest::AnyChainTransaction(txid)
+                    } else {
+                        ReadRequest::BlockQuery {
+                            hash_or_height: height.into(),
+                            fields: BlockQueryFields::RAW_BLOCK,
+                        }
+                    };
+                    read_state
+                        .expect_request(request)
+                        .await
+                        .respond(Err(source));
+                };
+                let (response, _) = tokio::join!(query, handler);
+                let error = response.unwrap_err();
+                assert_eq!(error.code(), -1);
+                assert_eq!(error.message(), expected);
+            }
+        }
+
+        for query in [height.into(), block::Hash([0; 32]).into()] {
+            for (response, code, message) in [
+                (
+                    Ok(ReadResponse::BlockHeader(None)),
+                    -8,
+                    "the requested block is not in the main chain".to_owned(),
+                ),
+                (
+                    Err(BoxError::from("database read failed")),
+                    -1,
+                    "database read failed".to_owned(),
+                ),
+                (
+                    Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+                    -1,
+                    BlockReadError::CorruptBlock { height }.to_string(),
+                ),
+            ] {
+                let handler = async {
+                    read_state
+                        .expect_request(ReadRequest::BlockHeader(query))
+                        .await
+                        .respond(response);
+                };
+                let (response, _) = tokio::join!(rpc.z_get_treestate(query.to_string()), handler);
+                let error = response.unwrap_err();
+                assert_eq!(error.code(), code);
+                assert_eq!(error.message(), message);
+            }
+        }
+
+        rpc_tx_queue.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_spent_outputs_distinguishes_pruned_history() {
+    use zebra_state::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block = zebra_test::vectors::MAINNET_BLOCKS
+            .values()
+            .map(|bytes| bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+            .find(|block| {
+                block
+                    .transactions
+                    .iter()
+                    .any(|tx| tx.spent_outpoints().next().is_some())
+            })
+            .expect("the mainnet vectors contain a transaction spending transparent outputs");
+        let height = block.coinbase_height().unwrap();
+        for response in [
+            Ok(ReadResponse::BlockQuery(Some(zebra_state::QueriedBlock {
+                spent_outputs: None,
+                ..queried_block(&block, VERBOSITY_3_READS, 0)
+            }))),
+            Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
+                height,
+            })),
+        ] {
+            let pruned = response.is_err();
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: block.hash().into(),
+                        fields: VERBOSITY_3_READS,
+                    })
+                    .await
+                    .respond(response);
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(block.hash().to_string(), Some(GetBlockQuery::Verbosity(3))),
+                handler
+            );
+            if pruned {
+                let error = response.unwrap_err();
+                assert_eq!(error.code(), -32603);
+                assert_eq!(error.message(), "Block not available (pruned data)");
+            } else {
+                // A reorg or lagging secondary omits prevouts and fees rather than failing.
+                let GetBlockResponse::Object(body) = response.unwrap() else {
+                    panic!("verbosity three returns a block object");
+                };
+                let body_tx = body
+                    .tx
+                    .as_ref()
+                    .expect("verbosity three returns transactions");
+                assert_eq!(body_tx.len(), block.transactions.len());
+                for (tx, source) in body_tx.iter().zip(&block.transactions) {
+                    let GetBlockTransaction::Object(tx) = tx else {
+                        panic!("verbosity three returns transaction objects");
+                    };
+                    if source.spent_outpoints().next().is_some() {
+                        assert_eq!(tx.fee(), None);
+                    }
+                    assert!(tx.inputs.iter().all(|input| !matches!(
+                        input,
+                        Input::NonCoinbase {
+                            prevout: Some(_),
+                            ..
+                        }
+                    )));
+                }
+            }
+        }
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockheader_distinguishes_missing_and_failed_reads() {
+    use zebra_state::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let height = Height(1);
+        for (query, not_found_code) in [
+            (HashOrHeight::from(height), -8),
+            (HashOrHeight::from(block::Hash([0; 32])), -5),
+        ] {
+            for (response, code, message) in [
+                (
+                    Ok(ReadResponse::BlockQuery(None)),
+                    not_found_code,
+                    "block height not in best chain".to_owned(),
+                ),
+                (
+                    Err(BoxError::from("database read failed")),
+                    -32603,
+                    "database read failed".to_owned(),
+                ),
+                (
+                    Err(BoxError::from(BlockReadError::CorruptBlock { height })),
+                    -32603,
+                    BlockReadError::CorruptBlock { height }.to_string(),
+                ),
+            ] {
+                let handler = async {
+                    read_state
+                        .expect_request(ReadRequest::BlockQuery {
+                            hash_or_height: query,
+                            fields: BlockQueryFields::HEADER,
+                        })
+                        .await
+                        .respond(response);
+                };
+                let (response, _) = tokio::join!(
+                    rpc.get_block_header(query.to_string(), Some(false)),
+                    handler
+                );
+                let error = response.unwrap_err();
+                assert_eq!(error.code(), code);
+                assert_eq!(error.message(), message);
+            }
+        }
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     let _init_guard = zebra_test::init();
 
@@ -424,14 +931,14 @@ async fn rpc_getblock() {
         let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
-            .get_block(i.to_string(), Some(0u8))
+            .get_block(i.to_string(), Some(GetBlockQuery::Verbosity(0)))
             .await
             .expect("We should have a GetBlock struct");
 
         assert_eq!(get_block, expected_result);
 
         let get_block = rpc
-            .get_block(block.hash().to_string(), Some(0u8))
+            .get_block(block.hash().to_string(), Some(GetBlockQuery::Verbosity(0)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -443,14 +950,17 @@ async fn rpc_getblock() {
         let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
-            .get_block(blocks[i].hash().to_string(), Some(0u8))
+            .get_block(
+                blocks[i].hash().to_string(),
+                Some(GetBlockQuery::Verbosity(0)),
+            )
             .await
             .expect("We should have a GetBlock struct");
 
         assert_eq!(get_block, expected_result);
 
         let get_block = rpc
-            .get_block(block.hash().to_string(), Some(0u8))
+            .get_block(block.hash().to_string(), Some(GetBlockQuery::Verbosity(0)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -465,7 +975,7 @@ async fn rpc_getblock() {
         let expected_result = GetBlockResponse::Raw(blocks[index].clone().into());
 
         let get_block = rpc
-            .get_block(neg_height.to_string(), Some(0u8))
+            .get_block(neg_height.to_string(), Some(GetBlockQuery::Verbosity(0)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -486,7 +996,7 @@ async fn rpc_getblock() {
     let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
-            .get_block(i.to_string(), Some(1u8))
+            .get_block(i.to_string(), Some(GetBlockQuery::Verbosity(1)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -503,20 +1013,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -536,6 +1049,7 @@ async fn rpc_getblock() {
                 value_pools: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -544,7 +1058,10 @@ async fn rpc_getblock() {
     let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
-            .get_block(blocks[i].hash().to_string(), Some(1u8))
+            .get_block(
+                blocks[i].hash().to_string(),
+                Some(GetBlockQuery::Verbosity(1)),
+            )
             .await
             .expect("We should have a GetBlock struct");
 
@@ -561,20 +1078,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -593,6 +1113,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -601,7 +1122,7 @@ async fn rpc_getblock() {
     let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
-            .get_block(i.to_string(), Some(2u8))
+            .get_block(i.to_string(), Some(GetBlockQuery::Verbosity(2)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -628,6 +1149,7 @@ async fn rpc_getblock() {
                 version,
                 merkle_root,
                 block_commitments,
+                auth_data_root,
                 final_sapling_root,
                 final_orchard_root,
                 nonce,
@@ -638,12 +1160,15 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                hex,
             } = &**obj;
             assert_eq!(hash, &block.hash());
-            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(confirmations, &Some((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
-            assert_eq!(*n_tx, block.transactions.len());
+            assert_eq!(*n_tx, Some(block.transactions.len()));
+            assert_eq!(auth_data_root, &None);
+            assert_eq!(hex, &None);
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -676,6 +1201,7 @@ async fn rpc_getblock() {
                 block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
             );
 
+            let tx = tx.as_ref().expect("verbosity 2 returns transactions");
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
                     let TransactionObject {
@@ -701,7 +1227,10 @@ async fn rpc_getblock() {
     let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
-            .get_block(blocks[i].hash().to_string(), Some(2u8))
+            .get_block(
+                blocks[i].hash().to_string(),
+                Some(GetBlockQuery::Verbosity(2)),
+            )
             .await
             .expect("We should have a GetBlock struct");
 
@@ -728,6 +1257,7 @@ async fn rpc_getblock() {
                 version,
                 merkle_root,
                 block_commitments,
+                auth_data_root,
                 final_sapling_root,
                 final_orchard_root,
                 nonce,
@@ -738,12 +1268,15 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                hex,
             } = &**obj;
             assert_eq!(hash, &block.hash());
-            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(confirmations, &Some((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
-            assert_eq!(*n_tx, block.transactions.len());
+            assert_eq!(*n_tx, Some(block.transactions.len()));
+            assert_eq!(auth_data_root, &None);
+            assert_eq!(hex, &None);
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -776,6 +1309,7 @@ async fn rpc_getblock() {
                 block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
             );
 
+            let tx = tx.as_ref().expect("verbosity 2 returns transactions");
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
                     let TransactionObject {
@@ -802,7 +1336,7 @@ async fn rpc_getblock() {
     // have no prevout.
     for i in 0..blocks.len() {
         let get_block = rpc
-            .get_block(i.to_string(), Some(3u8))
+            .get_block(i.to_string(), Some(GetBlockQuery::Verbosity(3)))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -810,7 +1344,7 @@ async fn rpc_getblock() {
             panic!("Expected GetBlock::Object");
         };
 
-        for actual_tx in obj.tx.iter() {
+        for actual_tx in obj.tx.iter().flatten() {
             let GetBlockTransaction::Object(tx_object) = actual_tx else {
                 panic!("verbosity 3 must return transaction objects");
             };
@@ -847,20 +1381,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -879,6 +1416,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -904,20 +1442,23 @@ async fn rpc_getblock() {
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
                 hash: block.hash(),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
-                n_tx: block.transactions.len(),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
-                    .collect(),
-                trees,
+                n_tx: Some(block.transactions.len()),
+                tx: Some(
+                    block
+                        .transactions
+                        .iter()
+                        .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                        .collect()
+                ),
+                trees: Some(trees),
                 size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
+                auth_data_root: None,
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -936,6 +1477,7 @@ async fn rpc_getblock() {
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                hex: None,
             }))
         );
     }
@@ -976,12 +1518,18 @@ async fn rpc_getblock_parse_error() {
 
     // Make sure we get an error if Zebra can't parse the block height.
     assert!(rpc
-        .get_block("not parsable as height".to_string(), Some(0u8))
+        .get_block(
+            "not parsable as height".to_string(),
+            Some(GetBlockQuery::Verbosity(0))
+        )
         .await
         .is_err());
 
     assert!(rpc
-        .get_block("not parsable as height".to_string(), Some(1u8))
+        .get_block(
+            "not parsable as height".to_string(),
+            Some(GetBlockQuery::Verbosity(1))
+        )
         .await
         .is_err());
 
@@ -1026,13 +1574,19 @@ async fn rpc_getblock_missing_error() {
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
     // https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290
-    let block_future = tokio::spawn(async move { rpc.get_block("0".to_string(), Some(0u8)).await });
+    let block_future = tokio::spawn(async move {
+        rpc.get_block("0".to_string(), Some(GetBlockQuery::Verbosity(0)))
+            .await
+    });
 
     // Make the mock service respond with no block
     let response_handler = read_state
-        .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
+        .expect_request(zebra_state::ReadRequest::BlockQuery {
+            hash_or_height: Height(0).into(),
+            fields: BlockQueryFields::RAW_BLOCK,
+        })
         .await;
-    response_handler.respond(zebra_state::ReadResponse::Block(None));
+    response_handler.respond(zebra_state::ReadResponse::BlockQuery(None));
 
     let block_response = block_future.await.expect("block future should not panic");
     let block_response =
@@ -1061,7 +1615,7 @@ async fn rpc_getblock_missing_error() {
 
 /// Regression test for GHSA-x6v8-c2xp-928m — panics (aborts) before the fix.
 ///
-/// When `Depth` returns `None` (side-chain block), `get_block_header` sets
+/// When the state returns no depth for a block (a side-chain block), `getblock` sets
 /// `confirmations = -1`:
 /// https://github.com/ZcashFoundation/zebra/blob/v5.2.0/zebra-rpc/src/methods.rs#L1508
 /// The old code narrowed that to `u32` via `.try_into().expect()`, which panicked.
@@ -1078,78 +1632,30 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
         .zcash_deserialize_into()
         .unwrap();
     let block_hash = block.hash();
-    let block_header = block.header.clone();
-    let block_size = block.zcash_serialized_size();
-    let previous_block_hash = block.header.previous_block_hash;
 
-    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+    let mut read_state: MockReadState = MockService::build()
         .with_max_request_delay(std::time::Duration::from_secs(5))
         .for_unit_tests();
+    let rpc = getblock_mock_rpc(Mainnet, &read_state);
 
-    let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _rpc_tx_queue) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        Default::default(),
-        "0.0.1",
-        "RPC test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(read_state.clone(), 1),
-        MockService::build().for_unit_tests(),
-        MockSyncStatus::default(),
-        NoChainTip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    let rpc_clone = rpc.clone();
     let hash_str = block_hash.to_string();
-    let block_future = tokio::spawn(async move { rpc_clone.get_block(hash_str, Some(2u8)).await });
+    let block_future = tokio::spawn(async move {
+        rpc.get_block(hash_str, Some(GetBlockQuery::Verbosity(2)))
+            .await
+    });
 
-    // get_block_header: BlockHeader, SaplingTree, Depth (None = side chain)
+    // One request, with no depth: the block is not on the best chain.
     read_state
-        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .expect_request(ReadRequest::BlockQuery {
+            hash_or_height: block_hash.into(),
+            fields: VERBOSITY_2_READS,
+        })
         .await
-        .respond(ReadResponse::BlockHeader {
-            header: block_header,
-            hash: block_hash,
-            height: zebra_chain::block::Height(0),
-            next_block_hash: None,
-        });
-    read_state
-        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
-        .await
-        .respond(ReadResponse::SaplingTree(Some(Default::default())));
-    read_state
-        .expect_request(ReadRequest::Depth(block_hash))
-        .await
-        .respond(ReadResponse::Depth(None));
-
-    // get_block: BlockAndSize, OrchardTree, IronwoodTree, BlockInfo x2
-    read_state
-        .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
-        .await
-        .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
-    read_state
-        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
-        .await
-        .respond(ReadResponse::OrchardTree(Some(Default::default())));
-    read_state
-        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
-        .await
-        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
-    read_state
-        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
-        .await
-        .respond(ReadResponse::BlockInfo(None));
-    read_state
-        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
-        .await
-        .respond(ReadResponse::BlockInfo(Some(BlockInfo::default())));
+        .respond(ReadResponse::BlockQuery(Some(zebra_state::QueriedBlock {
+            depth: None,
+            block_info: Some(BlockInfo::default()),
+            ..queried_block(&block, VERBOSITY_2_READS, 0)
+        })));
 
     let block_response = block_future
         .await
@@ -1161,13 +1667,14 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     };
 
     assert_eq!(
-        obj.confirmations, -1,
+        obj.confirmations,
+        Some(-1),
         "side-chain confirmations should be -1"
     );
 
     // Each transaction object must be labeled as side-chain (height=-1,
     // confirmations=0) rather than panicking on the u32 cast.
-    for actual_tx in &obj.tx {
+    for actual_tx in obj.tx.iter().flatten() {
         let GetBlockTransaction::Object(tx_obj) = actual_tx else {
             panic!("verbosity-2 returns transaction objects");
         };
@@ -1257,7 +1764,6 @@ async fn rpc_getblockheader() {
             merkle_root: block.header.merkle_root,
             block_commitments: block.header.commitment_bytes.0,
             final_sapling_root: expected_final_sapling_root,
-            sapling_tree_size: sapling_tree.count(),
             time: block.header.time.timestamp(),
             nonce: expected_nonce,
             solution: block.header.solution,
@@ -7480,6 +7986,143 @@ async fn rpc_addnode() {
     mempool.expect_no_requests().await;
 }
 
+#[test]
+fn rpc_gettxout_nullable_version() {
+    let response = serde_json::json!({
+        "bestblock": "00".repeat(32),
+        "confirmations": 42,
+        "value": 1.0,
+        "scriptPubKey": {"asm": "", "hex": "", "type": "nonstandard"},
+        "version": null,
+        "coinbase": true,
+    });
+    let output: GetTxOutResponse =
+        serde_json::from_value(response.clone()).expect("a pruned creating version is unknown");
+    assert_eq!(serde_json::to_value(output).unwrap(), response);
+}
+
+/// Output metadata does not require a transaction response, and mempool spends take precedence.
+#[tokio::test]
+async fn rpc_gettxout_without_history_and_mempool_overlay() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let tx = &block.transactions[0];
+    let outpoint = transparent::OutPoint {
+        hash: tx.hash(),
+        index: 0,
+    };
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_sender, receiver) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        receiver,
+        None,
+    );
+
+    for (version, coinbase, include_mempool) in [(None, true, None), (Some(5), false, Some(false))]
+    {
+        let rpc = rpc.clone();
+        let request = tokio::spawn(async move {
+            rpc.get_tx_out(outpoint.hash.to_string(), outpoint.index, include_mempool)
+                .await
+        });
+        if include_mempool.unwrap_or(true) {
+            mempool
+                .expect_request(mempool::Request::UnspentOutput(outpoint))
+                .await
+                .respond(mempool::Response::TransparentOutput(None));
+        }
+        read_state
+            .expect_request(ReadRequest::UnspentOutput(outpoint))
+            .await
+            .respond(ReadResponse::UnspentOutput(Some(
+                zebra_state::OutputWithMetadata {
+                    utxo: transparent::Utxo::new(tx.outputs()[0].clone(), Height(1), coinbase),
+                    transaction_version: version,
+                    confirmations: 42,
+                    best_chain_tip_hash: block.hash(),
+                },
+            )));
+        let response = request.await.unwrap().unwrap();
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["version"], serde_json::to_value(version).unwrap());
+        let output = response.0.unwrap();
+        assert_eq!(output.version(), version);
+        assert_eq!(output.coinbase(), coinbase);
+        assert_eq!(output.confirmations(), 42);
+        assert_eq!(output.best_block(), &block.hash().to_string());
+        assert_eq!(
+            output.value(),
+            crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
+        );
+        assert_eq!(
+            output.script_pub_key().hex().as_raw_bytes(),
+            tx.outputs()[0].lock_script.as_raw_bytes()
+        );
+    }
+
+    let request_rpc = rpc.clone();
+    let request = tokio::spawn(async move {
+        request_rpc
+            .get_tx_out(outpoint.hash.to_string(), 0, Some(false))
+            .await
+    });
+    read_state
+        .expect_request(ReadRequest::UnspentOutput(outpoint))
+        .await
+        .respond(ReadResponse::UnspentOutput(None));
+    assert!(
+        request.await.unwrap().unwrap().0.is_none(),
+        "spent or unknown outputs are null"
+    );
+
+    for spent in [false, true] {
+        let rpc = rpc.clone();
+        let request =
+            tokio::spawn(async move { rpc.get_tx_out(outpoint.hash.to_string(), 0, None).await });
+        let output = if spent {
+            CreatedOrSpent::Spent
+        } else {
+            CreatedOrSpent::Created {
+                output: tx.outputs()[0].clone(),
+                tx_version: 5,
+                last_seen_hash: block.hash(),
+            }
+        };
+        mempool
+            .expect_request(mempool::Request::UnspentOutput(outpoint))
+            .await
+            .respond(mempool::Response::TransparentOutput(Some(output)));
+        let response = request.await.unwrap().unwrap();
+        if spent {
+            assert!(response.0.is_none());
+        } else {
+            let output = response.0.unwrap();
+            assert_eq!(output.confirmations(), 0);
+            assert_eq!(output.version(), Some(5));
+            assert!(!output.coinbase());
+        }
+    }
+    read_state.expect_no_requests().await;
+    mempool.expect_no_requests().await;
+    assert!(queue.now_or_never().is_none());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_gettxout() {
     let _init_guard = zebra_test::init();
@@ -7515,8 +8158,6 @@ async fn rpc_gettxout() {
         None,
     );
 
-    // TODO: Create a mempool test
-
     // Build a state test for all transactions
     let run_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
@@ -7538,6 +8179,8 @@ async fn rpc_gettxout() {
                 output_object.script_pub_key().hex().as_raw_bytes(),
                 tx.outputs()[0].lock_script.as_raw_bytes()
             );
+            assert_eq!(output_object.version(), Some(tx.version()));
+            assert_eq!(output_object.coinbase(), tx.is_coinbase());
             let depth_response = read_state
                 .oneshot(zebra_state::ReadRequest::Depth(_block.hash()))
                 .await
@@ -8047,6 +8690,52 @@ fn template_extending(net: &Network, tip_height: Height, tip_hash: Hash) -> Bloc
     )
 }
 
+/// `getnetworkinfo` reports the services the node advertises, so a pruned node that cleared
+/// `NODE_NETWORK` never claims over RPC that it serves historical blocks.
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_getnetworkinfo_reports_advertised_services() {
+    use zebra_network::types::PeerServices;
+
+    let _init_guard = zebra_test::init();
+
+    for (services, expected) in [
+        (PeerServices::NODE_NETWORK, "0000000000000001"),
+        (PeerServices::empty(), "0000000000000000"),
+    ] {
+        let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
+            ([127, 0, 0, 1], Mainnet.default_port()).into(),
+            services,
+            &Mainnet,
+            zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
+            tracing::Span::none(),
+        )));
+
+        let (_log_tx, log_rx) = tokio::sync::watch::channel(None);
+        let (rpc, _rpc_tx_queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            Default::default(),
+            "0.0.1",
+            "RPC test",
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+            MockService::build().for_unit_tests(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            address_book,
+            log_rx,
+            None,
+        );
+
+        let response = rpc
+            .get_network_info()
+            .await
+            .expect("getnetworkinfo reads only the address book");
+        assert_eq!(response.local_services, expected);
+    }
+}
+
 /// A contended address book must not prevent other RPC runtime tasks from progressing.
 #[tokio::test(flavor = "current_thread")]
 async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
@@ -8056,6 +8745,7 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
 
     let address_book = Arc::new(std::sync::Mutex::new(zebra_network::AddressBook::new(
         ([127, 0, 0, 1], Mainnet.default_port()).into(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &Mainnet,
         zebra_network::constants::DEFAULT_MAX_CONNS_PER_IP,
         tracing::Span::none(),
@@ -8121,4 +8811,1256 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
         .expect("RPC task should not panic")
         .expect("RPC should succeed");
     assert_eq!(response.connections, 0);
+}
+
+/// A mock read state service for `getblock` tests.
+type MockReadState =
+    MockService<ReadRequest, ReadResponse, zebra_test::mock_service::PanicAssertion, BoxError>;
+
+/// The parts of a block `getblock` reads at verbosity 1.
+const VERBOSITY_1_READS: BlockQueryFields = BlockQueryFields::HEADER
+    .union(BlockQueryFields::DEPTH)
+    .union(BlockQueryFields::NEXT_BLOCK_HASH)
+    .union(BlockQueryFields::TRANSACTION_IDS)
+    .union(BlockQueryFields::SAPLING_TREE)
+    .union(BlockQueryFields::ORCHARD_TREE)
+    .union(BlockQueryFields::IRONWOOD_TREE)
+    .union(BlockQueryFields::BLOCK_INFO)
+    .union(BlockQueryFields::PREVIOUS_BLOCK_INFO);
+
+/// The parts of a block `getblock` reads at verbosity 2: verbosity 1 with the transactions
+/// instead of their IDs.
+const VERBOSITY_2_READS: BlockQueryFields = BlockQueryFields::HEADER
+    .union(BlockQueryFields::DEPTH)
+    .union(BlockQueryFields::NEXT_BLOCK_HASH)
+    .union(BlockQueryFields::TRANSACTIONS)
+    .union(BlockQueryFields::SAPLING_TREE)
+    .union(BlockQueryFields::ORCHARD_TREE)
+    .union(BlockQueryFields::IRONWOOD_TREE)
+    .union(BlockQueryFields::BLOCK_INFO)
+    .union(BlockQueryFields::PREVIOUS_BLOCK_INFO);
+
+/// The parts of a block `getblock` reads at verbosity 3: verbosity 2 with the spent outputs.
+const VERBOSITY_3_READS: BlockQueryFields =
+    VERBOSITY_2_READS.union(BlockQueryFields::SPENT_OUTPUTS);
+
+/// The parts of a block verbose `getblockheader` reads.
+const VERBOSE_HEADER_READS: BlockQueryFields = BlockQueryFields::HEADER
+    .union(BlockQueryFields::DEPTH)
+    .union(BlockQueryFields::NEXT_BLOCK_HASH)
+    .union(BlockQueryFields::SAPLING_TREE);
+
+/// Returns an RPC on `network` that reads `read_state`, with mock services that must not be
+/// called for everything else.
+fn getblock_mock_rpc(
+    network: Network,
+    read_state: &MockReadState,
+) -> RpcImpl<
+    impl MempoolService,
+    impl StateService,
+    impl zebra_state::ReadState,
+    NoChainTip,
+    MockAddressBookPeers,
+    impl BlockVerifierService,
+    MockSyncStatus,
+> {
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    queue.abort();
+    rpc
+}
+
+/// Returns the parts of `block` that a `BlockQuery` for `fields` reads, as the state returns them
+/// for a best-chain block `depth` blocks below the tip, with empty note commitment trees, no
+/// value pools and no next block.
+pub(super) fn queried_block(
+    block: &Arc<Block>,
+    fields: BlockQueryFields,
+    depth: u32,
+) -> zebra_state::QueriedBlock {
+    let size = block.zcash_serialized_size();
+    let body = BlockQueryFields::TRANSACTIONS
+        | BlockQueryFields::SPENT_OUTPUTS
+        | BlockQueryFields::AUTH_DATA_ROOT;
+
+    zebra_state::QueriedBlock {
+        hash: block.hash(),
+        height: block
+            .coinbase_height()
+            .expect("test blocks have a coinbase height"),
+        header: fields
+            .contains(BlockQueryFields::HEADER)
+            .then(|| block.header.clone()),
+        depth: fields.contains(BlockQueryFields::DEPTH).then_some(depth),
+        next_block_hash: None,
+        transaction_count: fields
+            .contains(BlockQueryFields::TRANSACTION_COUNT)
+            .then(|| block.transactions.len()),
+        transaction_ids: fields
+            .contains(BlockQueryFields::TRANSACTION_IDS)
+            .then(|| block.transactions.iter().map(|tx| tx.hash()).collect()),
+        block_info: fields.contains(BlockQueryFields::BLOCK_INFO).then(|| {
+            BlockInfo::new(
+                ValueBalance::zero(),
+                size.try_into().expect("test blocks are smaller than 4 GB"),
+            )
+        }),
+        previous_block_info: None,
+        sapling_tree: fields
+            .contains(BlockQueryFields::SAPLING_TREE)
+            .then(Default::default),
+        orchard_tree: fields
+            .contains(BlockQueryFields::ORCHARD_TREE)
+            .then(Default::default),
+        ironwood_tree: fields
+            .contains(BlockQueryFields::IRONWOOD_TREE)
+            .then(Default::default),
+        raw_block: fields
+            .contains(BlockQueryFields::RAW_BLOCK)
+            .then(|| SerializedBlock::from(block.as_ref())),
+        block: fields.intersects(body).then(|| block.clone()),
+        size: fields
+            .intersects(BlockQueryFields::RAW_BLOCK | body)
+            .then_some(size),
+        spent_outputs: fields
+            .contains(BlockQueryFields::SPENT_OUTPUTS)
+            .then(HashMap::new),
+        auth_data_root: fields
+            .contains(BlockQueryFields::AUTH_DATA_ROOT)
+            .then(|| block.auth_data_root()),
+    }
+}
+
+/// Each `getblock` verbosity and each `getblockheader` form reads the state with exactly one
+/// `BlockQuery`, for the parts its response needs.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reads_the_state_once() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let queries = [
+            HashOrHeight::from(block.hash()),
+            HashOrHeight::from(block.coinbase_height().unwrap()),
+        ];
+
+        for (verbosity, fields) in [
+            (Some(0), BlockQueryFields::RAW_BLOCK),
+            (Some(1), VERBOSITY_1_READS),
+            (Some(2), VERBOSITY_2_READS),
+            (Some(3), VERBOSITY_3_READS),
+            (None, VERBOSITY_1_READS),
+        ] {
+            for query in queries {
+                let handler = async {
+                    read_state
+                        .expect_request(ReadRequest::BlockQuery {
+                            hash_or_height: query,
+                            fields,
+                        })
+                        .await
+                        .respond(ReadResponse::BlockQuery(Some(queried_block(
+                            &block, fields, 0,
+                        ))));
+                };
+                let (response, _) = tokio::join!(
+                    rpc.get_block(query.to_string(), verbosity.map(GetBlockQuery::Verbosity)),
+                    handler
+                );
+                response.unwrap_or_else(|error| {
+                    panic!("verbosity {verbosity:?} of {query:?} failed: {error:?}")
+                });
+            }
+        }
+
+        for (verbose, fields) in [
+            (Some(false), BlockQueryFields::HEADER),
+            (Some(true), VERBOSE_HEADER_READS),
+            (None, VERBOSE_HEADER_READS),
+        ] {
+            for query in queries {
+                let handler = async {
+                    read_state
+                        .expect_request(ReadRequest::BlockQuery {
+                            hash_or_height: query,
+                            fields,
+                        })
+                        .await
+                        .respond(ReadResponse::BlockQuery(Some(queried_block(
+                            &block, fields, 0,
+                        ))));
+                };
+                let (response, _) =
+                    tokio::join!(rpc.get_block_header(query.to_string(), verbose), handler);
+                response.unwrap_or_else(|error| {
+                    panic!("verbose {verbose:?} of {query:?} failed: {error:?}")
+                });
+            }
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// State errors on `getblock` verbosity 1 to 3 and on `getblockheader` are internal errors,
+/// whichever part of the block failed to read; pruned bodies keep their message.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_state_errors_are_internal_errors() {
+    use zebra_state::BlockReadError;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let height = Height(1);
+        let query = HashOrHeight::from(height);
+
+        for (verbosity, verbose, fields) in [
+            (Some(1), None, VERBOSITY_1_READS),
+            (Some(2), None, VERBOSITY_2_READS),
+            (Some(3), None, VERBOSITY_3_READS),
+            (None, Some(true), VERBOSE_HEADER_READS),
+            (None, Some(false), BlockQueryFields::HEADER),
+        ] {
+            for (error, message) in [
+                (
+                    BoxError::from("database read failed"),
+                    "database read failed".to_owned(),
+                ),
+                (
+                    BoxError::from(BlockReadError::CorruptBlock { height }),
+                    BlockReadError::CorruptBlock { height }.to_string(),
+                ),
+                (
+                    BoxError::from(BlockReadError::BlockBodyUnavailable { height }),
+                    "Block not available (pruned data)".to_owned(),
+                ),
+            ] {
+                let call = async {
+                    if verbose.is_some() {
+                        rpc.get_block_header(query.to_string(), verbose)
+                            .await
+                            .map(|_| ())
+                    } else {
+                        rpc.get_block(query.to_string(), verbosity.map(GetBlockQuery::Verbosity))
+                            .await
+                            .map(|_| ())
+                    }
+                };
+                let handler = async {
+                    read_state
+                        .expect_request(ReadRequest::BlockQuery {
+                            hash_or_height: query,
+                            fields,
+                        })
+                        .await
+                        .respond(Err(error));
+                };
+                let (response, _) = tokio::join!(call, handler);
+                let response = response.unwrap_err();
+                assert_eq!(
+                    (response.code(), response.message()),
+                    (-32603, message.as_str()),
+                    "verbosity {verbosity:?}, verbose {verbose:?}"
+                );
+            }
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// A part the state did not return for a known block, as on a torn secondary view, keeps the
+/// error the handler returned when each part was its own request.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_missing_parts() {
+    type Tear = fn(&mut zebra_state::QueriedBlock);
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let query = HashOrHeight::from(block.hash());
+
+        let cases: [(Option<u8>, Option<bool>, BlockQueryFields, Tear, i32, &str); 9] = [
+            (
+                Some(0),
+                None,
+                BlockQueryFields::RAW_BLOCK,
+                |block| block.raw_block = None,
+                -8,
+                "Block not found",
+            ),
+            (
+                Some(1),
+                None,
+                VERBOSITY_1_READS,
+                |block| block.transaction_ids = None,
+                -1,
+                "block not found",
+            ),
+            (
+                Some(1),
+                None,
+                VERBOSITY_1_READS,
+                |block| block.sapling_tree = None,
+                -1,
+                "missing Sapling tree",
+            ),
+            (
+                Some(1),
+                None,
+                VERBOSITY_1_READS,
+                |block| block.orchard_tree = None,
+                -1,
+                "missing Orchard tree",
+            ),
+            (
+                Some(1),
+                None,
+                VERBOSITY_1_READS,
+                |block| block.ironwood_tree = None,
+                -1,
+                "missing Ironwood tree",
+            ),
+            (
+                Some(2),
+                None,
+                VERBOSITY_2_READS,
+                |block| {
+                    block.header = None;
+                    block.block = None;
+                    block.size = None;
+                },
+                -1,
+                "Block not found",
+            ),
+            (
+                Some(3),
+                None,
+                VERBOSITY_3_READS,
+                |block| {
+                    block.block = None;
+                    block.size = None;
+                },
+                -1,
+                "Block not found",
+            ),
+            (
+                None,
+                Some(true),
+                VERBOSE_HEADER_READS,
+                |block| block.sapling_tree = None,
+                -1,
+                "missing Sapling tree",
+            ),
+            (
+                None,
+                Some(false),
+                BlockQueryFields::HEADER,
+                |block| block.header = None,
+                -1,
+                "Block not found",
+            ),
+        ];
+
+        for (verbosity, verbose, fields, tear, code, message) in cases {
+            let mut response = queried_block(&block, fields, 0);
+            tear(&mut response);
+            let call = async {
+                if verbose.is_some() {
+                    rpc.get_block_header(query.to_string(), verbose)
+                        .await
+                        .map(|_| ())
+                } else {
+                    rpc.get_block(query.to_string(), verbosity.map(GetBlockQuery::Verbosity))
+                        .await
+                        .map(|_| ())
+                }
+            };
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(Some(response)));
+            };
+            let (response, _) = tokio::join!(call, handler);
+            let response = response.unwrap_err();
+            assert_eq!(
+                (response.code(), response.message()),
+                (code, message),
+                "verbosity {verbosity:?}, verbose {verbose:?}"
+            );
+        }
+
+        // Verbosity levels omit `size`, `chainSupply` and `valuePools` without `BlockInfo`, as
+        // they did for databases that have no `BlockInfo` rows yet.
+        let handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields: VERBOSITY_1_READS,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(zebra_state::QueriedBlock {
+                    block_info: None,
+                    ..queried_block(&block, VERBOSITY_1_READS, 0)
+                })));
+        };
+        let (response, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(GetBlockQuery::Verbosity(1))),
+            handler
+        );
+        let GetBlockResponse::Object(object) = response.unwrap() else {
+            panic!("verbosity 1 returns an object");
+        };
+        assert_eq!(object.size(), None);
+        assert_eq!(object.chain_supply(), &None);
+        assert_eq!(object.value_pools(), &None);
+        assert_eq!(object.n_tx(), Some(block.transactions.len()));
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// `getblock` and `getblockheader` report the depth and next block the state returns, which for
+/// a finalized block count the non-finalized chain above it.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_the_state_depth_and_next_block() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let next: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let query = HashOrHeight::from(block.hash());
+        let depth = 7;
+
+        for (verbose, fields) in [(false, VERBOSITY_1_READS), (true, VERBOSE_HEADER_READS)] {
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(Some(zebra_state::QueriedBlock {
+                        next_block_hash: Some(next.hash()),
+                        ..queried_block(&block, fields, depth)
+                    })));
+            };
+            let call = async {
+                if verbose {
+                    serde_json::to_value(
+                        rpc.get_block_header(query.to_string(), Some(true))
+                            .await
+                            .unwrap(),
+                    )
+                } else {
+                    serde_json::to_value(
+                        rpc.get_block(query.to_string(), Some(GetBlockQuery::Verbosity(1)))
+                            .await
+                            .unwrap(),
+                    )
+                }
+            };
+            let (response, _) = tokio::join!(call, handler);
+            let response = response.unwrap();
+            assert_eq!(response["confirmations"], depth + 1, "verbose {verbose}");
+            assert_eq!(
+                response["nextblockhash"],
+                next.hash().to_string(),
+                "verbose {verbose}"
+            );
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// `finalorchardroot` is returned from NU5 on, even for an empty Orchard tree, whose size is
+/// omitted from `trees`.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_returns_the_orchard_root_from_nu5() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let empty_root: [u8; 32] = zebra_chain::orchard::tree::NoteCommitmentTree::default()
+            .root()
+            .into();
+
+        for (height, has_orchard_root) in [(1_046_400, false), (1_687_106, true)] {
+            let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS[&height]
+                .zcash_deserialize_into()
+                .unwrap();
+            let query = HashOrHeight::from(block.hash());
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields: VERBOSITY_1_READS,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(Some(queried_block(
+                        &block,
+                        VERBOSITY_1_READS,
+                        0,
+                    ))));
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(query.to_string(), Some(GetBlockQuery::Verbosity(1))),
+                handler
+            );
+            let response = serde_json::to_value(response.unwrap()).unwrap();
+
+            if has_orchard_root {
+                assert_eq!(response["finalorchardroot"], hex::encode(empty_root));
+            } else {
+                assert!(response.get("finalorchardroot").is_none());
+            }
+            assert_eq!(response["trees"], serde_json::json!({}), "height {height}");
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// Every `getblock` field name, as the RPC server parses them.
+const GET_BLOCK_FIELD_NAMES: [&str; 25] = [
+    "hash",
+    "confirmations",
+    "size",
+    "height",
+    "version",
+    "merkleroot",
+    "blockcommitments",
+    "authdataroot",
+    "finalsaplingroot",
+    "finalorchardroot",
+    "nTx",
+    "tx",
+    "txdetails",
+    "txprevouts",
+    "time",
+    "nonce",
+    "solution",
+    "bits",
+    "difficulty",
+    "chainSupply",
+    "valuePools",
+    "trees",
+    "previousblockhash",
+    "nextblockhash",
+    "hex",
+];
+
+/// Returns the field query for the field `names`, parsed from JSON as the RPC server parses it.
+pub(super) fn field_query(names: &[&str]) -> GetBlockQuery {
+    serde_json::from_value(serde_json::json!(names)).expect("the names are getblock fields")
+}
+
+/// Returns the response key of the field `name`: the three `tx` shapes share one key.
+fn response_key(name: &str) -> &str {
+    match name {
+        "txids" | "txdetails" | "txprevouts" => "tx",
+        name => name,
+    }
+}
+
+/// Invalid second arguments fail before reading the state, after the block argument is parsed.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_rejects_invalid_queries() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+
+        for (hash_or_height, query, message) in [
+            ("1", GetBlockQuery::Verbosity(4), "invalid verbosity value"),
+            (
+                "1",
+                GetBlockQuery::Verbosity(255),
+                "invalid verbosity value",
+            ),
+            ("1", field_query(&[]), "empty field list"),
+            (
+                "1",
+                field_query(&["txdetails", "tx"]),
+                "conflicting fields: tx, txdetails",
+            ),
+            (
+                "1",
+                field_query(&["txprevouts", "txids", "hash"]),
+                "conflicting fields: tx, txprevouts",
+            ),
+            (
+                "1",
+                field_query(&["txprevouts", "txdetails"]),
+                "conflicting fields: txdetails, txprevouts",
+            ),
+            (
+                "1",
+                field_query(&["txprevouts", "txdetails", "tx"]),
+                "conflicting fields: tx, txdetails, txprevouts",
+            ),
+            // The block argument is parsed first.
+            (
+                "garbage",
+                GetBlockQuery::Verbosity(7),
+                "parse error: could not convert the input string to a hash or height",
+            ),
+            (
+                "garbage",
+                field_query(&[]),
+                "parse error: could not convert the input string to a hash or height",
+            ),
+        ] {
+            let error = rpc
+                .get_block(hash_or_height.to_owned(), Some(query.clone()))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                (error.code(), error.message()),
+                (-8, message),
+                "{hash_or_height} {query:?}"
+            );
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// Each field query returns `hash` and exactly the requested key, with the value the verbosity
+/// levels return for that key; `authdataroot` and `hex` match the block.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_field_queries() {
+    let _init_guard = zebra_test::init();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let get_block = |hash_or_height: String, query: GetBlockQuery| {
+        let rpc = &rpc;
+        async move {
+            serde_json::to_value(
+                rpc.get_block(hash_or_height.clone(), Some(query.clone()))
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("{query:?} of {hash_or_height} failed: {error:?}")
+                    }),
+            )
+            .unwrap()
+        }
+    };
+
+    for (i, block) in blocks.iter().enumerate() {
+        let raw_block = hex::encode(block.zcash_serialize_to_vec().unwrap());
+        let auth_data_root = block.auth_data_root().encode_hex::<String>();
+        let size = block.zcash_serialized_size();
+
+        for hash_or_height in [i.to_string(), block.hash().to_string()] {
+            let mut verbose = Vec::new();
+            for verbosity in 0..=3 {
+                verbose.push(
+                    get_block(hash_or_height.clone(), GetBlockQuery::Verbosity(verbosity)).await,
+                );
+            }
+            let hash = verbose[1]["hash"].clone();
+
+            for name in GET_BLOCK_FIELD_NAMES {
+                let expected = match name {
+                    "txdetails" => verbose[2].get("tx").cloned(),
+                    "txprevouts" => verbose[3].get("tx").cloned(),
+                    "authdataroot" => Some(auth_data_root.clone().into()),
+                    "hex" => Some(verbose[0].clone()),
+                    name => verbose[1].get(name).cloned(),
+                };
+                let mut expected_object = serde_json::json!({ "hash": hash });
+                if let Some(expected) = expected {
+                    expected_object[response_key(name)] = expected;
+                }
+                assert_eq!(
+                    get_block(hash_or_height.clone(), field_query(&[name])).await,
+                    expected_object,
+                    "{name} of {hash_or_height}"
+                );
+            }
+
+            assert_eq!(verbose[0], serde_json::Value::from(raw_block.clone()));
+            assert_eq!(
+                get_block(hash_or_height.clone(), field_query(&["hex", "tx", "trees"])).await,
+                serde_json::json!({
+                    "hash": hash,
+                    "tx": verbose[1]["tx"],
+                    "trees": verbose[1]["trees"],
+                    "hex": raw_block,
+                }),
+            );
+
+            // The size comes from the body when it is read, and from `BlockInfo` otherwise.
+            for names in [
+                &["size"][..],
+                &["size", "hex"],
+                &["size", "txdetails"],
+                &["size", "authdataroot"],
+            ] {
+                assert_eq!(
+                    get_block(hash_or_height.clone(), field_query(names)).await["size"],
+                    size,
+                    "{names:?}"
+                );
+            }
+
+            // The transaction count comes from the body when it is read.
+            assert_eq!(
+                get_block(
+                    hash_or_height.clone(),
+                    field_query(&["nTx", "authdataroot"])
+                )
+                .await["nTx"],
+                block.transactions.len(),
+            );
+
+            // The alias and the boolean verbosities, as the RPC server parses them.
+            assert_eq!(
+                get_block(
+                    hash_or_height.clone(),
+                    serde_json::from_str(r#"["txids"]"#).unwrap()
+                )
+                .await,
+                get_block(hash_or_height.clone(), field_query(&["tx"])).await,
+            );
+            assert_eq!(
+                get_block(
+                    hash_or_height.clone(),
+                    serde_json::from_str("true").unwrap()
+                )
+                .await,
+                verbose[1],
+            );
+            assert_eq!(
+                get_block(
+                    hash_or_height.clone(),
+                    serde_json::from_str("false").unwrap()
+                )
+                .await,
+                verbose[0],
+            );
+        }
+    }
+
+    for (hash_or_height, code) in [
+        (blocks.len().to_string(), -8),
+        (block::Hash([0; 32]).to_string(), -5),
+    ] {
+        let error = rpc
+            .get_block(hash_or_height, Some(field_query(&["hash"])))
+            .await
+            .unwrap_err();
+        assert_eq!((error.code(), error.message()), (code, "Block not found"));
+    }
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
+    assert!(rpc_tx_queue_task_result.is_none());
+}
+
+/// A field query reads only the parts of the block its fields need, in one request, and returns
+/// exactly the requested keys.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_field_queries_read_only_what_they_need() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        // An NU5 block, so `finalorchardroot` is returned.
+        let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS[&1_687_106]
+            .zcash_deserialize_into()
+            .unwrap();
+        let query = HashOrHeight::from(block.hash());
+        let trees = BlockQueryFields::SAPLING_TREE
+            | BlockQueryFields::ORCHARD_TREE
+            | BlockQueryFields::IRONWOOD_TREE;
+
+        for (names, fields) in [
+            (&["hash"][..], BlockQueryFields::empty()),
+            (&["height"], BlockQueryFields::empty()),
+            (&["confirmations"], BlockQueryFields::DEPTH),
+            (&["nTx"], BlockQueryFields::TRANSACTION_COUNT),
+            // The transaction count comes from the IDs or the transactions when they are read.
+            (&["nTx", "tx"], BlockQueryFields::TRANSACTION_IDS),
+            (&["nTx", "txids"], BlockQueryFields::TRANSACTION_IDS),
+            (
+                &["nTx", "txdetails"],
+                BlockQueryFields::TRANSACTIONS | BlockQueryFields::DEPTH,
+            ),
+            // The authorizing data root implies reading the transactions.
+            (&["nTx", "authdataroot"], BlockQueryFields::AUTH_DATA_ROOT),
+            (&["size"], BlockQueryFields::BLOCK_INFO),
+            // The size comes from the body when it is read.
+            (&["size", "hex"], BlockQueryFields::RAW_BLOCK),
+            (
+                &["size", "txdetails"],
+                BlockQueryFields::TRANSACTIONS | BlockQueryFields::DEPTH,
+            ),
+            (&["size", "authdataroot"], BlockQueryFields::AUTH_DATA_ROOT),
+            (
+                &["size", "chainSupply", "hex"],
+                BlockQueryFields::BLOCK_INFO | BlockQueryFields::RAW_BLOCK,
+            ),
+            (&["chainSupply"], BlockQueryFields::BLOCK_INFO),
+            (
+                &["valuePools"],
+                BlockQueryFields::BLOCK_INFO | BlockQueryFields::PREVIOUS_BLOCK_INFO,
+            ),
+            (
+                &[
+                    "version",
+                    "merkleroot",
+                    "time",
+                    "nonce",
+                    "solution",
+                    "bits",
+                    "difficulty",
+                    "previousblockhash",
+                ],
+                BlockQueryFields::HEADER,
+            ),
+            (
+                &["blockcommitments"],
+                BlockQueryFields::HEADER | BlockQueryFields::SAPLING_TREE,
+            ),
+            (&["finalsaplingroot"], BlockQueryFields::SAPLING_TREE),
+            (&["finalorchardroot"], BlockQueryFields::ORCHARD_TREE),
+            (&["trees"], trees),
+            (&["authdataroot"], BlockQueryFields::AUTH_DATA_ROOT),
+            (
+                &["txprevouts"],
+                BlockQueryFields::TRANSACTIONS
+                    | BlockQueryFields::SPENT_OUTPUTS
+                    | BlockQueryFields::DEPTH,
+            ),
+            (&["nextblockhash"], BlockQueryFields::NEXT_BLOCK_HASH),
+            (
+                &["hex", "tx", "trees"],
+                BlockQueryFields::RAW_BLOCK | BlockQueryFields::TRANSACTION_IDS | trees,
+            ),
+        ] {
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(Some(zebra_state::QueriedBlock {
+                        next_block_hash: fields
+                            .contains(BlockQueryFields::NEXT_BLOCK_HASH)
+                            .then_some(block.header.previous_block_hash),
+                        ..queried_block(&block, fields, 0)
+                    })));
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(query.to_string(), Some(field_query(names))),
+                handler
+            );
+            let response = serde_json::to_value(response.unwrap()).unwrap();
+            let keys: BTreeSet<&str> = response
+                .as_object()
+                .expect("field queries return objects")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let expected_keys: BTreeSet<&str> = names
+                .iter()
+                .map(|name| response_key(name))
+                .chain(["hash"])
+                .collect();
+            assert_eq!(keys, expected_keys, "{names:?}");
+        }
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// Body-bearing field queries run one at a time without delaying index-only queries or changing
+/// legacy verbosity admission. The combined query keeps its full response shape when admitted.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_bounds_concurrent_body_field_queries() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let query = HashOrHeight::from(block.hash());
+        let names = &["hex", "authdataroot", "txprevouts"][..];
+        let fields = BlockQueryFields::RAW_BLOCK
+            | BlockQueryFields::AUTH_DATA_ROOT
+            | BlockQueryFields::TRANSACTIONS
+            | BlockQueryFields::SPENT_OUTPUTS
+            | BlockQueryFields::DEPTH;
+
+        let first = tokio::spawn({
+            let rpc = rpc.clone();
+            async move {
+                rpc.get_block(query.to_string(), Some(field_query(names)))
+                    .await
+            }
+        });
+        let pending = read_state
+            .expect_request(ReadRequest::BlockQuery {
+                hash_or_height: query,
+                fields,
+            })
+            .await;
+
+        let busy = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            rpc.get_block(query.to_string(), Some(field_query(&["authdataroot"]))),
+        )
+        .await
+        .expect("a second body-bearing field query must be rejected before its state read")
+        .unwrap_err();
+        assert_eq!(busy.code(), -32603);
+        assert_eq!(
+            busy.message(),
+            "getblock field query body reads are busy; retry after the active query finishes"
+        );
+
+        let header_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields: BlockQueryFields::empty(),
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block,
+                    BlockQueryFields::empty(),
+                    0,
+                ))));
+        };
+        let (header, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(field_query(&["hash"]))),
+            header_handler
+        );
+        header.expect("an index-only field query must bypass the body-query limit");
+
+        let legacy_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields: VERBOSITY_3_READS,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block,
+                    VERBOSITY_3_READS,
+                    0,
+                ))));
+        };
+        let (legacy, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(GetBlockQuery::Verbosity(3))),
+            legacy_handler
+        );
+        legacy.expect("legacy verbosity must bypass the field-query limit");
+
+        pending.respond(ReadResponse::BlockQuery(Some(queried_block(
+            &block, fields, 0,
+        ))));
+        let response = first.await.expect("the first RPC task must not panic");
+        let response = serde_json::to_value(response.unwrap()).unwrap();
+        let keys: BTreeSet<&str> = response
+            .as_object()
+            .expect("the combined field query returns an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys, BTreeSet::from(["hash", "hex", "authdataroot", "tx"]));
+
+        let retry_handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block, fields, 0,
+                ))));
+        };
+        let (retry, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(field_query(names))),
+            retry_handler
+        );
+        retry.expect("finishing the active query must release admission for a retry");
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
+}
+
+/// Field query errors: zcashd's not-found message, internal errors for state failures, and
+/// `missing block info` for a requested key without its `BlockInfo` row.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_field_query_errors() {
+    use zebra_state::BlockReadError;
+
+    type Tear = fn(&mut zebra_state::QueriedBlock);
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut read_state: MockReadState = MockService::build().for_unit_tests();
+        let rpc = getblock_mock_rpc(Mainnet, &read_state);
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let height = block.coinbase_height().unwrap();
+
+        for (query, code) in [
+            (HashOrHeight::from(block.hash()), -5),
+            (HashOrHeight::from(height), -8),
+        ] {
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields: BlockQueryFields::TRANSACTION_IDS,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(None));
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(query.to_string(), Some(field_query(&["tx"]))),
+                handler
+            );
+            let error = response.unwrap_err();
+            assert_eq!((error.code(), error.message()), (code, "Block not found"));
+        }
+
+        let query = HashOrHeight::from(block.hash());
+        for (names, fields, error, message) in [
+            (
+                &["hex"][..],
+                BlockQueryFields::RAW_BLOCK,
+                BoxError::from(BlockReadError::BlockBodyUnavailable { height }),
+                "Block not available (pruned data)".to_owned(),
+            ),
+            (
+                &["tx"],
+                BlockQueryFields::TRANSACTION_IDS,
+                BoxError::from(BlockReadError::CorruptBlock { height }),
+                BlockReadError::CorruptBlock { height }.to_string(),
+            ),
+            (
+                &["hash"],
+                BlockQueryFields::empty(),
+                BoxError::from("database read failed"),
+                "database read failed".to_owned(),
+            ),
+        ] {
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields,
+                    })
+                    .await
+                    .respond(Err(error));
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(query.to_string(), Some(field_query(names))),
+                handler
+            );
+            let error = response.unwrap_err();
+            assert_eq!(
+                (error.code(), error.message()),
+                (-32603, message.as_str()),
+                "{names:?}"
+            );
+        }
+
+        let no_block_info: Tear = |block| block.block_info = None;
+        let cases: [(&[&str], BlockQueryFields, Tear, &str); 9] = [
+            (
+                &["size"],
+                BlockQueryFields::BLOCK_INFO,
+                no_block_info,
+                "missing block info",
+            ),
+            (
+                &["chainSupply"],
+                BlockQueryFields::BLOCK_INFO,
+                no_block_info,
+                "missing block info",
+            ),
+            (
+                &["valuePools"],
+                BlockQueryFields::BLOCK_INFO | BlockQueryFields::PREVIOUS_BLOCK_INFO,
+                no_block_info,
+                "missing block info",
+            ),
+            (
+                &["tx"],
+                BlockQueryFields::TRANSACTION_IDS,
+                |block| block.transaction_ids = None,
+                "block not found",
+            ),
+            (
+                &["hex"],
+                BlockQueryFields::RAW_BLOCK,
+                |block| block.raw_block = None,
+                "Block not found",
+            ),
+            (
+                &["authdataroot"],
+                BlockQueryFields::AUTH_DATA_ROOT,
+                |block| block.auth_data_root = None,
+                "Block not found",
+            ),
+            // The body supplies `size`, so a torn body is not reported as missing block info.
+            (
+                &["size", "hex"],
+                BlockQueryFields::RAW_BLOCK,
+                |block| {
+                    block.raw_block = None;
+                    block.size = None;
+                },
+                "Block not found",
+            ),
+            (
+                &["size", "authdataroot"],
+                BlockQueryFields::AUTH_DATA_ROOT,
+                |block| {
+                    block.auth_data_root = None;
+                    block.block = None;
+                    block.size = None;
+                },
+                "Block not found",
+            ),
+            (
+                &["trees"],
+                BlockQueryFields::SAPLING_TREE
+                    | BlockQueryFields::ORCHARD_TREE
+                    | BlockQueryFields::IRONWOOD_TREE,
+                |block| block.ironwood_tree = None,
+                "missing Ironwood tree",
+            ),
+        ];
+        for (names, fields, tear, message) in cases {
+            let mut response = queried_block(&block, fields, 0);
+            tear(&mut response);
+            let handler = async {
+                read_state
+                    .expect_request(ReadRequest::BlockQuery {
+                        hash_or_height: query,
+                        fields,
+                    })
+                    .await
+                    .respond(ReadResponse::BlockQuery(Some(response)));
+            };
+            let (response, _) = tokio::join!(
+                rpc.get_block(query.to_string(), Some(field_query(names))),
+                handler
+            );
+            let error = response.unwrap_err();
+            assert_eq!((error.code(), error.message()), (-1, message), "{names:?}");
+        }
+
+        // A missing parent row is a zero parent balance, as at verbosity 1.
+        let fields = BlockQueryFields::BLOCK_INFO | BlockQueryFields::PREVIOUS_BLOCK_INFO;
+        let handler = async {
+            read_state
+                .expect_request(ReadRequest::BlockQuery {
+                    hash_or_height: query,
+                    fields,
+                })
+                .await
+                .respond(ReadResponse::BlockQuery(Some(queried_block(
+                    &block, fields, 0,
+                ))));
+        };
+        let (response, _) = tokio::join!(
+            rpc.get_block(query.to_string(), Some(field_query(&["valuePools"]))),
+            handler
+        );
+        assert!(serde_json::to_value(response.unwrap()).unwrap()["valuePools"].is_array());
+
+        read_state.expect_no_requests().await;
+    })
+    .await
+    .unwrap();
 }

@@ -1,0 +1,116 @@
+---
+source: zebra-rpc/src/methods/get_block/tests.rs
+expression: rows
+---
+[
+  {
+    "bits": "1c04064e",
+    "blockcommitments_empty_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "blockcommitments_note_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "difficulty": 33349040.57883363,
+    "finalsaplingroot_empty_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "finalsaplingroot_note_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "height": 419199,
+    "nonce": "0000000000000000000000000062000000000000b52d00c00000000000000b35"
+  },
+  {
+    "bits": "1c03f492",
+    "blockcommitments_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "blockcommitments_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "difficulty": 33933122.873380706,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 419200,
+    "nonce": "d5a43d1f00000000000000000000000000000000000000001d8eeb1038550031"
+  },
+  {
+    "bits": "1c03e43c",
+    "blockcommitments_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "blockcommitments_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "difficulty": 34489547.534434356,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 419201,
+    "nonce": "00000000000000000000000000240000000000005f0c0080000000000000301f"
+  },
+  {
+    "bits": "1c03dab2",
+    "blockcommitments_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "blockcommitments_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "difficulty": 34822981.72162443,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 419202,
+    "nonce": "9ca94c2d00000000000000000000000000000000002d2a133808000f00000000"
+  },
+  {
+    "bits": "1c02208d",
+    "blockcommitments_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "blockcommitments_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "difficulty": 63097279.473419175,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 653600,
+    "nonce": "00000000000000000000000000000000000000000000000000622179601722f3"
+  },
+  {
+    "bits": "1c02954a",
+    "blockcommitments_empty_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "blockcommitments_note_tree": "0000000000000000000000000000000000000000000000000000000000000000",
+    "difficulty": 51958628.654923506,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 903000,
+    "nonce": "50bc04400000000000000000001d00000000000000000000000000005ec39e37"
+  },
+  {
+    "bits": "1c028a50",
+    "blockcommitments_empty_tree": "4e0cbe7186f98b5e42e2c8609133ca7581e602c9be231ad30136960c6364883f",
+    "blockcommitments_note_tree": "4e0cbe7186f98b5e42e2c8609133ca7581e602c9be231ad30136960c6364883f",
+    "difficulty": 52835633.37933686,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 903001,
+    "nonce": "2e820080000000000000000000210000000000000000000000000000000004b0"
+  },
+  {
+    "bits": "1c021352",
+    "blockcommitments_empty_tree": "48218a8f4fe0e5373b00e1cffe39f8a53e8e6fb888312c022cda9b9a248b003c",
+    "blockcommitments_note_tree": "48218a8f4fe0e5373b00e1cffe39f8a53e8e6fb888312c022cda9b9a248b003c",
+    "difficulty": 64668472.150685936,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 1046400,
+    "nonce": "ac5ee96f0000000000000000000000000000000000000000030cd14631780413"
+  },
+  {
+    "bits": "1c01aee4",
+    "blockcommitments_empty_tree": "1b34e3a3b83c911ab27760cf84b080aebe9726479fecbbe51272522ac9dfd992",
+    "blockcommitments_note_tree": "1b34e3a3b83c911ab27760cf84b080aebe9726479fecbbe51272522ac9dfd992",
+    "difficulty": 79741054.54719512,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 1687106,
+    "nonce": "c59003000000000000000000002800000000000000000000000000003cd66053"
+  },
+  {
+    "bits": "1c01a98a",
+    "blockcommitments_empty_tree": "60b674aa731d890a8922994aef066442bbd2795f66f00924c8dfe13b0bd2c56e",
+    "blockcommitments_note_tree": "60b674aa731d890a8922994aef066442bbd2795f66f00924c8dfe13b0bd2c56e",
+    "difficulty": 80743874.91042611,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 1687107,
+    "nonce": "7412064000000000000000000025000000000000000000000000000078f32dd8"
+  },
+  {
+    "bits": "1c01a63c",
+    "blockcommitments_empty_tree": "b8502349bf35dd530e93d617ddabc5a3e5cb1cb3a1ef6185de224368ad86df92",
+    "blockcommitments_note_tree": "b8502349bf35dd530e93d617ddabc5a3e5cb1cb3a1ef6185de224368ad86df92",
+    "difficulty": 81375830.26488547,
+    "finalsaplingroot_empty_tree": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
+    "finalsaplingroot_note_tree": "4037509618f822fc619ce80c9beb29d8d84053fada6724e2decf652f600796d2",
+    "height": 1687108,
+    "nonce": "2e540700000000000000000000ad0000000000000000000000000000f9d52ca7"
+  }
+]

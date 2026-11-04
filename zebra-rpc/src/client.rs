@@ -17,6 +17,7 @@ pub use crate::methods::{
     },
     types::{
         default_roots::DefaultRoots,
+        get_block::{GetBlockField, GetBlockQuery},
         get_block_template::{
             BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource,
             GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,

@@ -1,0 +1,10 @@
+project: zebrad
+kind: Changed
+body: >-
+  Changed `getblock` verbosity 1 to 3 and `getblockheader` to read the state in one request
+  instead of up to nine; successful output is unchanged. A state read failure on those paths now
+  returns code `-32603` with the error text whichever read fails; later reads previously returned
+  `-1`. A gap in the retained transaction index now returns `-32603` instead of a shortened
+  transaction list. Not-found and pruned-body errors are unchanged.
+  ([#8390](https://github.com/ZcashFoundation/zebra/issues/8390))
+time: 2026-11-03T04:17:41.112842003-05:00

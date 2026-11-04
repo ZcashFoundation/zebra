@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, Block, ChainHistoryMmrRootHash, SerializedBlock},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
@@ -33,6 +33,98 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+/// Availability of bodies for known blocks, independent of any retention setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryCapabilities {
+    /// The first retained non-genesis body height, or zero when no prefix is missing.
+    ///
+    /// Genesis remains available even when the suffix starts above it. Unknown blocks are not
+    /// made available by this boundary, and missing bodies within the suffix indicate corruption.
+    pub lowest_retained_height: block::Height,
+}
+
+impl Default for HistoryCapabilities {
+    fn default() -> Self {
+        Self {
+            lowest_retained_height: block::Height::MIN,
+        }
+    }
+}
+
+impl HistoryCapabilities {
+    /// Returns whether a non-genesis body prefix is unavailable.
+    ///
+    /// Missing bytes cannot distinguish intentional pruning from a corrupted archive prefix.
+    pub fn is_pruned(self) -> bool {
+        self.lowest_retained_height > block::Height::MIN
+    }
+
+    /// Returns whether a known block's body is retained, including the genesis exception.
+    ///
+    /// Callers must separately establish that the block exists.
+    pub fn has_block_body(self, height: block::Height) -> bool {
+        height == block::Height::MIN || height >= self.lowest_retained_height
+    }
+}
+
+/// A retained block header and its best-chain identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockHeader {
+    /// The header of the requested block.
+    pub header: Arc<block::Header>,
+    /// The hash of the requested block.
+    pub hash: block::Hash,
+    /// The height of the requested block.
+    pub height: block::Height,
+    /// The hash of the next block in the best chain, if known.
+    pub next_block_hash: Option<block::Hash>,
+}
+
+/// A best-chain block's requested parts, read under one chain snapshot. Unrequested parts are `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueriedBlock {
+    /// The hash of the block.
+    pub hash: block::Hash,
+    /// The height of the block in the best chain.
+    pub height: block::Height,
+    /// The block header, when `HEADER` was requested.
+    pub header: Option<Arc<block::Header>>,
+    /// `None` when not requested.
+    pub depth: Option<u32>,
+    /// `None` when not requested or the block is the chain tip.
+    pub next_block_hash: Option<block::Hash>,
+    /// The number of transactions, when `TRANSACTION_COUNT` was requested.
+    pub transaction_count: Option<usize>,
+    /// The transaction IDs in block order, when `TRANSACTION_IDS` was requested and the
+    /// transaction index could be read.
+    pub transaction_ids: Option<Arc<[transaction::Hash]>>,
+    /// The `BlockInfo` after this block, when `BLOCK_INFO` was requested and its row exists.
+    pub block_info: Option<BlockInfo>,
+    /// The `BlockInfo` after the parent block, when `PREVIOUS_BLOCK_INFO` was requested and its
+    /// row exists.
+    pub previous_block_info: Option<BlockInfo>,
+    /// The Sapling note commitment tree after this block, when `SAPLING_TREE` was requested and
+    /// the tree could be read.
+    pub sapling_tree: Option<Arc<sapling::tree::NoteCommitmentTree>>,
+    /// The Orchard note commitment tree after this block, when `ORCHARD_TREE` was requested and
+    /// the tree could be read.
+    pub orchard_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    /// The Ironwood note commitment tree after this block, when `IRONWOOD_TREE` was requested and
+    /// the tree could be read.
+    pub ironwood_tree: Option<Arc<orchard::tree::NoteCommitmentTree>>,
+    /// The network-serialized block, when `RAW_BLOCK` was read.
+    pub raw_block: Option<SerializedBlock>,
+    /// The deserialized block, when `TRANSACTIONS` (or a flag implying it) was read.
+    pub block: Option<Arc<Block>>,
+    /// The serialized size, when the body was read (`RAW_BLOCK`, `TRANSACTIONS`, or a flag
+    /// implying it).
+    pub size: Option<usize>,
+    /// `None` when not requested, or when a parent is known but torn on a secondary (no prevouts).
+    pub spent_outputs: Option<HashMap<transparent::OutPoint, transparent::Utxo>>,
+    /// The ZIP 244 authorizing data root, when `AUTH_DATA_ROOT` was requested.
+    pub auth_data_root: Option<block::merkle::AuthDataRoot>,
+}
 
 /// Keeps early mining work alive and reserves its slot until block verification finishes.
 #[derive(Clone, Debug)]
@@ -178,17 +270,8 @@ pub enum Response {
     /// Response to [`Request::BlockAndSize`] with the specified block and size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
+    /// Response to [`Request::BlockHeader`], or `None` if the block is unknown.
+    BlockHeader(Option<BlockHeader>),
 
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
@@ -266,6 +349,19 @@ impl From<AnyTx> for Arc<Transaction> {
             AnyTx::Side((tx, _)) => tx,
         }
     }
+}
+
+/// An unspent output and RPC metadata from one best-chain view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputWithMetadata {
+    /// The output, creation height, and coinbase flag.
+    pub utxo: transparent::Utxo,
+    /// The creating transaction's version, or `None` if its body is unavailable.
+    pub transaction_version: Option<u32>,
+    /// The number of confirmations at the captured tip.
+    pub confirmations: u32,
+    /// The best-chain tip used to compute confirmations and check spentness.
+    pub best_chain_tip_hash: block::Hash,
 }
 
 /// Information about a transaction in the best chain
@@ -500,6 +596,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
     UsageInfo(u64),
 
+    /// Stored body availability, in response to [`ReadRequest::HistoryCapabilities`].
+    HistoryCapabilities(HistoryCapabilities),
+
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
@@ -530,28 +629,33 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::SpentOutputs`] with the outputs spent by the
     /// non-coinbase inputs of the specified block, keyed by the spending
-    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found.
+    /// [`OutPoint`](transparent::OutPoint), or `None` if the block was not found or a secondary
+    /// view is torn.
     ///
-    /// An outpoint whose spent output could not be found in the best chain is
-    /// omitted from the map.
+    /// An unknown parent or outpoint is omitted from the map. Known pruned or corrupt parents
+    /// produce a service error instead of an incomplete map.
     SpentOutputs(Option<HashMap<transparent::OutPoint, transparent::Utxo>>),
 
-    /// The response to a `BlockHeader` request.
-    BlockHeader {
-        /// The header of the requested block
-        header: Arc<block::Header>,
-        /// The hash of the requested block
-        hash: block::Hash,
-        /// The height of the requested block
-        height: block::Height,
-        /// The hash of the next block after the requested block
-        next_block_hash: Option<block::Hash>,
-    },
+    /// Response to [`ReadRequest::BlockQuery`] with the requested parts of the block, or `None`
+    /// if the block is unknown.
+    BlockQuery(Option<QueriedBlock>),
+
+    /// Response to [`ReadRequest::BlockHeader`], or `None` if the block is unknown.
+    BlockHeader(Option<BlockHeader>),
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
+    ///
+    /// Unknown hashes and torn secondary views return `None`; known pruned or corrupt bodies
+    /// produce a service error instead.
     Transaction(Option<MinedTx>),
 
-    /// Response to [`Request::Transaction`] with the specified transaction.
+    /// Response to [`ReadRequest::KnownTransaction`], independent of body availability.
+    KnownTransaction(bool),
+
+    /// Response to [`ReadRequest::AnyChainTransaction`] with the specified transaction.
+    ///
+    /// Unknown hashes and torn secondary views return `None`; known pruned or corrupt bodies
+    /// produce a service error instead.
     AnyChainTransaction(Option<AnyTx>),
 
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
@@ -666,8 +770,8 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 
-    /// Response to [`ReadRequest::IsTransparentOutputSpent`]
-    IsTransparentOutputSpent(bool),
+    /// Response to [`ReadRequest::UnspentOutput`], or `None` for a spent or unknown output.
+    UnspentOutput(Option<OutputWithMetadata>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -730,17 +834,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
-            ReadResponse::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            } => Ok(Response::BlockHeader {
-                header,
-                hash,
-                height,
-                next_block_hash
-            }),
+            ReadResponse::BlockHeader(header) => Ok(Response::BlockHeader(header)),
             ReadResponse::Transaction(tx_info) => {
                 Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }
@@ -758,10 +852,12 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::UsageInfo(_)
+            | ReadResponse::HistoryCapabilities(_)
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SpentOutputs(_)
+            | ReadResponse::BlockQuery(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
@@ -779,7 +875,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ValidBestTipHeader
             | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
-            | ReadResponse::IsTransparentOutputSpent(_)
+            | ReadResponse::KnownTransaction(_)
+            | ReadResponse::UnspentOutput(_)
             | ReadResponse::ForkPoint(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

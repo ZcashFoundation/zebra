@@ -1236,6 +1236,9 @@ pub enum Request {
     ///
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or missing retained data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     Transaction(transaction::Hash),
 
     /// Looks up a transaction by hash in any chain.
@@ -1246,6 +1249,9 @@ pub enum Request {
     ///   if the transaction is in any chain;
     /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction)
     ///   otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or missing retained data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     AnyChainTransaction(transaction::Hash),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
@@ -1261,6 +1267,9 @@ pub enum Request {
     /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
@@ -1273,6 +1282,9 @@ pub enum Request {
     ///   if the block height is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     AnyChainBlock(HashOrHeight),
@@ -1283,13 +1295,15 @@ pub enum Request {
     ///
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     BlockAndSize(HashOrHeight),
 
     /// Looks up a block header by hash or height in the current best chain.
     ///
-    /// Returns
-    ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
+    /// Returns [`Response::BlockHeader`] with the header and its identity, or `None` for an
+    /// unknown block. A known block with missing header data returns [`crate::BlockReadError`].
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1325,8 +1339,9 @@ pub enum Request {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding 500 hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding 500 hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1482,6 +1497,41 @@ impl Request {
     }
 }
 
+bitflags::bitflags! {
+    /// The parts of a block a `ReadRequest::BlockQuery` reads. Each flag is one read unit.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct BlockQueryFields: u32 {
+        /// The block header (all header fields come from one 1,487-byte row, or from the body read).
+        const HEADER = 1 << 0;
+        /// Depth below the best-chain tip (`confirmations`).
+        const DEPTH = 1 << 1;
+        /// The hash of the next block on the best chain.
+        const NEXT_BLOCK_HASH = 1 << 2;
+        /// The number of transactions (one `hash_by_tx_loc` seek).
+        const TRANSACTION_COUNT = 1 << 3;
+        /// All transaction IDs in block order (one `hash_by_tx_loc` range scan).
+        const TRANSACTION_IDS = 1 << 4;
+        /// `BlockInfo` after this block: serialized size and value pools.
+        const BLOCK_INFO = 1 << 5;
+        /// `BlockInfo` after the parent block, for value-pool deltas.
+        const PREVIOUS_BLOCK_INFO = 1 << 6;
+        /// The Sapling note commitment tree after this block.
+        const SAPLING_TREE = 1 << 7;
+        /// The Orchard note commitment tree after this block.
+        const ORCHARD_TREE = 1 << 8;
+        /// The Ironwood note commitment tree after this block.
+        const IRONWOOD_TREE = 1 << 9;
+        /// The serialized block bytes, without deserializing them. Fails for pruned bodies.
+        const RAW_BLOCK = 1 << 10;
+        /// The deserialized transactions (the whole `Block`). Fails for pruned bodies.
+        const TRANSACTIONS = 1 << 11;
+        /// The outputs spent by this block's inputs (implies `TRANSACTIONS`). Fails for pruned parents.
+        const SPENT_OUTPUTS = 1 << 12;
+        /// The ZIP 244 authorizing-data root (implies `TRANSACTIONS`).
+        const AUTH_DATA_ROOT = 1 << 13;
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
@@ -1521,6 +1571,11 @@ pub enum ReadRequest {
     /// it every 30 seconds; read-only services measure it on demand.
     UsageInfo,
 
+    /// Returns stored body availability in [`ReadResponse::HistoryCapabilities`].
+    ///
+    /// The retained suffix describes actual storage, not a configured retention target.
+    HistoryCapabilities,
+
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
@@ -1550,6 +1605,9 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
@@ -1563,6 +1621,9 @@ pub enum ReadRequest {
     ///   followed by side chains in order from most to least work.
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     AnyChainBlock(HashOrHeight),
@@ -1573,13 +1634,15 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for pruned bodies or incomplete primary data.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     BlockAndSize(HashOrHeight),
 
     /// Looks up a block header by hash or height in the current best chain.
     ///
-    /// Returns
-    ///
-    /// [`Response::BlockHeader(block::Header)`](Response::BlockHeader).
+    /// Returns [`ReadResponse::BlockHeader`] with the header and its identity, or `None` for an
+    /// unknown block. A known block with missing header data returns [`crate::BlockReadError`].
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
@@ -1595,11 +1658,29 @@ pub enum ReadRequest {
     ///   the best chain;
     /// * [`ReadResponse::SpentOutputs(None)`](ReadResponse::SpentOutputs) otherwise.
     ///
-    /// An outpoint whose spent output cannot be found in the best chain is omitted from the
-    /// map, so callers must treat a missing outpoint as "prevout unknown", not an error.
+    /// An unknown parent or outpoint is omitted from the map, so callers must treat a missing
+    /// outpoint as "prevout unknown", not an error. Known unavailable parents are never omitted.
     ///
-    /// Used by the `getblock` RPC at verbosity 3.
+    /// Kept for external callers: the `getblock` RPC reads spent outputs with
+    /// [`ReadRequest::BlockQuery`].
+    ///
+    /// Returns [`crate::BlockReadError`] if the block or a known parent is pruned or corrupt.
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     SpentOutputs(HashOrHeight),
+
+    /// Reads any combination of a block's parts in one request, on the best chain, under one chain
+    /// snapshot.
+    ///
+    /// Returns [`ReadResponse::BlockQuery`] with `None` for an unknown block. Unrequested parts are
+    /// `None` in the response. Requesting bodies for a pruned block returns
+    /// [`crate::BlockReadError::BlockBodyUnavailable`]; missing retained rows return
+    /// [`crate::BlockReadError::CorruptBlock`] on a primary and `None` parts on a torn secondary.
+    BlockQuery {
+        /// The block to read, by hash or by best-chain height.
+        hash_or_height: HashOrHeight,
+        /// The parts of the block to read.
+        fields: BlockQueryFields,
+    },
 
     /// Looks up a transaction by hash in the current best chain.
     ///
@@ -1607,7 +1688,17 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::Transaction(Some(Arc<Transaction>))`](ReadResponse::Transaction) if the transaction is in the best chain;
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError::BlockBodyUnavailable`] for missing non-genesis transaction
+    /// bytes below the retained floor. Missing retained data returns
+    /// [`crate::BlockReadError::CorruptBlock`].
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     Transaction(transaction::Hash),
+
+    /// Returns whether a transaction is in the best chain, without reading its body.
+    ///
+    /// Returns [`ReadResponse::KnownTransaction`]. A known pruned transaction is still mined.
+    KnownTransaction(transaction::Hash),
 
     /// Looks up a transaction by hash in any chain.
     ///
@@ -1617,6 +1708,11 @@ pub enum ReadRequest {
     ///   if the transaction is in any chain;
     /// * [`ReadResponse::AnyChainTransaction(None)`](ReadResponse::AnyChainTransaction)
     ///   otherwise.
+    ///
+    /// Returns [`crate::BlockReadError::BlockBodyUnavailable`] for missing non-genesis transaction
+    /// bytes below the retained floor. Missing retained data returns
+    /// [`crate::BlockReadError::CorruptBlock`].
+    /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     AnyChainTransaction(transaction::Hash),
 
     /// Looks up the transaction IDs for a block, using a block hash or height.
@@ -1678,8 +1774,9 @@ pub enum ReadRequest {
     ///
     /// Stops the list of hashes after:
     ///   * adding the best tip,
-    ///   * adding the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list.
+    ///   * adding the `stop` hash to the list, if it is in the best chain,
+    ///   * adding [`MAX_FIND_BLOCK_HASHES_RESULTS`] hashes to the list, or
+    ///   * reaching a height whose block body is unavailable.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1976,9 +2073,10 @@ pub enum ReadRequest {
         known_chain_tips: HashSet<block::Hash>,
     },
 
-    /// Returns `true` if the transparent output is spent in the best chain,
-    /// or `false` if it is unspent.
-    IsTransparentOutputSpent(transparent::OutPoint),
+    /// Returns an unspent best-chain output and its metadata in [`ReadResponse::UnspentOutput`].
+    ///
+    /// The creating transaction version is unavailable when its body has been pruned.
+    UnspentOutput(transparent::OutPoint),
 }
 
 impl ReadRequest {
@@ -1986,6 +2084,7 @@ impl ReadRequest {
     pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
+            ReadRequest::HistoryCapabilities => "history_capabilities",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::BlockInfo(_) => "block_info",
@@ -1994,8 +2093,10 @@ impl ReadRequest {
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::SpentOutputs(_) => "spent_outputs",
+            ReadRequest::BlockQuery { .. } => "block_query",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::KnownTransaction(_) => "known_transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
             ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
@@ -2034,7 +2135,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
-            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::UnspentOutput(_) => "unspent_output",
         }
     }
 

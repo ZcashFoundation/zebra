@@ -7586,6 +7586,7 @@ dependencies = [
  "proptest",
  "prost",
  "rand 0.10.2",
+ "reqwest 0.12.28",
  "sapling-crypto",
  "schemars 1.2.1",
  "semver",
@@ -7646,6 +7647,7 @@ name = "zebra-state"
 version = "16.0.0"
 dependencies = [
  "bincode",
+ "bitflags",
  "chrono",
  "color-eyre",
  "crossbeam-channel",

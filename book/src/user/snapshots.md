@@ -30,12 +30,20 @@ Zebra 7.0.0 uses database format **29.0.0**, with finalized state under
 `database_format_major_version` with the [state format][state-constants], not
 the producer's Zebra release number.
 
-Zebra also reuses compatible format 28 state without a resync, moving
+Zebra 7.0.0 also reuses compatible format 28 state without a resync, moving
 `state/v28/<network>/` to `state/v29/<network>/` when no usable format 29
 database exists there. The old state must resolve inside the cache root;
 symlinks outside it are skipped. Reuse considers only the immediately
 preceding major version, not format 27 or older. Do not rename a database
 directory manually to claim compatibility.
+
+Builds with [block-body pruning](pruning.md) use database format **30.0.0**,
+with finalized state under `<cache_dir>/state/v30/<network>/`. When no v30
+database exists, startup moves a v29 archive there. This happens even with
+pruning disabled and leaves no v29 backup for an older binary. A never-pruned
+archive can be moved back for Zebra 7.0.0; read
+[format 30 and recovery](pruning.md#format-30-recovery-and-copies) before
+upgrading.
 
 Restore into a fresh cache root. Keep an independent backup for rollback:
 reuse moves the database rather than copying it. See [upgrading](upgrading.md)
@@ -181,6 +189,33 @@ The [standard image entrypoint](docker.md) repairs cache ownership on startup.
 A custom non-root entrypoint must arrange write permissions itself. Keep the
 volume mount and `ZEBRA_STATE__CACHE_DIR` consistent.
 
+## Pruned state and recovery
+
+For mining and pool backends, an archive snapshot can be loaded and then
+converted using [pruning](pruning.md). Follow the publisher's current metadata;
+do not assume that a separately labelled pruned snapshot family is available or
+that a snapshot contains the history you need. A checksum authenticates neither
+the producer nor its claimed retention.
+
+To back up your own pruned node, stop Zebra cleanly before copying the complete
+`state/v30/<network>/` directory. Do not copy live database files. Record the
+generating build, network, database version, finalized tip height and hash,
+actual `pruneheight`, configured retention, and whether the build uses the
+`indexer` feature. Keep that backup outside the managed cache.
+
+Restore into a clean, separate `cache_dir`, preserving the normal directory
+layout. A pruned backup requires pruning to be enabled and the same
+spending-index build layout; it cannot become an archive by changing the
+config. After startup, confirm the loaded tip and actual `pruneheight`, let the
+node catch up, and obtain fresh mining work before routing miners to it. Test
+recent-body queries and the expected failures for pruned bodies against the
+pool's software.
+
+To recover full history, restore a compatible **archive** snapshot or resync in
+a separate cache directory with pruning disabled. Never extract an archive over
+pruned state. A pruned backup cannot restore the history already missing when it
+was made, and raising retention does not fill gaps.
+
 ## Troubleshooting
 
 - **Zebra syncs from genesis.** Check the network, effective cache root,
@@ -192,6 +227,10 @@ volume mount and `ZEBRA_STATE__CACHE_DIR` consistent.
   root rather than combining databases.
 - **The database cannot open.** Preserve the full error and follow
   [database troubleshooting](troubleshooting.md#the-database-is-locked-or-cannot-open).
+- **Zebra won't start after restoring pruned state.** Check the pruning
+  configuration and the `indexer` build setting against the backup's record.
+  An incompatible format or missing history will not fix itself on retry; see
+  [pruned state and recovery](#pruned-state-and-recovery).
 - **The starting height differs from the manifest.** Read `chain_tip.note`.
   Older manifests can describe a live source-node tip rather than the
   archived finalized tip. A restart can also restore separately cached
