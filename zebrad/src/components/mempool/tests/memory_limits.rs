@@ -22,7 +22,7 @@ fn default_memory_limits_keep_the_mempool_config() {
     }
 }
 
-/// The limits' cost limit replaces the configured limit, whatever it is, and nothing else.
+/// The derived cost limit also bounds pending bytes; the other public settings are unchanged.
 #[test]
 fn cost_limit_replaces_the_configured_limit() {
     let _init_guard = zebra_test::init();
@@ -40,6 +40,7 @@ fn cost_limit_replaces_the_configured_limit() {
             limits.apply_to(&config),
             Config {
                 tx_cost_limit: DERIVED,
+                pending_bytes: Some(DERIVED),
                 ..config
             },
             "the limits replace a configured cost limit of {configured}"

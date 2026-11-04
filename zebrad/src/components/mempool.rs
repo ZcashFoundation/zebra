@@ -115,6 +115,7 @@ impl MempoolMemoryLimits {
 
         if let Some(tx_cost_limit) = self.tx_cost_limit {
             config.tx_cost_limit = tx_cost_limit;
+            config.pending_bytes = Some(tx_cost_limit);
         }
 
         config
@@ -473,12 +474,15 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.read_state.clone(),
-            self.transaction_verified.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.read_state.clone(),
+                self.transaction_verified.clone(),
+            )
+            .with_pending_bytes(self.config.pending_bytes),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,
