@@ -544,7 +544,8 @@ fn without_panic_handling_frames(mut stacktrace: Stacktrace) -> Stacktrace {
 ///
 /// The SDK classifies frames by function name, but release builds keep only line tables, so
 /// inlined frames lose their module path. When no frame matches, the SDK marks every frame
-/// in-app. Every frame keeps its source file, so Zebra classifies frames by path instead.
+/// in-app. Zebra's frames keep their source file, so Zebra classifies frames by path instead, and
+/// frames without one are not in-app.
 fn mark_zebra_frames_in_app(event: &mut Event<'static>) {
     let exception_stacktraces = event
         .exception
