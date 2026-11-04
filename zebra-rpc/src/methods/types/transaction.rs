@@ -21,8 +21,8 @@ use zebra_chain::{
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::{
         subsidy::{
-            block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-            nsm_fee_contribution,
+            block_subsidy, founders_reward, founders_reward_address, funding_stream_address,
+            funding_stream_values, miner_subsidy, nsm_fee_contribution,
         },
         Network, NetworkUpgrade,
     },
@@ -143,6 +143,7 @@ impl TransactionTemplate<NegativeOrZero> {
     /// The parent's NSM value balance is required from the NSM reissuance height, because it
     /// determines the block subsidy.
     /// The payout and negative `fee` include only net miner fees after the NSM contribution.
+    /// Includes the applicable founders' reward, funding stream, and lockbox disbursement outputs.
     pub fn new_coinbase_with_parent_pools(
         net: &Network,
         height: Height,
@@ -252,6 +253,18 @@ impl TransactionTemplate<NegativeOrZero> {
         .ok_or(TransactionError::CoinbaseConstruction(
             "Could not construct output with miner reward".to_string(),
         ))?;
+
+        let founders_reward = founders_reward(net, height);
+        if !founders_reward.is_zero() {
+            let address = founders_reward_address(net, height)
+                .and_then(|address| address.try_into().ok())
+                .ok_or_else(|| {
+                    TransactionError::CoinbaseConstruction(
+                        "Could not determine founders' reward address".to_string(),
+                    )
+                })?;
+            builder.add_transparent_output(&address, founders_reward.try_into()?)?;
+        }
 
         let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
             .into_iter()

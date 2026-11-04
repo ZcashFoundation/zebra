@@ -25,6 +25,152 @@ use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
 
+/// Coinbase templates pay the founders' reward until Canopy, matching subsidy validation.
+#[test]
+fn coinbase_template_pays_founders_reward() {
+    use std::sync::Arc;
+    use zebra_chain::{
+        block::Block,
+        parameters::subsidy::{block_subsidy, founders_reward, subsidy_is_valid},
+    };
+
+    let _init_guard = zebra_test::init();
+    let delayed_canopy = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(3),
+            ..Default::default()
+        }
+        .into(),
+    );
+    for (network, heights) in [
+        (
+            Network::Mainnet,
+            &[
+                Height(419_200),
+                Height(653_600),
+                Height(1_000_000),
+                Height(1_046_400),
+            ][..],
+        ),
+        (delayed_canopy, &[Height(1), Height(2), Height(3)][..]),
+    ] {
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        for &height in heights {
+            let template =
+                TransactionTemplate::new_coinbase(&network, height, &miner_params, Amount::zero())
+                    .unwrap();
+            let coinbase: Transaction = template.data().as_ref().zcash_deserialize_into().unwrap();
+            let subsidy = block_subsidy(height, &network).unwrap();
+            let mut block: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into()
+                .unwrap();
+            block.transactions = vec![Arc::new(coinbase)];
+            subsidy_is_valid(&block, &network, subsidy).unwrap();
+            if !founders_reward(&network, height).is_zero() {
+                assert_eq!(block.transactions[0].outputs().len(), 2);
+                assert_eq!(
+                    block.transactions[0]
+                        .outputs()
+                        .iter()
+                        .map(|output| output.value())
+                        .sum::<Result<Amount<_>, _>>()
+                        .unwrap(),
+                    subsidy,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn template_header_commitments_follow_upgrade_rules() {
+    use zebra_chain::{
+        block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, Commitment},
+        serialization::DateTime32,
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
+    };
+    use zebra_state::GetBlockTemplateChainInfo;
+
+    use super::{BlockTemplateResponse, CoinbaseCache};
+    use crate::methods::types::long_poll::LongPollInput;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let heartwood = NetworkUpgrade::Heartwood
+        .activation_height(&network)
+        .unwrap();
+    let nu5 = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let miner_params = MinerParams::from(
+        Address::decode(
+            &network,
+            default_miner_address(network.kind(), &MinerAddressType::Transparent),
+        )
+        .unwrap(),
+    );
+    let genesis: Block = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let mut header = *genesis.header;
+
+    for (height, history_root) in [
+        (heartwood, None),
+        (heartwood.next().unwrap(), Some([4; 32])),
+        (nu5.previous().unwrap(), Some([4; 32])),
+        (nu5, Some([4; 32])),
+    ] {
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            chain_value_pools: Default::default(),
+            tip_height: height.previous().unwrap(),
+            tip_hash: block::Hash([3; 32]),
+            cur_time: DateTime32::from(1_700_000_000),
+            min_time: DateTime32::from(1_699_999_999),
+            max_time: DateTime32::from(1_700_000_001),
+            chain_history_root: history_root.map(Into::into),
+        };
+        let long_poll_id = LongPollInput::new(
+            chain_info.tip_height,
+            chain_info.tip_hash,
+            chain_info.max_time,
+            iter::empty(),
+        )
+        .generate_id();
+        let template = BlockTemplateResponse::new_internal(
+            &network,
+            &CoinbaseCache::default(),
+            &miner_params,
+            &chain_info,
+            long_poll_id,
+            Vec::new(),
+            None,
+        );
+        let expected = if height == heartwood {
+            Commitment::ChainHistoryActivationReserved
+        } else if height < nu5 {
+            Commitment::ChainHistoryRoot(history_root.unwrap().into())
+        } else {
+            Commitment::ChainHistoryBlockTxAuthCommitment(
+                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    &history_root.unwrap().into(),
+                    &template.default_roots.auth_data_root,
+                ),
+            )
+        };
+        header.commitment_bytes = <[u8; 32]>::from(template.block_commitments_hash).into();
+        assert_eq!(
+            header.commitment(&network, height).unwrap(),
+            expected,
+            "{height:?}"
+        );
+    }
+}
+
 /// PoW test networks can restart a stalled chain, but must still be synchronized.
 #[test]
 fn mining_requires_sync_but_only_mainnet_requires_a_recent_tip() {
