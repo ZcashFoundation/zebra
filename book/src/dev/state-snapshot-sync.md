@@ -51,12 +51,14 @@ checkpoint minus one, cut together with the checkpoint list.
    requires `end_sapling_root` and `end_orchard_root` to match, `end_ironwood_root` to match for V3
    nodes from NU6.3 (ZIP 258), an empty Ironwood state below NU6.3, and every tip root to be in its
    anchor set.
-3. Block `H+1`, fetched from up to three distinct bootstrap peers: the header chains to `hash(H)`,
-   the merkle root matches, and `hashBlockCommitments(H+1) = BLAKE2b("ZcashBlockCommit",
-   history_root(H) ‖ authDataRoot(H+1) ‖ 0^32)`. One matching copy is enough; mismatching copies
-   blame their peers. If no peer serves `H+1`, the check is deferred to the first commit above `H`,
-   which runs it, and a failure there resets and retries like normal sync, never rejecting
-   automatically.
+3. Block `H+1`, requested from eligible bootstrap peers until three structurally valid bodies have
+   been retained or every peer has been tried: the header chains to `hash(H)`, the merkle root
+   matches, and `hashBlockCommitments(H+1) = BLAKE2b("ZcashBlockCommit", history_root(H) ‖
+   authDataRoot(H+1) ‖ 0^32)`. Structurally invalid bodies do not count toward the three-copy
+   limit, so they cannot hide a valid body from a later peer. One copy that also matches the
+   commitment is enough; mismatching copies blame only their peers. If no peer serves `H+1`, the
+   check is deferred to the first commit above `H`, which runs it, and a failure there resets and
+   retries like normal sync, never rejecting automatically.
 4. The window: `L == max(1, H − 2303)`; headers `L..=H` link by `previous_block_hash`; each window
    body's recomputed txids match its `hash_by_tx_loc` rows and its merkle root; genesis rows hash to
    `network.genesis_hash()`.
@@ -121,6 +123,14 @@ Decoding is strict: bounds before allocation, no trailing bytes, no unknown ids,
 exactly once in order, `entry_count == 0 ⇔ piece_count == 0`. The decoder takes the `Network`,
 because the parameters hash is present only on Regtest and custom testnets. `snapshot_format`
 changes only when shipped encodings change; the importer maps it onto the running database format.
+
+The manifest and the optional version 2 handshake parameters record use the same hash. It binds
+every consensus parameter, including activation heights, funding streams, lockbox disbursements,
+and coinbase-spending rules. Checkpoint lists are deliberately excluded because they are Zebra's
+local verification anchors, not consensus rules, and newer releases routinely extend them. Binding
+the lists would reject an otherwise compatible snapshot whenever the exporter and importer had
+different checkpoint list lengths. The importer's own checkpoints still authenticate the snapshot
+block hash and its header chain as described above.
 
 The **artifact store** (`zebra_state::state_snapshot::store::ArtifactStore`) keeps objects at
 `<state cache_dir>/state-snapshots/<network.directory_name()>/objects/<sha256-hex>`, written as a
@@ -188,7 +198,9 @@ empty, `network.initial_v2_peers` not empty; zcashd-compat off; the manifest not
 
 **Flow**:
 
-1. Delete any leftover `<cache_dir>/state-snapshot-import/`.
+1. Create a fresh, uniquely named workspace for this attempt under
+   `<cache_dir>/state-snapshot-import/`. Never delete the shared import root or a sibling workspace,
+   because another bootstrap could still be using it.
 2. Dial the bootstrap peers.
 3. Fetch the manifest with `get-object(manifest, 0, 1 MiB)`; abort if `size` > 1 MiB; a hash
    mismatch blames the peer and tries the next; check the manifest against the commitment and the
@@ -201,8 +213,9 @@ empty, `network.initial_v2_peers` not empty; zcashd-compat off; the manifest not
 6. Import: ingest, write the singletons, the marker, and the version file; run the
    self-consistency, chain, and format validity checks synchronously, mapping any failure to a
    refusal; fsync; clear the stale non-finalized backup; rename into place.
-7. Delete the pieces unless `serve_state_snapshots` is set. Close the bootstrap endpoint, then
-   continue the normal start.
+7. Delete the pieces unless `serve_state_snapshots` is set, and delete this attempt's workspace.
+   Close the bootstrap endpoint, then continue the normal start. Cleanup failures are logged without
+   removing the shared import root or any sibling workspace.
 
 **Failure handling**: a peer-attributable failure blames the peer and excludes it for the
 bootstrap (a single peer's hash mismatch closes its connection with `MISBEHAVIOR`; `FLOOD` and
@@ -210,7 +223,8 @@ bootstrap (a single peer's hash mismatch closes its connection with `MISBEHAVIOR
 backoff). The manifest must arrive within 60 s of the first handshake; the piece phase is aborted
 if no piece verifies for 5 min or every peer is excluded. On an abort, or on a rejected snapshot (a
 verified manifest whose contents fail the checks), the rejection is recorded when it is the
-snapshot's fault, the temp directory is deleted, and `[sync] state_snapshot_fallback` applies.
+snapshot's fault, only this attempt's workspace is deleted, and `[sync] state_snapshot_fallback`
+applies.
 `"error"` exits with an actionable message: an aborted download leaves no state directory and is
 retried on the next start, while a rejected manifest remains fatal on later starts until its marker
 is removed after investigation or a different commitment is configured. `"genesis"` continues with
