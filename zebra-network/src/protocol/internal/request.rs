@@ -138,12 +138,13 @@ pub enum Request {
     /// Callers must bound the entire readiness and response operation with a deadline.
     /// The peer's response timeout starts only when the request is dispatched.
     ///
-    /// A known advertiser is preferred even if its advertisement was lost from the inventory
-    /// registry, but only while its shared [`ConnectionInfo`] still identifies the current connection.
-    /// A busy current advertiser is awaited for up to one second before trying unrelated peers.
+    /// Inventory advertisers take priority over the carried source, which remains preferred when
+    /// its advertisement was lost or when recovering the parent of a block it supplied, but only
+    /// while its shared [`ConnectionInfo`] still identifies the current connection.
+    /// A busy current source is awaited for up to one second before trying unrelated peers.
     /// This preference does not shorten connection readiness or the caller's operation deadline.
     /// Missing-inventory reports, prior failures, and connection eligibility still apply.
-    /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
+    /// Without an eligible source, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
     /// Inbound `getdata` messages decode as [`Request::BlocksByHash`] or, on negotiated connections,
@@ -158,7 +159,8 @@ pub enum Request {
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
-        /// Shared metadata identifying the connection that advertised this block, if any.
+        /// Shared metadata identifying the connection that supplied this block, or the child's
+        /// source for a parent recovery, if known.
         #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
         advertiser: Option<Arc<ConnectionInfo>>,
     },
