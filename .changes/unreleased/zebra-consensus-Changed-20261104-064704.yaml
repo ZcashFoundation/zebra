@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: The mempool transaction verifier no longer asks the state to check nullifiers and anchors for transactions without shielded data.
+time: 2026-11-04T06:47:04.404898375+01:00
