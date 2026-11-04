@@ -656,6 +656,7 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         inbound_service: tower::service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
         inv_collector: tokio::sync::broadcast::channel(16).0,
         genesis_hash: network.genesis_hash(),
+        network: network.clone(),
         misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
         address_book: None,
         discovery: false,

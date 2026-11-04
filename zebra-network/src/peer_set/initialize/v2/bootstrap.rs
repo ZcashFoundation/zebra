@@ -201,6 +201,7 @@ pub(in crate::peer_set::initialize) async fn v2_bootstrap_clients_with_timeout(
         // Nothing listens for inventory: the bootstrap has no peer set to route by it.
         inv_collector: broadcast::channel(1).0,
         genesis_hash: network.genesis_hash(),
+        network: network.clone(),
         // A peer whose score reaches the threshold is disconnected with `MISBEHAVIOR` by its
         // connection, and reported to a task that logs it: there is no address book to ban it in.
         misbehavior: MisbehaviorScores::spawn(spawn_report_log(peers.len()), peers.len()),

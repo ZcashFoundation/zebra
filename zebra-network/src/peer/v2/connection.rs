@@ -36,7 +36,8 @@ use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block, diagnostic::task::CheckForPanics, serialization::DateTime32, transaction::UnminedTxId,
+    block, diagnostic::task::CheckForPanics, parameters::Network, serialization::DateTime32,
+    transaction::UnminedTxId,
 };
 
 use crate::{
@@ -97,6 +98,9 @@ pub struct ConnectionParams<S> {
     /// The hash of the network's genesis block, which a `get-headers` response
     /// to a locator the peer does not know starts after (draft, "`get-headers`").
     pub genesis_hash: block::Hash,
+
+    /// The network this connection belongs to, used to screen gossiped addresses.
+    pub network: Network,
 
     /// The misbehavior scores of every version 2 peer, which report peers to
     /// ban to the address book.
@@ -738,6 +742,7 @@ where
                         self.tasks.spawn(announcements::serve(
                             recv,
                             self.announcement_permits.clone(),
+                            self.params.network.clone(),
                             self.transient_addr,
                             self.params.inbound_service.clone(),
                             self.overloads.clone(),
