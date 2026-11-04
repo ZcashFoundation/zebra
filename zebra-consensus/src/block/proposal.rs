@@ -165,24 +165,17 @@ impl Eq for DecodedBlock {}
 pub struct PreparedBlockCache(pub(super) Arc<watch::Sender<ProposalCache>>);
 
 impl PreparedBlockCache {
-    /// Decodes a block, reusing parsed transactions only when their complete wire bytes match.
+    /// Decodes a block only if its complete wire bytes match a validated proposal, reusing the
+    /// proposal's parsed transactions.
     ///
-    /// Transaction-section length and the header with only nonce and solution normalized select a
-    /// candidate. Exact streaming byte comparison permits reuse; the returned block keeps the
-    /// submitted header and a private cache handle for [`Request::CommitDecoded`](super::Request::CommitDecoded). Misses, evictions
-    /// and malformed input use ordinary deserialization.
-    /// No full-body hash pass or transaction-byte allocation is needed. Call from a blocking worker.
-    pub fn deserialize(&self, bytes: &[u8]) -> Result<DecodedBlock, SerializationError> {
-        self.reuse(bytes)
-            .map(Ok)
-            .unwrap_or_else(|| DecodedBlock::deserialize(bytes))
-    }
-
-    /// Decodes a block only if its complete wire bytes match a validated proposal, as
-    /// [`Self::deserialize()`] does on a hit.
+    /// The transaction section's length and the header with only the nonce and solution
+    /// normalized select a candidate, and an exact byte comparison permits reuse. The returned
+    /// block keeps the submitted header and a private cache handle for
+    /// [`Request::CommitDecoded`](super::Request::CommitDecoded).
     ///
     /// A hit parses the header and compares the transaction bytes, which is cheap enough to run
-    /// inline; a miss returns `None` without decoding, so the caller can decode off the executor.
+    /// inline. A miss, an evicted entry or malformed input returns `None` without decoding, so the
+    /// caller can decode with [`DecodedBlock::deserialize()`] off the executor.
     pub fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
         if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
             || self.0.borrow().is_empty()

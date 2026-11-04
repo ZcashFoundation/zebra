@@ -254,8 +254,7 @@ where
             }
 
             Some(height) if height <= self.max_checkpoint_height => match request {
-                Request::CommitMined(_, notifications)
-                | Request::CommitDecoded(_, Some(notifications)) => self
+                Request::CommitDecoded(_, Some(notifications)) => self
                     .checkpoint
                     .verify(block, Some(notifications))
                     .map_err(Into::into)

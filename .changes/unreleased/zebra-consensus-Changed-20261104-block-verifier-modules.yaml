@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: Changed
-body: 'Reorganized the semantic block verifier''s internals into submodules and helper functions. The public API and block verification behavior are unchanged.'
+body: 'Reorganized the semantic block verifier''s internals into submodules. Block verification behavior is unchanged.'
 time: 2026-11-04T00:00:00Z

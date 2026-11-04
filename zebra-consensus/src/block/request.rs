@@ -18,17 +18,17 @@ pub enum Request {
     /// before exempting subsequent transaction/contextual failures from peer punishment.
     /// Unavailable parent context defers authentication until a later failure needs peer scoring.
     CommitEarlyRelay(Arc<Block>),
-    /// Validates and commits a locally mined block, carrying notifications into the state writer.
+    /// Validates and commits a decoded submission, optionally carrying mined-block notifications
+    /// into the state writer.
     ///
-    /// Exact successful proposals can reuse their semantic and contextual verdicts after
-    /// proof-of-work, size, and time checks. The state checks live parent eligibility before
-    /// publishing a validated notification, and publishes committed notifications before replying.
+    /// Exact decoder matches avoid recomputing proposal identity while their cache entry is live,
+    /// and reuse the proposal's semantic and contextual verdicts after proof-of-work, size, and
+    /// time checks. All submitted-header and live-state checks still run. Misses use ordinary
+    /// verification.
+    ///
+    /// With notifications, the state checks live parent eligibility before publishing a
+    /// validated notification, and publishes committed notifications before replying.
     /// Checkpoint-routed blocks publish only committed notifications.
-    CommitMined(Arc<Block>, zebra_state::MinedBlockNotifications),
-    /// Validates and commits a decoded submission, optionally carrying mined-block notifications.
-    ///
-    /// Exact decoder matches avoid recomputing proposal identity while their cache entry is live.
-    /// All submitted-header and live-state checks still run. Misses use ordinary verification.
     CommitDecoded(DecodedBlock, Option<zebra_state::MinedBlockNotifications>),
     /// Performs semantic validation but skips checking proof of work,
     /// then asks the state to perform contextual validation.
@@ -42,7 +42,6 @@ impl Request {
         match self {
             Request::Commit(block)
             | Request::CommitEarlyRelay(block)
-            | Request::CommitMined(block, _)
             | Request::CheckProposal(block) => Arc::clone(block),
             Request::CommitDecoded(decoded, _) => decoded.block(),
         }
@@ -51,10 +50,9 @@ impl Request {
     /// Returns `true` if the request is a proposal
     pub fn is_proposal(&self) -> bool {
         match self {
-            Request::Commit(_)
-            | Request::CommitEarlyRelay(_)
-            | Request::CommitMined(_, _)
-            | Request::CommitDecoded(_, _) => false,
+            Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, _) => {
+                false
+            }
             Request::CheckProposal(_) => true,
         }
     }

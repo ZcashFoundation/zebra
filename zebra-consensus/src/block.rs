@@ -470,8 +470,7 @@ where
                 let mut contextual = (*cached).clone();
                 contextual.rebind(block, received_time);
                 let commit = match request {
-                    Request::CommitMined(_, notifications)
-                    | Request::CommitDecoded(_, Some(notifications)) => {
+                    Request::CommitDecoded(_, Some(notifications)) => {
                         contextual.into_mined_request(notifications)
                     }
                     Request::Commit(_) | Request::CommitEarlyRelay(_) | Request::CommitDecoded(_, None) => {
@@ -720,8 +719,7 @@ where
                 };
             }
             let commit = match request {
-                Request::CommitMined(_, notifications)
-                | Request::CommitDecoded(_, Some(notifications)) => zs::Request::CommitMinedBlock {
+                Request::CommitDecoded(_, Some(notifications)) => zs::Request::CommitMinedBlock {
                     block: prepared_block,
                     contextual: None,
                     notifications,
