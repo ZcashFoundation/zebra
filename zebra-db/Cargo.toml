@@ -63,7 +63,7 @@ zcash_history = { workspace = true }
 
 elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
 
 zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 proptest = { workspace = true, optional = true }
