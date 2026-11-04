@@ -562,7 +562,7 @@ where
         (new_syncer, sync_status)
     }
 
-    /// Expose the downloader's current ownership to inbound parent recovery.
+    /// Share block download ownership with inbound gossip and parent recovery.
     pub(crate) fn in_flight_downloads(&self) -> InFlightDownloads {
         self.downloads.in_flight_hashes()
     }

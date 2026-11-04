@@ -179,9 +179,8 @@ pub enum Request {
     /// unsolicited in order to gossip new blocks to their peers. These gossip
     /// messages can race with the response to a `getblocks` request, and there
     /// is no way for the network layer to distinguish them. Singleton inventories
-    /// therefore go to inbound gossip, and this request returns an empty list to
-    /// avoid a second download. If inbound drops the advert, a later discovery round
-    /// with the unchanged locator will advertise it again.
+    /// are therefore returned and also forwarded to inbound gossip, so the block is
+    /// still fetched if inbound drops the advert.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         //

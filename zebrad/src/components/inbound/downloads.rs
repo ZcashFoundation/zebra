@@ -336,7 +336,7 @@ where
         }
     }
 
-    /// Reuse parent downloads already owned by the chain syncer.
+    /// Skip hashes the chain syncer is downloading, sharing one registry for both downloaders.
     pub(crate) fn with_sync_downloads(
         mut self,
         sync_downloads: crate::components::sync::InFlightDownloads,
@@ -391,9 +391,20 @@ where
             metrics::counter!("gossip.peer.limit.dropped.block.hash.count").increment(1);
             return DownloadAction::TooManyFromPeer;
         }
-        let task = self
+        let Some(task) = self
             .spawner
-            .spawn_download(&mut admission, hash, advertiser, None);
+            .spawn_download(&mut admission, hash, advertiser, None)
+        else {
+            debug!(
+                ?hash,
+                queue_len,
+                concurrency_limit = self.spawner.full_verify_concurrency_limit,
+                "block hash already claimed by another download: ignored block",
+            );
+            metrics::gauge!("gossip.queued.block.count").set(queue_len as f64);
+            metrics::counter!("gossip.already.queued.dropped.block.hash.count").increment(1);
+            return DownloadAction::AlreadyQueued;
+        };
         self.pending.push(task);
         debug!(
             ?hash,
@@ -440,7 +451,6 @@ where
         let ip = advertiser.map(|addr| addr.ip());
         if admission.closed
             || admission.cancel_handles.contains_key(&hash)
-            || self.sync_downloads.contains(&hash)
             || admission.cancel_handles.len() >= self.full_verify_concurrency_limit
             || admission.parent_recoveries.len() >= MAX_PARENT_RECOVERIES
             || admission
@@ -450,8 +460,11 @@ where
         {
             return;
         }
-        let task =
-            self.spawn_download(&mut admission, hash, advertiser, Some(Box::new(child_work)));
+        let Some(task) =
+            self.spawn_download(&mut admission, hash, advertiser, Some(Box::new(child_work)))
+        else {
+            return;
+        };
         admission.parent_recoveries.insert(hash, ip);
         // Dropping the stream closes admission and cancels every task.
         let _ = self.spawned_sender.send(task);
@@ -463,7 +476,8 @@ where
         hash: block::Hash,
         advertiser: Option<PeerSocketAddr>,
         child_work: Option<Box<dyn FnOnce() -> bool + Send>>,
-    ) -> DownloadHandle {
+    ) -> Option<DownloadHandle> {
+        let ownership = self.sync_downloads.claim(hash)?;
         let parent_recovery = child_work.is_some();
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         let advertiser_ip = advertiser
@@ -700,6 +714,7 @@ where
 
         let task_admission = self.admission.clone();
         let task = tokio::spawn(async move {
+            let _ownership = ownership;
             // Prefer the cancel handle if both are ready.
             let result = tokio::select! {
                 biased;
@@ -731,6 +746,6 @@ where
             );
         }
 
-        task
+        Some(task)
     }
 }
