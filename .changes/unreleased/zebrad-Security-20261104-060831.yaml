@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Keep unrelated block verification running when a peer serves an invalid block or a download fails, and retry hashes whose block bodies fail validation. Back off tip crawls that make no chain progress. The `sync_step_timeout` reason of `sync.restart.count` now counts rounds where the chain tip made no progress for 8 minutes; tip progress during a pending request now resets that timer. Downloads are no longer cancelled, and the round logs at INFO instead of WARN.
+time: 2026-11-04T06:08:31.433655531+01:00

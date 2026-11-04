@@ -21,7 +21,8 @@ pub enum RestartReason {
     ObtainTipsError,
     /// Extending tips failed.
     ExtendTipsError,
-    /// A sync step took longer than the block verify timeout, which usually indicates a hang.
+    /// The state tip did not advance for the block verify timeout during a sync round, so the
+    /// syncer backs off without cancelling pending downloads.
     SyncStepTimeout,
     /// A block download or verification failed with an error that restarts the sync.
     BlockError,

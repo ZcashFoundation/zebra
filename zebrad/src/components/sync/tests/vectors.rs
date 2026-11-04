@@ -5,7 +5,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use color_eyre::Report;
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, StreamExt};
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -1614,8 +1614,7 @@ type TestChainSync = ChainSync<
     MockChainTip,
 >;
 
-/// Verifies fix for #11168 and #11132: a `TransparentInputNotFound` from an `AwaitUtxo`
-/// timeout does not trigger a sync restart, but other transaction errors still do.
+/// A UTXO lookup timeout and an invalid transaction both leave unrelated downloads running.
 #[tokio::test]
 async fn transparent_input_not_found_does_not_restart_sync() {
     let make_invalid = |tx_error| BlockDownloadVerifyError::Invalid {
@@ -1635,8 +1634,8 @@ async fn transparent_input_not_found_does_not_restart_sync() {
     );
 
     assert!(
-        TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
-        "other transaction errors should still trigger sync restart"
+        !TestChainSync::should_restart_sync(&make_invalid(TransactionError::CoinbasePosition)),
+        "an invalid transaction must not cancel unrelated downloads"
     );
 }
 
@@ -2017,36 +2016,235 @@ async fn auth_commitment_mismatch_without_advertiser_is_still_requeued() {
     );
 }
 
-/// The new handling is scoped to the commitment mismatch: every other consensus failure
-/// still restarts the sync round and is not re-requested.
-///
-/// A genuinely invalid block was rejected by the network, so re-downloading it is
-/// pointless. Only the commitment mismatch proves the *body* was forged while the hash
-/// stayed valid.
+/// Invalid headers and checkpoint queue rejections do not need a different body.
 #[tokio::test]
-async fn other_invalid_errors_still_restart_sync_and_are_not_requeued() {
+async fn other_invalid_errors_are_dropped_without_restart_or_requeue() {
+    use zebra_consensus::VerifyCheckpointError;
+
     let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
 
     let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
     let hash = block::Hash::from([0x4D; 32]);
 
-    let err = BlockDownloadVerifyError::Invalid {
-        error: RouterError::Block {
-            source: Box::new(VerifyBlockError::Subsidy(SubsidyError::NoCoinbase)),
+    let errors = [
+        RouterError::Block {
+            source: Box::new(VerifyBlockError::Block {
+                source: zebra_consensus::BlockError::InvalidDifficulty(Height(42), hash),
+            }),
         },
-        height: block::Height(42),
-        hash,
-        advertiser_addr: Some(advertiser),
-    };
+        RouterError::Checkpoint {
+            source: Box::new(VerifyCheckpointError::QueuedLimit),
+        },
+        RouterError::Checkpoint {
+            source: Box::new(VerifyCheckpointError::Finished),
+        },
+    ];
 
-    assert!(
-        chain_sync.handle_block_response(Err(err)).is_err(),
-        "an ordinary consensus failure must still restart the syncer"
+    for error in errors {
+        let err = BlockDownloadVerifyError::Invalid {
+            error,
+            height: block::Height(42),
+            hash,
+            advertiser_addr: Some(advertiser),
+        };
+
+        assert!(
+            chain_sync.handle_block_response(Err(err)).is_ok(),
+            "a block-specific failure must not cancel unrelated downloads"
+        );
+        assert!(
+            !chain_sync.reobtain_hashes.contains(&hash),
+            "a block the verifier rejected must not be re-requested"
+        );
+    }
+}
+
+/// Body validation errors share the bounded retry path in both verifier routes.
+#[tokio::test]
+async fn body_validation_failures_have_bounded_retries() {
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let hash = block::Hash::from([0x5D; 32]);
+    let errors = [
+        BlockError::NoTransactions,
+        BlockError::BadMerkleRoot {
+            actual: block::merkle::Root([0; 32]),
+            expected: block::merkle::Root([1; 32]),
+        },
+        BlockError::DuplicateTransaction,
+        BlockError::WrongTransactionConsensusBranchId,
+        BlockError::MissingHeight(hash),
+        BlockError::MaxHeight(Height::MAX, hash, Height(1)),
+        BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase)),
+        BlockError::Transaction(TransactionError::Groth16("invalid proof".into())),
+        BlockError::Transaction(TransactionError::MalformedGroth16(
+            "invalid encoding".into(),
+        )),
+        BlockError::Transaction(TransactionError::SaplingVerificationFailed),
+        BlockError::Transaction(TransactionError::Halo2VerificationFailed),
+        BlockError::Transaction(TransactionError::OrchardProofSize),
+        BlockError::Transaction(TransactionError::IronwoodProofSize),
+        BlockError::Transaction(TransactionError::Other(
+            "transaction has Orchard actions (temporarily disabled)".into(),
+        )),
+    ];
+    for checkpoint in [false, true] {
+        for source in &errors {
+            for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+                let error = VerifyBlockError::from(source.clone());
+                let error = if checkpoint {
+                    RouterError::Checkpoint {
+                        source: Box::new(VerifyCheckpointError::VerifyBlock(error)),
+                    }
+                } else {
+                    RouterError::Block {
+                        source: Box::new(error),
+                    }
+                };
+                chain_sync
+                    .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                        error,
+                        height: Height(42),
+                        hash,
+                        advertiser_addr: None,
+                    }))
+                    .unwrap();
+                assert_eq!(
+                    chain_sync.reobtain_hashes.shift_remove(&hash),
+                    attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES,
+                    "retry {attempt} for {source:?} with checkpoint={checkpoint}"
+                );
+            }
+        }
+    }
+}
+
+/// Canonical headers do not make a peer's transaction body trustworthy.
+#[tokio::test(start_paused = true)]
+async fn checkpoint_modified_body_is_retried() {
+    canonical_header_modified_body_is_retried(true).await;
+}
+
+/// Full verification must recover the same hash after a body-only failure.
+#[tokio::test(start_paused = true)]
+async fn semantic_modified_body_is_retried() {
+    canonical_header_modified_body_is_retried(false).await;
+}
+
+async fn canonical_header_modified_body_is_retried(checkpoint_sync: bool) {
+    use tower::ServiceExt;
+    use zebra_chain::parameters::Network;
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let _init_guard = zebra_test::init();
+    let honest: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = honest.hash();
+    let height = honest.coinbase_height().unwrap();
+    let parent_hash = honest.header.previous_block_hash;
+    let parent_height = (height - 1).unwrap();
+    let mut forged = honest.as_ref().clone();
+    assert!(forged.transactions.len() > 1);
+    forged.transactions.pop();
+    let forged = Arc::new(forged);
+    assert_eq!(
+        forged.hash(),
+        hash,
+        "the peer preserves the canonical header"
     );
-    assert!(
-        !chain_sync.reobtain_hashes.contains(&hash),
-        "a block the network rejected must not be re-requested"
+    assert_ne!(
+        forged
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<block::merkle::Root>(),
+        honest.header.merkle_root
     );
+
+    let state = tower::service_fn(move |request| {
+        futures::future::ok::<_, crate::BoxError>(match request {
+            zs::Request::Tip => zs::Response::Tip(Some((parent_height, parent_hash))),
+            zs::Request::BestChainBlockHash(_) => zs::Response::BlockHash(None),
+            zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+            _ => unreachable!("a forged body must fail before transaction or state verification"),
+        })
+    });
+    let (router, _mempool, tasks, max_checkpoint_height) = zebra_consensus::router::init_test(
+        ConsensusConfig { checkpoint_sync },
+        &Network::Mainnet,
+        state,
+    )
+    .await;
+    assert_eq!(height <= max_checkpoint_height, checkpoint_sync);
+    let mut network = MockService::build().for_unit_tests();
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(parent_height);
+    let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        max_checkpoint_height,
+        network.clone(),
+        router.map_err(crate::BoxError::from),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    chain_sync
+        .downloads
+        .download_and_verify(hash)
+        .await
+        .unwrap();
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            forged,
+            Some(advertiser),
+        ))]));
+    let error = chain_sync.downloads.next().await.unwrap().unwrap_err();
+    let BlockDownloadVerifyError::Invalid {
+        error: ref router_error,
+        ..
+    } = error
+    else {
+        panic!("expected a body validation failure, got {error:?}");
+    };
+    let block_error = match router_error {
+        RouterError::Block { source } => source.as_ref(),
+        RouterError::Checkpoint { source } => match source.as_ref() {
+            VerifyCheckpointError::VerifyBlock(error) => error,
+            other => panic!("unexpected checkpoint error: {other:?}"),
+        },
+    };
+    assert!(matches!(
+        block_error,
+        VerifyBlockError::Block {
+            source: BlockError::BadMerkleRoot { .. }
+        }
+    ));
+    chain_sync.handle_block_response(Err(error)).unwrap();
+    assert!(
+        chain_sync.reobtain_hashes.contains(&hash),
+        "a bad body must not discard its still-needed canonical block hash"
+    );
+    assert_eq!(misbehavior_rx.try_recv().unwrap().score, 100);
+    chain_sync.reobtain_missing_blocks().await;
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((honest, None))]));
+    chain_sync.downloads.cancel_all();
+    tasks.state_checkpoint_verify_handle.abort();
 }
 
 /// An honest body whose authorizing data matches its header must not be classified as a
@@ -2119,11 +2317,11 @@ async fn honest_bodies_are_not_classified_as_forgeries() {
     );
 }
 
-/// The pre-existing `NotFound` re-request (#5709) still works, and only fires for `NotFound`.
+/// Every failed block download is re-requested without restarting the sync (#5709).
 ///
-/// Both cases now share one bounded re-queue, so this pins the behavior the behind-tip fix reuses.
+/// Both cases share one bounded re-queue with the behind-tip fix.
 #[tokio::test]
-async fn download_failed_is_only_requeued_for_not_found() {
+async fn download_failures_are_requeued_without_restart() {
     let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
 
     let missing_hash = block::Hash::from([0xDE; 32]);
@@ -2139,7 +2337,7 @@ async fn download_failed_is_only_requeued_for_not_found() {
         "a block no peer delivered must be re-queued (#5709)"
     );
 
-    // A download that failed for any other reason is a syncer restart, and is not re-queued.
+    // Other download failures do not restart the sync, so they need the same retry.
     let failed_hash = block::Hash::from([0xEF; 32]);
     let restart = chain_sync
         .handle_block_response(Err(BlockDownloadVerifyError::DownloadFailed {
@@ -2149,13 +2347,13 @@ async fn download_failed_is_only_requeued_for_not_found() {
         }))
         .is_err();
     assert!(
-        restart,
-        "a download that failed for another reason must restart the syncer"
+        !restart,
+        "a failed download must not cancel unrelated downloads"
     );
 
     assert!(
-        !chain_sync.reobtain_hashes.contains(&failed_hash),
-        "a download that failed for another reason must not be re-queued"
+        chain_sync.reobtain_hashes.contains(&failed_hash),
+        "a download that failed for another reason must be re-queued"
     );
 
     // Neither case attributes misbehavior: the download never produced a block to judge.
@@ -2329,10 +2527,9 @@ async fn sync_diagnostics_count_block_errors_and_restarts() {
     assert_eq!(diagnostics.restarts_without_progress, 0);
 }
 
-/// A re-download that can't get network capacity before its deadline stays queued for a later
-/// sync round, along with the blocks queued after it, which don't wait out their own deadlines.
+/// Re-downloads retain the queue if dispatch is cancelled or network readiness times out.
 #[tokio::test(start_paused = true)]
-async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
+async fn reobtain_keeps_blocks_when_cancelled_or_network_readiness_times_out() {
     use tower::limit::ConcurrencyLimit;
 
     let _init_guard = zebra_test::init();
@@ -2359,6 +2556,25 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
 
     let missing = [block::Hash::from([0xB1; 32]), block::Hash::from([0xB2; 32])];
     chain_sync.reobtain_hashes.extend(missing);
+
+    assert!(
+        tokio::time::timeout(
+            sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT / 2,
+            chain_sync.reobtain_missing_blocks(),
+        )
+        .await
+        .is_err(),
+        "the dispatch must still be waiting for network capacity"
+    );
+    assert_eq!(
+        chain_sync
+            .reobtain_hashes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        missing,
+        "cancelling dispatch must preserve all queued retries"
+    );
 
     let recorder = CounterRecorder::default();
     let metrics_guard = metrics::set_default_local_recorder(&recorder);
@@ -3417,7 +3633,6 @@ async fn request_blocks_respects_remaining_capacity() {
     chain_sync.downloads.cancel_all();
 }
 
-
 /// Delayed retries retain capacity so a fresh batch cannot overfill the queue when they resume.
 #[tokio::test(start_paused = true)]
 async fn request_blocks_reserves_capacity_for_retries() {
@@ -3438,7 +3653,6 @@ async fn request_blocks_reserves_capacity_for_retries() {
     assert!(chain_sync.reobtain_hashes.is_empty());
     chain_sync.downloads.cancel_all();
 }
-
 
 /// A partially queued final checkpoint must leave room for its missing blocks.
 #[tokio::test(start_paused = true)]
@@ -3515,3 +3729,240 @@ async fn partial_final_checkpoint_keeps_admission_capacity() {
     chain_sync.downloads.cancel_all();
 }
 
+/// A stale height-pause flag must not make a single-slot queue wait for a nonexistent task.
+#[tokio::test(start_paused = true)]
+async fn high_invalid_block_does_not_pause_an_empty_queue() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let next_hash = block::Hash::from([0xA7; 32]);
+    let network = tower::service_fn(move |request| {
+        let block = block.clone();
+        async move {
+            match request {
+                zn::Request::BlockDownload {
+                    hash: requested, ..
+                } if requested == hash => Ok(zn::Response::Blocks(vec![Available((block, None))])),
+                zn::Request::BlockDownload { hash, .. } if hash == next_hash => {
+                    futures::future::pending::<Result<zn::Response, crate::BoxError>>().await
+                }
+                _ => unreachable!("only the advertised blocks are requested"),
+            }
+        }
+    });
+    let verifier = tower::service_fn(move |_| {
+        futures::future::err::<block::Hash, crate::BoxError>(
+            RouterError::Block {
+                source: Box::new(VerifyBlockError::Block {
+                    source: zebra_consensus::BlockError::InvalidDifficulty(Height(347_499), hash),
+                }),
+            }
+            .into(),
+        )
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(300_000));
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let mut config = ZebradConfig::default();
+    config.sync.full_verify_concurrency_limit = 1;
+    let (mut chain_sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        network,
+        verifier,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+    chain_sync
+        .request_blocks([hash].into_iter().collect())
+        .await
+        .unwrap();
+    let extra = tokio::time::timeout(
+        MAX_SERVICE_REQUEST_DELAY,
+        chain_sync.try_to_sync_once([next_hash].into_iter().collect()),
+    )
+    .await
+    .expect("a failed block must release the only download slot")
+    .unwrap();
+    assert!(chain_sync.past_lookahead_limit_receiver.cloned_watch_data());
+    assert!(extra.is_empty());
+    assert_eq!(chain_sync.downloads.in_flight(), 1);
+    chain_sync.downloads.cancel_all();
+}
+
+/// One invalid block or exhausted download must not cancel an honest pending verification.
+#[tokio::test(start_paused = true)]
+async fn failed_block_preserves_honest_pending_verification() {
+    let _init_guard = zebra_test::init();
+    let honest: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let invalid: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let honest_hash = honest.hash();
+    let invalid_hash = invalid.hash();
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+
+    for download_failure in [false, true] {
+        let blocks = [honest.clone(), invalid.clone()];
+        let network = tower::service_fn(move |request| {
+            let zn::Request::BlockDownload { hash, .. } = request else {
+                panic!("no tip requests are needed without prospective tips");
+            };
+            let response = if download_failure && hash == invalid_hash {
+                Err(crate::BoxError::from("connection reset"))
+            } else {
+                let block = blocks.iter().find(|block| block.hash() == hash).unwrap();
+                Ok(zn::Response::Blocks(vec![Available((
+                    block.clone(),
+                    Some(advertiser),
+                ))]))
+            };
+            futures::future::ready(response)
+        });
+        let mut verifier = MockService::build().for_unit_tests();
+        let (tip, _tip_sender) = MockChainTip::new();
+        let (misbehavior_tx, mut misbehavior_rx) = tokio::sync::mpsc::channel(4);
+        let (mut chain_sync, _status) = ChainSync::new(
+            &ZebradConfig::default(),
+            Height(0),
+            network,
+            verifier.clone(),
+            MockService::build().for_unit_tests(),
+            MockService::build().for_unit_tests(),
+            tip,
+            misbehavior_tx,
+        );
+        chain_sync.full_verify_concurrency_limit = 2;
+
+        chain_sync
+            .request_blocks([invalid_hash].into_iter().collect())
+            .await
+            .unwrap();
+        let invalid_request = if download_failure {
+            None
+        } else {
+            Some(
+                verifier
+                    .expect_request(zebra_consensus::Request::Commit(invalid.clone()))
+                    .await,
+            )
+        };
+        chain_sync
+            .request_blocks([honest_hash].into_iter().collect())
+            .await
+            .unwrap();
+        let honest_request = verifier
+            .expect_request(zebra_consensus::Request::Commit(honest.clone()))
+            .await;
+
+        let error = RouterError::Block {
+            source: Box::new(VerifyBlockError::Block {
+                source: zebra_consensus::BlockError::InvalidDifficulty(Height(2), invalid_hash),
+            }),
+        };
+        let expected_score = error.misbehavior_score();
+        if let Some(request) = invalid_request {
+            request.respond_error(error.into());
+        }
+        tokio::time::timeout(
+            sync::BLOCK_DOWNLOAD_TIMEOUT,
+            chain_sync.try_to_sync_once(Default::default()),
+        )
+        .await
+        .expect("handling a failed block must not wait for the honest verification")
+        .expect("a failed block must not restart the sync round");
+
+        // A failed download is re-requested while the honest block waits, until its bounded
+        // retries are exhausted. An invalid header is not re-requested.
+        assert_eq!(chain_sync.downloads.in_flight(), 1);
+        assert!(chain_sync.reobtain_hashes.is_empty());
+        assert!(chain_sync.block_reobtain_retries.is_empty());
+        if download_failure {
+            assert!(misbehavior_rx.try_recv().is_err());
+        } else {
+            let report = misbehavior_rx.try_recv().unwrap();
+            assert_ne!(expected_score, 0);
+            assert_eq!((report.addr, report.score), (advertiser, expected_score));
+        }
+
+        honest_request.respond(honest_hash);
+        let committed =
+            tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, chain_sync.downloads.next())
+                .await
+                .expect("the honest verification must still complete")
+                .expect("the honest download must still be tracked")
+                .expect("the honest download must not be cancelled");
+        assert_eq!(committed, (Height(1), honest_hash));
+        assert!(chain_sync.downloads.is_empty());
+    }
+}
+
+/// Wrapped service, state, and shutdown errors still require a sync restart.
+#[test]
+fn infrastructure_verification_errors_restart_sync() {
+    use zebra_consensus::{BlockError, VerifyCheckpointError};
+
+    let hash = block::Hash::from([0xD1; 32]);
+    let block_errors = [
+        VerifyBlockError::Depth {
+            source: "state depth failed".into(),
+            hash,
+        },
+        VerifyBlockError::StateService {
+            source: "state failed".into(),
+            hash,
+        },
+        VerifyBlockError::Commit(zs::CommitBlockError::new_write_task_exited()),
+        VerifyBlockError::Block {
+            source: BlockError::Other("internal failure".into()),
+        },
+        VerifyBlockError::Transaction(TransactionError::InternalDowncastError(
+            "unknown verifier failure".into(),
+        )),
+    ];
+    let mut errors: Vec<_> = block_errors
+        .into_iter()
+        .map(|error| RouterError::Block {
+            source: Box::new(error),
+        })
+        .collect();
+    errors.extend(
+        [
+            VerifyCheckpointError::VerifyBlock(VerifyBlockError::Depth {
+                source: "state depth failed".into(),
+                hash,
+            }),
+            VerifyCheckpointError::CommitCheckpointVerified(
+                zs::CommitCheckpointVerifiedError::from(
+                    zs::CommitBlockError::new_write_task_exited(),
+                )
+                .into(),
+            ),
+            VerifyCheckpointError::CommitCheckpointVerified("state commit failed".into()),
+            VerifyCheckpointError::Tip("state tip failed".into()),
+            VerifyCheckpointError::CheckpointList("checkpoint list failed".into()),
+            VerifyCheckpointError::Dropped,
+            VerifyCheckpointError::ShuttingDown,
+        ]
+        .into_iter()
+        .map(|error| RouterError::Checkpoint {
+            source: Box::new(error),
+        }),
+    );
+
+    for error in errors {
+        let error = BlockDownloadVerifyError::Invalid {
+            error,
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        };
+        assert!(TestChainSync::should_restart_sync(&error), "{error:?}");
+    }
+}
