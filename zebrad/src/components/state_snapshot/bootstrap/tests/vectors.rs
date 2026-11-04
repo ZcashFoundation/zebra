@@ -1029,7 +1029,7 @@ async fn manifest_short_answers_leave_time_for_other_peers() {
 
     let trickle_bytes = bytes.clone();
     let trickle = tokio::spawn(async move {
-        for offset in 0..trickle_bytes.len() {
+        for (offset, &byte) in trickle_bytes.iter().enumerate() {
             let received = u32::try_from(offset).expect("the test manifest is small");
             a.expect_request(zn::Request::Object {
                 hash: commitment.manifest,
@@ -1039,7 +1039,7 @@ async fn manifest_short_answers_leave_time_for_other_peers() {
             .await
             .respond(zn::Response::Object {
                 size,
-                data: vec![trickle_bytes[offset]],
+                data: vec![byte],
             });
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

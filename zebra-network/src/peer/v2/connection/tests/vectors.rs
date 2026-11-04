@@ -278,6 +278,7 @@ fn spawn_node_scored(
             inbound_service,
             inv_collector: inv_tx,
             genesis_hash: Network::Mainnet.genesis_hash(),
+            network: Network::Mainnet,
             misbehavior: misbehavior.clone(),
             discovery: relaying.address_book.is_some(),
             address_book: relaying.address_book,

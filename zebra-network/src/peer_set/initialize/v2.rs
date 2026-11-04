@@ -142,6 +142,7 @@ where
                 inbound_service,
                 inv_collector,
                 genesis_hash: config.network.genesis_hash(),
+                network: config.network.clone(),
                 misbehavior: MisbehaviorScores::spawn(
                     misbehavior_tx,
                     config.peerset_total_connection_limit(),

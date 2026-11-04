@@ -8,12 +8,13 @@
 //! format is a connection error of type `PROTOCOL_ERROR` (draft,
 //! "Announcement Streams").
 
-use std::sync::Arc;
+use std::{net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
 
 use zebra_chain::{
     block,
+    parameters::Network,
     serialization::{DateTime32, Duration32, ZcashSerialize},
     transaction::UnminedTxId,
 };
@@ -93,6 +94,33 @@ pub fn decode_tx_record(payload: &[u8]) -> Result<TxRef, WireError> {
 pub fn decode_addr_record(payload: &[u8]) -> Result<Option<MetaAddr>, WireError> {
     let record = deserialize_exact::<AddrV2>(payload, "address announcement")?;
     Ok(MetaAddr::try_from(record).ok())
+}
+
+/// Decodes an address announcement record for use on `network`, returning
+/// `None` for an internal address outside Regtest. Public-network gossip must
+/// not turn loopback, private, or link-local records into outbound TCP probes.
+pub fn decode_addr_record_for_network(
+    payload: &[u8],
+    network: &Network,
+) -> Result<Option<MetaAddr>, WireError> {
+    let addr = decode_addr_record(payload)?;
+    Ok(addr.filter(|addr| network.is_regtest() || !is_internal_ip(addr.addr().ip())))
+}
+
+/// Returns whether `ip` identifies a local or private network rather than a
+/// public peer.
+fn is_internal_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_unspecified() || ip.is_loopback() || ip.is_private() || ip.is_link_local()
+        }
+        IpAddr::V6(ip) => {
+            ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+        }
+    }
 }
 
 /// Encodes an address announcement record: one `addrv2` record, the layout

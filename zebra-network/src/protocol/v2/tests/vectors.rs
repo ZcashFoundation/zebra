@@ -30,8 +30,8 @@ use crate::{
         },
         v2::{
             announcement::{
-                clamp_relayed_time, decode_addr_record, decode_block_announcement,
-                decode_tx_record, encode_addr_record, encode_tx_record,
+                clamp_relayed_time, decode_addr_record, decode_addr_record_for_network,
+                decode_block_announcement, decode_tx_record, encode_addr_record, encode_tx_record,
             },
             constants::{
                 alpn_protocol_id, GET_OBJECT_REQUEST_LEN, MAX_ADDRS_PER_RESPONSE,
@@ -1444,6 +1444,55 @@ fn addr_record_pins_layout_and_skips_unsupported() {
     let mut long = expected.clone();
     long.push(0);
     assert_err!(decode_addr_record(&long), WireError::TrailingBytes { .. });
+}
+
+/// Public networks never turn gossiped internal addresses into outbound
+/// candidates, but Regtest still accepts them for local test networks.
+#[test]
+fn addr_records_skip_internal_addresses_outside_regtest() {
+    let _init_guard = zebra_test::init();
+
+    let regtest = Network::new_regtest(Default::default());
+    for address in [
+        "127.0.0.1:8233",
+        "10.0.0.1:8233",
+        "169.254.1.1:8233",
+        "[::1]:8233",
+        "[fc00::1]:8233",
+        "[fe80::1]:8233",
+        "[::ffff:127.0.0.1]:8233",
+    ] {
+        let addr: PeerSocketAddr = address.parse::<SocketAddr>().unwrap().into();
+        let meta = MetaAddr::new_gossiped_meta_addr(
+            addr,
+            PeerServices::NODE_NETWORK,
+            DateTime32::from(0x6000_0000),
+        );
+        let encoded = encode_addr_response(std::slice::from_ref(&meta)).expect("valid address");
+        let payload = &encoded[1..];
+
+        assert_eq!(
+            decode_addr_record_for_network(payload, &Network::Mainnet).expect("valid"),
+            None,
+            "{address} is not an outbound candidate on Mainnet"
+        );
+        assert_eq!(
+            decode_addr_record_for_network(payload, &regtest).expect("valid"),
+            Some(meta),
+            "{address} remains usable on Regtest"
+        );
+    }
+
+    let public = MetaAddr::new_gossiped_meta_addr(
+        "203.0.113.9:8233".parse::<SocketAddr>().unwrap().into(),
+        PeerServices::NODE_NETWORK,
+        DateTime32::from(0x6000_0000),
+    );
+    let encoded = encode_addr_response(std::slice::from_ref(&public)).expect("valid address");
+    assert_eq!(
+        decode_addr_record_for_network(&encoded[1..], &Network::Mainnet).expect("valid"),
+        Some(public)
+    );
 }
 
 #[test]

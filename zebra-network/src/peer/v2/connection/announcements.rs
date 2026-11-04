@@ -13,7 +13,7 @@ use tokio::{
 use tokio_util::codec::FramedRead;
 use tower::Service;
 
-use zebra_chain::transaction::UnminedTxId;
+use zebra_chain::{parameters::Network, transaction::UnminedTxId};
 
 use crate::{
     peer_set::InventoryChange,
@@ -21,7 +21,9 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
         v2::{
-            announcement::{decode_addr_record, decode_block_announcement, decode_tx_record},
+            announcement::{
+                decode_addr_record_for_network, decode_block_announcement, decode_tx_record,
+            },
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::{Violation, WireError},
@@ -178,9 +180,11 @@ impl AnnouncementPermits {
 /// are a `PROTOCOL_ERROR`. Transaction and address announcements that are
 /// already buffered are folded into one inbound service call or one cache
 /// update, as a legacy `inv` or `addr` message would be.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn serve<S>(
     mut recv: RecvStream,
     permits: AnnouncementPermits,
+    network: Network,
     transient_addr: Option<PeerSocketAddr>,
     inbound_service: S,
     overloads: Arc<Overloads>,
@@ -294,7 +298,9 @@ pub(super) async fn serve<S>(
                 )
                 .await
             }
-            StreamType::AddressAnnouncements => handle_addr_announcements(&payloads, &events),
+            StreamType::AddressAnnouncements => {
+                handle_addr_announcements(&payloads, &events, &network)
+            }
             _ => unreachable!("only announcement types are handed to this task"),
         };
         match handled {
@@ -410,10 +416,14 @@ where
 /// Hands a batch of address announcement records to the connection task,
 /// which applies the peer's address budget, best effort; a batch with a
 /// nonconforming record contributes nothing.
-fn handle_addr_announcements(payloads: &[Bytes], events: &Events) -> Result<(), Handled> {
+fn handle_addr_announcements(
+    payloads: &[Bytes],
+    events: &Events,
+    network: &Network,
+) -> Result<(), Handled> {
     let mut addrs = Vec::new();
     for payload in payloads {
-        if let Some(addr) = decode_addr_record(payload).map_err(close_code)? {
+        if let Some(addr) = decode_addr_record_for_network(payload, network).map_err(close_code)? {
             addrs.push(addr);
         }
     }

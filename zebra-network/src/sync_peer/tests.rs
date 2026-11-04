@@ -90,6 +90,7 @@ pub(super) async fn fixture() -> Fixture {
             inbound_service: service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
             inv_collector: tokio::sync::broadcast::channel(16).0,
             genesis_hash: network.genesis_hash(),
+            network: network.clone(),
             misbehavior: misbehavior.clone(),
             address_book: None,
             discovery: false,
