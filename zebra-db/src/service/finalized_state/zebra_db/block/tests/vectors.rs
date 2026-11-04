@@ -197,6 +197,7 @@ fn test_block_db_round_trip_with(
 
         if stored_block != original_block {
             error!(
+                target: "zebra_state::service::finalized_state::zebra_db::block::tests::vectors",
                 "
                 detailed block mismatch report:
                 original: {:?}\n\

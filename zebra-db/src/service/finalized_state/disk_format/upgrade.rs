@@ -277,7 +277,7 @@ impl DbFormatChange {
         let running_version = running_version.clone();
 
         let Some(disk_version) = disk_version else {
-            info!(
+            info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                 %running_version,
                 "creating new database with the current format"
             );
@@ -287,7 +287,7 @@ impl DbFormatChange {
 
         match disk_version.cmp_precedence(&running_version) {
             Ordering::Less => {
-                info!(
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                     %running_version,
                     %disk_version,
                     "trying to open older database format: launching upgrade task"
@@ -299,7 +299,7 @@ impl DbFormatChange {
                 }
             }
             Ordering::Greater => {
-                info!(
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                     %running_version,
                     %disk_version,
                     "trying to open newer database format: data should be compatible"
@@ -311,7 +311,7 @@ impl DbFormatChange {
                 }
             }
             Ordering::Equal => {
-                info!(%running_version, "trying to open current database format");
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", %running_version, "trying to open current database format");
 
                 CheckOpenCurrent { running_version }
             }
@@ -325,7 +325,7 @@ impl DbFormatChange {
     pub fn check_new_blocks(db: &ZebraDb) -> Self {
         let running_version = db.format_version_in_code();
 
-        info!(%running_version, "checking new blocks were written in current database format");
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", %running_version, "checking new blocks were written in current database format");
         CheckNewBlocksCurrent { running_version }
     }
 
@@ -524,7 +524,7 @@ impl DbFormatChange {
             CheckOpenCurrent { running_version } => {
                 // If we're re-opening a previously upgraded or newly created database,
                 // the database format should be valid. This check is done below.
-                info!(
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                     %running_version,
                     "checking database format produced by a previous zebra instance \
                      is current and valid"
@@ -538,7 +538,7 @@ impl DbFormatChange {
                 // TODO: should this check panic or just log an error?
                 //       Currently, we panic to avoid consensus bugs, but this could cause a denial
                 //       of service. We can make errors fail in CI using ZEBRA_FAILURE_MESSAGES.
-                info!(
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                     %running_version,
                     "checking database format produced by new blocks in this instance is valid"
                 );
@@ -554,9 +554,9 @@ impl DbFormatChange {
             let timer = CodeTimer::start();
 
             if let Some(initial_tip_height) = initial_tip_height.filter(|_| !history.is_pruned()) {
-                info!("started checking/adding indexes for spending tx ids");
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", "started checking/adding indexes for spending tx ids");
                 track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-                info!("finished checking/adding indexes for spending tx ids");
+                info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", "finished checking/adding indexes for spending tx ids");
             }
 
             // Record the spending-index layout only after its conversion has completed.
@@ -587,9 +587,9 @@ impl DbFormatChange {
                 let timer = CodeTimer::start();
 
                 if let Some(initial_tip_height) = initial_tip_height {
-                    info!("started removing indexes for spending tx ids");
+                    info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", "started removing indexes for spending tx ids");
                     drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-                    info!("finished removing indexes for spending tx ids");
+                    info!(target: "zebra_state::service::finalized_state::disk_format::upgrade", "finished removing indexes for spending tx ids");
                 }
 
                 // Remove build metadata to on-disk version file after indexes have been dropped.
@@ -623,7 +623,7 @@ impl DbFormatChange {
         let initial_disk_version = self
             .initial_disk_version()
             .map_or_else(|| "None".to_string(), |version| version.to_string());
-        info!(
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
             running_version = %self.running_version(),
             %initial_disk_version,
             "database format is valid"
@@ -664,7 +664,7 @@ impl DbFormatChange {
         // If the format change is outside RocksDb, put new code above this comment!
         let Some(initial_tip_height) = initial_tip_height else {
             // If the database is empty, then the RocksDb format doesn't need any changes.
-            info!(
+            info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                 %newer_running_version,
                 %older_disk_version,
                 "marking empty database as upgraded"
@@ -672,7 +672,7 @@ impl DbFormatChange {
 
             Self::mark_as_upgraded_to(db, newer_running_version);
 
-            info!(
+            info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                 %newer_running_version,
                 %older_disk_version,
                 "empty database is fully upgraded"
@@ -699,7 +699,7 @@ impl DbFormatChange {
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            info!(
+            info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
                 newer_running_version = ?upgrade.version(),
                 "Zebra automatically upgraded the database format"
             );
@@ -804,7 +804,7 @@ impl DbFormatChange {
         db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");
 
-        info!(
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
             %running_version,
             disk_version = %disk_version.map_or("None".to_string(), |version| version.to_string()),
             "marked database format as newly created"
@@ -870,7 +870,7 @@ impl DbFormatChange {
         db.update_format_version_on_disk(&format_upgrade_version)
             .expect("unable to write database format version file to disk");
 
-        info!(
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
             %running_version,
             %disk_version,
             // wait_for_state_version_upgrade() needs this to be the last field,
@@ -915,7 +915,7 @@ impl DbFormatChange {
         db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");
 
-        info!(
+        info!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
             %running_version,
             %disk_version,
             "marked database format as downgraded"
@@ -960,7 +960,7 @@ fn check_results(
         .position(|result| matches!(result, Err(FormatCheckError::HistoryRead(_))))
     {
         let error = results.swap_remove(local);
-        error!(
+        error!(target: "zebra_state::service::finalized_state::disk_format::upgrade",
             ?error,
             "local database history read failed during format checks"
         );
@@ -970,7 +970,7 @@ fn check_results(
     let error = Err(FormatCheckError::Invalid(format!(
         "invalid {kind} check: {results:?}"
     )));
-    error!(?error);
+    error!(target: "zebra_state::service::finalized_state::disk_format::upgrade", ?error);
     error
 }
 
@@ -1060,5 +1060,51 @@ fn reusable_source_follows_the_registered_upgrade_chain() {
     assert!(
         restorable_db_source_versions(31).is_empty(),
         "v31 is registered by the independent variable-height migration"
+    );
+}
+
+#[test]
+fn format_change_events_keep_their_legacy_target() {
+    use tracing::{span, Event, Metadata, Subscriber};
+
+    struct TargetCollector {
+        sender: Sender<String>,
+    }
+
+    impl Subscriber for TargetCollector {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+
+        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
+            span::Id::from_u64(1)
+        }
+
+        fn event(&self, event: &Event<'_>) {
+            self.sender
+                .try_send(event.metadata().target().to_owned())
+                .expect("the captured event fits in the channel");
+        }
+
+        fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
+        fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+        fn enter(&self, _span: &span::Id) {}
+        fn exit(&self, _span: &span::Id) {}
+    }
+
+    let (sender, receiver) = bounded(1);
+    tracing::subscriber::with_default(TargetCollector { sender }, || {
+        let _ = DbFormatChange::open_database(&Version::new(32, 0, 0), None);
+    });
+
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("opening a database emits an event"),
+        "zebra_state::service::finalized_state::disk_format::upgrade"
+    );
+    assert!(
+        receiver.try_recv().is_err(),
+        "opening a new database emits exactly one event"
     );
 }
