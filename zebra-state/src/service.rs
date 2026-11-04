@@ -1157,6 +1157,11 @@ impl ReadStateService {
         read::tip(self.latest_best_chain(), &self.db)
     }
 
+    /// Returns whether rejection tracking permits speculative work on this block.
+    pub(crate) fn mining_candidate_is_allowed(&self, hash: block::Hash) -> bool {
+        self.early_relay.allows_early_relay(hash)
+    }
+
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
     fn latest_non_finalized_state(&self) -> NonFinalizedState {
         self.non_finalized_state_receiver.cloned_watch_data()
@@ -1286,8 +1291,16 @@ impl Service<Request> for StateService {
                 }
                 .boxed()
             }
+            Request::RejectBlock(block) => {
+                let state = self.read_service.clone();
+                async move { Ok(Response::Rejected(state.reject_block(block).await)) }.boxed()
+            }
             Request::MiningCandidate(block) => {
                 if self.read_service.mining_candidate.receiver_count() == 0 {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                let hash = block.hash();
+                if !self.read_service.mining_candidate_is_allowed(hash) {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
                 let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {
@@ -1304,6 +1317,9 @@ impl Service<Request> for StateService {
                     let compute_permit = cancelled.borrow().clone();
                     let compute = tokio::task::spawn_blocking(move || {
                         let _permit = compute_permit;
+                        if !compute_state.mining_candidate_is_allowed(hash) {
+                            return None;
+                        }
                         read::difficulty::mining_candidate_chain_info(
                             &compute_state.latest_non_finalized_state(),
                             &compute_state.db,
@@ -1323,6 +1339,7 @@ impl Service<Request> for StateService {
                     if cancelled.has_changed().is_err()
                         || tokio::time::Instant::now() >= deadline
                         || state.best_tip().map(|(_, hash)| hash) != Some(parent)
+                        || !state.mining_candidate_is_allowed(hash)
                     {
                         return;
                     }
@@ -1748,8 +1765,8 @@ impl Service<ReadRequest> for ReadStateService {
 
         let request_handler = move || match req {
             ReadRequest::CheckBestTipHeader { header, height } => {
-                if state.early_relay.is_rejected(header.hash()) {
-                    return Err("compact header was deterministically rejected".into());
+                if !state.early_relay.allows_early_relay(header.hash()) {
+                    return Err("compact header early relay is unavailable".into());
                 }
                 read::difficulty::candidate_header_context(
                     &state.latest_non_finalized_state(),
@@ -1759,13 +1776,16 @@ impl Service<ReadRequest> for ReadStateService {
                     height,
                     true,
                 )?
-                .filter(|_| state.early_relay.best_tip_hash() == Some(header.previous_block_hash))
+                .filter(|_| {
+                    state.early_relay.best_tip_hash() == Some(header.previous_block_hash)
+                        && state.early_relay.allows_early_relay(header.hash())
+                })
                 .ok_or("compact header does not extend the committed best tip")?;
                 Ok(ReadResponse::ValidBestTipHeader)
             }
             ReadRequest::CheckBestTipBlockCommitments(block) => {
-                if state.early_relay.is_rejected(block.hash()) {
-                    return Err("compact block was deterministically rejected".into());
+                if !state.early_relay.allows_early_relay(block.hash()) {
+                    return Err("compact block early relay is unavailable".into());
                 }
                 let height = block
                     .coinbase_height()
@@ -1774,6 +1794,7 @@ impl Service<ReadRequest> for ReadStateService {
                     return Err("compact authentication requires NU5 commitments".into());
                 }
                 let parent = block.header.previous_block_hash;
+                let hash = block.hash();
                 read::difficulty::authenticated_candidate_header(
                     &state.latest_non_finalized_state(),
                     &state.db,
@@ -1781,7 +1802,10 @@ impl Service<ReadRequest> for ReadStateService {
                     block,
                     true,
                 )?
-                .filter(|_| state.early_relay.best_tip_hash() == Some(parent))
+                .filter(|_| {
+                    state.early_relay.best_tip_hash() == Some(parent)
+                        && state.early_relay.allows_early_relay(hash)
+                })
                 .ok_or("compact body does not extend the committed best tip")?;
                 Ok(ReadResponse::ValidBestTipBlockCommitments)
             }
@@ -1791,6 +1815,7 @@ impl Service<ReadRequest> for ReadStateService {
                     |(parent, info, cancelled, deadline)| {
                         (cancelled.has_changed().is_ok()
                             && tokio::time::Instant::now() < deadline
+                            && state.mining_candidate_is_allowed(info.tip_hash)
                             && state.best_tip().map(|(_, hash)| hash) == Some(parent))
                         .then_some(info)
                     },

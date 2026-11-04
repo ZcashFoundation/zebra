@@ -129,11 +129,18 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn early_relay_transient_failures_retry_without_recording_rejection() {
+async fn block_transient_failures_retry_without_recording_rejection() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(30), async {
         let (network, state, read) = state().await;
         let block = candidate(&network, &read, true).await;
+        let state = tower::service_fn(move |request| {
+            assert!(
+                !matches!(&request, zs::Request::RejectBlock(_)),
+                "transient failures must not notify rejection"
+            );
+            state.clone().oneshot(request)
+        });
         for failure in 0..3 {
             let dispatches = Arc::new(AtomicUsize::new(0));
             let count = dispatches.clone();
@@ -158,10 +165,20 @@ async fn early_relay_transient_failures_retry_without_recording_rejection() {
                     }
                 }
             });
-            for delivery in 1..=2 {
+            for delivery in 1..=6 {
+                let (committed, _commits) = tokio::sync::mpsc::channel(1);
+                let (validated, _validation) = tokio::sync::watch::channel(None);
+                let request = match (delivery - 1) % 3 {
+                    0 => Request::CommitEarlyRelay(block.clone()),
+                    1 => Request::Commit(block.clone()),
+                    _ => Request::CommitMined(
+                        block.clone(),
+                        zs::MinedBlockNotifications::new(committed, validated),
+                    ),
+                };
                 let error =
                     SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
-                        .oneshot(Request::CommitEarlyRelay(block.clone()))
+                        .oneshot(request)
                         .await
                         .unwrap_err();
                 assert!(matches!(
@@ -208,6 +225,18 @@ fn early_relay_rejection_classifies_block_totals_not_state_pressure() {
             hash,
             source: Amount::<NonNegative>::try_from(i64::MAX).unwrap_err(),
         },
+        BlockError::TooManyShieldedActions {
+            height,
+            hash,
+            pool: "Orchard actions",
+            count: 2,
+            limit: 1,
+        },
+        BlockError::from(zebra_chain::parameters::subsidy::SubsidyError::FundingStreamNotFound),
+        BlockError::from(zebra_chain::parameters::subsidy::SubsidyError::FoundersRewardNotFound),
+        BlockError::from(
+            zebra_chain::parameters::subsidy::SubsidyError::OneTimeLockboxDisbursementNotFound,
+        ),
     ] {
         assert!(VerifyBlockError::from(error).is_deterministic_rejection());
     }
@@ -220,6 +249,46 @@ fn early_relay_rejection_classifies_block_totals_not_state_pressure() {
         hash
     }
     .is_deterministic_rejection());
+}
+
+/// Untyped state errors stay retryable on both cached and ordinary commit paths.
+#[tokio::test(flavor = "multi_thread")]
+async fn untyped_commit_errors_do_not_record_rejections() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for cached in [false, true] {
+            let (mut verifier, _state, solved, _calls, _read) = verified_proposal().await;
+            if !cached {
+                verifier.proposals.send_modify(VecDeque::clear);
+            }
+            let state = tower::service_fn(move |request| async move {
+                match request {
+                    zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
+                    zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
+                    zs::Request::CommitContextuallyVerifiedBlock(_) if cached => {
+                        Err("untyped state commit failure".into())
+                    }
+                    zs::Request::CommitSemanticallyVerifiedBlock(_) if !cached => {
+                        Err("untyped state commit failure".into())
+                    }
+                    zs::Request::RejectBlock(_) => {
+                        panic!("an untyped commit error must not record a rejection")
+                    }
+                    other => panic!("unexpected state request: {other:?}"),
+                }
+            });
+            verifier.state_service = Buffer::new(BoxService::new(state), 10);
+            let error = verifier.oneshot(Request::Commit(solved)).await.unwrap_err();
+            assert!(
+                matches!(&error, VerifyBlockError::StateService { source, .. }
+                    if source.to_string() == "untyped state commit failure"),
+                "commit errors must preserve their unclassified source: {error:?}"
+            );
+            assert!(!error.is_deterministic_rejection());
+        }
+    })
+    .await
+    .expect("untyped commit failures return without attempting rejection authentication");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -7,6 +7,7 @@ use zebra_chain::{
 };
 use zebra_test::mock_service::MockService;
 
+mod mining_rejections;
 mod rejections;
 
 async fn state() -> (Network, ProposalTestState, zs::ReadStateService) {
@@ -184,17 +185,35 @@ async fn early_relay_authenticated_tx_failure_is_nonpunitive() {
         assert!(matches!(error, VerifyBlockError::EarlyRelay(_)));
         assert_eq!(error.misbehavior_score(), 0);
         assert!(cache.get(&block.hash()).is_none());
-        let transactions = tower::service_fn(|_| async {
-            Err::<tx::BlockResponse, BoxError>(TransactionError::BadBalance.into())
+        let dispatches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = dispatches.clone();
+        let transactions = tower::service_fn(move |_| {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Err::<tx::BlockResponse, BoxError>(TransactionError::BadBalance.into()) }
         });
+        let error = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
+            .oneshot(Request::Commit(block.clone()))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, VerifyBlockError::EarlyRelayRejected));
+        assert_eq!(error.misbehavior_score(), 0);
+        assert_eq!(dispatches.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let fresh = candidate(&network, &read, false).await;
+        assert_ne!(fresh.hash(), block.hash());
+        let expected_dispatches = fresh.transactions.len();
         let error = SemanticBlockVerifier::new(&network, state, transactions)
-            .oneshot(Request::Commit(block))
+            .oneshot(Request::Commit(fresh))
             .await
             .unwrap_err();
         assert_eq!(
             error.misbehavior_score(),
             100,
             "ordinary sources retain punishment"
+        );
+        assert_eq!(
+            dispatches.load(std::sync::atomic::Ordering::SeqCst),
+            expected_dispatches,
         );
     })
     .await
@@ -371,6 +390,7 @@ async fn early_relay_pre_nu5_keeps_ordinary_scoring() {
             Ok::<_, BoxError>(match request {
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
                 zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
+                zs::Request::RejectBlock(_) => zs::Response::Rejected(false),
                 _ => panic!("pre-NU5 negotiated bodies use ordinary validation"),
             })
         });

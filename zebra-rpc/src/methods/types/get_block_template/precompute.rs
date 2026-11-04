@@ -386,10 +386,17 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
         }
         candidate_changes.mark_seen();
 
-        if let Some(info) = mining_candidate(read_state.clone()).await {
+        if let Some(info) = mining_candidate(read_state.clone())
+            .await
+            .filter(|info| candidate_changes.is_current(info.tip_hash))
+        {
             if let Ok(height) = info.tip_height.next() {
                 store_precomputed_coinbase(&mut next_coinbase, height, &coinbase_cache).await;
             }
+            if !candidate_changes.is_current(info.tip_hash) {
+                continue;
+            }
+            let candidate_hash = info.tip_hash;
             if let Ok(Some((template, _))) = build(
                 &network,
                 &miner_params,
@@ -401,6 +408,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             )
             .await
             {
+                if !candidate_changes.is_current(candidate_hash) {
+                    continue;
+                }
                 let now = DateTime32::now();
                 if !template.needs_difficulty_refresh(&network, now) {
                     let refresh_at_boundary = template.needs_difficulty_refresh(
