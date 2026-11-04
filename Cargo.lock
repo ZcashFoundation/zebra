@@ -7528,6 +7528,7 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
+ "zebra-test",
 ]
 
 [[package]]
