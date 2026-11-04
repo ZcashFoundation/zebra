@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Cached mining candidates reuse created outputs when queued and committed.
+time: 2026-11-04T02:22:18.494257767+01:00

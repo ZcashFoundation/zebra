@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Block verification passes shared created outputs directly to the state service.
+time: 2026-11-04T02:22:18.49059181+01:00
