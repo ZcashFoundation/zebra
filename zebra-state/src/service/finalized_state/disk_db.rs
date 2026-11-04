@@ -398,6 +398,16 @@ enum DbMode {
     ReadOnlySecondary,
 }
 
+/// The holder of a database lock that RocksDB failed to acquire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockHolder {
+    /// Another process has the database open.
+    OtherProcess,
+
+    /// This process already has the database open.
+    ThisProcess,
+}
+
 impl DbMode {
     /// Returns true if dropping the database should delete its files.
     fn deletes_files_on_drop(self) -> bool {
@@ -1086,24 +1096,32 @@ impl DiskDb {
                 Ok(db)
             }
 
-            Err(e) if DiskDb::is_lock_conflict(&e) => panic!(
-                "Database {path:?} is locked by another process. \
-                 Hint: Check if another zebrad process is running. \
-                 Error: {e}"
-            ),
+            Err(e) => match (DiskDb::lock_holder(e.as_ref()), e.kind()) {
+                (Some(LockHolder::OtherProcess), _) => panic!(
+                    "Database {path:?} is locked by another process. \
+                     Hint: Check if another zebrad process is running. \
+                     Error: {e}"
+                ),
 
-            Err(e) if matches!(e.kind(), ErrorKind::IOError) => panic!(
-                "I/O error opening database {path:?}. \
-                 Hint: Check that the state cache_dir exists, is mounted, \
-                 is writable by zebrad, and has free disk space. \
-                 Error: {e}"
-            ),
+                (Some(LockHolder::ThisProcess), _) => panic!(
+                    "Database {path:?} is already open in this zebrad process. \
+                     This is a bug in Zebra. \
+                     Error: {e}"
+                ),
 
-            Err(e) => panic!(
-                "Opening database {path:?} failed. \
-                        Hint: Try changing the state cache_dir in the Zebra config. \
-                        Error: {e}",
-            ),
+                (None, ErrorKind::IOError) => panic!(
+                    "I/O error opening database {path:?}. \
+                     Hint: Check that the state cache_dir exists, is mounted, \
+                     is writable by zebrad, and has free disk space. \
+                     Error: {e}"
+                ),
+
+                (None, _) => panic!(
+                    "Opening database {path:?} failed. \
+                     Hint: Try changing the state cache_dir in the Zebra config. \
+                     Error: {e}",
+                ),
+            },
         }
     }
 
@@ -1751,20 +1769,29 @@ impl DiskDb {
         }
     }
 
-    /// Returns `true` if `error` means another process or `DiskDb` instance holds the
-    /// database lock.
+    /// Returns who holds the database lock, if the RocksDB open error `message` means
+    /// the lock is already held.
     ///
-    /// RocksDB reports lock conflicts as I/O errors, so the message text is the only
-    /// way to tell them apart from other I/O errors.
-    fn is_lock_conflict(error: &rocksdb::Error) -> bool {
-        match error.kind() {
-            ErrorKind::Busy => true,
-            ErrorKind::IOError => {
-                let message = error.as_ref();
-                message.contains("While lock file")
-                    || message.contains("lock hold by current process")
-            }
-            _ => false,
+    /// RocksDB reports a held lock as an I/O error, so the message text is the only way
+    /// to tell it apart from other I/O errors. These are the strings RocksDB 10.4 writes
+    /// in `env/fs_posix.cc` and `port/win/env_win.cc`. A held `fcntl` lock fails with
+    /// `EAGAIN` or `EACCES`; other `fcntl` failures, such as `ENOLCK` on a filesystem
+    /// without lock support, are not a held lock. The Windows check matches the English
+    /// system message, so on other system languages a held lock is reported as an I/O
+    /// error, which still includes the RocksDB error.
+    fn lock_holder(message: &str) -> Option<LockHolder> {
+        let posix_lock_held = message.contains("While lock file")
+            && (message.contains("Resource temporarily unavailable")
+                || message.contains("Permission denied"));
+        let windows_lock_held = message.contains("Failed to create lock file")
+            && message.contains("being used by another process");
+
+        if posix_lock_held || windows_lock_held {
+            Some(LockHolder::OtherProcess)
+        } else if message.contains("lock hold by current process") {
+            Some(LockHolder::ThisProcess)
+        } else {
+            None
         }
     }
 
