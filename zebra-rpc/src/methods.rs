@@ -365,7 +365,9 @@ pub trait Rpc {
     #[method(name = "getmempoolinfo")]
     async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse>;
 
-    /// Returns all transaction ids in the memory pool, as a JSON array.
+    /// Returns transaction ids in the memory pool, as a JSON array.
+    ///
+    /// Non-verbose responses are bounded to 25,000 transaction IDs.
     ///
     /// # Parameters
     ///

@@ -39,7 +39,7 @@ pub use self::{
 /// because all mempool transactions must be verified.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Request {
-    /// Query all [`UnminedTxId`]s in the mempool.
+    /// Query a bounded snapshot of [`UnminedTxId`]s in the mempool.
     TransactionIds,
 
     /// Query matching [`UnminedTx`] in the mempool,
@@ -83,10 +83,8 @@ pub enum Request {
     /// Request a [`VerifiedUnminedTx`] and its dependencies by its mined id.
     TransactionWithDepsByMinedId(transaction::Hash),
 
-    /// Get all the [`VerifiedUnminedTx`] in the mempool.
-    ///
-    /// Equivalent to `TransactionsById(TransactionIds)`,
-    /// but each transaction also includes the `miner_fee` and `legacy_sigop_count` fields.
+    /// Get all the [`VerifiedUnminedTx`] in the mempool, without the `TransactionIds` snapshot
+    /// bound. Each transaction also includes the `miner_fee` and `legacy_sigop_count` fields.
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
@@ -151,7 +149,7 @@ pub enum Request {
 /// confirm that the mempool has been checked for newly verified transactions.
 #[derive(Debug)]
 pub enum Response {
-    /// Returns all [`UnminedTxId`]s from the mempool.
+    /// Returns a bounded snapshot of [`UnminedTxId`]s from the mempool.
     TransactionIds(HashSet<UnminedTxId>),
 
     /// Returns matching [`UnminedTx`] from the mempool.

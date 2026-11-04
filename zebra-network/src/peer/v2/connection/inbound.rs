@@ -935,7 +935,7 @@ where
         // As on the legacy connection, a snapshot this large is unlikely with the default mempool
         // config and could indicate an amplification attack, and letting peers know every
         // transaction we have isn't that important, so the IDs past the limit are dropped. The
-        // inbound service relies on the network layer for this bound.
+        // production mempool applies the same bound before allocating its snapshot.
         if ids.len() > max_ids {
             tracing::debug!(
                 id_count = ids.len(),
