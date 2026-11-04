@@ -36,8 +36,9 @@ use zebra_chain::{
 use crate::{
     database_format_version_on_disk,
     service::finalized_state::disk_format::{
-        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES, FromDisk,
-        IntoDisk, TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT,
+        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES,
+        upgrade::restorable_db_source_version, FromDisk, IntoDisk, TransactionIndex,
+        TransactionLocation, MAX_ON_DISK_HEIGHT,
     },
     write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
     StateInitError,
@@ -1095,15 +1096,18 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
-        let column_families_in_code: Vec<String> = column_families_in_code.into_iter().collect();
+        let mut column_families_in_code: Vec<String> =
+            column_families_in_code.into_iter().collect();
         let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
         if read_only && !column_families_on_disk.is_empty() {
             // A secondary instance can not create column families, and RocksDB refuses to open
             // one with a column family that is not on disk. A database without one of the
-            // column families in code needs a writable start to add it.
+            // column families in code needs a writable start to add it, except `snapshot_base`:
+            // its reader treats a missing column family as an unmarked database, which every
+            // database from before 30.1.0 is.
             if let Some(missing) = column_families_in_code
                 .iter()
-                .find(|cf| !column_families_on_disk.contains(cf))
+                .find(|cf| !column_families_on_disk.contains(cf) && cf.as_str() != SNAPSHOT_BASE)
             {
                 info!(
                     ?missing,
@@ -1112,6 +1116,7 @@ impl DiskDb {
                 );
                 return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade { path });
             }
+            column_families_in_code.retain(|cf| column_families_on_disk.contains(cf));
         }
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
@@ -1417,14 +1422,13 @@ impl DiskDb {
     /// Tries to reuse an existing db after a major upgrade.
     ///
     /// If the current db version belongs to `restorable_db_versions`, the function renames the
-    /// immediately preceding major version's directory to the path used by the current version.
+    /// nearest earlier registered major version's directory to the path used by the current version.
     /// It rewrites the version file with the old major version so the required upgrades can run.
     ///
     /// In `read_only` mode, returns the candidate's stored version without modifying either path.
     /// The caller must check that its records and directory version permit read-only reuse.
     ///
     /// Returns the old disk version if a candidate was found or moved, or `None` otherwise.
-    // TODO: Update this function to rename older major db format version to the current version (#9565).
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],
@@ -1440,7 +1444,7 @@ impl DiskDb {
         {
             let db_kind = db_kind.as_ref();
 
-            let old_major_db_ver = major_db_ver - 1;
+            let old_major_db_ver = restorable_db_source_version(major_db_ver)?;
             let old_path = config.db_path(db_kind, old_major_db_ver, network);
             // Exit early if the path doesn't exist or there's an error checking it.
             if !fs::exists(&old_path).unwrap_or(false) {

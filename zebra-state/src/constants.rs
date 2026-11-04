@@ -38,7 +38,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 30;
+const DATABASE_FORMAT_VERSION: u64 = 32;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -49,12 +49,16 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
-/// - 30.1.0: adds the `snapshot_base` column family, which marks a database imported from a
+/// - 32.0.0: isolates snapshot-born databases in `state/v32`, so 30.0.0 readers cannot open and
+///   downgrade them. Compatible fixed-height v30 state moves to v32 without record rewrites. The
+///   independent variable-height record migration owns v31; once registered, that migration runs
+///   before v32 and v31 becomes the reusable source directory. Snapshot-born databases must not be
+///   renamed back to v30 or v31, because those readers do not enforce the snapshot history floor.
+/// - 30.1.0: added the `snapshot_base` column family, which marks a database imported from a
 ///   state snapshot with its window start, snapshot height, block hash and manifest. Existing
 ///   databases get the column family empty when they are opened, so the upgrade rewrites no
-///   records. A database imported from a snapshot has no blocks below its window, and only
-///   readers of this version know that: 30.0.0 builds must not open it, and it must never be
-///   renamed back to `state/v29`.
+///   records. The v32 directory barrier supersedes the unenforceable same-directory prohibition
+///   on 30.0.0 readers; existing 30.1.0 databases upgrade to v32 without record rewrites.
 /// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
 ///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
 ///   binaries must not open a pruned v30 directory: their minor-version downgrade path assumes
@@ -83,7 +87,7 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

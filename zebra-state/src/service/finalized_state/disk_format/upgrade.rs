@@ -146,7 +146,12 @@ fn format_upgrades(
             "add the state snapshot base marker",
             Version::new(30, 1, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 11])
+        // The major directory prevents older readers from opening and downgrading snapshot state.
+        Box::new(no_migration::NoMigration::new(
+            "isolate snapshot state from older readers",
+            Version::new(32, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 12])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -161,6 +166,22 @@ pub fn restorable_db_versions() -> Vec<u64> {
                 .then_some(upgrade.version().major)
         })
         .collect()
+}
+
+/// Returns the source directory major for a reusable database upgrade.
+///
+/// This is the nearest earlier registered format major, not necessarily `running_major - 1`.
+/// Consequently v32 reuses v30 until the independent v31 record migration is registered; after
+/// that integration, v32 reuses v31 and the migrations remain ordered.
+pub fn restorable_db_source_version(running_major: u64) -> Option<u64> {
+    if !restorable_db_versions().contains(&running_major) {
+        return None;
+    }
+
+    format_upgrades(None)
+        .map(|upgrade| upgrade.version().major)
+        .filter(|major| *major < running_major)
+        .max()
 }
 
 /// Whether the existing records can be read without applying any intervening migrations.
@@ -1030,4 +1051,15 @@ fn format_upgrades_are_in_version_order() {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
     }
+}
+
+#[test]
+fn reusable_source_follows_the_registered_upgrade_chain() {
+    assert_eq!(restorable_db_source_version(30), Some(29));
+    assert_eq!(restorable_db_source_version(32), Some(30));
+    assert_eq!(
+        restorable_db_source_version(31),
+        None,
+        "v31 is registered by the independent variable-height migration"
+    );
 }
