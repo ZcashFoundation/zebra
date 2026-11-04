@@ -128,9 +128,9 @@ fn prune_removes_right_children() -> Result<()> {
     assert_eq!(2, queue.blocks.len());
     assert_eq!(1, queue.by_parent.len());
     assert_eq!(1, queue.by_height.len());
-    assert!(queue.get_mut(&block1.hash()).is_none());
-    assert!(queue.get_mut(&child1.hash()).is_some());
-    assert!(queue.get_mut(&child2.hash()).is_some());
+    assert!(!queue.has(block1.hash()));
+    assert!(queue.has(child1.hash()));
+    assert!(queue.has(child2.hash()));
     assert_eq!(632, queue.known_utxos.len());
 
     // Pruning the children of the first block removes both of the other
@@ -139,8 +139,8 @@ fn prune_removes_right_children() -> Result<()> {
     assert_eq!(0, queue.blocks.len());
     assert_eq!(0, queue.by_parent.len());
     assert_eq!(0, queue.by_height.len());
-    assert!(queue.get_mut(&child1.hash()).is_none());
-    assert!(queue.get_mut(&child2.hash()).is_none());
+    assert!(!queue.has(child1.hash()));
+    assert!(!queue.has(child2.hash()));
     assert_eq!(0, queue.known_utxos.len());
 
     Ok(())
@@ -303,6 +303,11 @@ fn queued_blocks_keep_shared_outpoints_until_last_owner_is_dequeued() -> Result<
     let mut queue = QueuedBlocks::default();
     queue.queue(block.clone().into_queued());
     queue.queue(other.clone().into_queued());
+
+    let removed = queue.remove_queued(&block.hash()).expect("block is queued");
+    assert!(queue.utxo(&shared).is_some());
+    assert!(!queue.has_queued_children(block.header.previous_block_hash));
+    queue.queue(removed);
 
     queue.dequeue_children(block.header.previous_block_hash);
     assert!(queue.utxo(&shared).is_some());
@@ -513,6 +518,35 @@ fn full_queue_fails_abandoned_leaves_first() -> Result<()> {
         Err(TryRecvError::Empty),
         "the live block must outlive abandoned leaves"
     );
+
+    Ok(())
+}
+
+/// Removing and reinserting a queued block releases its indexes and UTXOs exactly once.
+#[test]
+fn queued_blocks_remove_and_reinsert_releases_retained_data() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+    queue.queue(block.clone().into_queued());
+
+    let removed = queue.remove_queued(&block.hash()).expect("block is queued");
+    assert_eq!(removed.0.block, block);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.remove_queued(&block.hash()).is_none());
+
+    queue.queue(removed);
+    let children = queue.dequeue_children(block.header.previous_block_hash);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].0.block, block);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
 
     Ok(())
 }

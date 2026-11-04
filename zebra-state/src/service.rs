@@ -838,26 +838,25 @@ impl StateService {
 
         // [`Request::CommitSemanticallyVerifiedBlock`] contract: a request to commit a block which
         // has been queued but not yet committed to the state fails the older request and replaces
-        // it with the newer request.
-        let rsp_rx = if let Some((_, old_rsp_tx)) = self
+        // it with the newer request. A block hash does not identify its authorizing data, so
+        // replace the body together with its response channel.
+        if let Some(old_request) = self
             .non_finalized_state_queued_blocks
-            .get_mut(&semantically_verified.hash)
+            .remove_queued(&semantically_verified.hash)
         {
             tracing::debug!("replacing older queued request with new request");
-            let (mut rsp_tx, rsp_rx) = oneshot::channel();
-            std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
-                Some(semantically_verified.hash.into()),
-                KnownBlock::Queue,
-            )
-            .into()));
-            rsp_rx
-        } else {
-            let (rsp_tx, rsp_rx) = oneshot::channel();
-            self.non_finalized_state_queued_blocks
-                .queue((semantically_verified, rsp_tx));
-            rsp_rx
-        };
+            Self::send_semantically_verified_block_error(
+                old_request,
+                CommitBlockError::new_duplicate(
+                    Some(semantically_verified.hash.into()),
+                    KnownBlock::Queue,
+                ),
+            );
+        }
+
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        self.non_finalized_state_queued_blocks
+            .queue((semantically_verified, rsp_tx));
 
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and

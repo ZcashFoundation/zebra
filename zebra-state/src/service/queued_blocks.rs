@@ -253,9 +253,14 @@ impl QueuedBlocks {
         self.update_metrics();
     }
 
-    /// Return the queued block if it has already been registered
-    pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedSemanticallyVerified> {
-        self.blocks.get_mut(hash).map(|(queued, _bytes)| queued)
+    /// Removes a queued block, its indexes, its outputs and its memory charge, if it is queued.
+    pub fn remove_queued(&mut self, hash: &block::Hash) -> Option<QueuedSemanticallyVerified> {
+        if !self.blocks.contains_key(hash) {
+            return None;
+        }
+        let queued = self.remove(hash);
+        self.update_metrics();
+        Some(queued)
     }
 
     /// Update metrics after the queue is modified
