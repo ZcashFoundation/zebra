@@ -224,7 +224,7 @@ impl ChainTipSender {
     ///
     /// The caller supplies the current database tip, which may have advanced since
     /// the last checkpointed block. If both states are empty, clear any old tip.
-    pub(crate) fn clear_best_non_finalized_tip(&mut self, finalized_tip: Option<ChainTipBlock>) {
+    pub fn clear_best_non_finalized_tip(&mut self, finalized_tip: Option<ChainTipBlock>) {
         self.has_non_finalized_tip = false;
         if finalized_tip.is_some() {
             self.update(finalized_tip);

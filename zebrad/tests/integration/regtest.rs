@@ -1541,11 +1541,11 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let error = rpc_client
         .json_result_from_call::<()>("invalidateblock", &root_params)
         .await
-        .expect_err("invalidating the only non-finalized root must return an RPC error");
+        .expect_err("invalidating a root shared by every chain must return an RPC error");
     assert!(
         error
             .to_string()
-            .contains("root of the only non-finalized chain"),
+            .contains("root of every non-finalized chain"),
         "expected the root-invalidation error, got: {error}"
     );
     let tip_after: String = rpc_client
