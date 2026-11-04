@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::*;
 
 /// Cheap, order- and level-sensitive hashes keep the multi-subtree regression small.
@@ -45,7 +47,7 @@ fn append_batch_keeps_last_completed_subtree() {
     }
 
     assert_eq!(
-        append_batch(&mut batch, &commitments, |value| Node(*value)),
+        append_batch_with_cancel(&mut batch, &commitments, |value| Node(*value), || false),
         Ok(expected)
     );
     assert_eq!(
@@ -54,4 +56,38 @@ fn append_batch_keeps_last_completed_subtree() {
     );
     assert_eq!(batch, sequential);
     assert_eq!(batch.root(), sequential.root());
+}
+
+#[test]
+fn cancelled_batch_does_no_hashing_or_appends() {
+    static COMBINE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct CountingNode(u64);
+
+    impl Hashable for CountingNode {
+        fn empty_leaf() -> Self {
+            Self(0)
+        }
+
+        fn combine(_level: incrementalmerkletree::Level, _left: &Self, _right: &Self) -> Self {
+            COMBINE_COUNT.fetch_add(1, Ordering::Relaxed);
+            Self(0)
+        }
+    }
+
+    let commitments: Vec<_> = (0..128).collect();
+    let mut batch = Frontier::<CountingNode, DEPTH>::empty();
+    let before = batch.clone();
+
+    let result = append_batch_with_cancel(
+        &mut batch,
+        &commitments,
+        |value| CountingNode(*value),
+        || true,
+    );
+
+    assert!(matches!(result, Err(AppendBatchError::Cancelled)));
+    assert_eq!(COMBINE_COUNT.load(Ordering::Relaxed), 0);
+    assert_eq!(batch, before);
 }

@@ -6,7 +6,11 @@ use std::{
     collections::{BTreeSet, HashMap},
     mem,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
 };
 
 use indexmap::IndexMap;
@@ -14,6 +18,7 @@ use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     parameters::Network,
+    primitives::zcash_history::BlockCommitmentTreeRoots,
     sprout::{self},
     transparent,
 };
@@ -47,6 +52,97 @@ mod tests;
 use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
 pub(crate) use created_utxos::CreatedUtxos;
+
+/// A block that passed the checks before its chain update, with what the rest of its commit needs.
+struct CheckedBlock {
+    /// The contextually verified block.
+    contextual: ContextuallyVerifiedBlock,
+
+    /// The Sprout treestates that the block's anchors refer to.
+    sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+
+    /// How long the transparent spend checks took.
+    transparent_spend: Duration,
+
+    /// How long the anchor checks and reads took.
+    anchor_reads: Duration,
+}
+
+/// The parts of a block commit that run alongside its note commitment tree updates.
+struct NonTreeUpdate {
+    /// The parent chain clone, with the block's updates other than the trees.
+    chain: Chain,
+
+    /// The contextually verified block.
+    contextual: ContextuallyVerifiedBlock,
+
+    /// The Sprout anchor check result, returned after the block commitment check result.
+    sprout_anchor_result: Result<(), ValidateContextError>,
+
+    /// The chain update result, returned after the tree update result.
+    chain_updates_result: Result<(), ValidateContextError>,
+
+    /// How long the transparent spend checks took.
+    transparent_spend: Duration,
+
+    /// How long the anchor checks and reads took.
+    anchor_reads: Duration,
+
+    /// How long the job waited for a rayon thread to start it.
+    pickup: Duration,
+
+    /// How long the parent chain clone took.
+    chain_clone: Duration,
+
+    /// How long the chain updates took.
+    chain_updates: Duration,
+}
+
+/// How long each sub-phase of a block commit took.
+///
+/// Some phases run on rayon threads, so the commit collects their durations and records them on
+/// the committing thread, once the block is committed.
+#[derive(Copy, Clone, Debug)]
+struct CommitPhases {
+    /// The transparent spend checks and UTXO reads.
+    transparent_spend: Duration,
+
+    /// The Sapling, Orchard and Sprout anchor reads.
+    anchor_reads: Duration,
+
+    /// The wait for a rayon thread to start the job that clones the parent chain.
+    pickup: Duration,
+
+    /// The parent chain clone.
+    chain_clone: Duration,
+
+    /// The note commitment tree appends and root calculations.
+    trees: Duration,
+
+    /// The chain updates other than the trees.
+    chain_updates: Duration,
+
+    /// The history tree push.
+    history: Duration,
+}
+
+impl CommitPhases {
+    /// Records each phase in the block writer's phase histogram.
+    fn record(&self) {
+        for (phase, duration) in [
+            ("transparent_spend", self.transparent_spend),
+            ("anchor_reads", self.anchor_reads),
+            ("pickup", self.pickup),
+            ("chain_clone", self.chain_clone),
+            ("trees", self.trees),
+            ("chain_updates", self.chain_updates),
+            ("history", self.history),
+        ] {
+            metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => phase)
+                .record(duration.as_secs_f64());
+        }
+    }
+}
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -699,6 +795,13 @@ impl NonFinalizedState {
     ///
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
+    ///
+    /// The note commitment tree updates take most of a shielded block's commit, and only need the
+    /// parent chain's tip trees, so they start first, on this thread. The checks and reads, the
+    /// chain clone, and the other chain updates run on rayon threads at the same time. A check that
+    /// precedes the tree update cancels it if that check fails. The history tree update needs the
+    /// new tree roots, so it runs after them. The commit returns the same result as running these
+    /// steps in series: the first error in that order.
     #[tracing::instrument(
         level = "debug",
         skip(self, finalized_state, new_chain, prepared),
@@ -716,49 +819,172 @@ impl NonFinalizedState {
             });
         }
 
+        let network = &self.network;
+        let block = prepared.block.clone();
+
+        // The tree updates only need the parent's tip trees and history tree.
+        let mut trees = new_chain.note_commitment_trees_for_tip();
+        let parent_history_tree = new_chain.history_block_commitment_tree();
+
+        let mut block_commitment_result = None;
+        let mut non_tree_result = None;
+        let mut tree_result = None;
+        let mut tree_duration = Duration::ZERO;
+        let cancel_tree_update = AtomicBool::new(false);
+
+        // Keep the commit's span on the checks and reads, which used to run on this thread.
+        let span = tracing::Span::current();
+
+        // The jobs are spawned as the scope starts.
+        let spawned_at = Instant::now();
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                let result = check::block_commitment_is_valid_for_chain_history(
+                    block.clone(),
+                    network,
+                    &parent_history_tree,
+                    None,
+                );
+                if result.is_err() {
+                    cancel_tree_update.store(true, Ordering::Release);
+                }
+                block_commitment_result = Some(result);
+            });
+
+            scope.spawn_fifo(|_scope| {
+                let result = span.in_scope(|| {
+                    Self::validate_and_update_except_trees(
+                        network,
+                        new_chain,
+                        prepared,
+                        finalized_state,
+                        spawned_at,
+                        &cancel_tree_update,
+                    )
+                });
+                if result.is_err() {
+                    cancel_tree_update.store(true, Ordering::Release);
+                    #[cfg(test)]
+                    tests::record_early_check_failure();
+                }
+                non_tree_result = Some(result);
+            });
+
+            // The costliest tree updates run on this thread, and the rest on rayon threads.
+            let phase_start = Instant::now();
+            #[cfg(test)]
+            tests::wait_for_early_check_failure_before_tree_update();
+            tree_result = Some(trees.update_trees_parallel_with_cancel(&block, || {
+                cancel_tree_update.load(Ordering::Acquire)
+            }));
+            tree_duration = phase_start.elapsed();
+        });
+
+        // Return the first error that a commit running these steps in series would return.
+        let NonTreeUpdate {
+            chain,
+            contextual,
+            sprout_anchor_result,
+            chain_updates_result,
+            transparent_spend,
+            anchor_reads,
+            pickup,
+            chain_clone,
+            chain_updates,
+        } = non_tree_result.expect("scope has finished")?;
+        block_commitment_result.expect("scope has finished")?;
+        sprout_anchor_result?;
+        assert!(
+            tree_result.expect("scope has finished")?,
+            "tree updates are cancelled only by an error returned above"
+        );
+        chain_updates_result?;
+
+        // The history tree commits to the new tree roots.
+        let phase_start = Instant::now();
+        let history_tree = Chain::history_tree_with_block(
+            network,
+            parent_history_tree,
+            block,
+            BlockCommitmentTreeRoots {
+                sapling: &trees.sapling.root(),
+                orchard: &trees.orchard.root(),
+                ironwood: &trees.ironwood.root(),
+            },
+        )?;
+        let history = phase_start.elapsed();
+
+        let chain = chain.push_with_trees(contextual, trees, history_tree);
+
+        if self.should_count_metrics() {
+            CommitPhases {
+                transparent_spend,
+                anchor_reads,
+                pickup,
+                chain_clone,
+                trees: tree_duration,
+                chain_updates,
+                history,
+            }
+            .record();
+        }
+
+        Ok(Arc::new(chain))
+    }
+
+    /// Checks the transparent spends, anchors and value balances of `prepared` against
+    /// `new_chain` and `finalized_state`, and returns the contextually verified block, with the
+    /// Sprout treestates that its anchors refer to.
+    fn validate_spends_anchors_and_value_balance(
+        network: &Network,
+        new_chain: &Arc<Chain>,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<CheckedBlock, ValidateContextError> {
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        let phase_start = Instant::now();
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
+        let transparent_spend = phase_start.elapsed();
 
         // Reads from disk
+        let phase_start = Instant::now();
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
-            &new_chain,
+            new_chain,
             &prepared,
         )?;
 
         // Reads from disk
         let sprout_final_treestates = check::anchors::block_fetch_sprout_final_treestates(
             finalized_state,
-            &new_chain,
+            new_chain,
             &prepared,
         );
+        let anchor_reads = phase_start.elapsed();
 
         let (height, block_hash) = (prepared.height, prepared.hash);
         let transaction_count = prepared.block.transactions.len();
         let spent_utxo_count = spent_utxos.len();
-        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
-            height,
-            &self.network,
-            new_chain.chain_value_pools,
-        )
-        .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
-            subsidy_error: subsidy_error.into(),
-            height,
-            block_hash,
-        })?;
+        let deferred_pool_balance_change =
+            calculate_deferred_pool_balance_change(height, network, new_chain.chain_value_pools)
+                .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+                    subsidy_error: subsidy_error.into(),
+                    height,
+                    block_hash,
+                })?;
 
         let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
             prepared,
             spent_utxos,
             deferred_pool_balance_change,
-            &self.network,
+            network,
             new_chain.chain_value_pools,
         )
         .map_err(|value_balance_error| {
@@ -772,81 +998,88 @@ impl NonFinalizedState {
         })?;
 
         // The semantic verifier defers parent-dependent payouts to this exact-parent check.
-        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, network) {
             check::nsm_subsidy_is_valid(
                 &contextual,
-                &self.network,
+                network,
                 new_chain.chain_value_pools,
                 block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
             )?;
         }
 
-        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+        Ok(CheckedBlock {
+            contextual,
+            sprout_final_treestates,
+            transparent_spend,
+            anchor_reads,
+        })
     }
 
-    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
-    #[allow(clippy::unwrap_in_result)]
+    /// Runs the parts of a block commit that don't need its note commitment trees: the checks and
+    /// reads before the chain update, the Sprout anchor checks, the parent chain clone, and the
+    /// chain updates other than the trees. `spawned_at` is when the job running this was spawned.
+    /// A failed Sprout anchor check sets `cancel_tree_update`, because it precedes the tree update.
+    ///
+    /// Returns the first error of the checks before the chain update. The Sprout anchor and chain
+    /// update results come later in the commit's error order, so they are returned in the
+    /// [`NonTreeUpdate`].
     #[tracing::instrument(
-        skip(new_chain, contextual, sprout_final_treestates),
-        fields(height = ?contextual.height, hash = %contextual.hash)
+        level = "debug",
+        skip_all,
+        fields(height = ?prepared.height, hash = %prepared.hash)
     )]
-    fn validate_and_update_parallel(
+    fn validate_and_update_except_trees(
+        network: &Network,
         new_chain: Arc<Chain>,
-        contextual: ContextuallyVerifiedBlock,
-        sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
-    ) -> Result<Arc<Chain>, ValidateContextError> {
-        let mut block_commitment_result = None;
-        let mut sprout_anchor_result = None;
-        let mut chain_push_result = None;
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+        spawned_at: Instant,
+        cancel_tree_update: &AtomicBool,
+    ) -> Result<NonTreeUpdate, ValidateContextError> {
+        let pickup = spawned_at.elapsed();
 
-        // Clone function arguments for different threads
-        let block = contextual.block.clone();
-        let network = new_chain.network();
-        let history_tree = new_chain.history_block_commitment_tree();
+        let CheckedBlock {
+            contextual,
+            sprout_final_treestates,
+            transparent_spend,
+            anchor_reads,
+        } = Self::validate_spends_anchors_and_value_balance(
+            network,
+            &new_chain,
+            prepared,
+            finalized_state,
+        )?;
 
-        let block2 = contextual.block.clone();
-        let height = contextual.height;
-        let transaction_hashes = contextual.transaction_hashes.clone();
+        let sprout_anchor_result = check::anchors::block_sprout_anchors_refer_to_treestates(
+            sprout_final_treestates,
+            contextual.block.clone(),
+            contextual.transaction_hashes.clone(),
+            contextual.height,
+        );
+        if sprout_anchor_result.is_err() {
+            cancel_tree_update.store(true, Ordering::Release);
+        }
 
-        rayon::in_place_scope_fifo(|scope| {
-            scope.spawn_fifo(|_scope| {
-                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
-                    block,
-                    &network,
-                    &history_tree,
-                    None,
-                ));
-            });
+        // We're pretty sure the new block is valid, so clone the inner chain if needed.
+        let phase_start = Instant::now();
+        let mut chain = Arc::unwrap_or_clone(new_chain);
+        let chain_clone = phase_start.elapsed();
 
-            scope.spawn_fifo(|_scope| {
-                sprout_anchor_result =
-                    Some(check::anchors::block_sprout_anchors_refer_to_treestates(
-                        sprout_final_treestates,
-                        block2,
-                        transaction_hashes,
-                        height,
-                    ));
-            });
+        let phase_start = Instant::now();
+        let chain_updates_result = chain.update_chain_tip_with_block_except_trees(&contextual);
+        let chain_updates = phase_start.elapsed();
 
-            // We're pretty sure the new block is valid,
-            // so clone the inner chain if needed, then add the new block.
-            //
-            // Pushing a block onto a Chain can launch additional parallel batches.
-            // TODO: should we pass _scope into Chain::push()?
-            scope.spawn_fifo(|_scope| {
-                // TODO: Replace with Arc::unwrap_or_clone() when it stabilises:
-                // https://github.com/rust-lang/rust/issues/93610
-                let new_chain = Arc::try_unwrap(new_chain)
-                    .unwrap_or_else(|shared_chain| (*shared_chain).clone());
-                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
-            });
-        });
-
-        // Don't return the updated Chain unless all the parallel results were Ok
-        block_commitment_result.expect("scope has finished")?;
-        sprout_anchor_result.expect("scope has finished")?;
-
-        chain_push_result.expect("scope has finished")
+        Ok(NonTreeUpdate {
+            chain,
+            contextual,
+            sprout_anchor_result,
+            chain_updates_result,
+            transparent_spend,
+            anchor_reads,
+            pickup,
+            chain_clone,
+            chain_updates,
+        })
     }
 
     /// Returns the length of the non-finalized portion of the current best chain
