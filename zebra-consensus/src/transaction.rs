@@ -6,7 +6,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -68,14 +67,6 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// This is how long Zebra will wait for an output to be added to the mempool before verification
 /// of the transaction that spends it will fail.
 const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// How long to wait after responding to a mempool request with a transaction that creates new
-/// transparent outputs before polling the mempool service so that it will try adding the verified
-/// transaction and responding to any potential `AwaitOutput` requests.
-///
-/// This should be long enough for the mempool service's `Downloads` to finish processing the
-/// response from the transaction verifier.
-const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
 
 /// Asynchronous verification of block transactions.
 ///
@@ -569,7 +560,7 @@ where
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
             let (spent_utxos, spent_outputs, spent_mempool_outpoints) =
-                Self::mempool_spent_utxos(tx.clone(), height, state.clone(), mempool.clone()).await?;
+                Self::mempool_spent_utxos(tx.clone(), height, state.clone(), mempool).await?;
 
             // Mempool transactions have no block context, so there are no outputs from
             // earlier transactions in the same block to consider.
@@ -639,20 +630,6 @@ where
                 cached_ffi_transaction.p2sh_sigops(),
                 spent_outputs.into(),
             )?;
-
-            if let Some(mut mempool) = mempool {
-                tokio::spawn(async move {
-                    // Best-effort poll of the mempool to provide a timely response to
-                    // `sendrawtransaction` RPC calls or `AwaitOutput` mempool calls.
-                    tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
-                    let _ = mempool
-                        .ready()
-                        .await
-                        .expect("mempool poll_ready() method should not return an error")
-                        .call(mempool::Request::CheckForVerifiedTransactions)
-                        .await;
-                });
-            }
 
             Ok(MempoolResponse { transaction, spent_mempool_outpoints })
         }
