@@ -1,5 +1,5 @@
-//! Fixed test vectors for the bootstrap's manifest and chain checks (design,
-//! §2 and §6), with the network steps driven by mock peers.
+//! Fixed test vectors for the bootstrap's manifest and chain checks, with the
+//! network steps driven by mock peers.
 
 use std::{
     collections::HashMap,
@@ -42,12 +42,13 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::state_snapshot::{
     bootstrap::{
-        check_chain, check_header_chain, check_manifest, check_successor_block,
-        check_successor_commitment, create_import_workspace, download_and_build_with,
-        fetch_header_chain, fetch_manifest, fetch_object, fetch_piece, fetch_successor_copies,
-        finish_install, install_staged_snapshot, quiesce_download_tasks, snapshot_fault,
-        window_start, BootstrapError, ChainCheckError, FetchError, Peers, SstBuilder,
-        VERIFIED_PIECE_CHANNEL_BOUND,
+        begin_snapshot_shutdown, check_chain, check_header_chain, check_manifest,
+        check_successor_block, check_successor_commitment, close_bootstrap_after,
+        create_import_workspace, download_and_build_with, fetch_header_chain, fetch_manifest,
+        fetch_object, fetch_piece, fetch_successor_copies, finish_install, install_staged_snapshot,
+        install_staged_snapshot_with_hook, quiesce_download_tasks, snapshot_fault,
+        wait_for_snapshot_install_with_hook, window_start, BootstrapError, ChainCheckError,
+        FetchError, Peers, SstBuilder, INSTALLS_QUIESCED, VERIFIED_PIECE_CHANNEL_BOUND,
     },
     scheduler::{PieceDescriptor, SchedulerError, VerifiedPiece},
 };
@@ -1140,6 +1141,29 @@ async fn import_workspaces_sweep_stale_siblings() {
     active.release().await;
 }
 
+/// A workspace creation error does not reach the fallback caller before bootstrap endpoint closure
+/// has finished.
+#[tokio::test]
+async fn workspace_errors_wait_for_bootstrap_close() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let root = temp.path().join("not-a-directory");
+    std::fs::write(&root, b"file").expect("the workspace obstacle is a regular file");
+    let closed = Arc::new(AtomicBool::new(false));
+    let closed_on_return = closed.clone();
+
+    let result = close_bootstrap_after(create_import_workspace(&root).await, async move {
+        closed_on_return.store(true, Ordering::SeqCst);
+    })
+    .await;
+
+    assert!(result.is_err(), "the real workspace creation fails");
+    assert!(
+        closed.load(Ordering::SeqCst),
+        "endpoint closure finished before the error returned"
+    );
+}
+
 /// A cleanup error after installation is logged but cannot turn the installed
 /// database back into a bootstrap failure and genesis fallback.
 #[tokio::test]
@@ -1175,6 +1199,91 @@ async fn shutdown_prevents_the_final_import_rename() {
     );
     assert!(!target.exists(), "shutdown prevented the rename");
     assert!(staged.exists(), "the staged database was not moved");
+}
+
+/// An install that wins the final check can finish, but shutdown stays pending until its rename
+/// and parent-directory sync are complete instead of cancelling the runtime around a detached task.
+/// Two waiters pause after their lifecycle loads and before their notification awaits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn shutdown_quiesces_an_install_that_won_the_final_check() {
+    let _init_guard = zebra_test::init();
+    let temp = tempfile::tempdir().expect("a temporary test directory");
+    let staged = temp.path().join("staged");
+    std::fs::create_dir(&staged).expect("the staged database is created");
+    let target = temp.path().join("state");
+    let (checked_tx, checked_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+    let install = tokio::spawn(install_staged_snapshot_with_hook(
+        staged.clone(),
+        target.clone(),
+        None,
+        move || {
+            checked_tx
+                .send(())
+                .expect("the test is waiting for the final check");
+            release_rx
+                .recv()
+                .expect("the test releases the final rename");
+        },
+    ));
+    tokio::task::spawn_blocking(move || checked_rx.recv())
+        .await
+        .expect("the check observer does not panic")
+        .expect("the installer reaches its final check");
+
+    let mut lifecycle_receivers = Vec::new();
+    let mut resume_senders = Vec::new();
+    let mut shutdowns = Vec::new();
+    for _ in 0..2 {
+        let (lifecycle_tx, lifecycle_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        lifecycle_receivers.push(lifecycle_rx);
+        resume_senders.push(resume_tx);
+        shutdowns.push(tokio::spawn(async {
+            begin_snapshot_shutdown();
+            wait_for_snapshot_install_with_hook(move || {
+                lifecycle_tx
+                    .send(())
+                    .expect("the test observes the lifecycle load");
+                resume_rx
+                    .recv()
+                    .expect("the test resumes the notification await");
+            })
+            .await;
+        }));
+    }
+    for lifecycle_rx in lifecycle_receivers {
+        tokio::task::spawn_blocking(move || lifecycle_rx.recv())
+            .await
+            .expect("the lifecycle observer does not panic")
+            .expect("shutdown loads the active installation count");
+    }
+    assert!(shutdowns.iter().all(|shutdown| !shutdown.is_finished()));
+    assert!(!target.exists(), "the test holds the rename open");
+
+    release_tx.send(()).expect("the installer is waiting");
+    install
+        .await
+        .expect("the install task does not panic")
+        .expect("the admitted installation finishes");
+    // The guard supplied one notification. A second single-target notification wakes both enabled
+    // waiters, but the notifications coalesce into one stored permit without the registrations.
+    INSTALLS_QUIESCED.notify_one();
+    for resume_tx in resume_senders {
+        resume_tx
+            .send(())
+            .expect("shutdown is paused before its notification await");
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        for shutdown in shutdowns {
+            shutdown.await.expect("the shutdown task does not panic");
+        }
+    })
+    .await
+    .expect("enabled notifications wake both waiters after the install guard drops");
+    assert!(target.exists(), "the admitted rename completed");
+    assert!(!staged.exists(), "the staged database was moved");
 }
 
 fn successor_at_committing_to(height: u32, history_root: &ChainHistoryMmrRootHash) -> Arc<Block> {

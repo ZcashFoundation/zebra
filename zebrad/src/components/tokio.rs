@@ -141,7 +141,7 @@ mod imp {
             .recv()
             .await;
 
-        zebra_chain::shutdown::set_shutting_down();
+        crate::components::state_snapshot::bootstrap::begin_snapshot_shutdown();
 
         #[cfg(feature = "progress-bar")]
         howudoin::disable();
@@ -152,6 +152,8 @@ mod imp {
             "received {}, starting shutdown",
             name,
         );
+
+        crate::components::state_snapshot::bootstrap::wait_for_snapshot_install().await;
     }
 }
 
@@ -165,7 +167,7 @@ mod imp {
             .await
             .expect("listening for ctrl-c signal should never fail");
 
-        zebra_chain::shutdown::set_shutting_down();
+        crate::components::state_snapshot::bootstrap::begin_snapshot_shutdown();
 
         #[cfg(feature = "progress-bar")]
         howudoin::disable();
@@ -175,5 +177,7 @@ mod imp {
             target: "zebrad::signal",
             "received Ctrl-C, starting shutdown",
         );
+
+        crate::components::state_snapshot::bootstrap::wait_for_snapshot_install().await;
     }
 }
