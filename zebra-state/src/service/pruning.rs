@@ -5,7 +5,7 @@ use std::{
     panic::{catch_unwind, resume_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -24,14 +24,17 @@ mod tests;
 #[derive(Debug)]
 pub(super) struct PruningTask {
     cancel: Sender<()>,
-    task: Mutex<Option<JoinHandle<()>>>,
+    /// Sole-owned by `Drop`; shared callers wait on `finished` instead of taking this handle.
+    task: Option<JoinHandle<()>>,
     finished: Arc<AtomicBool>,
+    completed: Receiver<thread::Result<()>>,
 }
 
 impl PruningTask {
     /// Starts with the durable tip, without waiting for another block notification.
     pub(super) fn spawn(db: ZebraDb, retention: u32, wake: Receiver<()>) -> Arc<Self> {
         let (cancel, cancelled) = bounded(1);
+        let (worker_completed, completed) = bounded(1);
         let span = tracing::Span::current();
         let finished = Arc::new(AtomicBool::new(false));
         let worker_finished = finished.clone();
@@ -43,43 +46,44 @@ impl PruningTask {
                     });
                 });
             }));
+            let _ = worker_completed.send(result);
             worker_finished.store(true, Ordering::Release);
-            if let Err(panic) = result {
-                resume_unwind(panic);
-            }
         });
         Arc::new(Self {
             cancel,
-            task: Mutex::new(Some(task)),
+            task: Some(task),
             finished,
+            completed,
         })
+    }
+
+    /// Propagates the single worker outcome to at most one shared caller.
+    fn propagate_worker_panic(&self) {
+        if let Ok(Err(panic)) = self.completed.try_recv() {
+            resume_unwind(panic);
+        }
     }
 
     /// Propagates worker failures through the state service's background-task checks.
     pub(super) fn check_for_panics(&self) {
-        if !self.finished.load(Ordering::Acquire) {
-            return;
-        }
-        let task = self
-            .task
-            .lock()
-            .expect("pruning task handle is not poisoned")
-            .take();
-        if let Some(task) = task {
-            task.wait_for_panics();
+        if self.finished.load(Ordering::Acquire) {
+            self.propagate_worker_panic();
         }
     }
 
-    /// Cancels between batches and waits for any in-flight batch to finish.
+    /// Cancels between batches and compaction ranges, and waits for any in-flight batch or
+    /// range to finish.
     pub(super) fn stop(&self) {
         let _ = self.cancel.try_send(());
-        let task = self
-            .task
-            .lock()
-            .expect("pruning task handle is not poisoned")
-            .take();
-        if let Some(task) = task {
-            task.wait_for_panics();
+        // Blocks until the worker sends its outcome. If an earlier call already took it, the
+        // worker has dropped its sender, so this returns at once.
+        let outcome = self.completed.recv();
+        // The worker sends its outcome as its last step, so its thread exits right after.
+        while self.task.as_ref().is_some_and(|task| !task.is_finished()) {
+            thread::yield_now();
+        }
+        if let Ok(Err(panic)) = outcome {
+            resume_unwind(panic);
         }
     }
 }
@@ -87,6 +91,9 @@ impl PruningTask {
 impl Drop for PruningTask {
     fn drop(&mut self) {
         self.stop();
+        if let Some(task) = self.task.take() {
+            task.wait_for_panics();
+        }
     }
 }
 
@@ -131,7 +138,7 @@ fn prune_batch(
     db.write_batch(batch)?;
     // `run` repeats a batch that reports progress at once, and only waits for a finalized block
     // after `None`. A deletion that leaves the derived floor where it was would therefore spin,
-    // writing an empty range tombstone per iteration (R4 #5): stop and wait instead.
+    // writing an empty range tombstone per iteration: stop and wait instead.
     let floor = db.history_capabilities()?.lowest_retained_height;
     if floor <= previous {
         tracing::warn!(

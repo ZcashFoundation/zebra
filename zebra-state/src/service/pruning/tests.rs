@@ -329,7 +329,7 @@ fn worker_waits_for_readiness_and_wakes_for_finalization() {
     wake.try_send(()).unwrap();
     wait_for_floor(&state.db, Height(251), &task);
     task.stop();
-    assert!(task.task.lock().unwrap().is_none());
+    assert!(task.task.as_ref().is_some_and(|task| task.is_finished()));
     assert!(matches!(
         wake.try_send(()),
         Err(crossbeam_channel::TrySendError::Disconnected(()))
@@ -372,7 +372,7 @@ async fn state_prunes_existing_history_at_startup_and_joins_on_shutdown() {
         tokio::task::spawn_blocking(move || drop(state))
             .await
             .unwrap();
-        assert!(task.task.lock().unwrap().is_none());
+        assert!(task.task.as_ref().is_some_and(|task| task.is_finished()));
         assert!(reader.db.block(Height(TIP).into()).unwrap().is_some());
     })
     .await
@@ -548,5 +548,67 @@ fn worker_panics_publish_completion_before_propagating() {
         thread::sleep(Duration::from_millis(10));
     }
     assert!(catch_unwind(AssertUnwindSafe(|| task.check_for_panics())).is_err());
-    assert!(task.task.lock().unwrap().is_none());
+    assert!(task.task.as_ref().is_some_and(|task| task.is_finished()));
+}
+
+#[test]
+fn concurrent_stop_and_checks_propagate_worker_panic_once() {
+    use std::sync::Barrier;
+
+    use crate::{TransactionLocation, WriteDisk};
+
+    const CALLERS: usize = 8;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let state = populated(&config(cache.path().to_path_buf()));
+    state.db.mark_ready_for_pruning();
+    let mut damage = DiskWriteBatch::new();
+    damage.zs_delete(
+        &state.db.cf_handle("hash_by_tx_loc").unwrap(),
+        TransactionLocation::min_for_height(Height(TIP)),
+    );
+    state.db.write_batch(damage).unwrap();
+
+    let (_wake, receiver) = bounded(1);
+    let task = PruningTask::spawn(state.db.clone(), RETENTION, receiver);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !task.finished.load(Ordering::Acquire) {
+        assert!(Instant::now() < deadline, "worker failure must finish");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let barrier = Arc::new(Barrier::new(CALLERS));
+    let (result_sender, results) = bounded(CALLERS);
+    let mut callers = Vec::new();
+    for check in [true, false].into_iter().cycle().take(CALLERS) {
+        let task = task.clone();
+        let barrier = barrier.clone();
+        let result_sender = result_sender.clone();
+        callers.push(thread::spawn(move || {
+            barrier.wait();
+            let panicked = catch_unwind(AssertUnwindSafe(|| {
+                if check {
+                    task.check_for_panics();
+                } else {
+                    task.stop();
+                }
+            }))
+            .is_err();
+            result_sender.send(panicked).unwrap();
+        }));
+    }
+
+    let mut panics = 0;
+    for _ in 0..CALLERS {
+        panics += usize::from(
+            results
+                .recv_timeout(Duration::from_secs(10))
+                .expect("every concurrent caller returns"),
+        );
+    }
+    for caller in callers {
+        caller.join().unwrap();
+    }
+    assert_eq!(panics, 1, "the worker outcome has exactly one owner");
 }
