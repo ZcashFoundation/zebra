@@ -21,7 +21,10 @@ use crate::{
     protocol::{
         external::types::{Nonce, PeerServices, Version},
         v2::{
-            handshake::{decode_record, InitRecord},
+            handshake::{
+                decode_consensus_parameters_record, decode_record,
+                encode_consensus_parameters_record, InitRecord, CONSENSUS_PARAMETERS_RECORD_KIND,
+            },
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::WireError,
@@ -117,6 +120,14 @@ pub enum HandshakeError {
     #[error("invalid init record from peer: {0}")]
     Init(#[from] SerializationError),
 
+    /// The peer's consensus-parameters record could not be decoded.
+    #[error("invalid consensus parameters record from peer: {0}")]
+    Parameters(SerializationError),
+
+    /// The peer's consensus parameters differ from this node's.
+    #[error("peer is using different consensus parameters")]
+    ParametersMismatch,
+
     /// The peer's version is below the minimum for the protocol and the
     /// current network epoch (draft, "Handshake Validation": `OBSOLETE`).
     #[error("peer advertised obsolete version {version}, minimum is {min_version}")]
@@ -181,7 +192,7 @@ impl HandshakeError {
     /// finished stream, a declined peer, a timeout).
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            HandshakeError::Init(_) => ErrorCode::ProtocolError,
+            HandshakeError::Init(_) | HandshakeError::Parameters(_) => ErrorCode::ProtocolError,
             HandshakeError::Obsolete { .. } => ErrorCode::Obsolete,
             HandshakeError::Record(error) => error.close_code(),
             HandshakeError::SelfConnection => ErrorCode::SelfConnection,
@@ -190,6 +201,7 @@ impl HandshakeError {
             HandshakeError::Timeout
             | HandshakeError::StreamFinished
             | HandshakeError::MissingRequiredServices { .. }
+            | HandshakeError::ParametersMismatch
             | HandshakeError::Connection(_)
             | HandshakeError::Write(_)
             | HandshakeError::Read(_) => ErrorCode::NoError,
@@ -288,6 +300,9 @@ async fn run<C: ChainTip>(
         .unwrap_or(block::Height(0));
     let our_init = identity.init_record(local_nonce, start_height);
     let our_record = RecordCodec::encode_record(our_init.encode())?;
+    let parameters_hash = minimum_peer_version
+        .network()
+        .state_snapshot_parameters_hash();
 
     let (mut send, recv) = match role {
         Role::Initiator => {
@@ -303,13 +318,32 @@ async fn run<C: ChainTip>(
     // stream costs no registry slot.
     nonces.register(local_nonce).await?;
 
+    // Send the optional extension before init, so supporting peers can compare parameters and
+    // older peers can ignore its unknown kind before reading init.
+    if let Some(parameters_hash) = parameters_hash {
+        let record =
+            RecordCodec::encode_record(encode_consensus_parameters_record(parameters_hash))?;
+        send.write_all(&record).await?;
+    }
     // The responder may send its init as soon as it has seen the type byte, without waiting
     // for the initiator's record (draft, "Handshake Sequence").
     send.write_all(&our_record).await?;
 
     let mut recv = FramedRead::new(recv, RecordCodec);
+    let mut remote_parameters = None;
     let remote = loop {
         let payload = recv.next().await.ok_or(HandshakeError::StreamFinished)??;
+        if payload.first() == Some(&CONSENSUS_PARAMETERS_RECORD_KIND) {
+            if remote_parameters.is_some() {
+                return Err(HandshakeError::Parameters(SerializationError::Parse(
+                    "duplicate consensus parameters record",
+                )));
+            }
+            remote_parameters = Some(
+                decode_consensus_parameters_record(&payload).map_err(HandshakeError::Parameters)?,
+            );
+            continue;
+        }
         match decode_record(&payload)? {
             Some(init) => break init,
             None => {
@@ -321,6 +355,12 @@ async fn run<C: ChainTip>(
             }
         }
     };
+
+    // A peer that sent the extension must have the same consensus parameters. A peer that did not
+    // is a legacy peer, which the draft's unknown-record rule keeps compatible.
+    if remote_parameters.is_some() && remote_parameters != parameters_hash {
+        return Err(HandshakeError::ParametersMismatch);
+    }
 
     // The draft leaves the protocol's minimum version unassigned, so the minimum is the current
     // network epoch's, the same comparison as the legacy handshake: a peer the legacy handshake

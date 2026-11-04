@@ -375,6 +375,11 @@ go in these metrics, and its progress in the usual `state.*` and
 - **Mempool snapshots use legacy peers.** The draft's `get-mempool` request is
   an open-ended subscription, so requests for the whole mempool go to legacy
   peers only.
+- **Regtest handshakes carry a Zebra-only record.** On Regtest, where the
+  genesis block does not identify the consensus parameters, Zebra sends a
+  record of kind `0x01` holding a hash of its parameters before `init`, and
+  closes the connection if the peer sends a different hash. The draft does not
+  define this record kind yet, so a peer that does not know it ignores it.
 - **Custom testnets cannot use it.** The draft assigns ALPN identifiers only to
   Mainnet, the default Testnet, and Regtest. On a custom testnet, Zebra refuses
   to start when `v2_listen_addr` is set.

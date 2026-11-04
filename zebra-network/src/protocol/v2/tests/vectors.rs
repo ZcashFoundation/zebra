@@ -39,7 +39,11 @@ use crate::{
                 MAX_OBJECT_REQUEST_LEN, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
                 MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
             },
-            handshake::{decode_record, InitRecord},
+            handshake::{
+                decode_consensus_parameters_record, decode_record,
+                encode_consensus_parameters_record, InitRecord, CONSENSUS_PARAMETERS_RECORD_KIND,
+                CONSENSUS_PARAMETERS_RECORD_LEN,
+            },
             object::ObjectHash,
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetObject, GetTx, Request},
@@ -435,6 +439,30 @@ fn init_record_golden_vector_round_trips() {
         decode_record(&at_limit.encode()).expect("valid"),
         Some(at_limit)
     );
+}
+
+/// The optional parameters extension is exactly its kind byte and a 32-byte
+/// hash, and the init decoder still treats it as an ignorable unknown kind.
+#[test]
+fn consensus_parameters_record_pins_layout_and_compatibility() {
+    let parameters_hash = [0xA5; 32];
+    let encoded = encode_consensus_parameters_record(parameters_hash);
+    assert_eq!(encoded.len(), CONSENSUS_PARAMETERS_RECORD_LEN);
+    assert_eq!(encoded[0], CONSENSUS_PARAMETERS_RECORD_KIND);
+    assert_eq!(&encoded[1..], &parameters_hash);
+    assert_eq!(
+        decode_consensus_parameters_record(&encoded).expect("valid"),
+        parameters_hash
+    );
+    assert!(matches!(decode_record(&encoded), Ok(None)));
+
+    assert!(decode_consensus_parameters_record(&encoded[..32]).is_err());
+    let mut long = encoded.to_vec();
+    long.push(0);
+    assert!(decode_consensus_parameters_record(&long).is_err());
+    let mut wrong_kind = encoded.to_vec();
+    wrong_kind[0] = 0x7F;
+    assert!(decode_consensus_parameters_record(&wrong_kind).is_err());
 }
 
 /// Malformed payloads built by mutating the golden bytes are rejected, and
