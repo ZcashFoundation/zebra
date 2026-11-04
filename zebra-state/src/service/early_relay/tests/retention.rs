@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn early_relay_concurrent_rejections_preserve_the_full_ring() {
-    let state = EarlyRelayState::new(None);
+    let (state, _cache, _tip, _block) = cache();
     let start = Barrier::new(MAX_REJECTIONS);
     std::thread::scope(|threads| {
         for byte in 0..u8::try_from(MAX_REJECTIONS).unwrap() {
