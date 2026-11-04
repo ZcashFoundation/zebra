@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_in_result)]
 
+mod compatibility;
 mod history;
 mod prop;
 mod snapshot;

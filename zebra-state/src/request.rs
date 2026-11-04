@@ -162,6 +162,12 @@ impl FinalizedBlock {
     }
 }
 
+impl AsRef<zebra_db::FinalizedBlock> for FinalizedBlock {
+    fn as_ref(&self) -> &zebra_db::FinalizedBlock {
+        &self.0
+    }
+}
+
 impl Deref for FinalizedBlock {
     type Target = zebra_db::FinalizedBlock;
 

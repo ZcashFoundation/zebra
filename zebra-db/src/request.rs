@@ -392,6 +392,12 @@ impl FinalizedBlock {
     }
 }
 
+impl AsRef<FinalizedBlock> for FinalizedBlock {
+    fn as_ref(&self) -> &FinalizedBlock {
+        self
+    }
+}
+
 impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(semantically_verified: &SemanticallyVerifiedBlock) -> Self {
         semantically_verified.clone()
