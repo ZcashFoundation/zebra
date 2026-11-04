@@ -256,7 +256,7 @@ impl Sub<HeightDiff> for Height {
     fn sub(self, rhs: HeightDiff) -> Option<Self> {
         // We need to convert the height to [`i64`] so we can subtract negative [`HeightDiff`]s.
         let lhs = HeightDiff::from(self.0);
-        let res = lhs - rhs;
+        let res = lhs.checked_sub(rhs)?;
 
         // Check the bounds.
         let res = u32::try_from(res).ok()?;
@@ -272,7 +272,7 @@ impl Add<HeightDiff> for Height {
     fn add(self, rhs: HeightDiff) -> Option<Height> {
         // We need to convert the height to [`i64`] so we can add negative [`HeightDiff`]s.
         let lhs = i64::from(self.0);
-        let res = lhs + rhs;
+        let res = lhs.checked_add(rhs)?;
 
         // Check the bounds.
         let res = u32::try_from(res).ok()?;

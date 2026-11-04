@@ -261,6 +261,14 @@ fn height_i64_conversion_checks_bounds() {
 }
 
 #[test]
+fn height_diff_arithmetic_checks_i64_overflow() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(Height(1) + i64::MAX, None);
+    assert_eq!(Height(0) - i64::MIN, None);
+}
+
+#[test]
 fn blockheaderhash_debug() {
     let _init_guard = zebra_test::init();
 
