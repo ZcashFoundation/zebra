@@ -6,6 +6,7 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     pin::Pin,
+    sync::Arc,
     task::Poll,
     time::Duration,
 };
@@ -30,6 +31,7 @@ use tower::{
 use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
+    parameters::checkpoint::list::CheckpointList,
     state_snapshot::StateSnapshotCommitment,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
@@ -46,6 +48,7 @@ use crate::{
     BoxError,
 };
 
+mod budget;
 mod diagnostics;
 mod downloads;
 pub mod end_of_support;
@@ -58,9 +61,11 @@ mod status;
 #[cfg(test)]
 mod tests;
 
+use budget::PipelineAdmission;
 use downloads::Downloads;
 use hedge::SuccessHedge;
 
+pub use budget::{PipelineBudget, SyncMemoryLimits, MAX_CHECKPOINT_CHARGE_RATIO};
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, gossip_early_blocks, BlockGossipError};
@@ -738,6 +743,8 @@ where
     ///  - latest_chain_tip: the latest chain tip from `state`
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
+    ///
+    /// The pipeline has no byte bound: use [`ChainSync::new_with_limits`] for one.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &ZebradConfig,
@@ -748,6 +755,67 @@ where
         read_state: ZSR,
         latest_chain_tip: ZSTip,
         misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
+    ) -> (Self, SyncStatus) {
+        Self::new_inner(
+            config,
+            max_checkpoint_height,
+            peers,
+            verifier,
+            state,
+            read_state,
+            latest_chain_tip,
+            misbehavior_sender,
+            None,
+        )
+    }
+
+    /// Returns a new syncer instance like [`ChainSync::new`], whose download pipeline is bounded
+    /// by `limits` (design §4.2).
+    ///
+    /// `checkpoint_list` is the list the checkpoint verifier uses, as returned by
+    /// `zebra_consensus::router::init_checkpoint_list`. With a byte bound, the syncer always
+    /// admits the downloads of the oldest checkpoint range above the state tip, so the checkpoint
+    /// verifier can complete that range and the pipeline can drain.
+    ///
+    /// With [`SyncMemoryLimits::default()`], this is [`ChainSync::new`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_limits(
+        config: &ZebradConfig,
+        max_checkpoint_height: Height,
+        peers: ZN,
+        verifier: ZV,
+        state: ZS,
+        read_state: ZSR,
+        latest_chain_tip: ZSTip,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
+        checkpoint_list: Arc<CheckpointList>,
+        limits: SyncMemoryLimits,
+    ) -> (Self, SyncStatus) {
+        Self::new_inner(
+            config,
+            max_checkpoint_height,
+            peers,
+            verifier,
+            state,
+            read_state,
+            latest_chain_tip,
+            misbehavior_sender,
+            Some((checkpoint_list, limits)),
+        )
+    }
+
+    /// Returns a new syncer instance, bounding its pipeline by `pipeline_limits` if given.
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        config: &ZebradConfig,
+        max_checkpoint_height: Height,
+        peers: ZN,
+        verifier: ZV,
+        state: ZS,
+        read_state: ZSR,
+        latest_chain_tip: ZSTip,
+        misbehavior_sender: mpsc::Sender<zn::MisbehaviorReport>,
+        pipeline_limits: Option<(Arc<CheckpointList>, SyncMemoryLimits)>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -806,7 +874,7 @@ where
         let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
         let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);
 
-        let downloads = Box::pin(Downloads::new(
+        let mut downloads = Downloads::new(
             block_network,
             verifier,
             read_state,
@@ -817,7 +885,17 @@ where
                 full_verify_concurrency_limit,
             ),
             max_checkpoint_height,
-        ));
+        );
+        if let Some(admission) = pipeline_limits.and_then(|(checkpoint_list, limits)| {
+            PipelineAdmission::new(
+                PipelineBudget::new(limits),
+                checkpoint_list,
+                max_checkpoint_height,
+            )
+        }) {
+            downloads = downloads.with_pipeline_admission(admission);
+        }
+        let downloads = Box::pin(downloads);
 
         let (diagnostics, diagnostics_receiver) = watch::channel(SyncDiagnostics {
             in_flight_blocks: downloads.in_flight_blocks(),
@@ -880,6 +958,13 @@ where
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         self.hints = Some(HintsGate { decided, deadline });
         self
+    }
+
+    /// Returns the download pipeline's byte bound, which the inbound block downloader shares.
+    ///
+    /// It has no bound unless the syncer was built with one.
+    pub fn pipeline_budget(&self) -> PipelineBudget {
+        self.downloads.pipeline_budget()
     }
 
     /// Runs the syncer to synchronize the chain and keep it synchronized.
@@ -1265,9 +1350,9 @@ where
     /// Re-issues downloads for blocks that failed with `NotFound` (#5709).
     ///
     /// These are re-requested even while the download pipeline is past its
-    /// lookahead limit, because a missing low block is exactly what stops the
-    /// checkpoint verifier from advancing. Waiting for the lookahead pause to
-    /// clear would deadlock — the pause cannot clear until this block arrives.
+    /// lookahead limit or its byte bound, because a missing low block is exactly what stops the
+    /// checkpoint verifier from advancing. Waiting for the lookahead pause or the byte bound to
+    /// clear would deadlock — neither can clear until this block arrives.
     /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
     /// Blocks that can't get network capacity before the download deadline stay queued for the
     /// next sync round.
@@ -1282,7 +1367,7 @@ where
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
-            if let Err(error) = self.queue_block(hash).await {
+            if let Err(error) = self.queue_block_exempt(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
                 // Any other error means the network failed or wasn't ready before the download
                 // deadline. Keep this block and the rest for the next sync round, rather than
@@ -1671,7 +1756,8 @@ where
     async fn request_genesis_once(
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self.queue_block(self.genesis_hash).await;
+        // Every later block waits for the genesis block, so it never waits for the byte bound.
+        let response = self.queue_block_exempt(self.genesis_hash).await;
         Self::handle_response(response).map_err(|e| eyre!(e))?;
         self.update_metrics();
 
@@ -1721,11 +1807,26 @@ where
         // DuplicateBlockQueuedForDownload is caught and skipped instead of
         // propagating — this prevents dropping unprocessed hashes from the
         // batch, which would create frontier gaps and stalls (#5709).
-        for hash in hashes.into_iter() {
+        let mut hashes = hashes.into_iter();
+        while let Some(hash) = hashes.next() {
             match self.queue_block(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");
+                }
+                Err(BlockDownloadVerifyError::PipelineFull { .. }) => {
+                    // Keep this hash and the rest of the batch, in order, ahead of the extra
+                    // hashes, so the syncer observes finished blocks before it asks again
+                    // (design §4.2 step 2).
+                    debug!(
+                        deferred = hashes.len() + 1 + extra_hashes.len(),
+                        "sync pipeline is above its memory limit, deferring block requests",
+                    );
+                    let mut deferred: IndexSet<block::Hash> =
+                        std::iter::once(hash).chain(hashes).collect();
+                    deferred.extend(extra_hashes);
+
+                    return Ok(deferred);
                 }
                 Err(error) => return Err(error),
             }
@@ -1987,6 +2088,7 @@ where
             AboveLookaheadHeightLimit { .. } => "above_lookahead_limit",
             BehindTipHeightLimit { .. } => "behind_tip",
             InvalidHeight { .. } => "invalid_height",
+            PipelineFull { .. } => "pipeline_full",
             DuplicateBlockQueuedForDownload { .. } => "duplicate_queued",
             CancelledDuringDownload { .. }
             | CancelledAwaitingVerifierReadiness { .. }
@@ -2007,6 +2109,23 @@ where
         self.update_metrics();
 
         let result = self.downloads.download_and_verify(hash).await;
+
+        match &result {
+            Ok(()) | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {}
+            Err(error) => self.count_block_error(error),
+        }
+
+        result
+    }
+
+    /// Queues a required block without waiting for byte capacity, with the same diagnostics.
+    async fn queue_block_exempt(
+        &mut self,
+        hash: block::Hash,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        self.update_metrics();
+
+        let result = self.downloads.download_and_verify_exempt(hash).await;
 
         match &result {
             Ok(()) | Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {}
@@ -2230,6 +2349,14 @@ where
                     error = ?e,
                     "queued duplicate block hash for download, \
                      assuming the syncer will eventually resolve duplicates, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::PipelineFull { .. } => {
+                debug!(
+                    error = ?e,
+                    "sync pipeline is above its memory limit, \
+                     requesting the block again later, continuing"
                 );
                 false
             }

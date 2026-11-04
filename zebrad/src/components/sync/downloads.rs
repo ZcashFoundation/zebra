@@ -32,8 +32,10 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
-    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
+    budget::{compute_downloaded_block_charge, PipelineAdmission, PipelineBudget},
+    diagnostics::InFlightBlocks,
+    BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT,
+    FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
 #[cfg(test)]
@@ -91,6 +93,13 @@ pub enum BlockDownloadVerifyError {
 
     #[error("duplicate block hash queued for download: {hash:?}")]
     DuplicateBlockQueuedForDownload { hash: block::Hash },
+
+    /// The sync pipeline stayed above its byte bound, so the block download was not started.
+    ///
+    /// The syncer keeps the hash, observes the blocks that finished meanwhile, and requests it
+    /// again (design §4.2 step 2).
+    #[error("sync pipeline is above its memory limit, deferring the block download: {hash:?}")]
+    PipelineFull { hash: block::Hash },
 
     #[error("error downloading block: {error:?} {hash:?}")]
     DownloadFailed {
@@ -243,6 +252,9 @@ where
     /// Receiver for `past_lookahead_limit_sender`, which tasks read before deciding to send.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
+    /// The pipeline's byte bound and the downloads it tracks, if the pipeline has a byte bound.
+    admission: Option<PipelineAdmission>,
+
     // Internal downloads state
     //
     /// A list of pending block download and verify tasks.
@@ -303,6 +315,9 @@ where
             if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
                 this.in_flight_blocks.remove(queued_at, hash);
             }
+            if let Some(admission) = this.admission.as_mut() {
+                admission.observe(&hash);
+            }
 
             return Poll::Ready(Some(result.map_err(|(e, _hash)| e)));
         }
@@ -358,6 +373,7 @@ where
             max_checkpoint_height,
             past_lookahead_limit_sender: Arc::new(past_lookahead_limit_sender),
             past_lookahead_limit_receiver,
+            admission: None,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             in_flight_blocks: InFlightBlocks::default(),
@@ -365,18 +381,79 @@ where
         }
     }
 
+    /// Bounds the pipeline by `admission`'s byte bound: downloaded blocks are charged to it, and
+    /// new downloads wait for it (design §4.2 steps 1 and 2).
+    pub(super) fn with_pipeline_admission(mut self, admission: PipelineAdmission) -> Self {
+        self.admission = Some(admission);
+        self
+    }
+
+    /// Returns the pipeline's byte bound, which has no bound if the pipeline has none.
+    pub fn pipeline_budget(&self) -> PipelineBudget {
+        self.admission
+            .as_ref()
+            .map(|admission| admission.budget().clone())
+            .unwrap_or_default()
+    }
+
+    /// Returns the byte bound's admission state, if the pipeline has a byte bound.
+    #[cfg(test)]
+    pub(super) fn admission(&self) -> Option<&PipelineAdmission> {
+        self.admission.as_ref()
+    }
+
     /// Queue a block for download and verification.
+    ///
+    /// If the pipeline has a byte bound, this method first waits for it (design §4.2 step 2),
+    /// returning [`BlockDownloadVerifyError::PipelineFull`] if it can't start the download.
     ///
     /// This method waits for the network to become ready, returning an error if readiness fails
     /// or the download deadline expires. It returns immediately after queuing the request.
-    #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
+        self.download_and_verify_with(hash, true).await
+    }
+
+    /// Queue a block for download and verification, without waiting for the pipeline's byte
+    /// bound.
+    ///
+    /// For blocks the verifier is already waiting for: the genesis block, and blocks the syncer
+    /// re-obtains after their download failed (design §4.2 step 2).
+    pub async fn download_and_verify_exempt(
+        &mut self,
+        hash: block::Hash,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        self.download_and_verify_with(hash, false).await
+    }
+
+    /// Queue a block for download and verification, waiting for the pipeline's byte bound if
+    /// `wait_for_bytes` is `true`.
+    #[instrument(name = "download_and_verify", level = "debug", skip(self), fields(%hash))]
+    async fn download_and_verify_with(
+        &mut self,
+        hash: block::Hash,
+        wait_for_bytes: bool,
+    ) -> Result<(), BlockDownloadVerifyError> {
         if self.cancel_handles.contains_key(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
+        }
+
+        if let Some(admission) = self.admission.as_mut() {
+            if wait_for_bytes {
+                let admission_deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+                admission
+                    .admit(&self.latest_chain_tip, admission_deadline)
+                    .await
+                    .map_err(|_deferred| {
+                        metrics::counter!("sync.pipeline.deferred.block.hash.count").increment(1);
+                        BlockDownloadVerifyError::PipelineFull { hash }
+                    })?;
+            } else {
+                admission.admitted();
+            }
         }
 
         // We construct the block requests sequentially, waiting for the peer
@@ -409,6 +486,12 @@ where
 
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
+
+        // Dropped when the task ends, releasing the block's charge.
+        let mut tracked_download = self
+            .admission
+            .as_mut()
+            .map(|admission| admission.track(hash));
 
         let task = tokio::spawn(
             async move {
@@ -606,6 +689,15 @@ where
                     });
                 }
 
+                // Charge the block to the pipeline's byte bound until this task ends, after its
+                // verification (design §4.2 step 1). Without a bound, skip the serialization pass.
+                if let Some(tracked_download) = tracked_download.as_mut() {
+                    let Some(bytes) = compute_downloaded_block_charge(block.clone()).await else {
+                        return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash });
+                    };
+                    tracked_download.downloaded(block_height, bytes);
+                }
+
                 // Wait for the verifier service to be ready.
                 let readiness = verifier.ready();
                 // Prefer the cancel handle if both are ready.
@@ -730,6 +822,12 @@ where
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
+
+        // Forget the cancelled downloads. Each task releases its block's charge when it observes
+        // the cancellation.
+        if let Some(admission) = self.admission.as_mut() {
+            admission.clear();
+        }
 
         // Set the lookahead limit to false, since we're empty (so we're under the limit).
         //
