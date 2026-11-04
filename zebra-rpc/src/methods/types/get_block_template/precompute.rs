@@ -12,7 +12,8 @@
 //! tip is served while its check runs, rather than leaving miners on coinbase-only work; a later
 //! build for the same tip waits in the cache's second slot until [`validate_templates()`] accepts
 //! it, so the work miners already hold stays served until its replacement is as ready. A build
-//! whose check finishes after newer work was served is dropped, so long polls never move back.
+//! whose check finishes after newer work was served is not served, so long polls never move back,
+//! but it is kept as the work to serve again if that newer work fails its own check.
 //!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
 //! only serves the current tip or a proof-of-work checked parent under verification. Early work
@@ -112,7 +113,8 @@ const BUILD_STARTED: u8 = 2;
 ///
 /// Served work is coinbase-only, a build that passed proposal validation, or the first
 /// transaction-bearing build for a parent while its check runs, so a solved block that changes
-/// only the nonce and Equihash solution almost always reuses a verdict in `submitblock`.
+/// only the nonce and Equihash solution almost always reuses a verdict in `submitblock`. If that
+/// first build fails its check, the last valid work for its parent is served again.
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
@@ -137,6 +139,10 @@ struct TemplateState {
     /// Both slots change under the same lock, so a validated build can be served only if the
     /// work it was checked against is still served.
     next: Option<Arc<BlockTemplateResponse>>,
+    /// The newest work for the served template's parent that is known to be valid: coinbase-only
+    /// work, or a build that passed its check. Served again if the served template fails its
+    /// check, so miners don't keep work whose solved block would be rejected.
+    last_valid: Option<Arc<BlockTemplateResponse>>,
     published_at: Instant,
     error: Option<(Option<block::Hash>, ErrorObjectOwned)>,
 }
@@ -147,6 +153,7 @@ impl TemplateState {
         Self {
             template,
             next: None,
+            last_valid: None,
             published_at: Instant::now(),
             error: None,
         }
@@ -318,8 +325,9 @@ impl TemplateCache {
     /// Serves `validated` if the work it was checked against, `base`, is still served.
     ///
     /// Work served since then is newer, so the validated build must not replace it: long polls
-    /// would move back to older work. Returns whether `validated` is served, including when it
-    /// was served ahead of its validation.
+    /// would move back to older work. It is kept as the work to serve again if that newer work
+    /// fails its check. Returns whether `validated` is served, including when it was served ahead
+    /// of its validation.
     fn promote(
         &self,
         validated: &Arc<BlockTemplateResponse>,
@@ -333,10 +341,22 @@ impl TemplateCache {
             let current = state.template.as_ref();
             if current.is_some_and(|current| Arc::ptr_eq(current, validated)) {
                 // Served ahead of its validation, so long polls already have it.
+                state.last_valid = Some(Arc::clone(validated));
                 served = true;
                 return false;
             }
             if current.map(Arc::as_ptr) != base.map(Arc::as_ptr) {
+                // Newer work is served. Unless it is known to be valid, keep this build as the
+                // work to serve again if the newer work fails its check.
+                let current_is_valid = current
+                    .zip(state.last_valid.as_ref())
+                    .is_some_and(|(current, valid)| Arc::ptr_eq(current, valid));
+                let same_parent = current.is_some_and(|current| {
+                    current.previous_block_hash == validated.previous_block_hash
+                });
+                if same_parent && !current_is_valid {
+                    state.last_valid = Some(Arc::clone(validated));
+                }
                 return false;
             }
 
@@ -350,12 +370,41 @@ impl TemplateCache {
             }
             *state = TemplateState {
                 next: state.next.take(),
+                last_valid: Some(Arc::clone(&template)),
                 ..TemplateState::new(Some(template))
             };
             served = true;
             true
         });
         served
+    }
+
+    /// Serves the last valid work again if `failed`, which failed its check, is served.
+    ///
+    /// Only the first transaction-bearing build for a parent is served ahead of its check, so the
+    /// last valid work is usually that parent's coinbase-only work. Returns whether the served
+    /// work changed.
+    fn reject(&self, failed: &Arc<BlockTemplateResponse>) -> bool {
+        self.served.send_if_modified(|state| {
+            let Some(state) = state.as_mut() else {
+                return false;
+            };
+            if !state
+                .template
+                .as_ref()
+                .is_some_and(|served| Arc::ptr_eq(served, failed))
+            {
+                return false;
+            }
+            let Some(valid) = state.last_valid.clone() else {
+                return false;
+            };
+            *state = TemplateState {
+                last_valid: Some(Arc::clone(&valid)),
+                ..TemplateState::new(Some(valid))
+            };
+            true
+        })
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
@@ -379,11 +428,22 @@ impl TemplateCache {
     pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
         self.preserve_work_identity(&mut template);
         let template = Arc::new(template);
-        let next = (!template.transactions.is_empty()).then(|| Arc::clone(&template));
-        self.served.send_replace(Some(TemplateState {
-            next,
-            ..TemplateState::new(Some(template))
-        }));
+        let unchecked = !template.transactions.is_empty();
+        self.served.send_modify(|state| {
+            let last_valid = if unchecked {
+                state
+                    .as_ref()
+                    .and_then(|state| state.last_valid.clone())
+                    .filter(|valid| valid.previous_block_hash == template.previous_block_hash)
+            } else {
+                Some(Arc::clone(&template))
+            };
+            *state = Some(TemplateState {
+                next: unchecked.then(|| Arc::clone(&template)),
+                last_valid,
+                ..TemplateState::new(Some(template))
+            });
+        });
         self.queued.notify_one();
     }
 
@@ -994,6 +1054,9 @@ async fn validate_templates(
                 }
             }
             Err(error) => {
+                if cache.reject(&template) {
+                    tracing::debug!(?parent, "serving the last valid work after a failed check");
+                }
                 // Miners keep earlier work for this parent, which can be coinbase-only, so they can
                 // silently lose fees while this keeps failing. Log the start of a failing spell
                 // loudly, then stay quiet.
