@@ -531,6 +531,8 @@ impl StartCmd {
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
+            network: config.network.network.clone(),
+            sync_downloads: syncer.in_flight_downloads(),
             address_book: address_book.clone(),
             block_download_peer_set: peer_set.background_service(),
             block_verifier: block_verifier_router.clone(),

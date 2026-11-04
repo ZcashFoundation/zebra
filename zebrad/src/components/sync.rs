@@ -52,6 +52,7 @@ mod tests;
 use downloads::Downloads;
 use hedge::SuccessHedge;
 
+pub(crate) use downloads::InFlightDownloads;
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, gossip_early_blocks, BlockGossipError};
 pub use progress::show_block_chain_progress;
@@ -559,6 +560,11 @@ where
         };
 
         (new_syncer, sync_status)
+    }
+
+    /// Expose the downloader's current ownership to inbound parent recovery.
+    pub(crate) fn in_flight_downloads(&self) -> InFlightDownloads {
+        self.downloads.in_flight_hashes()
     }
 
     /// Runs the syncer to synchronize the chain and keep it synchronized.

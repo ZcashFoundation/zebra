@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     convert,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
     time::Duration,
 };
@@ -40,6 +40,43 @@ use crate::components::sync::{
 mod tests;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+type CancelHandles = Mutex<HashMap<block::Hash, oneshot::Sender<()>>>;
+
+/// A read-only view that does not keep sync downloads alive after their owner is dropped.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InFlightDownloads(Weak<CancelHandles>);
+
+impl InFlightDownloads {
+    /// Return whether sync owns this hash, from its readiness wait until its task completes.
+    pub(crate) fn contains(&self, hash: &block::Hash) -> bool {
+        self.0.upgrade().is_some_and(|handles| {
+            handles
+                .lock()
+                .expect("sync download lock is not poisoned")
+                .get(hash)
+                // Completed tasks drop their receivers before the stream collects their results.
+                .is_some_and(|cancel| !cancel.is_closed())
+        })
+    }
+}
+
+/// Releases a hash owned during network readiness, unless its request was dispatched.
+struct ReadinessClaim<'a> {
+    cancel_handles: &'a CancelHandles,
+    hash: Option<block::Hash>,
+}
+
+impl Drop for ReadinessClaim<'_> {
+    fn drop(&mut self) {
+        if let Some(hash) = self.hash {
+            self.cancel_handles
+                .lock()
+                .expect("sync download lock is not poisoned")
+                .remove(&hash);
+        }
+    }
+}
 
 /// A multiplier used to calculate the extra number of blocks we allow in the
 /// verifier, state, and block commit pipelines, on top of the lookahead limit.
@@ -250,7 +287,7 @@ where
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    cancel_handles: Arc<CancelHandles>,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -280,14 +317,18 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
+            let mut cancel_handles = this
+                .cancel_handles
+                .lock()
+                .expect("sync download lock is not poisoned");
             match join_result.expect("block download and verify tasks must not panic") {
                 Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
+                    cancel_handles.remove(&hash);
 
                     Poll::Ready(Some(Ok((height, hash))))
                 }
                 Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
+                    cancel_handles.remove(&hash);
                     Poll::Ready(Some(Err(e)))
                 }
             }
@@ -347,8 +388,13 @@ where
             )),
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
-            cancel_handles: HashMap::new(),
+            cancel_handles: Arc::default(),
         }
+    }
+
+    /// Share existing admission bookkeeping without copying the in-flight hashes.
+    pub(crate) fn in_flight_hashes(&self) -> InFlightDownloads {
+        InFlightDownloads(Arc::downgrade(&self.cancel_handles))
     }
 
     /// Queue a block for download and verification.
@@ -360,10 +406,23 @@ where
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_handles.contains_key(&hash) {
-            metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
-            return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
-        }
+        // Own the hash while waiting for readiness, so gossip recovery doesn't also request it.
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+        let mut claim = {
+            let mut cancel_handles = self
+                .cancel_handles
+                .lock()
+                .expect("sync download lock is not poisoned");
+            if cancel_handles.contains_key(&hash) {
+                metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
+                return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
+            }
+            cancel_handles.insert(hash, cancel_tx);
+            ReadinessClaim {
+                cancel_handles: &self.cancel_handles,
+                hash: Some(hash),
+            }
+        };
 
         // We construct the block requests sequentially, waiting for the peer
         // set to be ready to process each request. This ensures that we start
@@ -373,16 +432,14 @@ where
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
         let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        let block_req = timeout_at(deadline, self.network.ready())
+        let network = timeout_at(deadline, self.network.ready())
             .await?
-            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlockDownload {
-                hash,
-                advertiser: None,
-            });
-
-        // This oneshot is used to signal cancellation to the download task.
-        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?;
+        claim.hash = None;
+        let block_req = network.call(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        });
 
         let mut verifier = self.verifier.clone();
         let read_state = self.read_state.clone();
@@ -682,14 +739,9 @@ where
             .map_err(move |e| (e, hash)),
         );
 
-        // Try to start the spawned task before queueing the next block request
-        tokio::task::yield_now().await;
-
         self.pending.push(task);
-        assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
-            "blocks are only queued once"
-        );
+        // Retain ownership before yielding, so cancellation still reaches every spawned task.
+        tokio::task::yield_now().await;
 
         Ok(())
     }
@@ -702,12 +754,16 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        let mut cancel_handles = self
+            .cancel_handles
+            .lock()
+            .expect("sync download lock is not poisoned");
+        for (_hash, cancel) in cancel_handles.drain() {
             let _ = cancel.send(());
         }
 
         assert!(self.pending.is_empty());
-        assert!(self.cancel_handles.is_empty());
+        assert!(cancel_handles.is_empty());
 
         // Set the lookahead limit to false, since we're empty (so we're under the limit).
         //
