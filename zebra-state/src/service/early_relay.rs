@@ -1,22 +1,15 @@
 //! Authenticated, next-tip-only early block retention, independent of mining subscriptions.
 
-use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use tokio::sync::{watch, Semaphore};
 use zebra_chain::{
     block::{self, Block},
-    chain_tip::ChainTip,
     parameters::NetworkUpgrade,
 };
 
-use super::{read, LatestChainTip, ReadStateService};
-use crate::BoxError;
+use super::{read, NonFinalizedState, ReadStateService};
+use crate::{BoxError, WatchReceiver};
 
 #[cfg(test)]
 mod tests;
@@ -33,7 +26,7 @@ struct Entry {
     hash: block::Hash,
     alive: watch::Receiver<()>,
     deadline: tokio::time::Instant,
-    context_version: u64,
+    context: WatchReceiver<NonFinalizedState>,
 }
 
 #[derive(Debug)]
@@ -61,18 +54,17 @@ struct Retained {
 /// Internal cache ownership does not enable publication; only external subscriptions do.
 #[derive(Debug)]
 pub(super) struct EarlyRelayState {
-    tip: Option<LatestChainTip>,
+    snapshot: WatchReceiver<NonFinalizedState>,
     retained: watch::Sender<Retained>,
     changes: watch::Sender<Option<block::Hash>>,
     slot: Arc<Semaphore>,
     computation: Arc<Semaphore>,
-    context_version: AtomicU64,
 }
 
 impl EarlyRelayState {
-    pub(super) fn new(tip: Option<LatestChainTip>) -> Arc<Self> {
+    pub(super) fn new(snapshot: WatchReceiver<NonFinalizedState>) -> Arc<Self> {
         Arc::new(Self {
-            tip,
+            snapshot,
             retained: watch::Sender::new(Retained {
                 entry: None,
                 rejections: Rejections {
@@ -83,7 +75,6 @@ impl EarlyRelayState {
             changes: watch::Sender::new(None),
             slot: Arc::new(Semaphore::new(1)),
             computation: Arc::new(Semaphore::new(1)),
-            context_version: AtomicU64::new(0),
         })
     }
 
@@ -94,10 +85,12 @@ impl EarlyRelayState {
         }
     }
 
-    /// Marks a writer mutation until its replacement snapshot has been published.
-    pub(super) fn updating_context(&self) -> ContextUpdate<'_> {
-        self.context_version.fetch_add(1, Ordering::SeqCst);
-        ContextUpdate(&self.context_version)
+    pub(super) fn best_tip_hash(&self) -> Option<block::Hash> {
+        self.snapshot.borrow_mapped(|state| {
+            state
+                .best_chain()
+                .map(|chain| chain.non_finalized_tip_hash())
+        })
     }
 
     pub(super) fn is_rejected(&self, hash: block::Hash) -> bool {
@@ -111,9 +104,8 @@ impl EarlyRelayState {
         if self.changes.receiver_count() == 0
             || retained > MAX_RETAINED_BYTES
             || guard.alive.receiver_count() != 0
-            || self.context_version.load(Ordering::SeqCst) != guard.context_version
-            || self.tip.as_ref().and_then(ChainTip::best_tip_hash)
-                != Some(block.header.previous_block_hash)
+            || guard.context.has_changed().unwrap_or(true)
+            || self.best_tip_hash() != Some(block.header.previous_block_hash)
         {
             return;
         }
@@ -129,7 +121,6 @@ impl EarlyRelayState {
                 .rejections
                 .contains(hash, tokio::time::Instant::now())
                 || retained.entry.is_some()
-                || self.context_version.load(Ordering::SeqCst) != guard.context_version
             {
                 return false;
             }
@@ -138,7 +129,7 @@ impl EarlyRelayState {
                 hash,
                 alive: alive.clone(),
                 deadline,
-                context_version: guard.context_version,
+                context: guard.context.clone(),
             });
             // Store before notifying: an observed advertisement must already be servable.
             self.changes.send_replace(Some(hash));
@@ -151,16 +142,17 @@ impl EarlyRelayState {
         tokio::spawn(async move {
             let _permit = permit;
             let mut alive = alive;
-            let mut tip = state
-                .tip
-                .clone()
-                .expect("published bodies have a committed parent");
-            tip.mark_best_tip_seen();
-            if tip.best_tip_hash() == Some(parent) {
+            let mut snapshot = state.snapshot.clone();
+            snapshot.mark_as_seen();
+            while state.best_tip_hash() == Some(parent) {
                 tokio::select! {
-                    _ = alive.changed() => {}
-                    _ = tokio::time::sleep_until(deadline) => {}
-                    _ = tip.best_tip_changed() => {}
+                    _ = alive.changed() => break,
+                    _ = tokio::time::sleep_until(deadline) => break,
+                    result = snapshot.changed() => {
+                        if result.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
             state.retained.send_if_modified(|retained| {
@@ -177,22 +169,17 @@ impl EarlyRelayState {
             });
             // A rejected body must not buy repeated fanout with the same proof of work.
             // Keep the permit, but not the body, until the deadline or a new committed tip.
-            if tip.best_tip_hash() == Some(parent) {
+            while state.best_tip_hash() == Some(parent) {
                 tokio::select! {
-                    _ = tokio::time::sleep_until(deadline) => {}
-                    _ = tip.best_tip_changed() => {}
+                    _ = tokio::time::sleep_until(deadline) => break,
+                    result = snapshot.changed() => {
+                        if result.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
-    }
-}
-
-/// Keeps authentication from accepting a snapshot while its writer is changing retention.
-pub(super) struct ContextUpdate<'a>(&'a AtomicU64);
-
-impl Drop for ContextUpdate<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -220,7 +207,7 @@ impl PartialEq for EarlyRelayCache {
 impl Eq for EarlyRelayCache {}
 
 impl EarlyRelayCache {
-    /// Returns a live body only while its parent is still the committed best tip.
+    /// Returns a live body only while its parent is still the published snapshot's best tip.
     ///
     /// Only serve this body on a bilaterally negotiated early-relay connection. Expired, cancelled,
     /// or stale entries are removed before returning; callers must fall back to committed state.
@@ -230,13 +217,10 @@ impl EarlyRelayCache {
             let Some(entry) = retained.entry.as_ref() else {
                 return false;
             };
-            // An entry's odd successor marks an update whose snapshot is not published yet,
-            // so committed state cannot serve the block in its place.
             if entry.alive.has_changed().is_err()
-                || self.state.context_version.load(Ordering::SeqCst) > entry.context_version + 1
+                || entry.context.has_changed().unwrap_or(true)
                 || tokio::time::Instant::now() >= entry.deadline
-                || self.state.tip.as_ref().and_then(ChainTip::best_tip_hash)
-                    != Some(entry.block.header.previous_block_hash)
+                || self.state.best_tip_hash() != Some(entry.block.header.previous_block_hash)
             {
                 retained.entry = None;
                 self.state.changes.send_replace(None);
@@ -265,7 +249,7 @@ pub struct EarlyRelayGuard {
     alive: watch::Sender<()>,
     state: Arc<EarlyRelayState>,
     hash: block::Hash,
-    context_version: u64,
+    context: WatchReceiver<NonFinalizedState>,
 }
 
 impl EarlyRelayGuard {
@@ -331,12 +315,7 @@ impl ReadStateService {
         // return here instead of waiting for the authentication slot and a blocking task.
         if !required
             && (self.early_relay.changes.receiver_count() == 0
-                || self
-                    .early_relay
-                    .tip
-                    .as_ref()
-                    .and_then(ChainTip::best_tip_hash)
-                    != Some(block.header.previous_block_hash))
+                || self.early_relay.best_tip_hash() != Some(block.header.previous_block_hash))
         {
             return Ok(None);
         }
@@ -352,27 +331,22 @@ impl ReadStateService {
         let admitted = tokio::task::spawn_blocking(move || {
             // A cancelled request retains computation admission until this closure finishes.
             let _permit = permit;
-            let version = state.early_relay.context_version.load(Ordering::SeqCst);
-            if version % 2 != 0 {
-                return Ok(None);
-            }
-            let result = read::difficulty::authenticated_candidate_header(
+            let mut context = state.early_relay.snapshot.clone();
+            context.mark_as_seen();
+            read::difficulty::authenticated_candidate_header(
                 &state.latest_non_finalized_state(),
                 &state.db,
                 &state.network,
                 candidate.clone(),
                 !required,
-            );
-            if state.early_relay.context_version.load(Ordering::SeqCst) != version {
-                return Ok(None);
-            }
-            result.map(|history| {
+            )
+            .map(|history| {
                 history.map(|_| {
                     (
                         publish.then(|| {
                             crate::request::block_wire_and_retained_bytes(&candidate, &[])
                         }),
-                        version,
+                        context,
                     )
                 })
             })
@@ -381,17 +355,17 @@ impl ReadStateService {
         .expect(
             "header validation returns invalid-input errors and its blocking task is never aborted",
         )?;
-        let Some((charge, context_version)) = admitted else {
+        let Some((charge, context)) = admitted else {
             return Ok(None);
         };
-        if self.early_relay.context_version.load(Ordering::SeqCst) != context_version {
+        if context.has_changed().unwrap_or(true) {
             return Ok(None);
         }
         let guard = EarlyRelayGuard {
             alive: watch::Sender::new(()),
             state: self.early_relay.clone(),
             hash: block.hash(),
-            context_version,
+            context,
         };
         if guard.is_rejected() {
             return Ok(Some(guard));
