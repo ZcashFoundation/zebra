@@ -597,11 +597,12 @@ impl ZebraDb {
 impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s shielded transaction indexes,
     /// and return it (without actually writing anything).
-    pub fn prepare_shielded_transaction_batch(
-        &mut self,
-        zebra_db: &ZebraDb,
-        finalized: &FinalizedBlock,
-    ) {
+    pub fn prepare_shielded_transaction_batch<F>(&mut self, zebra_db: &ZebraDb, finalized: &F)
+    where
+        F: AsRef<FinalizedBlock>,
+    {
+        let finalized = finalized.as_ref();
+
         #[cfg(feature = "indexer")]
         let FinalizedBlock { block, height, .. } = finalized;
 
@@ -659,12 +660,15 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing the note commitment and history tree updates
     /// from `finalized.block`, and return it (without actually writing anything).
-    pub fn prepare_trees_batch(
+    pub fn prepare_trees_batch<F>(
         &mut self,
         zebra_db: &ZebraDb,
-        finalized: &FinalizedBlock,
+        finalized: &F,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) {
+    ) where
+        F: AsRef<FinalizedBlock>,
+    {
+        let finalized = finalized.as_ref();
         let FinalizedBlock {
             height,
             treestate:

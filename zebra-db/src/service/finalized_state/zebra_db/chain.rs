@@ -290,13 +290,17 @@ impl DiskWriteBatch {
     ///
     /// [`chain_value_pool_change`]: zebra_chain::block::Block::chain_value_pool_change
     /// [`add_chain_value_pool_change`]: ValueBalance::add_chain_value_pool_change
-    pub fn prepare_chain_value_pools_batch(
+    pub fn prepare_chain_value_pools_batch<F>(
         &mut self,
         db: &ZebraDb,
-        finalized: &FinalizedBlock,
+        finalized: &F,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
-    ) -> Result<(), ValidateContextError> {
+    ) -> Result<(), ValidateContextError>
+    where
+        F: AsRef<FinalizedBlock>,
+    {
+        let finalized = finalized.as_ref();
         let calculate_value_change_error =
             |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,

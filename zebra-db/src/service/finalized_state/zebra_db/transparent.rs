@@ -491,11 +491,11 @@ impl DiskWriteBatch {
     /// Prepare a database batch containing `finalized.block`'s transparent transaction indexes,
     /// and return it (without actually writing anything).
     #[allow(clippy::too_many_arguments)]
-    pub fn prepare_transparent_transaction_batch(
+    pub fn prepare_transparent_transaction_batch<F>(
         &mut self,
         zebra_db: &ZebraDb,
         network: &Network,
-        finalized: &FinalizedBlock,
+        finalized: &F,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
@@ -504,11 +504,13 @@ impl DiskWriteBatch {
             OutputLocation,
         >,
         address_balances: AddressBalanceLocationUpdates,
-    ) {
+    ) where
+        F: AsRef<FinalizedBlock>,
+    {
         self.prepare_transparent_transaction_batch_omitting(
             zebra_db,
             network,
-            finalized,
+            finalized.as_ref(),
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,

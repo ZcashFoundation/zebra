@@ -862,11 +862,11 @@ impl DiskWriteBatch {
     /// - Propagates any errors from computing the block's chain value balance change or
     ///   from applying the change to the chain value balance
     #[allow(clippy::too_many_arguments)]
-    pub fn prepare_block_batch(
+    pub fn prepare_block_batch<F>(
         &mut self,
         zebra_db: &ZebraDb,
         network: &Network,
-        finalized: &FinalizedBlock,
+        finalized: &F,
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
@@ -877,11 +877,14 @@ impl DiskWriteBatch {
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(), CommitCheckpointVerifiedError> {
+    ) -> Result<(), CommitCheckpointVerifiedError>
+    where
+        F: AsRef<FinalizedBlock>,
+    {
         self.prepare_block_batch_omitting(
             zebra_db,
             network,
-            finalized,
+            finalized.as_ref(),
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
@@ -971,11 +974,12 @@ impl DiskWriteBatch {
     /// Prepare a database batch containing the block header and transaction data
     /// from `finalized.block`, and return it (without actually writing anything).
     #[allow(clippy::unwrap_in_result)]
-    pub fn prepare_block_header_and_transaction_data_batch(
-        &mut self,
-        db: &DiskDb,
-        finalized: &FinalizedBlock,
-    ) {
+    pub fn prepare_block_header_and_transaction_data_batch<F>(&mut self, db: &DiskDb, finalized: &F)
+    where
+        F: AsRef<FinalizedBlock>,
+    {
+        let finalized = finalized.as_ref();
+
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
