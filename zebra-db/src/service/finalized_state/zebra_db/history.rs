@@ -13,11 +13,11 @@ use crate::service::finalized_state::{
 };
 
 /// Limits each deletion batch to this many complete block heights.
-pub(crate) const MAX_PRUNING_BATCH_HEIGHTS: u32 = 100;
+pub const MAX_PRUNING_BATCH_HEIGHTS: u32 = 100;
 
 /// Remembers the restart witness while the sole pruning worker follows finalized blocks.
 #[derive(Default)]
-pub(crate) struct PruningWitness {
+pub struct PruningWitness {
     tip: Option<(Height, block::Hash)>,
     height: Option<Height>,
 }
@@ -29,7 +29,7 @@ impl PruningWitness {
     /// `snapshot_base` is the marker of a database imported from a state snapshot: when the walk
     /// ends at its window start without finding a branch ID, the window start is the witness,
     /// exactly as [`legacy_chain`](crate::service::check::legacy_chain) accepts it.
-    pub(crate) fn update(
+    pub fn update(
         &mut self,
         db: &ZebraDb,
         snapshot_base: Option<SnapshotBase>,
@@ -102,7 +102,7 @@ impl ZebraDb {
     }
 
     /// Reclaims deleted transaction bodies in `heights` on the pruning worker.
-    pub(crate) fn compact_pruned_bodies(&self, heights: std::ops::Range<Height>) {
+    pub fn compact_pruned_bodies(&self, heights: std::ops::Range<Height>) {
         self.db.compact_pruned_bodies(heights);
     }
 }
@@ -115,7 +115,7 @@ impl DiskWriteBatch {
     /// The startup checks must be complete. Each batch deletes at most 100 heights and retains
     /// the restart witness. Returns the staged floor, or `None` while waiting for a newer witness.
     /// Errors and `None` leave the batch unchanged.
-    pub(crate) fn prepare_history_pruning(
+    pub fn prepare_history_pruning(
         &mut self,
         db: &ZebraDb,
         lowest_retained_height: Height,

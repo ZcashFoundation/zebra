@@ -11,9 +11,16 @@ pub mod block;
 pub mod chain;
 pub mod shielded;
 pub mod transparent;
+pub mod upgrade;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub mod tests;
 
 pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::OutputLocation;
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use tests::KV;
 
 /// Helper type for writing types to disk as raw bytes.
 /// Also used to convert key types to raw bytes for disk lookups.

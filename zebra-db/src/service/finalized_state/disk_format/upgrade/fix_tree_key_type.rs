@@ -17,7 +17,10 @@ use super::CancelFormatChange;
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
-#[instrument(skip(upgrade_db, cancel_receiver))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::fix_tree_key_type",
+    skip(upgrade_db, cancel_receiver)
+)]
 pub fn run(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
@@ -83,7 +86,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
                  key: {key:?}, tree: {:?}",
                 tree.root()
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::fix_tree_key_type", ?result);
         }
 
         // There should only be one tip tree in this column family.
@@ -96,7 +99,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
                 tree.root(),
                 prev_tree.root(),
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::fix_tree_key_type", ?result);
         }
 
         prev_key = Some(key);
@@ -114,7 +117,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
                  key: {key:?}, tree: {:?}",
                 tree.hash()
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::fix_tree_key_type", ?result);
         }
 
         // There should only be one tip tree in this column family.
@@ -127,7 +130,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
                 tree.hash(),
                 prev_tree.hash(),
             ));
-            error!(?result);
+            error!(target: "zebra_state::service::finalized_state::disk_format::upgrade::fix_tree_key_type", ?result);
         }
 
         prev_key = Some(key);

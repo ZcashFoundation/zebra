@@ -28,7 +28,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-use zebra_db::FinalizedBlock;
+use crate::FinalizedBlock;
 
 use crate::{
     service::finalized_state::{
@@ -96,7 +96,7 @@ impl ZebraDb {
     // Column family convenience methods
 
     /// Returns a typed handle to the snapshot base column family.
-    pub(crate) fn snapshot_base_cf(&self) -> SnapshotBaseCf<'_> {
+    pub fn snapshot_base_cf(&self) -> SnapshotBaseCf<'_> {
         SnapshotBaseCf::new(&self.db, SNAPSHOT_BASE)
             .expect("column family was created when database was created")
     }
@@ -109,33 +109,33 @@ impl ZebraDb {
     }
 
     /// Returns a typed handle to the `history_tree` column family.
-    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {
+    pub fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {
         HistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a legacy typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf<'_> {
+    pub fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf<'_> {
         LegacyHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a generic raw key typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf<'_> {
+    pub fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf<'_> {
         RawHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a typed handle to the chain value pools column family.
-    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf<'_> {
+    pub fn chain_value_pools_cf(&self) -> ChainValuePoolsCf<'_> {
         ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
             .expect("column family was created when database was created")
     }
 
     /// Returns a typed handle to the block data column family.
-    pub(crate) fn block_info_cf(&self) -> BlockInfoCf<'_> {
+    pub fn block_info_cf(&self) -> BlockInfoCf<'_> {
         BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
@@ -187,7 +187,7 @@ impl ZebraDb {
     /// Returns all the history tip trees.
     /// We only store the history tree for the tip, so this method is only used in tests and
     /// upgrades.
-    pub(crate) fn history_trees_full_tip(&self) -> BTreeMap<RawBytes, Arc<HistoryTree>> {
+    pub fn history_trees_full_tip(&self) -> BTreeMap<RawBytes, Arc<HistoryTree>> {
         let raw_history_tree_cf = self.raw_history_tree_cf();
 
         raw_history_tree_cf
@@ -228,7 +228,7 @@ impl DiskWriteBatch {
     /// Replaces the snapshot base marker, which records the checks a snapshot import deferred.
     ///
     /// The batch must be written to the database by the caller.
-    pub(crate) fn update_snapshot_base(&mut self, db: &ZebraDb, base: &SnapshotBase) {
+    pub fn update_snapshot_base(&mut self, db: &ZebraDb, base: &SnapshotBase) {
         let _ = db
             .snapshot_base_cf()
             .with_batch_for_writing(self)

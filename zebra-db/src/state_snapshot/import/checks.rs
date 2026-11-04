@@ -789,7 +789,7 @@ pub(super) fn check_database(
 }
 
 /// Runs the post-open database checks on `db`.
-pub(super) fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(), SnapshotError> {
+pub fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(), SnapshotError> {
     let fail = |detail: String| refused(ImportCheck::DatabaseFormat, detail);
     let running_version = db.format_version_in_code();
     let disk_version = db
@@ -837,7 +837,7 @@ pub(super) fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(
 }
 
 /// Maps invalid snapshot contents to a refusal, but keeps local history-read failures retryable.
-pub(super) fn database_format_error(error: FormatCheckError) -> SnapshotError {
+pub fn database_format_error(error: FormatCheckError) -> SnapshotError {
     match error {
         FormatCheckError::Invalid(detail) => refused(ImportCheck::DatabaseFormat, detail),
         FormatCheckError::HistoryRead(error) => SnapshotError::HistoryRead(error),

@@ -341,7 +341,7 @@ fn check_tree_layout(
 }
 
 /// Decodes a Sprout note commitment tree, recomputing its root.
-pub(super) fn sprout_tree(bytes: &[u8]) -> Result<sprout::tree::NoteCommitmentTree, String> {
+pub fn sprout_tree(bytes: &[u8]) -> Result<sprout::tree::NoteCommitmentTree, String> {
     // Sprout nodes and roots are plain hashes.
     check_tree_layout(
         bytes,
@@ -372,7 +372,7 @@ pub(super) fn sapling_tree(bytes: &[u8]) -> Result<sapling::tree::NoteCommitment
 }
 
 /// Decodes an Orchard or Ironwood note commitment tree, recomputing its root.
-pub(super) fn orchard_tree(bytes: &[u8]) -> Result<orchard::tree::NoteCommitmentTree, String> {
+pub fn orchard_tree(bytes: &[u8]) -> Result<orchard::tree::NoteCommitmentTree, String> {
     check_tree_layout(
         bytes,
         ORCHARD_MERKLE_DEPTH,
@@ -396,6 +396,7 @@ pub(super) fn history_tree_parts(bytes: &[u8]) -> Result<HistoryTreeParts, Strin
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(super) use crate::service::finalized_state::RawHistoryTree;
 
 /// Checks that history tree peaks can be combined without overflowing or panicking.

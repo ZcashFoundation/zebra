@@ -1,6 +1,10 @@
 //! Serialization formats for finalized data.
 
-pub use zebra_db::service::finalized_state::disk_format::*;
+#[allow(unused_imports)]
+pub use zebra_db::service::finalized_state::disk_format::{
+    block, chain, shielded, transparent, FromDisk, IntoDisk, OutputLocation, RawBytes,
+    TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT,
+};
 
 pub mod upgrade;
 

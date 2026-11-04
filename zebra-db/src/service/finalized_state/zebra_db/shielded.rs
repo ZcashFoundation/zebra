@@ -27,16 +27,13 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use zebra_db::FinalizedBlock;
-
 use crate::{
-    request::Treestate,
     service::finalized_state::{
         disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    TransactionLocation,
+    FinalizedBlock, TransactionLocation, Treestate,
 };
 
 // Doc-only items

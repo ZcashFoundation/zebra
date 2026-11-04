@@ -23,7 +23,7 @@ use super::{
     record::{Phase, Progress},
     HintedOutputs, SpentnessError, SPENTNESS_JOURNAL,
 };
-use zebra_db::FinalizedBlock;
+use crate::FinalizedBlock;
 
 use crate::service::finalized_state::{
     disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
@@ -204,7 +204,7 @@ pub(super) fn apply_block(
             ),
         );
         live.clear();
-        tracing::info!(?height, "spentness hints applied and verified");
+        tracing::info!(target: "zebra_state::service::finalized_state::zebra_db::spentness::apply", ?height, "spentness hints applied and verified");
     }
     batch.prepare_spentness_progress(db, commitment, progress);
     metrics::gauge!("state.spentness.height").set(f64::from(height.0));

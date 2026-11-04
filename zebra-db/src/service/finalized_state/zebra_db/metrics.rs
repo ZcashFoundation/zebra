@@ -10,7 +10,7 @@ use zebra_chain::{
 ///
 /// The metrics are updated after contextually validating a block,
 /// but before writing its batch to the state.
-pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
+pub fn block_precommit_metrics(block: &Block, hash: block::Hash, height: block::Height) {
     let transaction_count = block.transactions.len();
     let transparent_prevout_count = block
         .transactions
@@ -29,7 +29,7 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
     let sapling_nullifier_count = block.sapling_nullifiers().count();
     let orchard_nullifier_count = block.orchard_nullifiers().count();
 
-    tracing::debug!(
+    tracing::debug!(target: "zebra_state::service::finalized_state::zebra_db::metrics",
         ?hash,
         ?height,
         transaction_count,
@@ -75,7 +75,7 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
 /// - Monitoring total chain supply
 ///
 /// The values are in zatoshis (1 ZEC = 100,000,000 zatoshis).
-pub(crate) fn value_pool_metrics(value_pool: &ValueBalance<NonNegative>) {
+pub fn value_pool_metrics(value_pool: &ValueBalance<NonNegative>) {
     // Individual pool balances (zatoshis)
     metrics::gauge!("state.finalized.value_pool.transparent")
         .set(u64::from(value_pool.transparent_amount()) as f64);

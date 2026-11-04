@@ -13,7 +13,10 @@ use super::{super::super::DiskWriteBatch, CancelFormatChange};
 ///
 /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
 #[allow(clippy::unwrap_in_result)]
-#[instrument(skip(zebra_db, cancel_receiver))]
+#[instrument(
+    target = "zebra_state::service::finalized_state::disk_format::upgrade::drop_tx_locs_by_spends",
+    skip(zebra_db, cancel_receiver)
+)]
 pub fn run(
     initial_tip_height: Height,
     zebra_db: &ZebraDb,
