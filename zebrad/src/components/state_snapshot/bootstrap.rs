@@ -928,7 +928,10 @@ where
 
 /// Fetches `hash` until one peer serves it or `deadline` passes. Refusals back
 /// off exponentially without excluding or blaming the peer; other peers are
-/// tried immediately, and every wait remains inside the overall deadline.
+/// tried immediately, and every wait remains inside the overall deadline. One
+/// attempt gets at most an equal share of the time left and the peers left in
+/// that pass, so a peer that keeps making a little progress cannot consume the
+/// shares of the peers after it.
 async fn fetch_object_with_retries<S>(
     peers: &mut Peers<S>,
     hash: ObjectHash,
@@ -947,7 +950,9 @@ where
             break;
         }
 
-        for (peer, service) in peers.snapshot() {
+        let snapshot = peers.snapshot();
+        let peer_count = snapshot.len();
+        for (index, (peer, service)) in snapshot.into_iter().enumerate() {
             let now = Instant::now();
             if now >= deadline {
                 break;
@@ -959,7 +964,11 @@ where
                 continue;
             }
 
-            match fetch_object(service, hash, size_limit, deadline).await {
+            let peers_left = u32::try_from(peer_count - index)
+                .expect("the bootstrap has at most eight peers left in each pass");
+            let remaining = deadline.saturating_duration_since(now);
+            let attempt_deadline = now + remaining / peers_left;
+            match fetch_object(service, hash, size_limit, attempt_deadline).await {
                 Ok(bytes) => return Ok(bytes),
                 Err(FetchError::Peer(reason)) => {
                     retries.remove(&peer);
