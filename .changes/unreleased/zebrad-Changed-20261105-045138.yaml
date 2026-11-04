@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Load the bundled Sapling parameters in the background at startup, so the first Sapling block after a restart no longer waits about 120 ms for them.
+time: 2026-11-05T04:51:38.015005071+01:00
