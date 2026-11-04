@@ -81,7 +81,7 @@ const MAX_BOOTSTRAP_PEERS: usize = 8;
 /// sub-ranges in flight, plus the chain checks' requests.
 const PEER_BUFFER_BOUND: usize = 8;
 
-/// The most structurally valid copies of block `H + 1` retained, from distinct peers.
+/// The most commitment-valid copies of block `H + 1` retained, from distinct peers.
 const SUCCESSOR_COPIES: usize = 3;
 
 /// The most headers one version 2 `get-headers` response carries. The wire
@@ -1552,11 +1552,12 @@ where
     Ok(None)
 }
 
-/// Fetches block `successor_hash` from eligible peers until `copies` structurally valid bodies
-/// have been found. Returns every fetched body with its structural check result so the caller can
-/// blame only peers that served invalid bodies.
+/// Fetches block `successor_hash` from eligible peers until a body passes both its structural and
+/// `hashBlockCommitments` checks, retaining at most `copies` valid bodies. Returns every fetched
+/// body with its check result so the caller can blame only peers that served invalid bodies.
 pub(crate) async fn fetch_successor_copies<S>(
     peers: &Peers<S>,
+    history_root: &ChainHistoryMmrRootHash,
     hash_h: block::Hash,
     successor_hash: block::Hash,
     successor_height: Height,
@@ -1585,11 +1586,24 @@ where
                 Some(InventoryResponse::Available((block, _))) => {
                     let checked =
                         check_successor_block(hash_h, successor_hash, successor_height, &block)
-                            .map(|()| block);
-                    if checked.is_ok() {
+                            .map(|()| block)
+                            .and_then(|block| {
+                                if check_successor_commitment(history_root, &block) {
+                                    Ok(block)
+                                } else {
+                                    Err("its copy of the successor's authorizing data does not \
+                                         commit to the snapshot's history tree"
+                                        .to_string())
+                                }
+                            });
+                    let is_valid = checked.is_ok();
+                    if is_valid {
                         valid_copies += 1;
                     }
                     found.push((peer, checked));
+                    if is_valid {
+                        break;
+                    }
                 }
                 Some(InventoryResponse::Missing(_)) | None => {
                     info!(%peer, "a bootstrap peer does not have the block after the snapshot height");
@@ -1751,6 +1765,7 @@ where
     // must be checked before deciding that no peer served the real block.
     let copies = fetch_successor_copies(
         peers,
+        history_root,
         hash_h,
         successor_hash,
         successor_height,
