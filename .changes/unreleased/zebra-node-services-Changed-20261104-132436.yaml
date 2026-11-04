@@ -1,0 +1,6 @@
+project: zebra-node-services
+kind: Changed
+body: >-
+  Clarified that `TransactionIds` requests and responses represent bounded mempool ID
+  snapshots, while `FullTransactions` remains unbounded.
+time: 2026-11-04T13:24:36Z
