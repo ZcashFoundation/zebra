@@ -1460,7 +1460,8 @@ impl Chain {
     }
 
     /// Replaces the tip block with `block`, a block with the same transactions and the same
-    /// header apart from the nonce and Equihash solution, such as a solved block template.
+    /// header apart from the nonce and Equihash solution, such as a solved block template. The
+    /// solution must have the same length, so the block's serialized size is unchanged.
     ///
     /// Only the block hash index, the tip's history tree and the stored block depend on those
     /// header fields, so this costs a history tree append rather than a block push. An error

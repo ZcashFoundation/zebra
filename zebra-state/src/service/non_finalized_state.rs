@@ -1536,8 +1536,8 @@ fn chain_is_version_of(chain: &Chain, target: &Chain) -> bool {
 }
 
 /// Returns `true` if `proposal` and `block` have the same transactions, height and header apart
-/// from the nonce and Equihash solution. The header's commitment covers the transaction
-/// authorizing data, so this means the same block contents.
+/// from the nonce and the Equihash solution's bytes. The header's commitment covers the
+/// transaction authorizing data, so this means the same block contents and serialized size.
 fn same_block_except_proof_of_work(
     proposal: &ContextuallyVerifiedBlock,
     block: &ContextuallyVerifiedBlock,
@@ -1551,4 +1551,7 @@ fn same_block_except_proof_of_work(
         && proposal_header.commitment_bytes == header.commitment_bytes
         && proposal_header.time == header.time
         && proposal_header.difficulty_threshold == header.difficulty_threshold
+        // Rebinding keeps the proposal's recorded block size. Proposals skip proof of work, so
+        // they can carry a solution of either length.
+        && mem::discriminant(&proposal_header.solution) == mem::discriminant(&header.solution)
 }

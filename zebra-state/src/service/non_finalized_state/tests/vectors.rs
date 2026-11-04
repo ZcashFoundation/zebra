@@ -368,6 +368,60 @@ fn prepared_chain_commits_a_solved_proposal_by_rebinding() -> Result<()> {
     Ok(())
 }
 
+/// A committed solved proposal reports the solved block's size, which `getblock` verbosity 1 and
+/// `getmininginfo` read. Regtest accepts a proposal with a 1,344-byte Equihash solution, and the
+/// block that solves it carries the 36-byte one.
+#[test]
+fn solved_proposal_reports_the_solved_block_size() -> Result<()> {
+    use zebra_chain::{serialization::ZcashSerialize, work::equihash::Solution};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
+    let published = base
+        .clone()
+        .push(blocks[0].clone())?
+        .push(blocks[1].clone())?;
+    let proposal = blocks[2].clone();
+    assert!(matches!(
+        proposal.block.header.solution,
+        Solution::Common(_)
+    ));
+    let prepared = published.clone().push(proposal.clone())?;
+
+    // Solving replaces the 1,344-byte solution with a 36-byte one.
+    let mut solved_block = Block::clone(&proposal.block);
+    let mut header = block::Header::clone(&solved_block.header);
+    header.solution = Solution::Regtest([0; 36]);
+    solved_block.header = Arc::new(header);
+    let mut solved = proposal.clone();
+    solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+    let solved_size = solved.block.zcash_serialized_size();
+    assert_eq!(proposal.block.zcash_serialized_size() - solved_size, 1_310);
+
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    let mut state = NonFinalizedState::new(&network);
+    state.insert(Arc::new(published));
+    state.store_prepared(prepared);
+    state.commit_prevalidated_contextual(solved.clone(), &finalized_state.db, None)?;
+
+    let info = crate::service::read::block_info(
+        state.best_chain(),
+        &finalized_state.db,
+        solved.hash.into(),
+    )
+    .expect("the solved block was committed");
+    assert_eq!(usize::try_from(info.size())?, solved_size);
+
+    Ok(())
+}
+
 /// Opt in with `ZEBRA_STATE_APPEND_BENCH=1` and run alone with
 /// `--ignored --nocapture --test-threads=1`; fixture setup is excluded from timings.
 #[test]
