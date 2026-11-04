@@ -193,6 +193,14 @@ pub enum NonFinalizedWriteMessage {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FinalizedAdmission {
+    Checkpoints,
+    HandoffQueued,
+    HandoffRetry,
+    HandoffComplete,
+}
+
 /// A worker with a task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state` and channels for sending
 /// it blocks.
@@ -204,15 +212,57 @@ pub(super) struct BlockWriteSender {
     /// A logical channel to send finalized messages to the ordered writer.
     ///
     /// The sender stays alive after the semantic handoff so an honest checkpoint retry can follow
-    /// a failed parent. Admission closes only after that parent or its retry commits.
+    /// its failed parent. Ordinary checkpoint admission closes when the handoff is queued.
     pub finalized: Option<UnboundedSender<WriteMessage>>,
+    admission: FinalizedAdmission,
+    handoff_parent_hash: Option<block::Hash>,
     handoff_complete: Arc<AtomicBool>,
 }
 
 impl BlockWriteSender {
-    /// Returns whether checkpoint blocks are still admitted to the writer.
+    fn admission(&self) -> FinalizedAdmission {
+        if self.handoff_complete.load(Ordering::Acquire) {
+            FinalizedAdmission::HandoffComplete
+        } else {
+            self.admission
+        }
+    }
+
+    /// Returns whether ordinary checkpoint blocks are still admitted to the writer.
     pub(super) fn accepts_finalized(&self) -> bool {
-        self.finalized.is_some() && !self.handoff_complete.load(Ordering::Acquire)
+        self.finalized.is_some() && self.admission() == FinalizedAdmission::Checkpoints
+    }
+
+    /// Returns whether `hash` can be retried after its failed handoff parent reset.
+    pub(super) fn accepts_finalized_retry(&self, hash: block::Hash) -> bool {
+        self.finalized.is_some()
+            && self.admission() == FinalizedAdmission::HandoffRetry
+            && self.handoff_parent_hash == Some(hash)
+    }
+
+    /// Closes ordinary checkpoint admission before queueing the writer's handoff marker.
+    pub(super) fn start_handoff(&mut self, parent_hash: block::Hash) {
+        assert_eq!(
+            self.admission(),
+            FinalizedAdmission::Checkpoints,
+            "the semantic handoff starts once after ordinary checkpoint admission"
+        );
+        self.handoff_parent_hash = Some(parent_hash);
+        self.admission = FinalizedAdmission::HandoffQueued;
+    }
+
+    /// Allows the exact failed handoff parent to be retried after its reset.
+    pub(super) fn allow_finalized_retry(&mut self) {
+        if self.admission() == FinalizedAdmission::HandoffQueued {
+            self.admission = FinalizedAdmission::HandoffRetry;
+        }
+    }
+
+    /// Closes retry admission after dispatching the failed handoff parent.
+    pub(super) fn finalized_retry_sent(&mut self) {
+        if self.admission() == FinalizedAdmission::HandoffRetry {
+            self.admission = FinalizedAdmission::HandoffQueued;
+        }
     }
 
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
@@ -279,6 +329,8 @@ impl BlockWriteSender {
                 non_finalized: Some(non_finalized_block_write_sender),
                 finalized: should_use_finalized_block_write_sender
                     .then_some(finalized_block_write_sender),
+                admission: FinalizedAdmission::Checkpoints,
+                handoff_parent_hash: None,
                 handoff_complete,
             },
             invalid_block_write_reset_receiver,

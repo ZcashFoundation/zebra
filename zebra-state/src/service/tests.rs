@@ -1462,7 +1462,8 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 }
 
 /// A failed checkpoint parent must not make its honest retry look finalized after the semantic
-/// handoff. The retry also restores the UTXO lookahead needed by its semantic children.
+/// handoff. The retry also restores the UTXO lookahead needed by its semantic children, even when
+/// the writer has not consumed the handoff marker yet.
 #[tokio::test(flavor = "multi_thread")]
 async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
     use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
@@ -1491,11 +1492,17 @@ async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
             CheckpointVerifiedBlock::from(invalid_parent),
             None,
         );
+        let (handoff_sender, mut handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
         let rejected_child = state.queue_and_commit_to_non_finalized_state(
             honest_parent.make_fake_child().prepare(),
             None,
             None,
         );
+        assert!(matches!(
+            handoff_receiver.try_recv(),
+            Ok(super::write::WriteMessage::Handoff)
+        ));
 
         failed_parent
             .await
@@ -1514,12 +1521,23 @@ async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
             CheckpointVerifiedBlock::from(honest_parent.clone()),
             None,
         );
+        let queued_retry = match handoff_receiver.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => queued,
+            _ => panic!("the honest retry is admitted before handoff acknowledgement"),
+        };
         assert!(
             state
                 .non_finalized_block_write_sent_hashes
                 .contains(&honest_parent.hash()),
             "the retry restores checkpoint UTXO lookahead before its disk write",
         );
+        state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::WriteMessage::Finalized(queued_retry))
+            .unwrap();
         retry
             .await
             .unwrap()
@@ -1544,6 +1562,76 @@ async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
     })
     .await
     .expect("the failed-parent handoff regression finishes");
+}
+
+/// Once a semantic handoff is queued, a checkpoint must not slip behind its marker and commit
+/// after the semantic child at the same height, even if the writer has not consumed the marker.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_rejects_checkpoint_before_writer_acknowledgement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let checkpoint = state.queue_and_commit_to_finalized_state(blocks[1].clone().into(), None);
+        let (handoff_sender, mut handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
+        checkpoint.await.unwrap().unwrap();
+
+        let semantic_child = blocks[2].clone();
+        let semantic_response =
+            state.queue_and_commit_to_non_finalized_state(semantic_child.clone().prepare(), None, None);
+        let checkpoint_response = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(semantic_child.clone()),
+            None,
+        );
+        semantic_response
+            .await
+            .unwrap()
+            .expect("the semantic child commits while the handoff marker is detached");
+        assert!(matches!(
+            handoff_receiver.try_recv(),
+            Ok(super::write::WriteMessage::Handoff)
+        ));
+
+        let (checkpoint_admitted, checkpoint_result) = match handoff_receiver.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => {
+                state
+                    .block_write_sender
+                    .non_finalized
+                    .as_ref()
+                    .unwrap()
+                    .send(super::write::WriteMessage::Finalized(queued))
+                    .unwrap();
+                (true, checkpoint_response.await.unwrap())
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                (false, checkpoint_response.await.unwrap())
+            }
+            _ => panic!("unexpected detached handoff message"),
+        };
+        assert!(
+            !checkpoint_admitted,
+            "checkpoint committed behind Handoff with {checkpoint_result:?}, finalized tip {:?}, semantic tip {:?}",
+            state.read_service.db.finalized_tip_height(),
+            state.best_tip(),
+        );
+        assert!(checkpoint_result.is_err());
+        assert_eq!(state.read_service.db.finalized_tip_height(), Some(Height(1)));
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the unacknowledged handoff admission regression finishes");
 }
 
 /// A semantic child must switch the writer to non-finalized commits even when its checkpoint
@@ -1631,8 +1719,8 @@ async fn semantic_handoff_dispatches_children_before_writer_acknowledgement() {
             .unwrap();
 
         // Commit the last checkpoint on the real writer, but detach the sender used for Handoff.
-        // The writer never acknowledges the handoff, which holds `accepts_finalized()` open for
-        // checkpoint retries and deterministically exercises the semantic admission interval.
+        // The writer never acknowledges the handoff, which deterministically exercises the local
+        // admission transition and semantic dispatch interval.
         let checkpoint = state.queue_and_commit_to_finalized_state(blocks[1].clone().into(), None);
         let (handoff_sender, handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
         drop(state.block_write_sender.finalized.replace(handoff_sender));
@@ -1644,7 +1732,7 @@ async fn semantic_handoff_dispatches_children_before_writer_acknowledgement() {
             .await
             .unwrap()
             .expect("the first semantic child commits");
-        assert!(state.block_write_sender.accepts_finalized());
+        assert!(!state.block_write_sender.accepts_finalized());
 
         let next =
             state.queue_and_commit_to_non_finalized_state(blocks[3].clone().prepare(), None, None);
