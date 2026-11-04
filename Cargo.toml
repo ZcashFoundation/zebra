@@ -17,6 +17,8 @@ members = [
 
 # Keep fuzz-only features out of ordinary node builds. CI selects the full
 # workspace explicitly, while cargo-fuzz selects its own manifest.
+# Add new non-fuzz crates to both members and default-members so default
+# nextest, coverage, and lockfile checks continue to include them.
 default-members = [
         "zebrad",
         "zebra-chain",

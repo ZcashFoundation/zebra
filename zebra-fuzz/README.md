@@ -38,6 +38,11 @@ Two properties of this layout are deliberate:
   package, keeping it out of ordinary root `cargo build` and `cargo test`;
   use `--workspace` or `-p zebra-fuzz-targets` to select it explicitly.
 
+Fuzz builds inherit the root release profile (`panic = "abort"`, `lto = "thin"`,
+`debug = "line-tables-only"`), unless overridden by the build tooling. This is
+intentional; compared with the former standalone profile, it can change build
+time and the debug information available in crash stack traces.
+
 ## The `fuzzing` feature
 
 Six of the targets need two modules that are private in normal builds. Rather
