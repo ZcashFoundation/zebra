@@ -1564,6 +1564,144 @@ async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
     .expect("the failed-parent handoff regression finishes");
 }
 
+/// A semantic child queued after its parent retry is dispatched, but before that retry commits,
+/// must not depend on an unrelated request to restore dispatch after the failed-handoff reset.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_dispatches_child_while_retry_write_is_pending() {
+    use zebra_chain::primitives::zcash_history::BlockCommitmentTreeRoots;
+
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the first semantic child fails after its invalid parent");
+
+        let note_trees = state.read_service.db.note_commitment_trees_for_tip();
+        let sapling_root = note_trees.sapling.root();
+        let orchard_root = note_trees.orchard.root();
+        let ironwood_root = note_trees.ironwood.root();
+        let mut history_after_retry = state.read_service.db.history_tree();
+        Arc::make_mut(&mut history_after_retry)
+            .push(
+                &network,
+                honest_parent.clone(),
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &ironwood_root,
+                },
+            )
+            .expect("the valid retry extends the test history tree");
+        let semantic_child = child(
+            &honest_parent,
+            history_after_retry
+                .hash()
+                .expect("NU5 is active at the retry height"),
+            Coinbase::Branched,
+            vec![],
+        );
+
+        let writer = state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .clone();
+        let (detached_sender, mut detached_messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(
+            state
+                .block_write_sender
+                .finalized
+                .replace(detached_sender.clone()),
+        );
+        drop(
+            state
+                .block_write_sender
+                .non_finalized
+                .replace(detached_sender),
+        );
+
+        let retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let retry_message = detached_messages
+            .try_recv()
+            .expect("the honest retry is dispatched");
+        assert!(matches!(
+            retry_message,
+            super::write::WriteMessage::Finalized(_)
+        ));
+
+        let duplicate = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        assert!(
+            duplicate.await.unwrap().is_err(),
+            "an in-flight retry does not reopen checkpoint admission"
+        );
+        assert!(detached_messages.try_recv().is_err());
+
+        let semantic_response = state.queue_and_commit_to_non_finalized_state(
+            semantic_child.clone().prepare(),
+            None,
+            None,
+        );
+        let semantic_message = detached_messages.try_recv().ok();
+        writer.send(retry_message).unwrap();
+        if let Some(semantic_message) = semantic_message {
+            writer.send(semantic_message).unwrap();
+        }
+
+        retry
+            .await
+            .unwrap()
+            .expect("the honest parent retry commits");
+        tokio::time::timeout(Duration::from_secs(1), semantic_response)
+            .await
+            .expect("the already-queued semantic child completes without another request")
+            .unwrap()
+            .expect("the semantic child commits after its parent retry");
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the pending-retry semantic dispatch regression finishes");
+}
+
 /// Once a semantic handoff is queued, a checkpoint must not slip behind its marker and commit
 /// after the semantic child at the same height, even if the writer has not consumed the marker.
 #[tokio::test(flavor = "multi_thread")]
