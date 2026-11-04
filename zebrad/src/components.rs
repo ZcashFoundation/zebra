@@ -12,6 +12,7 @@ pub mod inbound;
 pub mod mempool;
 pub mod metrics;
 pub mod notify;
+pub mod resources;
 pub mod state_snapshot;
 #[allow(missing_docs)]
 pub mod sync;
