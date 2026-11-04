@@ -51,9 +51,8 @@ pub async fn zebrad_abrupt_kill() -> Result<()> {
     Ok(())
 }
 
-/// Verifies that zebrad's graceful shutdown (SIGTERM) also stops the
-/// supervised zcashd: zebrad's post-runtime cleanup SIGTERMs the child and
-/// waits for it, so a service-manager stop cannot orphan the sidecar.
+/// Verifies that zebrad's graceful shutdown (SIGTERM) also stops the supervised zcashd, so a
+/// service-manager stop cannot orphan the sidecar.
 ///
 /// Only runs in managed (regtest) mode.
 #[cfg(unix)]
@@ -76,7 +75,7 @@ pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
 
     send_signal(zebrad_pid, "-TERM")?;
 
-    // zebrad exits, then its post-runtime cleanup terminates zcashd.
+    // Zebra's shutdown sequence asks the supervisor to terminate zcashd before exiting.
     zebrad.wait_with_output()?;
 
     let mut zcashd_exited = false;

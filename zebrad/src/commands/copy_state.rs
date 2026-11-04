@@ -48,7 +48,7 @@ use zebra_state as old_zs;
 use zebra_state as new_zs;
 
 use crate::{
-    components::tokio::{RuntimeRun, TokioComponent},
+    components::tokio::{shutdown, RuntimeRun, TokioComponent},
     config::ZebradConfig,
     prelude::*,
     BoxError,
@@ -473,8 +473,13 @@ impl Runnable for CopyStateCmd {
             .rt
             .take();
 
-        rt.expect("runtime should not already be taken")
-            .run(self.start());
+        rt.expect("runtime should not already be taken").run(async {
+            tokio::select! {
+                biased;
+                _ = shutdown() => Ok(()),
+                result = self.start() => result,
+            }
+        });
 
         info!("finished cached chain state copy");
     }
