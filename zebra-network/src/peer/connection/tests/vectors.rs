@@ -972,9 +972,9 @@ async fn getblocks_response_precedes_ready_block_advert() {
     .expect("the response and advert are both delivered");
 }
 
-/// A singleton reaches inbound without also scheduling a sync download.
+/// A singleton reaches inbound and remains available to the pending discovery request.
 #[tokio::test]
-async fn connection_find_blocks_singleton_inv_is_only_advertised() {
+async fn connection_find_blocks_singleton_inv_is_also_advertised() {
     let _init_guard = zebra_test::init();
     tokio::time::pause();
 
@@ -1023,7 +1023,7 @@ async fn connection_find_blocks_singleton_inv_is_only_advertised() {
             .await
             .expect("peer internal response channel is valid")
             .expect("singleton inventory completes FindBlocks"),
-        Response::BlockHashes(Vec::new()),
+        Response::BlockHashes(vec![hash]),
     );
 
     connection.abort();

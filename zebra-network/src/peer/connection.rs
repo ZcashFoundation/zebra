@@ -143,7 +143,7 @@ impl Handler {
     /// Taking ownership of the message means that we can pass ownership of its
     /// contents to responses without additional copies.  If the message is not
     /// interpretable as a response, we return ownership to the caller.
-    /// Singleton block inventories go only to inbound gossip, completing discovery with no hashes.
+    /// Singleton block inventories also go to inbound gossip, because they can be adverts.
     ///
     /// Unexpected messages are left unprocessed, and may be rejected later.
     ///
@@ -419,18 +419,14 @@ impl Handler {
                         .iter()
                         .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
-                let hashes = if items.len() == 1 {
-                    // A singleton can be an advert racing getblocks. Let inbound download it,
-                    // rather than starting the same verification through the syncer as well.
-                    // If inbound drops it, the unchanged locator discovers it again next round.
+                let hashes = block_hashes(&items)
+                    .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
+                    .collect();
+                if items.len() == 1 {
+                    // A singleton can be an advert racing discovery. Return it and also forward it,
+                    // because inbound admission can drop the advert while the syncer can fetch it.
                     ignored_msg = Some(Message::Inv(items));
-                    Vec::new()
-                } else {
-                    // Truncate oversized responses while preserving the normal response bound.
-                    block_hashes(&items[..])
-                        .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
-                        .collect()
-                };
+                }
                 Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
