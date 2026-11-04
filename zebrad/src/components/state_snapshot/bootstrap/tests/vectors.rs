@@ -981,6 +981,82 @@ async fn manifest_refusals_are_retried_with_backoff() {
     assert_eq!(peers.addrs(), vec![addr]);
 }
 
+/// A peer that paces correct one-byte answers cannot consume the whole
+/// manifest deadline while another peer has the complete object.
+#[tokio::test]
+async fn manifest_short_answers_leave_time_for_other_peers() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let manifest = manifest(Height(5000));
+    let bytes = manifest.encode().expect("the test manifest is valid");
+    let commitment = StateSnapshotCommitment {
+        height: manifest.height,
+        block_hash: manifest.block_hash,
+        manifest: ObjectHash::of(&bytes),
+    };
+    let size = u64::try_from(bytes.len()).expect("the test manifest length fits in u64");
+    let limit = u32::try_from(MAX_MANIFEST_BYTES).expect("the manifest limit fits in u32");
+    let (addr_a, mut a) = peer(1);
+    let addr_b = PeerSocketAddr::from(([10, 0, 0, 2], 8233));
+    let mut b = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
+    let mut peers = Peers::new(vec![(addr_a, a.clone()), (addr_b, b.clone())]);
+
+    let trickle_bytes = bytes.clone();
+    let trickle = tokio::spawn(async move {
+        for offset in 0..trickle_bytes.len() {
+            let received = u32::try_from(offset).expect("the test manifest is small");
+            a.expect_request(zn::Request::Object {
+                hash: commitment.manifest,
+                offset: u64::try_from(offset).expect("a usize offset fits in u64"),
+                length: limit - received,
+            })
+            .await
+            .respond(zn::Response::Object {
+                size,
+                data: vec![trickle_bytes[offset]],
+            });
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
+    let honest = tokio::spawn(async move {
+        b.expect_request(zn::Request::Object {
+            hash: commitment.manifest,
+            offset: 0,
+            length: limit,
+        })
+        .await
+        .respond(zn::Response::Object { size, data: bytes });
+    });
+
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        fetch_manifest(
+            &mut peers,
+            commitment,
+            &network,
+            Instant::now() + Duration::from_millis(200),
+        ),
+    )
+    .await
+    .expect("the trickling peer leaves time for the honest peer");
+    trickle.abort();
+    honest.abort();
+    let _ = trickle.await;
+    let _ = honest.await;
+
+    result.expect("the honest peer serves the manifest");
+    assert!(
+        (Duration::from_millis(90)..Duration::from_secs(2)).contains(&started.elapsed()),
+        "the first peer gets only its half of the deadline: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(peers.addrs(), vec![addr_a, addr_b]);
+}
+
 /// The direct history-tree fetch uses the same refusal retry policy as the
 /// manifest fetch.
 #[tokio::test(start_paused = true)]
