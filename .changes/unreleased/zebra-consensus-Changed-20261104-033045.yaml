@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: The mempool transaction verifier no longer polls the mempool service 50 ms after each verified transaction; the caller must check for verified transactions when results arrive.
+time: 2026-11-04T03:30:45.000000000+01:00

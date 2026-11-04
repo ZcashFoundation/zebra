@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce mempool expiration scans and redundant polls during transaction submission bursts.
+time: 2026-11-04T03:30:45.628326756+01:00

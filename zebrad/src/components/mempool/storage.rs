@@ -219,6 +219,10 @@ pub struct Storage {
 
     /// Maximum allowed size of OP_RETURN scripts, in bytes.
     max_datacarrier_bytes: u32,
+
+    /// Number of expiration scans, for detecting repeated work at the same tip height.
+    #[cfg(test)]
+    pub(super) expiry_scan_count: usize,
 }
 
 impl Drop for Storage {
@@ -241,6 +245,8 @@ impl Storage {
             tip_rejected_exact: Default::default(),
             tip_rejected_same_effects: Default::default(),
             chain_rejected_same_effects: Default::default(),
+            #[cfg(test)]
+            expiry_scan_count: 0,
         }
     }
 
@@ -893,6 +899,11 @@ impl Storage {
         &mut self,
         tip_height: zebra_chain::block::Height,
     ) -> HashSet<UnminedTxId> {
+        #[cfg(test)]
+        {
+            self.expiry_scan_count += 1;
+        }
+
         let mut tx_ids = HashSet::new();
         let mut unmined_tx_ids = HashSet::new();
 
@@ -903,6 +914,10 @@ impl Storage {
                     unmined_tx_ids.insert(tx.transaction.id);
                 }
             }
+        }
+
+        if tx_ids.is_empty() {
+            return unmined_tx_ids;
         }
 
         // expiry height is effecting data, so we match by non-malleable TXID
