@@ -509,12 +509,13 @@ dependencies = [
 
 [[package]]
 name = "bls12_381"
-version = "0.9.0"
+version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18f887f26229478dcd0e0d063566b51c68fb55a38fba21799c5f3371a74ec61f"
+checksum = "eeb89aafc396dc9e6c71d3eb4dc884b7d8b0d2618626c885deebe3e5b6f6d876"
 dependencies = [
  "ff",
  "group",
+ "once_cell",
  "pairing",
  "rand_core 0.10.1",
  "subtle",
@@ -1854,9 +1855,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "groth16"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8bb1e0bde2dbacd81474ae216c5dd4901307bd1c75fd26ed49590e88048c8442"
+checksum = "851ec45dbdc0596107a882c30604daa15bff232e42e3fd0947793adcc6a677ea"
 dependencies = [
  "bellman",
  "byteorder",
@@ -1949,9 +1950,9 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5af2a9457f494f862cd07b81c2e98a19f50b06a2057b7569450d7c26b167d1c"
+checksum = "d886268046f1ceedd464c95382a64c7e86520b029b18e02ee92bf94f5120817d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3545,9 +3546,9 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "pairing"
-version = "0.24.0"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33f6413397336802d16a342e69a5bd9c8b8cc2fa9fc9298044cd3443f77f1010"
+checksum = "e2507708d4076d5c62617fbdd8c50e11047d033ac318a437623d7e35385f9b7f"
 dependencies = [
  "group",
 ]
@@ -3605,9 +3606,9 @@ dependencies = [
 
 [[package]]
 name = "pasta_curves"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ed53ba43531a06e1f82020907cf192fc3c25d7c0baf5c49c547b74e7103b62"
+checksum = "9d3b42dfae151179bc4634291b570db39455a90ee3b309723e7c02ac80d909ee"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -5390,7 +5391,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
