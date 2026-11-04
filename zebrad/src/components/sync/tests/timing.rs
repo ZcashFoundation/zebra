@@ -398,3 +398,72 @@ async fn tip_progress_renews_an_in_progress_sync_step() {
     chain_sync.downloads.cancel_all();
 }
 
+/// Verifier backpressure must expire even when no sync stage is polling the download.
+#[tokio::test(start_paused = true)]
+async fn verifier_readiness_times_out() {
+    use futures::StreamExt;
+    use tower::limit::ConcurrencyLimit;
+
+    use zebra_chain::{
+        block::Block, chain_tip::mock::MockChainTip, serialization::ZcashDeserializeInto,
+    };
+    use zebra_test::mock_service::MockService;
+
+    use crate::components::sync::downloads::BlockDownloadVerifyError;
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let network = tower::service_fn(move |request| {
+        assert_eq!(
+            request,
+            zebra_network::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            }
+        );
+        future::ok::<_, crate::BoxError>(zebra_network::Response::Blocks(vec![
+            zebra_network::InventoryResponse::Available((block.clone(), None)),
+        ]))
+    });
+    let never_ready_verifier = ConcurrencyLimit::new(MockService::build().for_unit_tests(), 0);
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        never_ready_verifier,
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    let started = tokio::time::Instant::now();
+    chain_sync
+        .downloads
+        .download_and_verify(hash)
+        .await
+        .unwrap();
+    let error = timeout(
+        BLOCK_VERIFY_TIMEOUT + Duration::from_secs(1),
+        chain_sync.downloads.next(),
+    )
+    .await
+    .expect("verifier readiness must have its own deadline")
+    .expect("the download must report its readiness timeout")
+    .expect_err("a verifier with no permits never becomes ready");
+    assert!(
+        matches!(
+            error,
+            BlockDownloadVerifyError::VerifierServiceError { ref error }
+                if error.is::<tokio::time::error::Elapsed>()
+        ),
+        "a readiness timeout must be reported as a verifier service error: {error:?}"
+    );
+    assert_eq!(tokio::time::Instant::now() - started, BLOCK_VERIFY_TIMEOUT);
+    assert!(chain_sync.downloads.is_empty());
+}

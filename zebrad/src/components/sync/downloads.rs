@@ -32,7 +32,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
@@ -80,7 +80,7 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
     },
 
-    #[error("permanent readiness error from the verifier service: {error:?}")]
+    #[error("readiness error from the verifier service: {error:?}")]
     VerifierServiceError {
         #[source]
         error: BoxError,
@@ -600,8 +600,8 @@ where
                     });
                 }
 
-                // Wait for the verifier service to be ready.
-                let readiness = verifier.ready();
+                // Bound readiness separately: the verifier's request timeout starts at `call`.
+                let readiness = timeout(BLOCK_VERIFY_TIMEOUT, verifier.ready());
                 // Prefer the cancel handle if both are ready.
                 let verifier = tokio::select! {
                     biased;
@@ -610,7 +610,8 @@ where
                         metrics::counter!("sync.cancelled.verify.ready.count").increment(1);
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
                     }
-                    verifier = readiness => verifier,
+                    verifier = readiness => verifier
+                        .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error: error.into() })?,
                 };
 
                 // Verify the block.
