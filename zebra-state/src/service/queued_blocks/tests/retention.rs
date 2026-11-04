@@ -301,13 +301,19 @@ async fn orphan_receiver_drop_retention_is_bounded() {
             .commit_block(child.clone().prepare(), &state.read_service.db)
             .unwrap();
         let contextual = proposal_state.best_tip_block().unwrap().clone();
+        let cached_outputs = contextual.new_outputs.clone();
         let (committed, mut commits) = mpsc::channel(1);
         let (validated, bodies) = watch::channel(None);
-        drop(state.queue_and_commit_to_non_finalized_state(
-            child.clone().prepare(),
-            Some(Box::new(contextual)),
-            Some(MinedBlockNotifications::new(committed.clone(), validated)),
-        ));
+        let Request::CommitMinedBlock {
+            block,
+            contextual,
+            notifications,
+        } = contextual
+            .into_mined_request(MinedBlockNotifications::new(committed.clone(), validated))
+        else {
+            unreachable!("a cached proposal creates a mined commit");
+        };
+        drop(state.queue_and_commit_to_non_finalized_state(block, contextual, Some(notifications)));
 
         let queue = &state.non_finalized_state_queued_blocks;
         assert_eq!(
@@ -316,6 +322,12 @@ async fn orphan_receiver_drop_retention_is_bounded() {
             "dropped response receivers must not permit unbounded orphan retention",
         );
         assert!(queue.has(child.hash()));
+        let queued = &queue.blocks[&child.hash()].0;
+        assert!(Arc::ptr_eq(&queued.0.new_outputs, &cached_outputs));
+        assert!(Arc::ptr_eq(
+            &queued.2.as_ref().unwrap().new_outputs,
+            &cached_outputs,
+        ));
         assert!(!queue.has(highest.hash()));
         assert!(queue
             .blocks
@@ -342,7 +354,7 @@ async fn orphan_receiver_drop_retention_is_bounded() {
         // A duplicate replaces only the response and notification policy, not the accepted payload.
         let mut replacement = child.clone().prepare();
         replacement.height = Height::MAX;
-        replacement.new_outputs.clear();
+        Arc::make_mut(&mut replacement.new_outputs).clear();
         let response = state.queue_and_commit_to_non_finalized_state(replacement, None, None);
 
         assert_eq!(
@@ -360,6 +372,15 @@ async fn orphan_receiver_drop_retention_is_bounded() {
             .read_service
             .latest_non_finalized_state()
             .any_chain_contains(&child.hash()));
+        assert!(Arc::ptr_eq(
+            &state
+                .read_service
+                .latest_non_finalized_state()
+                .best_tip_block()
+                .unwrap()
+                .new_outputs,
+            &cached_outputs,
+        ));
         assert!(!state.non_finalized_state_queued_blocks.has(child.hash()));
         assert_indexes(&state.non_finalized_state_queued_blocks);
 
