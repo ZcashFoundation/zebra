@@ -857,15 +857,9 @@ impl Exporter<'_> {
         };
 
         let tx_loc = |height: Height| TransactionLocation::min_for_height(height).as_bytes();
+        let end = [self.end_bytes().as_slice(), &[0, 0]].concat();
         if self.window_start <= Height(1) {
-            self.scan(
-                cf,
-                Some(&tx_loc(Height(0))),
-                Some(&tx_loc(
-                    self.height.next().expect("the tip has a successor"),
-                )),
-                &mut row,
-            )?;
+            self.scan(cf, Some(&tx_loc(Height(0))), Some(&end), &mut row)?;
         } else {
             self.scan(
                 cf,
@@ -873,14 +867,7 @@ impl Exporter<'_> {
                 Some(&tx_loc(Height(1))),
                 &mut row,
             )?;
-            self.scan(
-                cf,
-                Some(&tx_loc(self.window_start)),
-                Some(&tx_loc(
-                    self.height.next().expect("the tip has a successor"),
-                )),
-                &mut row,
-            )?;
+            self.scan(cf, Some(&tx_loc(self.window_start)), Some(&end), &mut row)?;
         }
 
         if let Some(missing) = next {

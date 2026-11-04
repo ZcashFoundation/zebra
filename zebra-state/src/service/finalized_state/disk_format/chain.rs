@@ -54,12 +54,12 @@ impl SnapshotBase {
             block_hash: block::Hash(
                 block_hash
                     .try_into()
-                    .expect("32 block hash bytes were sliced"),
+                    .map_err(|_| "the snapshot base has an invalid block hash")?,
             ),
             manifest: ObjectHash(
                 manifest
                     .try_into()
-                    .expect("32 manifest hash bytes were sliced"),
+                    .map_err(|_| "the snapshot base has an invalid manifest hash")?,
             ),
             deferred_checks,
         })
