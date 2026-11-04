@@ -1116,3 +1116,33 @@ async fn cancelling_pressure_retry_releases_downloaded_body() {
     verifier.expect_no_requests().await;
     network.expect_no_requests().await;
 }
+
+/// Runtime shutdown can cancel a spawned download before its JoinHandle is polled.
+#[tokio::test]
+async fn cancelled_download_task_ends_stream_without_panicking() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, _, _, _) = mock_downloads(Height(0));
+    let task = tokio::spawn(futures::future::pending::<
+        Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>,
+    >());
+    task.abort();
+    downloads.pending.push(task);
+
+    assert!(timeout(MAX_SERVICE_REQUEST_DELAY, downloads.next())
+        .await
+        .expect("a cancelled download does not stall the stream")
+        .is_none());
+}
+
+/// Filtering expected cancellation must not hide an actual download-task panic.
+#[tokio::test]
+#[should_panic(expected = "block download and verify tasks must not panic")]
+async fn download_task_panic_still_propagates() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, _, _, _) = mock_downloads(Height(0));
+    downloads.pending.push(tokio::spawn(async {
+        panic!("injected download task panic")
+    }));
+
+    let _ = downloads.next().await;
+}

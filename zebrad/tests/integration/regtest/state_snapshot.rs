@@ -462,6 +462,60 @@ fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
     Ok(())
 }
 
+/// A snapshot-serving node with block downloads in flight exits successfully on SIGTERM.
+#[cfg(unix)]
+#[ignore = "runs two nodes through 2,000 blocks; run it with --run-ignored=all \
+            --ignore-default-filter for process shutdown coverage"]
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_server_sigterm_during_sync_exits_successfully() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let network = regtest(None);
+        let key_a = TransparentSigningKey::random();
+        let key_b = TransparentSigningKey::random();
+        let rpc_a = reserve_tcp_port()?;
+        let p2p_a = loopback(reserve_tcp_port()?);
+        let quic_a = loopback(reserve_udp_port()?);
+        let rpc_b = reserve_tcp_port()?;
+        let p2p_b = loopback(reserve_tcp_port()?);
+        let quic_b = loopback(reserve_udp_port()?);
+
+        let mut config_a = node_config(&network, rpc_a, p2p_a, RETENTION_B, &key_a)?;
+        config_a.sync.serve_state_snapshots = true;
+        config_a.network.v2_listen_addr = Some(quic_a);
+        config_a.tracing.filter = Some("warn".to_owned());
+        let node_a = start_node(testdir()?.with_config(&mut config_a)?)?;
+        let a = RpcRequestClient::new_with_timeout(loopback(rpc_a), TEST_TIMEOUT);
+        wait_for_mempool_activation(&a).await?;
+        const SYNC_BLOCKS: u32 = 2_000;
+        mine_to(&a, SYNC_BLOCKS).await?;
+
+        let mut config_b = node_config(&network, rpc_b, p2p_b, RETENTION_B, &key_b)?;
+        config_b.sync.serve_state_snapshots = true;
+        config_b.sync.download_concurrency_limit = 500;
+        config_b.sync.full_verify_concurrency_limit = 500;
+        config_b.sync.parallel_cpu_threads = 1;
+        config_b.network.initial_testnet_peers = [p2p_a.to_string()].into();
+        config_b.network.v2_listen_addr = Some(quic_b);
+        config_b.network.initial_v2_peers = [quic_a.to_string()].into();
+        let node_b = start_node(testdir()?.with_config(&mut config_b)?)?;
+        let b = RpcRequestClient::new_with_timeout(loopback(rpc_b), TEST_TIMEOUT);
+        wait_for_mempool_activation(&b).await?;
+        let synced = block_count(&b).await.unwrap_or(0);
+        assert!(
+            synced < SYNC_BLOCKS,
+            "the process regression requires active block downloads, but node B reached {synced}"
+        );
+
+        crate::common::zcashd_compat::launch::send_signal(node_b.id(), "-TERM")?;
+        let output_b = node_b.wait_with_output();
+        stop_node(node_a)?;
+        output_b?.assert_success()?;
+        Ok(())
+    })
+    .await?
+}
+
 /// A pruned node bootstraps from a state snapshot, serves and spends from it, keeps it across a
 /// restart, and is refused when its checkpoints do not cover the snapshot height.
 #[ignore = "runs two nodes through a multi-minute snapshot bootstrap; run it with \

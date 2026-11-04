@@ -281,7 +281,7 @@ where
     type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        let mut this = self.project();
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
@@ -291,8 +291,12 @@ where
         // task is scheduled for wakeup when the next task becomes ready.
         //
         // TODO: this would be cleaner with poll_map (#2693)
-        if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let result = join_result.expect("block download and verify tasks must not panic");
+        while let Some(join_result) = ready!(this.pending.as_mut().poll_next(cx)) {
+            let result = match join_result {
+                // Runtime shutdown can cancel a download before its handle is polled.
+                Err(error) if error.is_cancelled() => continue,
+                join_result => join_result.expect("block download and verify tasks must not panic"),
+            };
             let hash = match &result {
                 Ok((_, hash)) | Err((_, hash)) => *hash,
             };
@@ -300,10 +304,10 @@ where
                 this.in_flight_blocks.remove(queued_at, hash);
             }
 
-            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
-        } else {
-            Poll::Ready(None)
+            return Poll::Ready(Some(result.map_err(|(e, _hash)| e)));
         }
+
+        Poll::Ready(None)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
