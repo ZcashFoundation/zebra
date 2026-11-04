@@ -1644,21 +1644,20 @@ async fn rpc_getaddresstxids_response() {
             zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
-            // Exhaustively test possible block ranges for mainnet.
-            for start in 1..=10 {
-                for end in start..=10 {
-                    rpc_getaddresstxids_response_with(
-                        &network,
-                        Some(start),
-                        Some(end),
-                        &address,
-                        &read_state,
-                        &latest_chain_tip,
-                        (end - start + 1) as usize,
-                    )
-                    .await;
-                }
-            }
+            // Keep every range and its full no-request window, but overlap independent cases.
+            let ranges = (1..=10).flat_map(|start| (start..=10).map(move |end| (start, end)));
+            futures::future::join_all(ranges.map(|(start, end)| {
+                rpc_getaddresstxids_response_with(
+                    &network,
+                    Some(start),
+                    Some(end),
+                    &address,
+                    &read_state,
+                    &latest_chain_tip,
+                    usize::try_from(end - start + 1).expect("range contains at most ten blocks"),
+                )
+            }))
+            .await;
         } else {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
@@ -3574,8 +3573,9 @@ async fn getblocktemplate_precomputed() {
 
     // The RPC validates the tip against the state, then must answer from the precomputed template:
     // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever.
+    // forever. An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
+    let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
@@ -3596,6 +3596,7 @@ async fn getblocktemplate_precomputed() {
         Hash::from_hex("0000000000b6a5024aa412120b684a509ba8fd57e01de07bc2a84e4d3719a9f1").unwrap();
 
     read_state_responder.abort();
+    let _ = read_state_responder.await;
 
     let (read_state_responder, mempool_responder) =
         spawn_responders(next_tip_height, next_tip_hash);

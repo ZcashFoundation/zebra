@@ -103,7 +103,10 @@ use crate::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
-        sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
+        sync::{
+            self, record_tip_block_delay, show_block_chain_progress,
+            VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
+        },
         tokio::{RuntimeRun, TokioComponent},
         zcashd_compat, ChainSync, Inbound,
     },
@@ -650,6 +653,11 @@ impl StartCmd {
             .in_current_span(),
         );
 
+        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
+        info!("spawning tip block delay metrics task");
+        let tip_delay_task_handle =
+            tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
+
         // Start health server if configured
         info!("initializing health endpoints");
         let (health_task_handle, _) = health::init(
@@ -892,6 +900,7 @@ impl StartCmd {
         rpc_tx_queue_handle.abort();
         block_template_task_handle.abort();
         health_task_handle.abort();
+        tip_delay_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();

@@ -1,17 +1,12 @@
 //! Randomised property tests for candidate peer selection.
 
-use std::{
-    env,
-    net::SocketAddr,
-    str::FromStr,
-    time::{Duration, Instant},
-};
+use std::{env, net::SocketAddr, str::FromStr, time::Duration};
 
 use proptest::{
     collection::{hash_map, vec},
     prelude::*,
 };
-use tokio::time::{sleep, timeout};
+use tokio::time::{sleep, timeout, Instant};
 use tracing::Span;
 
 use zebra_chain::{parameters::Network::*, serialization::DateTime32};
@@ -32,7 +27,7 @@ const MAX_TEST_CANDIDATES: u32 = 4;
 /// The number of random test addresses for each test.
 const TEST_ADDRESSES: usize = 2 * MAX_TEST_CANDIDATES as usize;
 
-/// The default number of proptest cases for each test that includes sleeps.
+/// The default number of proptest cases for the rate-limit test.
 const DEFAULT_SLEEP_TEST_PROPTEST_CASES: u32 = 16;
 
 /// The largest extra delay we allow after every test sleep.
@@ -91,7 +86,7 @@ proptest! {
 }
 
 proptest! {
-    // These tests contain sleeps, so we use a small number of cases by default.
+    // Keep the existing case count while running the rate-limit waits on a virtual clock.
     // Set the PROPTEST_CASES env var to override this default.
     #![proptest_config(proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
                                           .ok()
@@ -107,6 +102,8 @@ proptest! {
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        // The address book and mock peer service do not perform I/O.
+        tokio::time::pause();
 
         let peers = peers.into_iter().map(|(ip, port)| {
             MetaAddr::new_initial_peer(canonical_peer_addr(SocketAddr::new(ip, port)))

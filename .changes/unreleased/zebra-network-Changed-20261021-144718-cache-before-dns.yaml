@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`Config::initial_peers` now reads the disk cache first, and stops retrying failed DNS lookups when there are cached peers ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).'
+time: 2026-10-21T14:47:18.007266823Z

@@ -16,18 +16,23 @@ use zebra_chain::{
     },
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::client::PeerInfo;
-use zebra_test::{args, net::random_known_port, prelude::*};
+use zebra_rpc::{client::PeerInfo, server::OPENED_RPC_ENDPOINT_MSG};
+use zebra_test::{args, prelude::*};
 
 use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
-    config::{default_test_config, testdir, use_live_peers},
-    launch::{can_spawn_zebrad_for_test_type, ZebradTestDirExt, LAUNCH_DELAY},
+    config::{
+        default_test_config, os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir,
+        use_live_peers,
+    },
+    launch::{
+        can_spawn_zebrad_for_test_type, wait_for_mempool_activation, ZebradTestDirExt, LAUNCH_DELAY,
+    },
     test_type::TestType::*,
 };
 
-use crate::integration::database::check_config_conflict;
+use crate::integration::database::check_config_conflict_with_running_node;
 
 /// The maximum time for `zebrad` to finish its initial connections to live Mainnet peers.
 const LIVE_PEER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -80,23 +85,19 @@ fn live_mainnet_peer_handshake() -> Result<()> {
 fn zebra_zcash_listener_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{port}");
-
-    // Write a configuration that has our created network listen_addr
     let mut config = default_test_config(&Mainnet);
     config.network.cache_dir = false.into();
-    config.network.listen_addr = listen_addr.parse().unwrap();
-    let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+    let mut node1 = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    config.network.listen_addr =
+        read_listen_addr_from_logs(&mut node1, "Opened Zcash protocol endpoint at ")?;
 
-    // From another folder create a configuration with the same listener.
-    // `network.listen_addr` will be the same in the 2 nodes.
-    // (But since the config is ephemeral, they will have different state paths.)
+    // Reuse the first node's held listener, but keep separate ephemeral state.
     let dir2 = testdir()?.with_config(&mut config)?;
-
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
+    check_config_conflict_with_running_node(node1, dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
@@ -110,23 +111,26 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 fn zebra_metrics_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{port}");
+    // TODO: exporter hides its bound address; this handoff can race until it accepts a listener.
+    // Keep the reservation through config writing, then release it immediately before spawning.
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0")?;
 
-    // Write a configuration that has our created metrics endpoint_addr
     let mut config = default_test_config(&Mainnet);
     config.network.cache_dir = false.into();
-    config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
+    config.metrics.endpoint_addr = Some(reservation.local_addr()?);
     let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
+    drop(reservation);
+    let mut node1 = dir1
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    config.metrics.endpoint_addr = Some(read_listen_addr_from_logs(
+        &mut node1,
+        "Opened metrics endpoint at ",
+    )?);
 
-    // From another folder create a configuration with the same endpoint.
-    // `metrics.endpoint_addr` will be the same in the 2 nodes.
-    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    // Reuse the held endpoint, with separate automatic P2P ports and ephemeral state.
     let dir2 = testdir()?.with_config(&mut config)?;
-
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
+    check_config_conflict_with_running_node(node1, dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
@@ -140,23 +144,21 @@ fn zebra_metrics_conflict() -> Result<()> {
 fn zebra_tracing_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // [Note on port conflict](#Note on port conflict)
-    let port = random_known_port();
-    let listen_addr = format!("127.0.0.1:{port}");
-
-    // Write a configuration that has our created tracing endpoint_addr
     let mut config = default_test_config(&Mainnet);
     config.network.cache_dir = false.into();
-    config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
-    let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
+    config.tracing.endpoint_addr = Some("127.0.0.1:0".parse()?);
+    let mut node1 = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    config.tracing.endpoint_addr = Some(read_listen_addr_from_logs(
+        &mut node1,
+        "Opened tracing endpoint at ",
+    )?);
 
-    // From another folder create a configuration with the same endpoint.
-    // `tracing.endpoint_addr` will be the same in the 2 nodes.
-    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    // Reuse the held endpoint, with separate automatic P2P ports and ephemeral state.
     let dir2 = testdir()?.with_config(&mut config)?;
-
-    check_config_conflict(dir1, regex1.as_str(), dir2, PORT_IN_USE_ERROR.as_str())?;
+    check_config_conflict_with_running_node(node1, dir2, PORT_IN_USE_ERROR.as_str())?;
 
     Ok(())
 }
@@ -166,29 +168,23 @@ fn zebra_tracing_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic.
 #[test]
 fn zebra_rpc_conflict() -> Result<()> {
-    use crate::common::config::random_known_rpc_port_config;
-
     let _init_guard = zebra_test::init();
 
-    // Write a configuration that has RPC listen_addr set
-    // [Note on port conflict](#Note on port conflict)
-    //
-    // This is the required setting to detect port conflicts.
-    let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    // One RPC worker is required to detect port conflicts.
+    let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
     config.network.cache_dir = false.into();
+    let mut node1 = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    config.rpc.listen_addr = Some(read_listen_addr_from_logs(
+        &mut node1,
+        OPENED_RPC_ENDPOINT_MSG,
+    )?);
 
-    let dir1 = testdir()?.with_config(&mut config)?;
-    let regex1 = regex::escape(&format!(
-        r"Opened RPC endpoint at {}",
-        config.rpc.listen_addr.unwrap(),
-    ));
-
-    // From another folder create a configuration with the same endpoint.
-    // `rpc.listen_addr` will be the same in the 2 nodes.
-    // But they will have different Zcash listeners (auto port) and states (ephemeral)
+    // Reuse the held endpoint, with separate automatic P2P ports and ephemeral state.
     let dir2 = testdir()?.with_config(&mut config)?;
-
-    check_config_conflict(dir1, regex1.as_str(), dir2, "Address already in use")?;
+    check_config_conflict_with_running_node(node1, dir2, "Address already in use")?;
 
     Ok(())
 }
@@ -250,19 +246,15 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
         .expect("already checked config")?;
 
     config.network.cache_dir = false.into();
-    config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
     config.state.ephemeral = true;
     config.network.initial_testnet_peers = [].into();
     config.network.crawl_new_peer_interval = Duration::from_secs(5);
 
-    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-    // Use a longer timeout because `generate [500]` mines 500 blocks in a single
-    // RPC call, which can exceed the default timeout at ~400ms per block.
-    let rpc_client_1 =
-        RpcRequestClient::new_with_timeout(rpc_listen_addr, Duration::from_secs(15 * 60));
+    config.rpc.listen_addr = Some("127.0.0.1:0".parse()?);
 
     tracing::info!(
-        ?rpc_listen_addr,
+        rpc_listen_addr = ?config.rpc.listen_addr,
         network_listen_addr = ?config.network.listen_addr,
         "starting a zebrad child on incompatible custom Testnet"
     );
@@ -270,8 +262,7 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     let is_finished = Arc::new(AtomicBool::new(false));
     let _finish_guard = FinishOnDrop::new(Arc::clone(&is_finished));
 
-    let node1_listen_addr = config.network.listen_addr;
-    let (node1_listening_tx, node1_listening_rx) = tokio::sync::oneshot::channel::<()>();
+    let (node1_listening_tx, node1_listening_rx) = tokio::sync::oneshot::channel();
 
     {
         let is_finished = Arc::clone(&is_finished);
@@ -288,12 +279,15 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
             // Signal once node 1 is listening. A dial that lands before the listener
             // is open marks node 1 unreachable in node 2's address book, which then
             // never retries it, so node 2 never peers and the test times out.
-            zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
-                "Opened Zcash protocol endpoint at {node1_listen_addr}"
-            )))?;
+            let node1_listen_addr = read_listen_addr_from_logs(
+                &mut zebrad_child,
+                "Opened Zcash protocol endpoint at ",
+            )?;
+            let rpc_listen_addr =
+                read_listen_addr_from_logs(&mut zebrad_child, OPENED_RPC_ENDPOINT_MSG)?;
             let mut zebrad_child =
                 zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
-            let _ = node1_listening_tx.send(());
+            let _ = node1_listening_tx.send((node1_listen_addr, rpc_listen_addr));
 
             while !is_finished.load(Ordering::SeqCst) {
                 zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
@@ -304,10 +298,15 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
     }
 
     // Only let node 2 dial once node 1 is listening.
-    tokio::time::timeout(Duration::from_secs(60), node1_listening_rx)
-        .await
-        .wrap_err("timed out waiting for node 1 to open its network listener")?
-        .wrap_err("node 1 exited before opening its network listener")?;
+    let (node1_listen_addr, rpc_listen_addr) =
+        tokio::time::timeout(Duration::from_secs(60), node1_listening_rx)
+            .await
+            .wrap_err("timed out waiting for node 1 to open its listeners")?
+            .wrap_err("node 1 exited before opening its listeners")?;
+
+    // Mining 500 blocks in a single RPC call can exceed the default timeout.
+    let rpc_client_1 =
+        RpcRequestClient::new_with_timeout(rpc_listen_addr, Duration::from_secs(15 * 60));
 
     let network2 = testnet::Parameters::build()
         .with_network_magic(Magic([0; 4]))
@@ -328,21 +327,20 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
         .expect("failed to build configured network");
 
     config.network.network = network2;
-    config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
+    config.network.initial_testnet_peers = [node1_listen_addr.to_string()].into();
     config.network.listen_addr = "127.0.0.1:0".parse()?;
-    config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    config.rpc.listen_addr = Some("127.0.0.1:0".parse()?);
     config.network.crawl_new_peer_interval = Duration::from_secs(5);
     config.network.cache_dir = false.into();
     config.state.ephemeral = true;
 
-    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-    let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
-
     tracing::info!(
-        ?rpc_listen_addr,
+        rpc_listen_addr = ?config.rpc.listen_addr,
         network_listen_addr = ?config.network.listen_addr,
         "starting a zebrad child on the default Testnet"
     );
+
+    let (node2_listening_tx, node2_listening_rx) = tokio::sync::oneshot::channel();
 
     {
         let is_finished = Arc::clone(&is_finished);
@@ -356,9 +354,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
                 .with_timeout(test_type.zebrad_timeout())?
                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-            zebrad_child.expect_stdout_line_matches(regex::escape(&format!(
-                "Opened RPC endpoint at {rpc_listen_addr}"
-            )))?;
+            let rpc_listen_addr =
+                read_listen_addr_from_logs(&mut zebrad_child, OPENED_RPC_ENDPOINT_MSG)?;
+            let _ = node2_listening_tx.send(rpc_listen_addr);
             let mut zebrad_child =
                 zebrad_child.with_timeout(Duration::from_secs(10 * 60) + LAUNCH_DELAY)?;
 
@@ -369,6 +367,12 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
             Ok(())
         });
     }
+
+    let rpc_listen_addr = tokio::time::timeout(Duration::from_secs(60), node2_listening_rx)
+        .await
+        .wrap_err("timed out waiting for node 2 to open its RPC listener")?
+        .wrap_err("node 2 exited before opening its RPC listener")?;
+    let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
 
     tracing::info!("checking for peers");
 
@@ -385,13 +389,9 @@ async fn disconnects_from_misbehaving_peers_impl() -> Result<()> {
 
     // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
     tracing::info!("committed genesis block, mining blocks with invalid PoW");
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    wait_for_mempool_activation(&rpc_client_1).await?;
 
     rpc_client_1.call("generate", "[500]").await?;
-
-    tracing::info!("wait for misbehavior messages to flush into address updater channel");
-
-    tokio::time::sleep(Duration::from_secs(30)).await;
 
     tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
 
@@ -450,13 +450,8 @@ async fn synced_node_keeps_upstream_peer_connected() -> Result<()> {
 
 async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
     use zebra_chain::parameters::Network;
-    use zebra_rpc::{client::PeerInfo, server::OPENED_RPC_ENDPOINT_MSG};
 
-    use crate::common::{
-        config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
-        launch::LAUNCH_DELAY,
-        regtest::MiningRpcMethods,
-    };
+    use crate::common::regtest::MiningRpcMethods;
 
     let _init_guard = zebra_test::init();
 
@@ -468,12 +463,8 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
         .into(),
     );
 
-    // Use a preselected port for Node A's P2P listener so Node B's config can
-    // reference it without having to parse Node A's logs.
-    let upstream_p2p_addr = format!("127.0.0.1:{}", random_known_port());
-
     let mut upstream_config = os_assigned_rpc_port_config(false, &net)?;
-    upstream_config.network.listen_addr = upstream_p2p_addr.parse()?;
+    upstream_config.network.listen_addr = "127.0.0.1:0".parse()?;
     upstream_config.network.initial_testnet_peers = [].into();
     upstream_config.mempool.debug_enable_at_height = Some(0);
 
@@ -481,11 +472,14 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
         .with_config(&mut upstream_config)?
         .spawn_child(args!["start"])?;
 
+    // P2P opens before RPC; read its address first so the RPC wait does not discard it.
+    let upstream_p2p_addr =
+        read_listen_addr_from_logs(&mut upstream, "Opened Zcash protocol endpoint at ")?;
+
     let upstream_rpc_addr = read_listen_addr_from_logs(&mut upstream, OPENED_RPC_ENDPOINT_MSG)?;
 
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
     let upstream_client = RpcRequestClient::new(upstream_rpc_addr);
+    wait_for_mempool_activation(&upstream_client).await?;
 
     const BLOCKS_TO_MINE: u32 = 100;
     for _ in 0..BLOCKS_TO_MINE {
@@ -495,7 +489,7 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
 
     // Node B connects only to Node A; limit target size to 1 to avoid crawling.
     let mut internal_config = os_assigned_rpc_port_config(false, &net)?;
-    internal_config.network.initial_testnet_peers = [upstream_p2p_addr].into();
+    internal_config.network.initial_testnet_peers = [upstream_p2p_addr.to_string()].into();
     internal_config.network.peerset_initial_target_size = 1;
 
     let mut internal = testdir()?
@@ -543,14 +537,8 @@ async fn synced_node_keeps_upstream_peer_connected_impl() -> Result<()> {
     upstream.kill(false)?;
     internal.kill(false)?;
 
-    upstream
-        .wait_with_output()?
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
-    internal
-        .wait_with_output()?
-        .assert_was_killed()
-        .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+    upstream.wait_with_output()?.assert_was_killed()?;
+    internal.wait_with_output()?.assert_was_killed()?;
 
     Ok(())
 }

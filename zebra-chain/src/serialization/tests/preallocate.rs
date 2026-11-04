@@ -99,6 +99,50 @@ fn u8_max_allocation_is_correct() {
     assert_eq!(largest_allowed_serialized_len, MAX_PROTOCOL_MESSAGE_LEN);
 }
 
+/// Compare calculated lengths with real vector serialization across CompactSize boundaries.
+#[test]
+fn max_allocation_lengths_match_serialization() {
+    #[derive(Clone)]
+    struct Item<T, const MAX: u64>(T);
+
+    impl<T, const MAX: u64> TrustedPreallocate for Item<T, MAX> {
+        fn max_allocation() -> u64 {
+            MAX
+        }
+    }
+
+    impl<T: ZcashSerialize, const MAX: u64> ZcashSerialize for Item<T, MAX> {
+        fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> std::io::Result<()> {
+            self.0.zcash_serialize(writer)
+        }
+    }
+
+    fn check<T: ZcashSerialize + Clone, const MAX: u64>(item: T) {
+        let item = Item::<T, MAX>(item);
+        let calculated = max_allocation_is_big_enough(item.clone());
+        let max = usize::try_from(MAX).expect("test counts fit in usize");
+        let mut items = vec![item; max + 1];
+        let disallowed_len = items.zcash_serialize_to_vec().unwrap().len();
+        items.pop();
+        let allowed_len = items.zcash_serialize_to_vec().unwrap().len();
+        assert_eq!(calculated, (max + 1, disallowed_len, max, allowed_len));
+    }
+
+    fn check_sizes<const MAX: u64>() {
+        check::<_, MAX>(7u8);
+        for bytes in [Vec::new(), vec![1u8], vec![2u8; 253]] {
+            check::<_, MAX>(bytes);
+        }
+    }
+
+    check_sizes::<0>();
+    check_sizes::<1>();
+    check_sizes::<252>();
+    check_sizes::<253>();
+    check_sizes::<65_535>();
+    check_sizes::<65_536>();
+}
+
 #[test]
 /// A peer-supplied byte count at the `MAX_U8_ALLOCATION` ceiling, paired with a
 /// near-empty reader, must fail closed with `UnexpectedEof` rather than

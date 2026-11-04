@@ -486,7 +486,6 @@ proptest! {
     }
 }
 
-// This test sleeps for every block, so we only ever want to run it once
 proptest! {
     #![proptest_config(
         proptest::test_runner::Config::with_cases(1)
@@ -496,7 +495,7 @@ proptest! {
     ///
     /// 1. Generate a finalized chain and some non-finalized blocks.
     /// 2. Check that initially the best tip height is empty.
-    /// 3. Commit the finalized blocks and check that the best tip height is updated accordingly.
+    /// 3. Commit the finalized blocks, await each tip notification, and check the best tip height.
     /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
     ///    accordingly.
     #[test]
@@ -506,10 +505,12 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = Runtime::new().unwrap().block_on(async {
-            // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-            StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
-        });
+        let runtime = Runtime::new().unwrap();
+        let (mut state_service, _read_only_state_service, mut latest_chain_tip, mut chain_tip_change) =
+            runtime.block_on(async {
+                // Each block is committed separately, so the maximum checkpoint height is unused.
+                StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+            });
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);
@@ -535,9 +536,13 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
-            // Wait for the channels to be updated by the block commit task.
-            // TODO: add a blocking method on ChainTipChange
-            std::thread::sleep(Duration::from_secs(1));
+            // Await publication without consuming the tip action checked below.
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), latest_chain_tip.best_tip_changed())
+                    .await
+                    .expect("the committed block's tip notification should arrive")
+                    .expect("the state service keeps the tip channel open");
+            });
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
@@ -559,9 +564,13 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
-            // Wait for the channels to be updated by the block commit task.
-            // TODO: add a blocking method on ChainTipChange
-            std::thread::sleep(Duration::from_secs(1));
+            // Await publication without consuming the tip action checked below.
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), latest_chain_tip.best_tip_changed())
+                    .await
+                    .expect("the committed block's tip notification should arrive")
+                    .expect("the state service keeps the tip channel open");
+            });
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));

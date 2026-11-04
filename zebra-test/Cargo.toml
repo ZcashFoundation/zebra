@@ -24,6 +24,7 @@ itertools = { workspace = true }
 proptest = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
+tempfile = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tower = { workspace = true, features = ["util"] }
@@ -53,9 +54,6 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
-
-[dev-dependencies]
-tempfile = { workspace = true }
 
 [lints]
 workspace = true
