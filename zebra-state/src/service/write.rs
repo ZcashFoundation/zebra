@@ -319,8 +319,7 @@ impl WriteBlockWorkerTask {
             match finalized_state
                 .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
             {
-                Ok((finalized, note_commitment_trees)) => {
-                    let tip_block = ChainTipBlock::from(finalized);
+                Ok((tip_block, note_commitment_trees)) => {
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
                 }
