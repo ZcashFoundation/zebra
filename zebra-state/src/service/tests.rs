@@ -1780,6 +1780,34 @@ async fn semantic_handoff_rejects_checkpoint_before_writer_acknowledgement() {
     .expect("the unacknowledged handoff admission regression finishes");
 }
 
+/// An unspecified maximum checkpoint retains hash-based semantic handoff detection.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_without_configured_max_checkpoint_commits_child() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the checkpoint genesis commits");
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[1].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits without a configured maximum checkpoint");
+        assert_eq!(state.best_tip(), Some((Height(1), blocks[1].hash())));
+    })
+    .await
+    .expect("the unspecified-checkpoint handoff regression finishes");
+}
+
 /// A height-skipping semantic orphan whose parent is an intermediate checkpoint must not close
 /// ordinary checkpoint admission, including after the orphan fails contextual verification.
 #[tokio::test(flavor = "multi_thread")]
