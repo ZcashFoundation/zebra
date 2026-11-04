@@ -595,6 +595,31 @@ fn versionless_current_records_are_rejected_instead_of_rewritten() {
 }
 
 #[test]
+fn versionless_empty_current_directory_opens_as_a_new_database() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let path = config.db_path(
+        STATE_DATABASE_KIND,
+        running_version().major,
+        &Network::Mainnet,
+    );
+    std::fs::create_dir_all(path).unwrap();
+
+    let db = open_test_db(&config);
+    let live = db.disk_db().inner();
+    let hashes = live.cf_handle("hash_by_height").unwrap();
+    live.put_cf(&hashes, Height::MIN.as_bytes(), [0x55; 32])
+        .unwrap();
+    assert_eq!(
+        live.get_pinned_cf(&hashes, Height::MIN.as_bytes())
+            .unwrap()
+            .as_deref(),
+        Some([0x55; 32].as_slice())
+    );
+}
+
+#[test]
 fn versionless_current_records_with_pending_balance_merges_survive_reopen() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();

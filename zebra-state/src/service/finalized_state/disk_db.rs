@@ -1351,9 +1351,21 @@ impl DiskDb {
     ) -> Result<bool, StateInitError> {
         let path = config.db_path(db_kind, format_version_in_code.major, network);
         let mut options = Self::options();
+        let families_on_disk = match DB::list_cf(&options, &path) {
+            Ok(families) if !families.is_empty() => families,
+            _ => return Ok(false),
+        };
         options.set_disable_auto_compactions(true);
-        let column_families =
-            Self::construct_column_families(options.clone(), &path, column_families_in_code, true);
+        // An older source lacks the column families added after its format, and a read-only open
+        // cannot create them.
+        let column_families = Self::construct_column_families(
+            options.clone(),
+            &path,
+            column_families_in_code
+                .into_iter()
+                .filter(|family| families_on_disk.contains(family)),
+            true,
+        );
         let db = DB::open_cf_descriptors_read_only(&options, &path, column_families, false)
             .map_err(|source| StateInitError::HistoryRead {
                 path: path.clone(),
