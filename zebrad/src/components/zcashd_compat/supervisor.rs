@@ -27,12 +27,9 @@ const SUPERVISOR_EXHAUSTED_METRIC: &str = "zcashd.compat.supervisor.exhausted";
 
 /// The pid of the currently running supervised zcashd child, or `0` when none.
 ///
-/// On SIGINT/SIGTERM, the tokio runtime drops the whole `start()` future — and
-/// the supervisor task with it — without ever running the supervisor's
-/// graceful-shutdown path. The child is spawned without `kill_on_drop`, so it
-/// would be silently orphaned. This pid lets
-/// [`terminate_abandoned_zcashd`] clean up synchronously after the runtime has
-/// shut down.
+/// The child is spawned without `kill_on_drop`, so a supervisor task that is aborted before its
+/// graceful-shutdown path finishes, such as after a shutdown timeout, would orphan it. This pid
+/// lets [`terminate_abandoned_zcashd`] clean up synchronously after the runtime has shut down.
 static SUPERVISED_ZCASHD_PID: AtomicU32 = AtomicU32::new(0);
 
 /// The full configuration used by the zcashd-compat supervisor task.
@@ -352,10 +349,9 @@ pub async fn run(
 /// Terminates a supervised zcashd child that the supervisor task never got to
 /// shut down, blocking the calling thread.
 ///
-/// On SIGINT/SIGTERM, the tokio runtime cancels the supervisor task without
-/// polling it again, so its graceful-shutdown path never runs and the child
-/// (spawned without `kill_on_drop`) is orphaned. Call this after the runtime
-/// has shut down: it sends SIGTERM, waits up to `shutdown_grace_period` for the
+/// A supervisor task that is aborted before its graceful-shutdown path finishes, such as after a
+/// shutdown timeout, orphans the child (spawned without `kill_on_drop`). Call this after the
+/// runtime has shut down: it sends SIGTERM, waits up to `shutdown_grace_period` for the
 /// child to exit, and SIGKILLs it as a last resort — the same sequence as the
 /// supervisor's own [`terminate_child`].
 ///

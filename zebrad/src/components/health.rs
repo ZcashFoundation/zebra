@@ -49,7 +49,7 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use tokio::{
     sync::watch,
-    task::JoinHandle,
+    task::{JoinHandle, JoinSet},
     time::{self, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
@@ -106,6 +106,7 @@ impl ChainTipMetrics {
 ///
 /// The server accepts HTTP/1.1 requests on a dedicated TCP listener and serves
 /// two endpoints: `/healthy` and `/ready`.
+/// Aborting the task stops its listener, metrics updater, and active connections.
 ///
 /// # Panics
 ///
@@ -146,13 +147,6 @@ where
         let _ = num_live_peer_sender.send(metrics);
     }
 
-    // Refresh metrics in the background using a watch channel so request
-    // handlers can read the latest snapshot without taking locks.
-    let metrics_task = tokio::spawn(peer_metrics_refresh_task(
-        address_book.clone(),
-        num_live_peer_sender,
-    ));
-
     let shared = Arc::new(HealthCtx {
         config,
         network,
@@ -161,14 +155,11 @@ where
         num_live_peer_receiver,
     });
 
-    let server_task = tokio::spawn(run_health_server(listener, shared));
-
-    // Keep both async tasks tied to a single JoinHandle so shutdown and
-    // abort semantics mirror other components.
+    // Own both futures so cancellation drops the listener and metrics updater.
     let task = tokio::spawn(async move {
         tokio::select! {
-            _ = metrics_task => {},
-            _ = server_task => {},
+            _ = peer_metrics_refresh_task(address_book, num_live_peer_sender) => {},
+            _ = run_health_server(listener, shared) => {},
         }
     });
 
@@ -329,12 +320,17 @@ async fn run_health_server<SyncStatus>(
 {
     let mut num_recent_requests: usize = 0;
     let mut last_request_count_reset_time = Instant::now();
+    let mut connection_tasks = JoinSet::new();
 
     // Dedicated accept loop to keep request handling small and predictable; we
     // still spawn per-connection tasks but share the context clone.
 
     loop {
-        match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = connection_tasks.join_next(), if !connection_tasks.is_empty() => continue,
+        };
+        match accepted {
             Ok((stream, _)) => {
                 if !allow_request(
                     &mut num_recent_requests,
@@ -350,7 +346,7 @@ async fn run_health_server<SyncStatus>(
                 let service =
                     hyper::service::service_fn(move |req| handle_request(req, svc_ctx.clone()));
 
-                tokio::spawn(async move {
+                connection_tasks.spawn(async move {
                     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
                         debug!(?err, "health server connection closed with error");
                     }
