@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Parse large Sapling proof lists in parallel during verification ([#12195](https://github.com/ZcashFoundation/zebra/pull/12195)).
+time: 2026-11-15T19:03:36.917427858+01:00

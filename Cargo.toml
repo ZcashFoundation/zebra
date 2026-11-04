@@ -396,3 +396,6 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
