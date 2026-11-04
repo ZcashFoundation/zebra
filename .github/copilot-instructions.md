@@ -23,7 +23,8 @@ Skip the issue check when the PR author is a member or owner of the ZcashFoundat
 ```text
 zebrad (CLI orchestration)
   → zebra-consensus (verification)
-  → zebra-state (storage/service boundaries)
+  → zebra-state (state services and non-finalized chains)
+  → zebra-db (finalized RocksDB storage, migrations, and snapshots)
   → zebra-chain (data types; sync-only)
   → zebra-network (P2P)
   → zebra-rpc (JSON-RPC)
@@ -104,7 +105,8 @@ When the PR adds abstraction, flags, generics, or refactors:
 ## Extra Scrutiny Areas
 
 - **`zebra-consensus` / `zebra-chain`**: Consensus-critical; check serialization, edge cases, overflow, test coverage
-- **`zebra-state`**: Read/write separation, long-lived locks, timeouts, database migrations
+- **`zebra-state`**: Read/write separation, long-lived locks, timeouts, service boundaries
+- **`zebra-db`**: Disk encodings, RocksDB options, database migrations, snapshot contents, format compatibility
 - **`zebra-network`**: All inputs are attacker-controlled; check bounds, rate limits, protocol compatibility
 - **`zebra-rpc`**: zcashd compatibility (response shapes, errors, timeouts), user-facing behavior
 - **`zebra-script`**: FFI memory safety, lifetime/ownership across boundaries

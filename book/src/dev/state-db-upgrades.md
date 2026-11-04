@@ -632,27 +632,27 @@ convert record encodings, create an old-format fixture, or prove that a
 major-version move works. Use the persistent-cache upgrade test pattern for
 those cases; never use version-file edits as an operator recovery procedure.
 
-[constants]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/constants.rs
-[config]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/config.rs
+[constants]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/constants.rs
+[config]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/config.rs
 [network-directory]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network.rs
-[upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade.rs
-[disk-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_db.rs
-[zebra-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db.rs
+[upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/upgrade.rs
+[disk-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_db.rs
+[zebra-db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/zebra_db.rs
 [service]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service.rs
 [backup]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/non_finalized_state/backup.rs
-[families]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state.rs
-[disk-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format.rs
-[transparent-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/transparent.rs
-[shielded-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/shielded.rs
-[chain-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/chain.rs
+[families]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state.rs
+[disk-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format.rs
+[transparent-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/transparent.rs
+[shielded-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/shielded.rs
+[chain-format]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/chain.rs
 [value-balance]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs
-[block-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/block.rs
-[shielded-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/shielded.rs
-[chain-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/chain.rs
-[typed-family]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/column_family.rs
-[block-info-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/block_info_and_address_received.rs
-[ironwood-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/add_ironwood_tree.rs
+[block-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/zebra_db/block.rs
+[shielded-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/zebra_db/shielded.rs
+[chain-access]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/zebra_db/chain.rs
+[typed-family]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/column_family.rs
+[block-info-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/upgrade/block_info_and_address_received.rs
+[ironwood-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/upgrade/add_ironwood_tree.rs
 [upgrade-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/tests/vectors.rs
-[format-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/prop.rs
+[format-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/disk_format/tests/prop.rs
 [snapshot-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
 [balance-query]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/read/address/balance.rs

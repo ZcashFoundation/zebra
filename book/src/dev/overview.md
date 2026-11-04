@@ -12,10 +12,11 @@ The [root workspace][workspace] contains these crates:
 | Crate | Responsibility | Manifest |
 | --- | --- | --- |
 | [`zebra-chain`][chain] | Blocks, transactions, addresses, amounts, network parameters, serialization, and cryptographic data types. | [Cargo.toml][chain-manifest] |
+| [`zebra-db`][db] | Finalized-state RocksDB storage, disk formats, migrations, pruning helpers, and state snapshots, including the synchronization metadata (29.1.0) and spentness-hint (29.2.0) column families. | [Cargo.toml][db-manifest] |
 | [`zebra-network`][network] | Peer connections, wire messages, address discovery, inventory tracking, and outbound request routing. | [Cargo.toml][network-manifest] |
 | [`zebra-script`][script] | Transparent script verification through `libzcash_script`; the default interpreter is C++, with an optional C++/Rust comparison interpreter. | [Cargo.toml][script-manifest] |
 | [`zebra-consensus`][consensus] | Checkpoint verification, semantic block verification, block and mempool transaction verification, and cryptographic verification services. | [Cargo.toml][consensus-manifest] |
-| [`zebra-state`][state] | Contextual verification, finalized and non-finalized chain storage, chain queries, and tip notifications. | [Cargo.toml][state-manifest] |
+| [`zebra-state`][state] | Contextual verification, non-finalized chains, state services, chain queries, and tip notifications. Finalized storage is in `zebra-db`. | [Cargo.toml][state-manifest] |
 | [`zebra-node-services`][node-services] | Shared mempool request/response types, service traits, and an optional RPC client. It does not implement the mempool. | [Cargo.toml][node-services-manifest] |
 | [`zebra-rpc`][rpc] | JSON-RPC methods and server, RPC client, indexer gRPC server, and lightwalletd-compatible gRPC server. | [Cargo.toml][rpc-manifest] |
 | [`zebrad`][start] | CLI and configuration, service assembly, synchronization, inbound requests, mempool, monitoring, notifications, and optional zcashd supervision. | [Cargo.toml][zebrad-manifest] |
@@ -40,9 +41,9 @@ from it, so the graph omits each edge that a longer path already implies: for
 example, `zebrad` and `zebra-rpc` both declare `zebra-chain` directly. The
 dotted arrow is an optional dependency. The graph omits external crates and
 `zebra-test`, which every crate in the graph except `zebra-node-services` and
-`zebra-utils` uses as a development dependency, and which `zebra-chain` and
-`zebra-state` also pull in optionally for their `proptest-impl` features (and
-`zebra-chain` for its `bench` feature).
+`zebra-utils` uses as a development dependency, and which `zebra-chain`,
+`zebra-db`, and `zebra-state` also pull in optionally for their `proptest-impl`
+features (and `zebra-chain` for its `bench` feature).
 
 ```mermaid
 flowchart TD
@@ -56,6 +57,8 @@ flowchart TD
     consensus --> batch["tower-batch-control"]
     consensus --> fallback["tower-fallback"]
     state --> interfaces["zebra-node-services"]
+    state --> db["zebra-db"]
+    db --> chain
     interfaces --> chain["zebra-chain"]
     network --> chain
     script --> chain
@@ -290,6 +293,7 @@ when verification completes out of order.
 
 [workspace]: https://github.com/ZcashFoundation/zebra/blob/main/Cargo.toml
 [chain]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/lib.rs
+[db]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/lib.rs
 [network]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/lib.rs
 [script]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/src/lib.rs
 [consensus]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/lib.rs
@@ -301,6 +305,7 @@ when verification completes out of order.
 [utils]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/src/lib.rs
 [test]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-test/src/lib.rs
 [chain-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/Cargo.toml
+[db-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/Cargo.toml
 [network-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/Cargo.toml
 [script-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-script/Cargo.toml
 [consensus-manifest]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/Cargo.toml

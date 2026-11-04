@@ -46,7 +46,8 @@ cargo install --locked --path zebrad --features elasticsearch
 zebrad generate -o zebrad-elasticsearch.toml
 ```
 
-Set the [`[state]` Elasticsearch fields](config.md#state) for an account
+Set the [`[state]` Elasticsearch fields](config.md#state) in
+[`zebra-db`'s state configuration][config-source] for an account
 authorized to create and write the target index. A build with this feature
 exports automatically during normal startup; there is no runtime enable switch.
 
@@ -119,4 +120,5 @@ the historical blocks being indexed.
 
 Zebra does not provision Kibana, data views, index mappings, or dashboards.
 
+[config-source]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/config.rs
 [export-source]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state.rs

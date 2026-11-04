@@ -91,7 +91,7 @@ If AI tools were used to write code, tests, or PR descriptions, disclose this in
 Zebra is a Rust workspace. Main crates include:
 
 - `zebrad/` (node CLI/orchestration),
-- core libraries like `zebra-chain/`, `zebra-consensus/`, `zebra-network/`, `zebra-state/`, `zebra-rpc/`,
+- core libraries like `zebra-chain/`, `zebra-db/`, `zebra-consensus/`, `zebra-network/`, `zebra-state/`, `zebra-rpc/`,
 - support crates like `zebra-node-services/`, `zebra-test/`, `zebra-utils/`, `tower-batch-control/`, and `tower-fallback/`.
 
 Code is primarily in each crate's `src/`; integration tests are in `*/tests/`; many unit/property tests are colocated in `src/**/tests/` (for example `prop.rs`, `vectors.rs`, `preallocate.rs`). Documentation is in `book/` and `docs/decisions/`. CI and policy automation live in `.github/workflows/`.
@@ -147,7 +147,7 @@ Zebra is a Zcash full node implementation in Rust. It is a validator node — it
 
 - **Rust edition**: 2021
 - **MSRV**: 1.89 (libraries), 1.91 (zebrad binary)
-- **Database format version**: defined in `zebra-state/src/constants.rs`
+- **Database format version**: defined in `zebra-db/src/constants.rs`
 
 ## Crate Architecture
 
@@ -155,7 +155,8 @@ Zebra is a Zcash full node implementation in Rust. It is a validator node — it
 zebrad (CLI orchestration)
   ├── zebra-consensus (block/transaction verification)
   │     └── zebra-script (script validation via FFI)
-  ├── zebra-state (finalized + non-finalized storage)
+  ├── zebra-state (state services and non-finalized chains)
+  │     └── zebra-db (finalized-state RocksDB storage, disk formats, migrations, and snapshots)
   ├── zebra-network (P2P, peer management)
   └── zebra-rpc (JSON-RPC + gRPC)
         └── zebra-node-services (service trait aliases)
@@ -165,6 +166,7 @@ zebrad (CLI orchestration)
 **Dependency rules**:
 
 - Dependencies flow **downward only** — lower crates must not depend on higher ones
+- Keep the `zebra-chain` ← `zebra-db` ← `zebra-state` direction; `zebra-db` must not depend on `zebra-state`
 - `zebra-chain` is **sync-only**: no async, no tokio, no Tower services
 - `zebra-node-services` defines service trait aliases used across crates
 - `zebrad` orchestrates all components but contains minimal logic
@@ -175,9 +177,10 @@ zebrad (CLI orchestration)
 | Crate             | Key Concerns                                                            |
 | ----------------- | ----------------------------------------------------------------------- |
 | `zebra-chain`     | Serialization correctness, no async, consensus-critical data structures |
+| `zebra-db`        | Disk encodings, RocksDB options, migrations, snapshots, format 30.1.0   |
 | `zebra-network`   | Protocol correctness, peer handling, rate limiting, DoS resistance      |
 | `zebra-consensus` | Verification completeness, error handling, checkpoint vs semantic paths |
-| `zebra-state`     | Read/write separation (`ReadRequest` vs `Request`), database migrations |
+| `zebra-state`     | Read/write separation (`ReadRequest` vs `Request`), service boundaries  |
 | `zebra-rpc`       | zcashd compatibility, error responses, timeout handling                 |
 | `zebra-script`    | FFI safety, memory management, lifetime/ownership across boundaries     |
 
