@@ -96,6 +96,12 @@ type GossipedBlockDownloads =
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
+    /// The chain parameters used to screen proof of work before recovering missing parents.
+    pub network: Network,
+
+    /// A read-only view of blocks already being fetched by the chain syncer.
+    pub(crate) sync_downloads: crate::components::sync::InFlightDownloads,
+
     /// A shared list of peer addresses.
     pub address_book: Arc<std::sync::Mutex<AddressBook>>,
 
@@ -310,6 +316,8 @@ impl Service<zn::Request> for Inbound {
             } => match setup.try_recv() {
                 Ok(setup_data) => {
                     let InboundSetupData {
+                        network,
+                        sync_downloads,
                         address_book,
                         block_download_peer_set,
                         block_verifier,
@@ -321,13 +329,17 @@ impl Service<zn::Request> for Inbound {
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 
-                    let block_downloads = Box::pin(BlockDownloads::new(
-                        full_verify_concurrency_limit,
-                        block_download_peer_set,
-                        Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
-                        state.clone(),
-                        latest_chain_tip,
-                    ));
+                    let block_downloads = Box::pin(
+                        BlockDownloads::new(
+                            full_verify_concurrency_limit,
+                            block_download_peer_set,
+                            Timeout::new(block_verifier, BLOCK_VERIFY_TIMEOUT),
+                            state.clone(),
+                            latest_chain_tip,
+                            network,
+                        )
+                        .with_sync_downloads(sync_downloads),
+                    );
 
                     result = Ok(());
                     Setup::Initialized {

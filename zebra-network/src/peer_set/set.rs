@@ -1512,8 +1512,8 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready inventory advertiser or supplied source, waiting for a busy supplied block
-    /// source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
+    /// Prefers a ready inventory advertiser, then the carried source, waiting for a busy carried
+    /// block source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
@@ -1601,7 +1601,6 @@ where
             .inventory_registry
             .advertising_peers(hash)
             .copied()
-            .chain(advertiser)
             .collect();
         let advertising_peer_list = advertising_peers
             .iter()
@@ -1666,6 +1665,19 @@ where
             };
         }
 
+        // A recovery carries the child's source, which need not have advertised the parent.
+        // Prefer explicit parent inventory, but retain that source ahead of speculative peers.
+        // Like an advertiser, it is skipped for repeats once it has returned the block.
+        if let Some(peer) =
+            advertiser.filter(|addr| self.ready_services.contains_key(addr) && !has_failed(addr))
+        {
+            tracing::trace!(?hash, ?peer, "routing to the carried block source");
+            return InvRoute::Peer {
+                peer,
+                advertised: true,
+            };
+        }
+
         // An advert can arrive before its connection releases discovery capacity. Asking another
         // peer in that window can return notfound before it has even learned the new block.
         // Only the current announcing connection gets this short exclusive preference.
@@ -1695,11 +1707,13 @@ where
         // busy peer might have an advertised block, but only busy serving peers might have a
         // historic block.
         //
-        // Downloaders carry their known advertiser separately from this lossy registry.
+        // Downloaders carry their known source separately from this lossy registry. A recovery's
+        // source supplied the requested block's child, so that block is recent too.
         //
         // A disconnected or failed advertiser must not enable speculative non-serving fallback.
         let is_advertised = advertising_peers
             .iter()
+            .chain(advertiser.iter())
             .any(|addr| self.has_peer_with_addr(*addr) && !has_failed(addr));
         let busy_peer_might_have = |failed: bool| {
             self.cancel_handles.keys().any(|key| {
