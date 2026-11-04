@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Moved finalized-state storage into zebra-db while preserving existing zebra_state re-exports and behavior.
+time: 2026-11-06T06:57:26.288989525Z

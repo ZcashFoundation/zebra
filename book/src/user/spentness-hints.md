@@ -184,4 +184,4 @@ the first pinning release:
 - after a restart that interrupted a hinted sync, the state's writer waits
   up to ten minutes for the artifact before it stops Zebra
   (`RESUME_ARTIFACT_TIMEOUT` in
-  `zebra-state/src/service/finalized_state/zebra_db/spentness.rs`).
+  `zebra-db/src/service/finalized_state/zebra_db/spentness.rs`).

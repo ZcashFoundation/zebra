@@ -54,7 +54,7 @@ Restore into a fresh cache root. Keep an independent backup for rollback:
 reuse moves the database rather than copying it. See [upgrading](upgrading.md)
 for migration and rollback procedures.
 
-[state-constants]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/constants.rs
+[state-constants]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/constants.rs
 
 ## Resolve the archive
 

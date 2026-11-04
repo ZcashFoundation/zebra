@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Split finalized-state storage into zebra-db without changing configuration, database format, metrics, or node behavior.
+time: 2026-11-06T06:57:26.288989525Z

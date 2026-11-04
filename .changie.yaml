@@ -29,6 +29,9 @@ projects:
     - label: zebra-chain
       key: zebra-chain
       changelog: zebra-chain/CHANGELOG.md
+    - label: zebra-db
+      key: zebra-db
+      changelog: zebra-db/CHANGELOG.md
     - label: zebra-consensus
       key: zebra-consensus
       changelog: zebra-consensus/CHANGELOG.md

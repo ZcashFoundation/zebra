@@ -12,7 +12,7 @@ consensus-valid; select guarantees appropriate to the layer under test.
 ## Sharing strategies across crates
 
 Zebra exposes test generators through the `proptest-impl` Cargo feature. The
-feature exists in `zebra-chain`, `zebra-consensus`, `zebra-network`,
+feature exists in `zebra-chain`, `zebra-db`, `zebra-consensus`, `zebra-network`,
 `zebra-state`, `zebra-rpc`, and `zebrad`. Dependent test features forward to the
 crates whose generators they need. The `zebra-script` tests enable
 `zebra-chain/proptest-impl` without defining their own feature.

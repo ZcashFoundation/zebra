@@ -1,11 +1,14 @@
 # Zebra crates
 
-The [workspace][workspace] publishes 12 crates:
+The [workspace][workspace] publishes 13 crates:
 
 - `zebrad`
-- `zebra-chain`, `zebra-consensus`, `zebra-network`, `zebra-node-services`
+- `zebra-chain`, `zebra-db`, `zebra-consensus`, `zebra-network`, `zebra-node-services`
 - `zebra-rpc`, `zebra-script`, `zebra-state`, `zebra-test`, `zebra-utils`
 - `tower-batch-control`, `tower-fallback`
+
+`zebra-db` is new and requires the first-publication steps below before its
+initial crates.io release.
 
 Each of these crates has the following crates.io owners, verified on
 October 24, 2026:
