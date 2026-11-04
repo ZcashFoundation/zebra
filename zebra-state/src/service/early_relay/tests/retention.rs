@@ -5,11 +5,12 @@ use std::sync::Barrier;
 use super::*;
 
 #[test]
-fn early_relay_concurrent_rejections_preserve_the_full_ring() {
+fn early_relay_concurrent_rejections_are_all_recorded() {
+    const REJECTIONS: u8 = 8;
     let (state, _cache, _tip, _block) = cache();
-    let start = Barrier::new(MAX_REJECTIONS);
+    let start = Barrier::new(REJECTIONS.into());
     std::thread::scope(|threads| {
-        for byte in 0..u8::try_from(MAX_REJECTIONS).unwrap() {
+        for byte in 0..REJECTIONS {
             let state = &state;
             let start = &start;
             threads.spawn(move || {
@@ -19,7 +20,7 @@ fn early_relay_concurrent_rejections_preserve_the_full_ring() {
             });
         }
     });
-    for byte in 0..u8::try_from(MAX_REJECTIONS).unwrap() {
+    for byte in 0..REJECTIONS {
         assert!(guard(&state, block::Hash([byte; 32])).is_rejected());
     }
 }

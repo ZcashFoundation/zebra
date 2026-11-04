@@ -9,6 +9,7 @@ use std::{
 mod commit_phases;
 mod dense_chain;
 mod prop;
+mod rejections;
 mod tree_first;
 mod tree_first_gate;
 mod vectors;
