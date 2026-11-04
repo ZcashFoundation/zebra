@@ -167,7 +167,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
 
     use crate::{
         config::check_and_delete_old_state_databases,
-        constants::STATE_DATABASE_KIND,
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
         service::finalized_state::{
             zebra_db::chain::{BLOCK_INFO, CHAIN_VALUE_POOLS},
             FinalizedState, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE,
@@ -184,6 +184,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         ..Config::default()
     };
     let old_version = Version::new(29, 0, 0);
+    let running_major = state_database_format_version_in_code().major;
     let old_path = config.db_path(STATE_DATABASE_KIND, old_version.major, &network);
     let mut state = FinalizedState {
         db: ZebraDb::new(
@@ -282,7 +283,8 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         "cleanup must protect a reusable v29 cache"
     );
 
-    // Disabling cleanup is not a rollback backup: startup moves the v29 directory to v30.
+    // Disabling cleanup is not a rollback backup: startup moves the v29 directory to the current
+    // format directory.
     config.delete_old_database = false;
     let mut state = FinalizedState::new(
         &config,
@@ -301,7 +303,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
     .unwrap();
     assert_eq!(
         state.db.format_version_on_disk().unwrap().unwrap().major,
-        30,
+        running_major,
     );
     assert!(
         !old_path.exists(),
@@ -309,7 +311,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
     );
     assert!(
         !state.db.history_capabilities().unwrap().is_pruned(),
-        "the move keeps every body, so a never-pruned v30 archive can be renamed back to v29",
+        "the move keeps every body, so a never-pruned archive can be renamed back to v29",
     );
     assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
     assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
@@ -356,12 +358,13 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         assert_eq!(raw.len(), width);
     }
 
-    // Rolling a never-pruned archive back to Zebra 7.0.0 renames v30 to v29. The v29 reader
-    // must see every block, including the one written by the v30 build, with complete bodies.
+    // Rolling a never-pruned archive back to Zebra 7.0.0 renames the current directory to v29.
+    // The v29 reader must see every block, including the one written by the current build, with
+    // complete bodies.
     let expected_blocks: Vec<_> = (0..=2)
         .map(|height| state.db.block(Height(height).into()).unwrap().unwrap())
         .collect();
-    let new_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    let new_path = config.db_path(STATE_DATABASE_KIND, running_major, &network);
     drop(state);
     std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
     std::fs::rename(&new_path, &old_path).unwrap();

@@ -125,8 +125,11 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
             .unwrap();
 
         let current_version = new_zs::state_database_format_version_in_code();
-        let mut previous_version = current_version.clone();
-        previous_version.major -= 1;
+        let mut source_version = current_version.clone();
+        source_version.major = new_zs::restorable_db_source_versions(current_version.major)
+            .first()
+            .copied()
+            .expect("the running format has a reusable source for this fixture");
         for target_tip in [0, 1] {
             let target_dir = tempfile::tempdir().unwrap();
             let target = new_zs::Config {
@@ -138,23 +141,23 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
                 .await
                 .unwrap();
 
-            // These adjacent major formats have compatible records; only the directory differs.
+            // These registered source and running formats have compatible records; only the directory differs.
             let current_path = target.db_path("state", current_version.major, &network);
-            let previous_path = target.db_path("state", previous_version.major, &network);
+            let source_path = target.db_path("state", source_version.major, &network);
             std::fs::rename(
                 current_path.parent().unwrap(),
-                previous_path.parent().unwrap(),
+                source_path.parent().unwrap(),
             )
             .unwrap();
             new_zs::write_database_format_version_to_disk(
                 &target,
                 "state",
-                previous_version.major,
-                &previous_version,
+                source_version.major,
+                &source_version,
                 &network,
             )
             .unwrap();
-            let version_path = target.version_file_path("state", previous_version.major, &network);
+            let version_path = target.version_file_path("state", source_version.major, &network);
             let version_bytes = std::fs::read(&version_path).unwrap();
 
             // Preflight must read the same archive that the writer would reuse, without moving it.
@@ -162,7 +165,7 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(db.path(), previous_path);
+            assert_eq!(db.path(), source_path);
             assert_eq!(db.finalized_tip_height(), Some(Height(target_tip)));
             assert!(!db.history_capabilities().unwrap().is_pruned());
             drop(db);
@@ -180,14 +183,14 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
                     .unwrap_err()
                     .to_string()
                     .contains("requires unavailable block history"));
-                assert!(previous_path.exists());
+                assert!(source_path.exists());
                 assert!(!current_path.parent().unwrap().exists());
                 assert_eq!(std::fs::read(&version_path).unwrap(), version_bytes);
                 continue;
             }
 
             result.unwrap();
-            assert!(!previous_path.exists());
+            assert!(!source_path.exists());
             let (_, db, _) = new_zs::spawn_init_read_only(target, &network)
                 .await
                 .unwrap()
@@ -228,27 +231,30 @@ async fn interrupted_upgrade_copy_target_is_rejected_without_changes() {
             .await
             .unwrap();
         let current_major = new_zs::state_database_format_version_in_code().major;
-        let previous_major = current_major - 1;
+        let source_major = new_zs::restorable_db_source_versions(current_major)
+            .first()
+            .copied()
+            .expect("the running format has a reusable source for this fixture");
         let current_path = target.db_path("state", current_major, &network);
-        let previous_path = target.db_path("state", previous_major, &network);
+        let source_path = target.db_path("state", source_major, &network);
         std::fs::rename(
             current_path.parent().unwrap(),
-            previous_path.parent().unwrap(),
+            source_path.parent().unwrap(),
         )
         .unwrap();
-        // Record an unfinished transition into the previous directory, not an empty target.
+        // Record an unfinished transition into the source directory, not an empty target.
         let mut interrupted_version = new_zs::state_database_format_version_in_code();
-        interrupted_version.major = previous_major - 1;
+        interrupted_version.major = source_major - 1;
         new_zs::write_database_format_version_to_disk(
             &target,
             "state",
-            previous_major,
+            source_major,
             &interrupted_version,
             &network,
         )
         .unwrap();
         let files = || {
-            std::fs::read_dir(&previous_path)
+            std::fs::read_dir(&source_path)
                 .unwrap()
                 .map(|entry| {
                     let path = entry.unwrap().path();
@@ -269,7 +275,7 @@ async fn interrupted_upgrade_copy_target_is_rejected_without_changes() {
             matches!(
                 error.downcast_ref::<new_zs::StateInitError>(),
                 Some(new_zs::StateInitError::ReadOnlyDatabaseNeedsUpgrade { path })
-                    if path == &previous_path
+                    if path == &source_path
             ),
             "copy preflight must report the target's unfinished transition: {error}"
         );
