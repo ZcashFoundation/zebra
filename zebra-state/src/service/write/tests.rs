@@ -116,10 +116,12 @@ async fn write_worker_survives_rejected_root_invalidation() {
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::Invalidate {
-        hash: root.hash(),
-        rsp_tx,
-    })
+    tx.send(WriteMessage::NonFinalized(
+        NonFinalizedWriteMessage::Invalidate {
+            hash: root.hash(),
+            rsp_tx,
+        },
+    ))
     .unwrap();
     let result = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
@@ -139,10 +141,12 @@ async fn write_worker_survives_rejected_root_invalidation() {
 
     // Exercise the same worker again: a non-root invalidation must still succeed.
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::Invalidate {
-        hash: child.hash(),
-        rsp_tx,
-    })
+    tx.send(WriteMessage::NonFinalized(
+        NonFinalizedWriteMessage::Invalidate {
+            hash: child.hash(),
+            rsp_tx,
+        },
+    ))
     .unwrap();
     let result = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
@@ -192,10 +196,12 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::Invalidate {
-        hash: genesis.hash,
-        rsp_tx,
-    })
+    tx.send(WriteMessage::NonFinalized(
+        NonFinalizedWriteMessage::Invalidate {
+            hash: genesis.hash,
+            rsp_tx,
+        },
+    ))
     .unwrap();
     let result = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
@@ -213,10 +219,12 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     assert_eq!(latest.best_tip_hash(), Some(genesis.hash));
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    tx.send(NonFinalizedWriteMessage::Reconsider {
-        hash: genesis.hash,
-        rsp_tx,
-    })
+    tx.send(WriteMessage::NonFinalized(
+        NonFinalizedWriteMessage::Reconsider {
+            hash: genesis.hash,
+            rsp_tx,
+        },
+    ))
     .unwrap();
     let result = tokio::time::timeout(Duration::from_secs(10), rsp_rx)
         .await
@@ -301,18 +309,20 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
     let non_finalized = NonFinalizedState::new(&network);
     let (chain_tip_sender, _, _) = ChainTipSender::new(None, &network);
     let (non_finalized_state_sender, _snapshot) = watch::channel(non_finalized.clone());
-    let (queued, finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (queued, block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
     let (invalid_block_reset_sender, resets) = tokio::sync::mpsc::unbounded_channel();
     let (rsp_tx, rsp_rx) = oneshot::channel();
-    queued.send((child.into(), rsp_tx, None)).unwrap();
+    queued
+        .send(WriteMessage::Finalized((child.into(), rsp_tx, None)))
+        .unwrap();
     drop(queued);
     let worker = WriteBlockWorkerTask {
-        finalized_block_write_receiver,
-        non_finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
+        block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: non_finalized,
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        handoff_complete: Arc::new(AtomicBool::new(false)),
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
@@ -394,24 +404,24 @@ fn precious_response_follows_tip_and_snapshot_publication() {
     let mut cx = Context::from_waker(&waker);
     let (rsp_tx, mut rsp_rx) = oneshot::channel();
     assert!(Pin::new(&mut rsp_rx).poll(&mut cx).is_pending());
-    let (queued, non_finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (queued, block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
     queued
-        .send(NonFinalizedWriteMessage::Precious {
-            hash: second.hash(),
-            rsp_tx,
-        })
+        .send(WriteMessage::NonFinalized(
+            NonFinalizedWriteMessage::Precious {
+                hash: second.hash(),
+                rsp_tx,
+            },
+        ))
         .unwrap();
     drop(queued);
     let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
-    // Bind the worker first: temporaries in a single `.run()` statement, such as the unused
-    // finalized-block sender, would live until `run()` returns and keep its first loop waiting.
     let worker = WriteBlockWorkerTask {
-        finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
-        non_finalized_block_write_receiver,
+        block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: state,
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        handoff_complete: Arc::new(AtomicBool::new(false)),
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
@@ -581,14 +591,16 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         assert!(commits.poll_recv(&mut cx).is_pending());
         let (validated, _bodies) = watch::channel(None);
         queued
-            .send(NonFinalizedWriteMessage::Commit(
-                (
-                    child.clone().prepare(),
-                    rsp_tx,
-                    Some(Box::new(contextual)),
-                    Some(MinedBlockNotifications::new(committed, validated)),
+            .send(WriteMessage::NonFinalized(
+                NonFinalizedWriteMessage::Commit(
+                    (
+                        child.clone().prepare(),
+                        rsp_tx,
+                        Some(Box::new(contextual)),
+                        Some(MinedBlockNotifications::new(committed, validated)),
+                    ),
+                    Instant::now(),
                 ),
-                Instant::now(),
             ))
             .unwrap();
         observations.push(observation);
@@ -599,12 +611,12 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
     let writes = Arc::new(AtomicUsize::new(0));
     let (pruning_wake, pruning_notifications) = crossbeam_channel::bounded(1);
     let worker = WriteBlockWorkerTask {
-        finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
-        non_finalized_block_write_receiver,
+        block_write_receiver: non_finalized_block_write_receiver,
         finalized_state: finalized,
         non_finalized_state: state,
         invalid_block_reset_sender,
         non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        handoff_complete: Arc::new(AtomicBool::new(false)),
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
