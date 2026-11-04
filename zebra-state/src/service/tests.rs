@@ -1831,6 +1831,63 @@ async fn semantic_orphan_above_max_checkpoint_preserves_checkpoint_admission() {
     .expect("the intermediate-parent handoff regression finishes");
 }
 
+/// A restarted state whose finalized tip is already above the maximum checkpoint starts in
+/// semantic mode even when no non-finalized blocks were restored.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_commit_after_restart_above_max_checkpoint() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            should_backup_non_finalized_state: false,
+            ..Config::default()
+        };
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let mut finalized = crate::service::finalized_state::FinalizedState::new_with_debug(
+            &config,
+            &Network::Mainnet,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .unwrap();
+        for block in &blocks[..3] {
+            finalized
+                .commit_finalized_direct(
+                    CheckpointVerifiedBlock::from(block.clone()).into(),
+                    None,
+                    "restart test",
+                )
+                .unwrap();
+        }
+        drop(finalized);
+
+        let (mut state, _, _, _) = StateService::new(config, &Network::Mainnet, Height(1), 0).await;
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(2))
+        );
+        assert!(
+            state.semantic_handoff_started(),
+            "a finalized tip above the maximum checkpoint must start in semantic mode"
+        );
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[3].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits after restart");
+        assert_eq!(state.best_tip(), Some((Height(3), blocks[3].hash())));
+    })
+    .await
+    .expect("the restarted semantic-mode regression finishes");
+}
+
 /// A semantic child must switch the writer to non-finalized commits even when its checkpoint
 /// parent is still queued for its disk write, and checkpoint UTXOs must remain available meanwhile.
 #[tokio::test(flavor = "multi_thread")]
