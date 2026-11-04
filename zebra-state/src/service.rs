@@ -130,6 +130,9 @@ pub(crate) struct StateService {
     /// The configured Zcash network.
     network: Network,
 
+    /// The configured maximum checkpoint height.
+    max_checkpoint_height: block::Height,
+
     /// The height that we start storing UTXOs from finalized blocks.
     ///
     /// This height should be lower than the last few checkpoints,
@@ -162,6 +165,10 @@ pub(crate) struct StateService {
     /// If `invalid_block_write_reset_receiver` gets a reset, this is:
     /// - the hash of the last valid committed block (the parent of the invalid block).
     finalized_block_write_last_sent_hash: block::Hash,
+
+    /// The height of the most recent checkpoint sent to the finalized writer, or the restored
+    /// finalized tip height. This is tracked separately because a semantic orphan can skip heights.
+    finalized_block_write_last_sent_height: Option<block::Height>,
 
     /// After a finalized reset, the height the checkpoint verifier restarts from.
     ///
@@ -525,11 +532,13 @@ impl StateService {
 
         let mut state = Self {
             network: network.clone(),
+            max_checkpoint_height,
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
             finalized_block_write_last_sent_hash,
+            finalized_block_write_last_sent_height: finalized_tip_height,
             finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
@@ -760,6 +769,7 @@ impl StateService {
             }
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
+            self.finalized_block_write_last_sent_height = Some(last_sent_finalized_block_height);
 
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
@@ -814,6 +824,7 @@ impl StateService {
             match self.invalid_block_write_reset_receiver.try_recv() {
                 Ok((reset_tip_height, reset_tip_hash)) => {
                     self.finalized_block_write_last_sent_hash = reset_tip_hash;
+                    self.finalized_block_write_last_sent_height = reset_tip_height;
                     self.finalized_reset_next_height = Some(
                         reset_tip_height
                             .map(|height| (height + 1).expect("committed heights are valid"))
@@ -1003,11 +1014,11 @@ impl StateService {
             rsp_rx
         };
 
-        // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
+        // Start the handoff only for a semantic child of the configured maximum checkpoint.
+        // Checking the parent's height as well as its hash rejects height-skipping orphans whose
+        // parent is merely an intermediate checkpoint.
         if self.block_write_sender.accepts_finalized()
+            && self.finalized_block_write_last_sent_height == Some(self.max_checkpoint_height)
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
