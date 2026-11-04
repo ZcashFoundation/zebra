@@ -1434,6 +1434,78 @@ async fn a_peer_with_another_size_is_not_blamed() {
     assert!(other_pieces > 0, "the peer is not excluded");
 }
 
+/// Wrong-size answers make no progress, so three in a row stall the peer just
+/// like any other short answers.
+#[tokio::test(start_paused = true)]
+async fn wrong_size_answers_count_toward_stalls() {
+    let _init_guard = zebra_test::init();
+
+    let objects = objects(&[2 * MIB; 10]);
+    let lying = Behavior {
+        latency: ms(100),
+        other_size: objects
+            .iter()
+            .map(|object| ObjectHash::of(object))
+            .collect(),
+        ..Behavior::default()
+    };
+    let honest = Behavior {
+        latency: ms(100),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects, vec![lying, honest]).run().await;
+
+    outcome.assert_complete();
+    assert!(outcome.blamed.is_empty());
+    let wrong_answers = outcome
+        .calls_of(0)
+        .iter()
+        .filter(|call| call.delivered.is_some())
+        .count();
+    assert_eq!(
+        wrong_answers,
+        3,
+        "the third wrong-size answer rests the peer: {:?}",
+        outcome.calls_of(0)
+    );
+}
+
+/// Once a wrong-size answer returns the last piece, every other idle peer can
+/// try it. A slow wrong-size peer must not make an honest peer wait in line.
+#[tokio::test(start_paused = true)]
+async fn wrong_size_endgame_uses_idle_peers_immediately() {
+    let _init_guard = zebra_test::init();
+
+    let objects = objects(&[2 * MIB]);
+    let lying = Behavior {
+        latency: secs(10),
+        other_size: [ObjectHash::of(&objects[0])].into(),
+        ..Behavior::default()
+    };
+    let honest = Behavior {
+        latency: ms(20),
+        ..Behavior::default()
+    };
+    let outcome = Scenario::new(objects, vec![lying.clone(), lying, honest])
+        .run()
+        .await;
+
+    outcome.assert_complete();
+    assert!(outcome.blamed.is_empty());
+    let honest_calls = outcome.calls_of_for(2, 0);
+    assert!(!honest_calls.is_empty());
+    assert!(
+        honest_calls.iter().all(|call| call.start == secs(10)),
+        "the honest peer starts as soon as the first wrong size arrives: {:?}",
+        outcome.calls
+    );
+    assert!(
+        outcome.elapsed < secs(20),
+        "the honest peer does not wait for the second wrong-size answer: {:?}",
+        outcome.elapsed
+    );
+}
+
 /// A peer that delivers a whole piece with the wrong hash is blamed and
 /// excluded, and the piece is downloaded again from another peer.
 #[tokio::test(start_paused = true)]
