@@ -1637,7 +1637,7 @@ where
         let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
             use zebra_state::ReadResponse::*;
 
-            let UsageInfo(size_on_disk) = usage_info_rsp.map_misc_error()? else {
+            let UsageInfo(size_on_disk) = usage_info_rsp.map_internal_error()? else {
                 unreachable!("unmatched response to a TipPoolValues request")
             };
 
@@ -1662,7 +1662,7 @@ where
             .clone()
             .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
             .await
-            .map_misc_error()?
+            .map_internal_error()?
         else {
             unreachable!("unmatched response to a HistoryCapabilities request");
         };

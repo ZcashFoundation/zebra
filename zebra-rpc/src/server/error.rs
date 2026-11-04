@@ -76,6 +76,9 @@ pub(crate) trait MapError<T, E>: Sized {
         self.map_error(LegacyCode::Misc)
     }
 
+    /// Maps local failures to an internal error without exposing their details to RPC clients.
+    fn map_internal_error(self) -> std::result::Result<T, ErrorObjectOwned>;
+
     /// Maps unavailable bodies to an internal error with `pruned_message`, preserving other errors.
     fn map_body_read_error(
         self,
@@ -107,6 +110,10 @@ where
 {
     fn map_error(self, code: impl Into<ErrorCode>) -> Result<T, ErrorObjectOwned> {
         self.map_err(|error| ErrorObject::owned(code.into().code(), error.to_string(), None::<()>))
+    }
+
+    fn map_internal_error(self) -> Result<T, ErrorObjectOwned> {
+        self.map_err(|_| ErrorObject::from(ErrorCode::InternalError))
     }
 
     fn map_body_read_error(self, pruned_message: &'static str) -> Result<T, ErrorObjectOwned>
