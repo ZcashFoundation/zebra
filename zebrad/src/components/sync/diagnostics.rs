@@ -71,8 +71,8 @@ impl SyncDiagnostics {
 /// queued.
 ///
 /// The downloader and the progress task share it, because a finished task stays in the downloader
-/// until the syncer reads its result, which can be several sync rounds later for a node at the
-/// tip, and the syncer only republishes its state during a round.
+/// until the syncer reads its result, which can be the next sync round for a node at the tip,
+/// and the syncer only republishes its state during a round.
 #[derive(Clone, Debug, Default)]
 pub struct InFlightBlocks(Arc<Mutex<BTreeMap<(Instant, [u8; 32]), AbortHandle>>>);
 

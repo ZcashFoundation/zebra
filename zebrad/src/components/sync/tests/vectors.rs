@@ -3040,3 +3040,256 @@ fn setup() -> (
         mock_chain_tip_sender,
     )
 }
+
+/// A hash advertised once must exhaust its retry budget across empty and singleton tip rounds.
+#[tokio::test(start_paused = true)]
+async fn singleton_tip_rounds_reap_completed_downloads() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let hash = block::Hash::from([0xF1; 32]);
+    let known_hash = block::Hash::from([0xF2; 32]);
+    for singleton in [false, true] {
+        for download_timeout in [false, true] {
+            let advertised = Arc::new(AtomicBool::new(false));
+            let network_advertised = advertised.clone();
+            let network = tower::service_fn(move |request| {
+                let response = match request {
+                    zn::Request::FindBlocks { .. } => {
+                        let hashes = if !network_advertised.load(Ordering::SeqCst) {
+                            vec![hash]
+                        } else if singleton {
+                            vec![known_hash]
+                        } else {
+                            Vec::new()
+                        };
+                        Some(Ok(zn::Response::BlockHashes(hashes)))
+                    }
+                    zn::Request::BlockDownload {
+                        hash: requested, ..
+                    } => {
+                        assert_eq!(requested, hash);
+                        if download_timeout {
+                            None
+                        } else {
+                            Some(Err(crate::BoxError::from("NotFoundResponse")))
+                        }
+                    }
+                    _ => unreachable!("the syncer only requests tips and blocks"),
+                };
+                async move {
+                    match response {
+                        Some(response) => response,
+                        None => futures::future::pending().await,
+                    }
+                }
+            });
+            let state = tower::service_fn(move |request| {
+                futures::future::ok::<_, crate::BoxError>(match request {
+                    zs::Request::BlockLocator => zs::Response::BlockLocator(vec![known_hash]),
+                    zs::Request::KnownBlock(requested) => zs::Response::KnownBlock(
+                        (requested == known_hash).then_some(zs::KnownBlock::BestChain),
+                    ),
+                    _ => unreachable!("the syncer only checks known blocks and the locator"),
+                })
+            });
+            let (tip, _tip_sender) = MockChainTip::new();
+            let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+            let (mut chain_sync, _status) = ChainSync::new(
+                &ZebradConfig::default(),
+                Height(0),
+                network,
+                MockService::build().for_unit_tests(),
+                state,
+                MockService::build().for_unit_tests(),
+                tip,
+                misbehavior_tx,
+            );
+            chain_sync.full_verify_concurrency_limit = 2;
+            chain_sync.try_to_sync().await.unwrap();
+            assert_eq!(chain_sync.downloads.in_flight(), 1);
+            advertised.store(true, Ordering::SeqCst);
+
+            for attempt in 1..=sync::MAX_BLOCK_REOBTAIN_RETRIES + 1 {
+                tokio::time::sleep(sync::BLOCK_DOWNLOAD_ROUND_TIMEOUT + sync::SYNC_RESTART_DELAY)
+                    .await;
+                tokio::time::timeout(sync::SYNC_RESTART_DELAY, chain_sync.try_to_sync())
+                    .await
+                    .expect("an empty or singleton tip round must finish")
+                    .unwrap();
+                assert!(chain_sync.prospective_tips.is_empty());
+                let retrying = attempt <= sync::MAX_BLOCK_REOBTAIN_RETRIES;
+                assert_eq!(
+                    chain_sync.downloads.in_flight(),
+                    usize::from(retrying),
+                    "the hash must be dropped after its retry budget is exhausted"
+                );
+                assert_eq!(
+                    chain_sync.block_reobtain_retries.get(&hash).copied(),
+                    retrying.then_some(attempt),
+                    "retry counts must survive the inter-round sleep"
+                );
+            }
+            assert!(chain_sync.reobtain_hashes.is_empty());
+            chain_sync.try_to_sync().await.unwrap();
+            assert!(chain_sync.downloads.is_empty());
+            chain_sync
+                .downloads
+                .download_and_verify(hash)
+                .await
+                .expect("reaping the exhausted download must remove its cancellation handle");
+            chain_sync.downloads.cancel_all();
+        }
+    }
+}
+
+/// A terminal header rejection must not leave its previous retry budget behind.
+#[tokio::test(start_paused = true)]
+async fn terminal_header_failure_reaps_retry_counter_next_round() {
+    let _init_guard = zebra_test::init();
+    let hash = block::Hash::from([0xE1; 32]);
+    let network = tower::service_fn(|request| {
+        assert!(matches!(request, zn::Request::FindBlocks { .. }));
+        futures::future::ok::<_, crate::BoxError>(zn::Response::BlockHashes(Vec::new()))
+    });
+    let state = tower::service_fn(move |request| {
+        assert!(matches!(request, zs::Request::BlockLocator));
+        futures::future::ok::<_, crate::BoxError>(zs::Response::BlockLocator(vec![hash]))
+    });
+    let (tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(4);
+    let (mut chain_sync, _status) = ChainSync::new(
+        &ZebradConfig::default(),
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        tip,
+        misbehavior_tx,
+    );
+
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::DownloadTimedOut { hash }))
+        .unwrap();
+    assert!(chain_sync.reobtain_hashes.shift_remove(&hash));
+    chain_sync
+        .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+            error: RouterError::Block {
+                source: Box::new(VerifyBlockError::Block {
+                    source: zebra_consensus::BlockError::InvalidDifficulty(Height(1), hash),
+                }),
+            },
+            height: Height(1),
+            hash,
+            advertiser_addr: None,
+        }))
+        .unwrap();
+    assert!(chain_sync.block_reobtain_retries.contains_key(&hash));
+    chain_sync.try_to_sync().await.unwrap();
+    assert!(
+        !chain_sync.block_reobtain_retries.contains_key(&hash),
+        "terminal failures must release retry bookkeeping before the next tip round"
+    );
+}
+
+/// A failed ancestor is retried after the inter-round sleep, even without fresh tip hashes.
+#[tokio::test(start_paused = true)]
+async fn inter_round_ancestor_failure_is_retried() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let parent: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let child: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let parent_hash = parent.hash();
+    let child_hash = child.hash();
+    for singleton in [false, true] {
+        let recovered = Arc::new(AtomicBool::new(false));
+        let network_recovered = recovered.clone();
+        let parent = parent.clone();
+        let network_child = child.clone();
+        let network = tower::service_fn(move |request| {
+            let response = match request {
+                zn::Request::FindBlocks { .. } => {
+                    let hashes = if !network_recovered.load(Ordering::SeqCst) {
+                        vec![parent_hash]
+                    } else if singleton {
+                        vec![child_hash]
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(zn::Response::BlockHashes(hashes))
+                }
+                zn::Request::BlockDownload { hash, .. } if hash == child_hash => Ok(
+                    zn::Response::Blocks(vec![Available((network_child.clone(), None))]),
+                ),
+                zn::Request::BlockDownload { hash, .. } if hash == parent_hash => {
+                    if network_recovered.load(Ordering::SeqCst) {
+                        Ok(zn::Response::Blocks(vec![Available((
+                            parent.clone(),
+                            None,
+                        ))]))
+                    } else {
+                        Err(crate::BoxError::from("NotFoundResponse"))
+                    }
+                }
+                _ => unreachable!("only the parent, child, and tips are requested"),
+            };
+            futures::future::ready(response)
+        });
+        let state = tower::service_fn(move |request| {
+            futures::future::ok::<_, crate::BoxError>(match request {
+                zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent_hash]),
+                zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                _ => unreachable!("only known blocks and the locator are queried"),
+            })
+        });
+        let mut verifier = MockService::build().for_unit_tests();
+        let (tip, _tip_sender) = MockChainTip::new();
+        let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+        let (mut chain_sync, _status) = ChainSync::new(
+            &ZebradConfig::default(),
+            Height(0),
+            network,
+            verifier.clone(),
+            state,
+            MockService::build().for_unit_tests(),
+            tip,
+            misbehavior_tx,
+        );
+        chain_sync
+            .downloads
+            .download_and_verify(child_hash)
+            .await
+            .unwrap();
+        let pending_child = verifier
+            .expect_request(zebra_consensus::Request::Commit(child.clone()))
+            .await;
+        chain_sync.try_to_sync().await.unwrap();
+        tokio::time::sleep(sync::SYNC_RESTART_DELAY).await;
+        recovered.store(true, Ordering::SeqCst);
+        chain_sync.try_to_sync().await.unwrap();
+        verifier
+            .expect_request_that(|request: &zebra_consensus::Request| {
+                request.block().hash() == parent_hash
+            })
+            .await
+            .respond(parent_hash);
+        pending_child.respond(child_hash);
+        let results = tokio::time::timeout(Duration::from_secs(1), async {
+            let mut hashes = Vec::new();
+            while let Some(response) = chain_sync.downloads.next().await {
+                hashes.push(response.unwrap().1);
+            }
+            hashes
+        })
+        .await
+        .expect("the recovered parent and retained child must both finish");
+        assert!(results.contains(&parent_hash) && results.contains(&child_hash));
+    }
+}
+

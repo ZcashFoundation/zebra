@@ -369,7 +369,7 @@ where
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_handles.contains_key(&hash) {
+        if self.is_queued(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
@@ -714,6 +714,11 @@ where
     /// that wait.
     pub fn take_cancelled_network_wait(&mut self) -> bool {
         std::mem::take(&mut self.awaiting_network_capacity)
+    }
+
+    /// Returns true while a hash is queued, including completed tasks whose results are unread.
+    pub fn is_queued(&self, hash: &block::Hash) -> bool {
+        self.cancel_handles.contains_key(hash)
     }
 
     /// Get the number of currently in-flight download and verify tasks.

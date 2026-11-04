@@ -450,6 +450,7 @@ where
 }
 
 /// A sync round that ended early, and why.
+#[derive(Debug)]
 struct RestartError {
     reason: RestartReason,
     /// The block error kind, for [`RestartReason::BlockError`].
@@ -633,6 +634,8 @@ where
             if result.is_err() {
                 self.count_finished_block_errors();
                 self.downloads.cancel_all();
+                self.reobtain_hashes.clear();
+                self.block_reobtain_retries.clear();
             }
 
             self.update_metrics();
@@ -712,11 +715,19 @@ where
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), RestartError> {
         self.prospective_tips = HashSet::new();
-
-        self.reobtain_hashes.clear();
-        self.block_reobtain_retries.clear();
         self.utxo_race_drops = 0;
         self.downloads.take_cancelled_network_wait();
+
+        // Reap the previous round even if the new tips never enter `try_to_sync_once`.
+        // Unfinished downloads can still make progress while we obtain fresh tips.
+        while let Poll::Ready(Some(response)) = futures::poll!(self.downloads.next()) {
+            self.handle_block_response(response)
+                .map_err(Self::block_restart_error)?;
+        }
+        // Preserve retry budgets for retained downloads, but discard terminal failures.
+        self.block_reobtain_retries.retain(|hash, _| {
+            self.downloads.is_queued(hash) || self.reobtain_hashes.contains(hash)
+        });
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -733,7 +744,10 @@ where
         };
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
+        while !self.prospective_tips.is_empty()
+            || !extra_hashes.is_empty()
+            || !self.reobtain_hashes.is_empty()
+        {
             // Avoid hangs due to service readiness or other internal operations
             extra_hashes = match timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
                 .await
