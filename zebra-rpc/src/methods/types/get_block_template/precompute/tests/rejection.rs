@@ -85,7 +85,7 @@ async fn rejected_candidate_read_does_not_start_template_work() {
         else {
             panic!("state provides mining subscriptions")
         };
-        let zebra_state::Response::MiningCandidate(Some(_guard)) = state
+        let zebra_state::Response::MiningCandidate(Some(guard)) = state
             .clone()
             .oneshot(zebra_state::Request::MiningCandidate(block.clone()))
             .await
@@ -93,6 +93,7 @@ async fn rejected_candidate_read_does_not_start_template_work() {
         else {
             panic!("the subscription enables speculative work")
         };
+        guard.body_bound();
         candidates.changed().await;
         assert!(candidates.is_current(hash));
 

@@ -35,10 +35,21 @@ use crate::{
 mod tests;
 
 /// Keeps early mining work alive and reserves its slot until block verification finishes.
+///
+/// The work is only published after [`MiningCandidateGuard::body_bound`] is called.
 #[derive(Clone, Debug)]
 pub struct MiningCandidateGuard(
     pub(crate) tokio::sync::watch::Sender<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    pub(crate) tokio::sync::watch::Sender<bool>,
 );
+
+impl MiningCandidateGuard {
+    /// Allows the early work to be published, once the transaction Merkle root has bound the
+    /// candidate's transactions to its header.
+    pub fn body_bound(&self) {
+        self.1.send_replace(true);
+    }
+}
 
 impl PartialEq for MiningCandidateGuard {
     fn eq(&self, other: &Self) -> bool {

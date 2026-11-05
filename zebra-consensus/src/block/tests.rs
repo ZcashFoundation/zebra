@@ -1285,16 +1285,16 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .await
             .respond(zs::Response::KnownBlock(None));
         state
+            .expect_request(zs::Request::MiningCandidate(block.clone()))
+            .await
+            .respond_error("early mining is disabled in this fixture".into());
+        state
             .expect_request(zs::Request::EarlyRelay {
                 block: block.clone(),
                 require_authentication: false,
             })
             .await
             .respond(zs::Response::EarlyRelay(None));
-        state
-            .expect_request(zs::Request::MiningCandidate(block.clone()))
-            .await
-            .respond_error("early mining is disabled in this fixture".into());
 
         transaction_verifier
             .expect_request_that(|_| true)

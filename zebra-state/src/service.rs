@@ -1354,6 +1354,7 @@ impl Service<Request> for StateService {
                 let mut tip_change = self.latest_chain_tip.clone();
                 // Keep the slot reserved until verification ends, even after early work expires.
                 let (guard, mut cancelled) = watch::channel(Arc::new(permit));
+                let (body_bound, mut is_body_bound) = watch::channel(false);
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
@@ -1381,6 +1382,16 @@ impl Service<Request> for StateService {
                             _ => return,
                         },
                     };
+                    // The roots are computed before the body is bound to the header, so a
+                    // forged body under a valid header must never reach miners.
+                    tokio::select! {
+                        biased;
+                        _ = cancelled.changed() => return,
+                        _ = tokio::time::sleep_until(deadline) => return,
+                        bound = is_body_bound.wait_for(|bound| *bound) => if bound.is_err() {
+                            return;
+                        },
+                    }
                     if cancelled.has_changed().is_err()
                         || tokio::time::Instant::now() >= deadline
                         || state.best_tip().map(|(_, hash)| hash) != Some(parent)
@@ -1419,7 +1430,7 @@ impl Service<Request> for StateService {
                 });
                 async move {
                     Ok(Response::MiningCandidate(Some(
-                        crate::MiningCandidateGuard(guard),
+                        crate::MiningCandidateGuard(guard, body_bound),
                     )))
                 }
                 .boxed()
