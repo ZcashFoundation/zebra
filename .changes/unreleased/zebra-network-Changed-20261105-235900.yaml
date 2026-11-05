@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: A new request to a peer now supersedes that peer's pending `FindBlocks` tip poll and answers it with no hashes, so block downloads no longer wait for the peer's next block inventory.
+time: 2026-11-05T23:59:00.000000000-05:00
