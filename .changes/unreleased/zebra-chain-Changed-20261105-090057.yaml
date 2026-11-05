@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Use GLV multiscalar multiplication for RedPallas signature batches, retaining NAF when the dispatcher declines. Inherit RedDSA's empty/singleton fast paths; RedPallas and RedJubjub singleton verification no longer draws batch weights ([#12232](https://github.com/ZcashFoundation/zebra/pull/12232)).
+time: 2026-11-05T09:00:57.442107879+01:00

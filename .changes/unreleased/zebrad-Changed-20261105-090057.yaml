@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Use the GLV backend for eligible RedPallas batches and deterministic empty/singleton signature paths ([#12232](https://github.com/ZcashFoundation/zebra/pull/12232)).
+time: 2026-11-15T19:03:36.920737046+01:00

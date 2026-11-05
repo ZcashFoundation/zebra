@@ -3606,8 +3606,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ed53ba43531a06e1f82020907cf192fc3c25d7c0baf5c49c547b74e7103b62"
+source = "git+https://github.com/zcash/pasta_curves?rev=7554d790e39c4b303d0e727c3e009463327281d3#7554d790e39c4b303d0e727c3e009463327281d3"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -4270,8 +4269,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a70b6dbd7b3277cbd4d89ee750a30bebab3b9951ee4e166ce15c00975fe410f"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=f2a23676b3cdcba3f82e480e29f8c0612209d954#f2a23676b3cdcba3f82e480e29f8c0612209d954"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5390,7 +5388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
