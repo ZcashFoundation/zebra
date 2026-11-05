@@ -661,6 +661,8 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         discovery: false,
         bans: tokio::sync::watch::channel(crate::BanList::default()).1,
         addr_relay: None,
+        serve_block_ranges: true,
+        block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
     };
     let client = spawn_connection(
         outbound,

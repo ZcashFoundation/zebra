@@ -111,7 +111,16 @@ pub struct ConnectionParams<S> {
     /// The hub that relays addresses between version 2 peers and advertises
     /// this node's own; `None` for a connection that relays nothing.
     pub addr_relay: Option<AddrRelayHandle>,
+    /// Whether the peer's `get-block-range` requests are served
+    /// (`network.v2_serve_block_ranges`).
+    pub serve_block_ranges: bool,
+
+    /// The node-wide `get-block-range` stream permits, shared by every
+    /// version 2 connection: [`global_block_range_permits`].
+    pub block_range_permits: Arc<Semaphore>,
 }
+
+pub(crate) use inbound::global_block_range_permits;
 
 /// Something a stream task needs the connection task to act on.
 enum Event {
@@ -387,6 +396,10 @@ where
     };
 
     let is_inbound = connection_info.connected_addr.is_inbound();
+    let block_ranges = inbound::BlockRangeServing::new(
+        params.serve_block_ranges,
+        params.block_range_permits.clone(),
+    );
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
@@ -406,6 +419,7 @@ where
         addr_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
+        block_ranges,
         overloads: Arc::new(Overloads::new()),
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
         tasks: JoinSet::new(),
@@ -483,6 +497,8 @@ struct ConnectionTask<S> {
     announcement_permits: AnnouncementPermits,
     /// Bounds how many of the peer's requests are in the inbound service at once.
     inbound_permits: Arc<Semaphore>,
+    /// Bounds how many of the peer's `get-block-range` requests are served at once.
+    block_ranges: inbound::BlockRangeServing,
     /// The peer's inbound service overloads, which may close the connection.
     overloads: Arc<Overloads>,
     /// Bounds how many of this node's requests are in flight to the peer at once.
@@ -747,6 +763,7 @@ where
             self.get_addr_allowed.clone(),
             self.params.address_book.clone(),
             self.events.clone(),
+            self.block_ranges.clone(),
         ));
     }
 
@@ -843,7 +860,8 @@ where
             | Request::AdvertiseCompactBlock(..)
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
-            | Request::CheckCompactBlock(_) => Err(PeerError::InboundOnlyRequest.into()),
+            | Request::CheckCompactBlock(_)
+            | Request::BlockRange { .. } => Err(PeerError::InboundOnlyRequest.into()),
 
             // Peer set internal.
             Request::PollPeerSet => Ok(Response::Nil),

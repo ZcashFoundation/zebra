@@ -421,7 +421,8 @@ impl StartCmd {
                     .with_compact_relay(
                         config.network.network.clone(),
                         read_only_state_service.clone(),
-                    ),
+                    )
+                    .with_block_range_state(read_only_state_service.clone()),
             );
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =

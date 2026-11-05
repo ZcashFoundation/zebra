@@ -156,6 +156,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `v2_listen_addr` | Optional socket-address string | Absent | Beta, opt-in: open a QUIC (UDP) endpoint for the draft version 2 peer-to-peer protocol at this address, also used for the version 2 connections Zebra makes. The legacy TCP protocol keeps running on `listen_addr`, and both can use the same port number. See [Version 2 peer-to-peer protocol (beta)](p2p-v2.md). |
 | `initial_v2_peers` | Array of address strings | `[]` | Peers to connect to over the version 2 protocol at startup; each IP address or DNS name must include the peer's QUIC (UDP) port. Only used when `v2_listen_addr` is set; these peers have the first claim on the outbound version 2 slots. |
 | `v2_peer_discovery` | Boolean | `true` | Only used when `v2_listen_addr` is set: discover version 2 peers through the `get-addr` answers of the version 2 peers Zebra dials, a version 2 peer cache (`<cache_dir>/network/<network>.v2-peers`), and the DNS seeders on the network's default port, and connect to some of them. Set to `false` to connect only to `initial_v2_peers`, as on a closed test network. |
+| `v2_serve_block_ranges` | Boolean | `true` | Serve `get-block-range` requests, which version 2 peers use to download ranges of up to 64 MiB of blocks. Zebra serves at most 2 ranges per peer and 8 in total at once, and refuses the rest. Only used when `v2_listen_addr` is set; `false` refuses every such request. |
 
 The exact default Mainnet seed list is:
 

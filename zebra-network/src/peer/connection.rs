@@ -1390,6 +1390,9 @@ where
             (AwaitingRequest, EarlyBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(_)) => {
                 Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
+            (AwaitingRequest, BlockRange { .. }) => {
+                Ok(Handler::Finished(Err(PeerError::V2OnlyRequest)))
+            }
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
@@ -1745,6 +1748,10 @@ where
             Response::Nil => { /* generic success, do nothing */ }
             Response::EarlyBlocks(_) | Response::CompactBlockTransactions(_) => {
                 error!("inbound service returned an outbound-only early block response");
+                return;
+            }
+            Response::BlockRange(_) => {
+                error!("inbound service returned a version 2 only response to a legacy request");
                 return;
             }
             Response::Peers(addrs) => {

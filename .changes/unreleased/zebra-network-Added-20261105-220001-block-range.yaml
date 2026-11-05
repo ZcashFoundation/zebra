@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `get-block-range` serving to version 2 connections, and the `v2_serve_block_ranges` config field, which turns it off; it defaults to on.
+time: 2026-11-05T22:00:01.000000000Z

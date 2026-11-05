@@ -2218,3 +2218,137 @@ fn compact_header_screening_checks_proof_of_work_and_shape() {
     compact.prefilled[0].0 = 1;
     assert!(super::super::screen_compact_header(&compact, &network).is_err());
 }
+
+/// An initialized [`Inbound`] service that serves block ranges from `read_state`, or from no
+/// read state if `None`.
+async fn setup_block_range_serving(
+    read_state: Option<
+        MockService<zebra_state::ReadRequest, zebra_state::ReadResponse, PanicAssertion>,
+    >,
+) -> Inbound {
+    let network = Mainnet;
+    let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), &network, Height::MAX, 0).await;
+    let (block_verifier, _verifier_called) = recording_block_verifier();
+    let peer_set: MockService<Request, Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mempool: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+
+    let (setup_tx, setup_rx) = oneshot::channel();
+    let mut inbound = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+    if let Some(read_state) = read_state {
+        inbound = inbound.with_block_range_state(read_state);
+    }
+    let setup_data = InboundSetupData {
+        address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+            SocketAddr::from_str("0.0.0.0:0").unwrap(),
+            &network,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::none(),
+        ))),
+        block_download_peer_set: Buffer::new(BoxService::new(peer_set), 1),
+        block_verifier,
+        mempool: Buffer::new(BoxService::new(mempool), 1),
+        state: ServiceBuilder::new().buffer(1).service(state),
+        latest_chain_tip,
+        misbehavior_sender,
+    };
+    // We can't expect or unwrap because the returned Result does not implement Debug.
+    assert!(
+        setup_tx.send(setup_data).is_ok(),
+        "the setup channel is open"
+    );
+
+    // The first readiness check completes the setup.
+    inbound.ready().await.expect("the inbound service is ready");
+    inbound
+}
+
+/// A version 2 block range request is a read of the requested hash's ancestors, whose blocks are
+/// returned unchanged, and an empty read means the hash is unknown.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_range_requests_read_ancestor_blocks() -> Result<(), BoxError> {
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    let blocks: Vec<Arc<Block>> = [
+        &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+    ]
+    .into_iter()
+    .map(|bytes| bytes.zcash_deserialize_into().map(Arc::new))
+    .collect::<Result<_, _>>()?;
+    let read_state = MockService::build().for_unit_tests();
+    let mut inbound = setup_block_range_serving(Some(read_state.clone())).await;
+
+    // The request's bounds are passed through, and the blocks come back unchanged.
+    let from_hash = blocks[0].hash();
+    let response = inbound.ready().await?.call(Request::BlockRange {
+        from_hash,
+        count: 64,
+        max_bytes: 2 * 1024 * 1024,
+    });
+    let mut read_state_handle = read_state.clone();
+    let expected = blocks.clone();
+    let answer = async move {
+        read_state_handle
+            .expect_request(ReadRequest::AncestorBlocks {
+                hash: from_hash,
+                count: 64,
+                max_bytes: 2 * 1024 * 1024,
+            })
+            .await
+            .respond(ReadResponse::AncestorBlocks(expected));
+    };
+    let (response, ()) = futures::join!(response, answer);
+    match response? {
+        Response::BlockRange(served) => assert_eq!(served, blocks),
+        other => panic!("expected a block range, got {other:?}"),
+    }
+
+    // An unknown hash is an empty range.
+    let unknown = zebra_chain::block::Hash([0xAB; 32]);
+    let response = inbound.ready().await?.call(Request::BlockRange {
+        from_hash: unknown,
+        count: 1,
+        max_bytes: 0,
+    });
+    let mut read_state_handle = read_state.clone();
+    let answer = async move {
+        read_state_handle
+            .expect_request(ReadRequest::AncestorBlocks {
+                hash: unknown,
+                count: 1,
+                max_bytes: 0,
+            })
+            .await
+            .respond(ReadResponse::AncestorBlocks(Vec::new()));
+    };
+    let (response, ()) = futures::join!(response, answer);
+    assert!(matches!(response?, Response::BlockRange(served) if served.is_empty()));
+
+    Ok(())
+}
+
+/// Without a block range read state, a block range request fails, which the version 2 connection
+/// turns into a refused stream.
+#[tokio::test(flavor = "multi_thread")]
+async fn block_range_requests_fail_without_a_read_state() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+    let mut inbound = setup_block_range_serving(None).await;
+
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::BlockRange {
+            from_hash: zebra_chain::block::Hash([0xAB; 32]),
+            count: 1,
+            max_bytes: 0,
+        })
+        .await;
+    assert!(response.is_err(), "the request fails, got {response:?}");
+
+    Ok(())
+}
