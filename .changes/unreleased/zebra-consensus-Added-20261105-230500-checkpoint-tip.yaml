@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `router::init_with_checkpoint_tip`, which initializes the verifiers like `init` with a checkpoint verifier that fast-forwards to the state tip another component commits, published on a `watch` channel.
+time: 2026-11-05T23:05:00.000000000Z

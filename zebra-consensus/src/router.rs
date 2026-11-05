@@ -22,7 +22,10 @@ use std::{
 
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle};
+use tokio::{
+    sync::{oneshot, watch},
+    task::JoinHandle,
+};
 use tower::{
     buffer::Buffer,
     util::{BoxCloneService, BoxService},
@@ -351,11 +354,82 @@ where
         mempool,
         block_mempool,
         halo2::spawn_key_preload(),
+        None,
     )
     .await
 }
 
-/// Initializes verifier services with the caller's key preload task.
+/// Initializes verifier services like [`init`], with a checkpoint verifier
+/// that fast-forwards to blocks committed by another component.
+///
+/// `checkpoint_tip` carries the state tip the checkpoint sync engine left
+/// when it stopped, as `(height, hash)`: usually a checkpoint, but in the
+/// middle of a checkpoint interval if a commit failed there. When it
+/// changes, the checkpoint verifier resets its progress to it if, and only
+/// if, `height` is above the verifier's current progress and, if `height` is
+/// a checkpoint, `hash` is that checkpoint's hash; any other value is
+/// ignored. The verifier then accepts blocks from `height + 1`, so the
+/// legacy syncer can continue from where the engine stopped.
+///
+/// With a receiver whose value never changes, this behaves exactly like
+/// [`init`].
+#[instrument(skip(
+    state_service,
+    read_state_service,
+    mempool,
+    block_mempool,
+    checkpoint_tip
+))]
+pub async fn init_with_checkpoint_tip<S, ReadState, Mempool>(
+    config: Config,
+    network: &Network,
+    state_service: S,
+    read_state_service: ReadState,
+    mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
+    checkpoint_tip: watch::Receiver<Option<(Height, block::Hash)>>,
+) -> (
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<
+        BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
+        transaction::MempoolRequest,
+    >,
+    BackgroundTaskHandles,
+    Height,
+    PreparedBlockCache,
+)
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
+{
+    init_with_preload_handle(
+        config,
+        network,
+        state_service,
+        read_state_service,
+        mempool,
+        block_mempool,
+        halo2::spawn_key_preload(),
+        Some(checkpoint_tip),
+    )
+    .await
+}
+
+/// Initializes verifier services with the caller's key preload task, and an optional
+/// committed checkpoint tip for the checkpoint verifier to fast-forward to.
+#[allow(clippy::too_many_arguments)]
 async fn init_with_preload_handle<S, ReadState, Mempool>(
     config: Config,
     network: &Network,
@@ -366,6 +440,7 @@ async fn init_with_preload_handle<S, ReadState, Mempool>(
         oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     >,
     halo2_key_preload_handle: JoinHandle<()>,
+    checkpoint_tip: Option<watch::Receiver<Option<(Height, block::Hash)>>>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -511,6 +586,10 @@ where
     };
     let prepared_blocks = block.prepared_blocks();
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
+    let checkpoint = match checkpoint_tip {
+        Some(checkpoint_tip) => checkpoint.with_checkpoint_tip(checkpoint_tip),
+        None => checkpoint,
+    };
     let router = BlockVerifierRouter {
         checkpoint,
         max_checkpoint_height,
@@ -602,6 +681,7 @@ where
         .1,
         None,
         tokio::spawn(std::future::ready(())),
+        None,
     )
     .await
 }
