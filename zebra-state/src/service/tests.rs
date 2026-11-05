@@ -645,7 +645,11 @@ async fn mining_candidate_is_published_only_after_its_body_is_bound() {
         else {
             panic!("the first candidate must reserve the available slot");
         };
-        // The computation holds a clone of the slot permit until it finishes.
+        // The computation holds a clone of the slot permit until it finishes, so wait for it to
+        // start, then to finish.
+        while Arc::strong_count(&guard.0.borrow()) < 2 {
+            tokio::task::yield_now().await;
+        }
         while Arc::strong_count(&guard.0.borrow()) > 1 {
             tokio::task::yield_now().await;
         }
