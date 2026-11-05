@@ -6,10 +6,6 @@
 //! header parsing and the consensus size limit are the client stream's
 //! checks (`sync_peer::block_range`).
 
-// The readers and writers are unused until the get-block-range server and
-// client stream call them.
-#![allow(dead_code)]
-
 use std::io::Write;
 
 use bytes::Bytes;

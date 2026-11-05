@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'Added `SyncPeer` handles to version 2 peers for bulk sync, the `SyncPeers` registry of connected version 2 peers (spawned with `SyncPeersSender::spawn` and passed in the runtime-only `Config::v2_sync_peers` field), and the `get-block-range` client stream (`SyncPeer::get_block_range`, `BlockRangeStream`).'
+time: 2026-11-05T16:00:00.000000000-05:00

@@ -4000,6 +4000,58 @@ async fn v2_dialer_redials_after_disconnect() {
     dialer_task.abort();
 }
 
+/// With `v2_sync_peers` set, every completed version 2 handshake is registered as a sync peer
+/// for the connection's address, and removed once the connection ends.
+#[tokio::test]
+async fn v2_handshakes_register_sync_peers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let (sync_peers_tx, mut sync_peers) = crate::SyncPeersSender::spawn();
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) = spawn_v2_node(
+        Config {
+            v2_sync_peers: Some(sync_peers_tx),
+            ..v2_test_config(listener_addr, &[])
+        },
+        no_bans(),
+    );
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), no_bans());
+
+    let (addr, client) = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the configured peer is dialled")
+        .expect("the listener is running");
+    let registered = tokio::time::timeout(
+        V2_TEST_CONNECT_TIMEOUT,
+        sync_peers.wait_for(|peers| !peers.is_empty()),
+    )
+    .await
+    .expect("the handshake registers a sync peer")
+    .expect("the registry runs")
+    .clone();
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].addr(), addr);
+    assert!(!registered[0].is_closed());
+    drop(registered);
+
+    // Dropping the client ends the connection.
+    std::mem::drop(client);
+    tokio::time::timeout(
+        V2_TEST_CONNECT_TIMEOUT,
+        sync_peers.wait_for(|peers| peers.is_empty()),
+    )
+    .await
+    .expect("the registry removes the ended connection")
+    .expect("the registry runs");
+
+    listener_task.abort();
+    dialer_task.abort();
+}
+
 /// Two nodes that list each other as initial version 2 peers settle on one connection between
 /// them, rather than repeatedly dialling connections that the other node's peer set drops as
 /// duplicates.
