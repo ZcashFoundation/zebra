@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: breaking
-body: 'Block verification announces mining candidates after proof-of-work, Merkle-root, and future-time checks, without waiting for transaction verification or full contextual validation. This requires the matching `zebra-state` mining-candidate variants and guards; upgrade both crates together.'
+body: 'Block verification announces mining candidates right after proof-of-work and shielded action limit checks, so the state can compute their note commitment tree roots early. It allows publication after the Merkle-root, future-time, coinbase, and subsidy checks, without waiting for transaction verification or full contextual validation. This requires the matching `zebra-state` mining-candidate variants and guards; upgrade both crates together.'
 time: 2026-10-11T00:00:00Z
