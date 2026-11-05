@@ -2009,6 +2009,18 @@ impl Service<ReadRequest> for ReadStateService {
                 .collect(),
             )),
 
+            ReadRequest::AncestorBlocks {
+                hash,
+                count,
+                max_bytes,
+            } => Ok(ReadResponse::AncestorBlocks(read::ancestor_blocks(
+                state.latest_non_finalized_state().chain_iter(),
+                &state.db,
+                hash,
+                count,
+                max_bytes,
+            ))),
+
             ReadRequest::FindForkPoint { known_blocks } => {
                 // Reject over-long locators before doing any work, so an untrusted
                 // caller can't force unbounded lookups.
