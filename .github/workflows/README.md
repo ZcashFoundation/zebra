@@ -168,6 +168,7 @@ Three rules keep the quota usable:
    it does not build `zebrad` and `zebra-rpc` is second widest option).
 3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
    crate-matrix generator in `test-crates.yml` set `cache: false`.
+   The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
 
 To inspect the current state:
 
