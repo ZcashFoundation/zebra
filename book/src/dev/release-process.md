@@ -100,11 +100,32 @@ fixes can require an immediate incompatible change.
 
 ## Release frequency
 
-Publication is maintainer-controlled, not scheduled by a timer. Non-release
-pushes to `main` refresh the Release PR; review and merge authorize publication.
-Plan upgrades and release preparation before the current Mainnet support window
-expires. Network-upgrade deadlines and urgent security fixes determine release
-timing independently of routine feature and fix releases.
+Zebra publishes a stable release every two weeks, on a Monday, from the work
+merged to the [`next` branch](next-branch.md):
+
+1. **Cut Monday.** A maintainer opens the promotion pull request from `next`
+   to `main`. That pull request is the release candidate: whatever is merged
+   to `next` by then is in it, and nothing is added to make a date.
+2. **Soak week.** The candidate runs on the Foundation's nodes and on any
+   mining pool or operator that wants to try it. Only fixes for the candidate
+   merge to its branch during that week.
+3. **Release Monday.** The promotion pull request merges, release-plz
+   refreshes the Release PR from `main`, and the two maintainer actions below
+   publish the release. A candidate that is not ready waits for the next
+   train, two weeks later.
+
+The [`Next stable release` milestone](https://github.com/ZcashFoundation/zebra/milestones)
+lists the release task and anything that would stop the cut, and nothing
+else. It is renamed to the version on release Monday, and a new one opens
+with the next date. Changes to the state database format are always listed
+there, because operators cannot roll back from them without a resync.
+
+Cutting the release rotates between the maintainers, one train each. Alphas
+and betas are [published from `next`](next-branch.md#publish-a-pre-release)
+whenever there is something worth testing early; they have no schedule and
+no milestone. Patch releases for security and urgent fixes are published
+from `main` at any time, independently of the train, and the automatic
+`main`-to-`next` sync carries them into the next candidate.
 
 <a id="deprecation"></a>
 

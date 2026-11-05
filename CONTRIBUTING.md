@@ -24,8 +24,12 @@ Maintainers do not need prior issue approval for their own work.
    proposed change. Wait for a Zebra team member's acknowledgment before coding.
 2. Agree on the approach for changes beyond small bug fixes. Discuss the overall
    plan before splitting work across related PRs.
-3. Keep each PR to one logical change. Link the agreed issue and distinguish a
-   complete fix from partial work or a dependency on another PR.
+3. Keep each PR to one logical change. Link the agreed issue with `Closes #N`
+   in the description, so the issue closes on merge and the work shows under
+   its tracking epic; use `Part of #N` for partial work and `Depends on #N`
+   for a dependency on another PR. Milestones are set by maintainers and only
+   for items that block a release; see the
+   [release train](https://zebra.zfnd.org/dev/release-process.html#release-frequency).
 4. Follow [Conventional Commits][conventional-commits] for the PR title and branch
    commits. Zebra uses merge commits, so both remain in history.
 5. Add tests for changed behavior and the required [change fragments][changelogs].

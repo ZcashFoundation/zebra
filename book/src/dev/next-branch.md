@@ -20,6 +20,10 @@ the [deployment triggers and environments](continuous-delivery.md#triggers-and-e
 4. To promote the branch, open a PR from `next` to `main`. It follows
    `main`'s [review and merge-queue requirements](continuous-integration.md#automated-merges).
    Review the entire branch difference, not only the latest change.
+   This PR is the release candidate of the
+   [two-week release train](release-process.md#release-frequency): it opens
+   on the cut Monday, soaks for a week, and merges on the release Monday
+   unless an item in the `Next stable release` milestone holds it.
 
 Dispatch [GCP stateful tests](continuous-integration.md#gcp-stateful-tests)
 manually for `next`; they do not run on its PRs or gate its merges.
