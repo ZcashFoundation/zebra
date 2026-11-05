@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Verify large batches of Orchard proofs faster by computing their public-input commitments in parallel.
+time: 2026-11-05T09:01:00.400459441+01:00
