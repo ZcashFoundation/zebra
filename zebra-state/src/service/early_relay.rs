@@ -14,7 +14,7 @@ use zebra_chain::{
 
 use super::{read, LatestChainTip, ReadStateService};
 use crate::{
-    loom::sync::atomic::{AtomicU64, Ordering},
+    loom::sync::atomic::{fence, AtomicU64, Ordering},
     BoxError,
 };
 
@@ -91,6 +91,7 @@ impl EarlyRelayState {
     /// Marks a writer mutation until its replacement snapshot has been published.
     pub(super) fn updating_context(&self) -> ContextUpdate<'_> {
         self.context_version.fetch_add(1, Ordering::SeqCst);
+        fence(Ordering::Release);
         ContextUpdate(&self.context_version)
     }
 
@@ -105,6 +106,7 @@ impl EarlyRelayState {
 
     /// `SeqCst` load; `true` when the version still equals `version`.
     fn context_unchanged(&self, version: u64) -> bool {
+        fence(Ordering::Acquire);
         self.context_version.load(Ordering::SeqCst) == version
     }
 
@@ -350,17 +352,13 @@ impl ReadStateService {
             let _permit = permit;
             // # Correctness
             //
-            // The version loads bracket the reads, but they alone do not make the re-check
-            // sound: nothing orders the reads before the re-check, so a read can observe part
-            // of a writer's mutation while the re-check still loads the old even version. The
-            // re-check rejects every overlapping snapshot only if each such read synchronizes
-            // with the writer. The non-finalized state comes through a `watch` channel, whose
-            // lock does. The RocksDB reads rely on RocksDB performing release/acquire
-            // operations internally that pair across the writer and reader threads: this is
-            // assumed, not verified. Under that assumption the early-relay loom models find no
-            // violation, exhaustively for one reader and at preemption bound 3 for two; without
-            // it they find a torn snapshot. Explicit fences after the writer's first increment
-            // and before the re-check would remove the reliance.
+            // The version loads bracket the reads. The writer's Release fence after its odd
+            // increment keeps every mutation inside that versioned interval, and the Acquire
+            // fence before the re-check keeps every state read before it. Together they reject
+            // every overlapping writer without relying on synchronization inside either state
+            // storage backend. The early-relay loom models check this using relaxed cells,
+            // exhaustively for one reader and at preemption bound 3 for two. Their
+            // missing-recheck control still admits a torn snapshot.
             let Some(version) = state.early_relay.context_snapshot() else {
                 return Ok(None);
             };

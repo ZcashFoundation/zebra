@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Made early-relay snapshot validation independent of RocksDB internal synchronization.'
+time: 2026-11-03T20:28:07.000000000+00:00
