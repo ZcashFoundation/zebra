@@ -64,6 +64,14 @@ pub(super) struct CompactRelay {
 }
 
 impl CompactRelay {
+    /// Returns the hash of the received compact block that extends `parent`, if there is one.
+    pub(super) fn announced_child(&self, parent: block::Hash) -> Option<block::Hash> {
+        self.received
+            .as_ref()
+            .filter(|(block, _, _)| block.header.previous_block_hash == parent)
+            .map(|(block, _, _)| block.header.hash())
+    }
+
     pub(super) fn clear_sent(&mut self) {
         self.sent = None;
     }
