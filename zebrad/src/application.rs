@@ -479,6 +479,11 @@ impl Application for ZebradApp {
         // Log git metadata and platform info when zebrad starts up
         if is_server {
             info!("{metadata_section}");
+            #[cfg(feature = "pasta-asm")]
+            info!(
+                backend = pasta_curves::selected_backend(),
+                "Pasta field arithmetic backend"
+            );
 
             if command.config_path().is_some() {
                 info!("Using config file at: {:?}", command.config_path().unwrap());
