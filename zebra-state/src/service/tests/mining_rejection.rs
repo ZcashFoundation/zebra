@@ -196,6 +196,7 @@ fn rejection_during_queued_mining_computation_prevents_publication() {
             else {
                 panic!("the first candidate reserves the computation slot");
             };
+            guard.body_bound();
             // The queued blocking computation retains a clone of the publication's slot permit.
             while Arc::strong_count(&guard.0.borrow()) < 2 {
                 tokio::task::yield_now().await;
@@ -265,6 +266,7 @@ async fn published_mining_rejection_invalidates_live_and_detached_reads() {
         else {
             panic!("finalized-only parent context supports speculative mining");
         };
+        guard.body_bound();
         changes.changed().await;
         assert!(changes.is_current(hash));
         assert!(Arc::ptr_eq(&changes.block(hash).unwrap(), &block));
@@ -357,6 +359,7 @@ async fn rejection_capacity_disables_mining_without_rejecting_an_unknown_block()
         else {
             panic!("mining is enabled before rejection capacity fills");
         };
+        guard.body_bound();
         changes.changed().await;
         assert!(changes.is_current(hash));
         let (publication, receiver) = watch::channel(changes.0.borrow().clone());

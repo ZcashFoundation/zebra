@@ -108,6 +108,7 @@ async fn candidate_transition(rejected: bool) {
         else {
             panic!("the updater's subscription enables candidates");
         };
+        candidate_guard.body_bound();
         let early = published_template(&cache, &mut publications, candidate_hash, &network).await;
         assert!(early.transactions.is_empty());
         let candidate_snapshot = mempool
@@ -128,6 +129,7 @@ async fn candidate_transition(rejected: bool) {
                     .await
                     .unwrap()
                 {
+                    guard.body_bound();
                     break guard;
                 }
                 tokio::task::yield_now().await;
