@@ -336,3 +336,160 @@ proptest! {
         }
     }
 }
+
+/// `get-block-range` requests and responses.
+mod get_block_range {
+    use proptest::{collection::vec, prelude::*};
+
+    use zebra_chain::{block, serialization::ZcashSerialize};
+
+    use super::vector_blocks;
+    use crate::protocol::v2::{
+        constants::{MAX_GET_BLOCK_RANGE_BYTES, MAX_GET_BLOCK_RANGE_COUNT},
+        request::{GetBlockRange, Request},
+        response::block_range::{
+            read_block_range_answer, read_block_range_element, write_block_range_answer,
+            write_block_range_element, BlockRangeAnswer, BlockRangeBounds,
+        },
+        types::{ErrorCode, StreamType},
+        wire::{Violation, WireError},
+    };
+
+    /// A strategy for requests within the draft's bounds.
+    fn request_strategy() -> impl Strategy<Value = GetBlockRange> {
+        (
+            any::<[u8; 32]>(),
+            0..=MAX_GET_BLOCK_RANGE_COUNT,
+            0..=MAX_GET_BLOCK_RANGE_BYTES,
+        )
+            .prop_map(|(hash, count, max_bytes)| GetBlockRange {
+                final_hash: block::Hash(hash),
+                count,
+                max_bytes,
+            })
+    }
+
+    /// The blocks an honest responder delivers from `available`: as many as
+    /// `count` allows, while the total stays within `max_bytes`, with the
+    /// first block exempt.
+    fn honest_prefix(available: &[Vec<u8>], count: u32, max_bytes: u32) -> usize {
+        let mut total = 0u64;
+        let mut delivered = 0;
+        for block in available {
+            // `count` is a `u32`, so it fits in a `usize` on every supported target.
+            if delivered == count as usize {
+                break;
+            }
+            total += block.len() as u64;
+            if delivered > 0 && total > u64::from(max_bytes) {
+                break;
+            }
+            delivered += 1;
+        }
+        delivered
+    }
+
+    /// Reads a `Found` response's elements from `wire`.
+    fn read_elements(wire: &[u8], request: &GetBlockRange) -> Result<Vec<Vec<u8>>, WireError> {
+        futures::executor::block_on(async {
+            let mut reader = wire;
+            assert_eq!(
+                read_block_range_answer(&mut reader).await?,
+                BlockRangeAnswer::Found
+            );
+            let mut bounds = BlockRangeBounds::new(request);
+            let mut blocks = Vec::new();
+            while let Some(block) = read_block_range_element(&mut reader, &mut bounds).await? {
+                blocks.push(block.to_vec());
+            }
+            Ok(blocks)
+        })
+    }
+
+    proptest! {
+        /// A request within the bounds round-trips through its fixed 40-byte
+        /// body, and every strict prefix is a `PROTOCOL_ERROR`.
+        #[test]
+        fn request_roundtrip(request in request_strategy()) {
+            let body = Request::BlockRange(request).encode().expect("within the bounds");
+            prop_assert_eq!(body.len(), 40);
+            prop_assert_eq!(
+                Request::decode(StreamType::GetBlockRange, &body).expect("valid"),
+                Request::BlockRange(request)
+            );
+            for cut in 0..body.len() {
+                prop_assert_eq!(
+                    Request::decode(StreamType::GetBlockRange, &body[..cut])
+                        .err()
+                        .and_then(|error| error.violation()),
+                    Some(Violation::Close(ErrorCode::ProtocolError))
+                );
+            }
+        }
+
+        /// A request over either bound is never sent, and is a
+        /// `PROTOCOL_ERROR` when received.
+        #[test]
+        fn request_over_a_bound_is_rejected_both_ways(
+            hash in any::<[u8; 32]>(),
+            count in any::<u32>(),
+            max_bytes in any::<u32>(),
+        ) {
+            prop_assume!(count > MAX_GET_BLOCK_RANGE_COUNT || max_bytes > MAX_GET_BLOCK_RANGE_BYTES);
+            let request = GetBlockRange { final_hash: block::Hash(hash), count, max_bytes };
+            let local = request.check();
+            prop_assert!(
+                matches!(local, Err(WireError::LocalCountTooLarge { .. })),
+                "got {:?}",
+                local,
+            );
+
+            let mut body = hash.to_vec();
+            body.extend_from_slice(&count.to_le_bytes());
+            body.extend_from_slice(&max_bytes.to_le_bytes());
+            let error = Request::decode(StreamType::GetBlockRange, &body)
+                .expect_err("over a bound");
+            prop_assert!(matches!(error, WireError::CountTooLarge { .. }), "got {:?}", error);
+        }
+
+        /// An honest response, which stops at whichever of `count` and
+        /// `max_bytes` it reaches first (the first block exempt) or earlier,
+        /// reads back exactly; one more block past a bound it stopped at is a
+        /// `FLOOD`.
+        #[test]
+        fn response_roundtrip_and_bounds(
+            picks in vec(0..3usize, 0..=8),
+            count in 0..=10u32,
+            max_bytes in 0..=4_000u32,
+            early_finish in 0..=8usize,
+        ) {
+            let blocks = vector_blocks();
+            let available: Vec<Vec<u8>> = picks
+                .iter()
+                .map(|index| blocks[*index].zcash_serialize_to_vec().expect("valid"))
+                .collect();
+            let request = GetBlockRange { final_hash: block::Hash([0; 32]), count, max_bytes };
+
+            let limit = honest_prefix(&available, count, max_bytes);
+            let delivered = limit.min(early_finish);
+
+            let mut wire = Vec::new();
+            write_block_range_answer(&mut wire, BlockRangeAnswer::Found).expect("valid");
+            for block in &available[..delivered] {
+                write_block_range_element(&mut wire, block).expect("valid");
+            }
+            prop_assert_eq!(read_elements(&wire, &request).expect("honest"), &available[..delivered]);
+
+            // A responder that goes past the bound it stopped at floods.
+            if limit < available.len() {
+                let mut wire = Vec::new();
+                write_block_range_answer(&mut wire, BlockRangeAnswer::Found).expect("valid");
+                for block in &available[..=limit] {
+                    write_block_range_element(&mut wire, block).expect("valid");
+                }
+                let error = read_elements(&wire, &request).expect_err("past a bound");
+                prop_assert_eq!(error.violation(), Some(Violation::Close(ErrorCode::Flood)));
+            }
+        }
+    }
+}

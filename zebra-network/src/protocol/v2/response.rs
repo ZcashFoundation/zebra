@@ -30,6 +30,8 @@ use super::{
     },
 };
 
+pub mod block_range;
+
 /// The `result` byte that introduces a found object.
 pub const RESULT_FOUND: u8 = 0x00;
 
