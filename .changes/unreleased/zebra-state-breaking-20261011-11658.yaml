@@ -1,4 +1,4 @@
 project: zebra-state
 kind: breaking
-body: 'The `ReadResponse::ValidBlockProposal` and `Response::ValidBlockProposal` variants now carry `Arc<ContextuallyVerifiedBlock>`, shared with the chain the state prepared for the proposal's commit; request matches must handle `Request::CommitContextuallyVerifiedBlock`. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
+body: 'The `ReadResponse::ValidBlockProposal` and `Response::ValidBlockProposal` variants now carry `Arc<ContextuallyVerifiedBlock>`, shared with the chain the state prepared for the proposal''s commit; request matches must handle `Request::CommitContextuallyVerifiedBlock`. ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658))'
 time: 2026-10-11T00:00:00Z
