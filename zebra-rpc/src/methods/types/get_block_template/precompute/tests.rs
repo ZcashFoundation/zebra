@@ -479,7 +479,13 @@ async fn mempool_changes_compare_the_verified_set() {
         ))
     });
     let (events, mut receiver) = broadcast::channel(1);
-    let changed = wait_for_mempool_change(&mut receiver, mempool, &template_ids, Instant::now());
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        Instant::now(),
+        Instant::now(),
+    );
     tokio::pin!(changed);
 
     for _ in 0..20 {
@@ -504,6 +510,121 @@ async fn mempool_changes_compare_the_verified_set() {
     tokio::time::timeout(Duration::from_millis(1), changed)
         .await
         .expect("a collateral eviction must wake the updater even when its ID was not announced");
+}
+
+/// Steady 20–100 tx/s flows use the short pause; a 9,000 tx/s burst waits for coalescing.
+#[tokio::test(start_paused = true)]
+async fn mempool_arrivals_adapt_the_rebuild_pause() {
+    for (interval_ms, batch_size, burst) in [(50u32, 1u32, false), (10, 1, false), (1, 9, true)] {
+        let template_ids = HashSet::new();
+        let changed_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+        let mempool = tower::service_fn(move |request| {
+            assert_eq!(request, mempool::Request::TransactionIds);
+            std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+                mempool::Response::TransactionIds([changed_id].into_iter().collect()),
+            ))
+        });
+        let (events, mut receiver) = broadcast::channel(1);
+        let start = Instant::now();
+        let changed = wait_for_mempool_change(
+            &mut receiver,
+            mempool,
+            &template_ids,
+            start + MEMPOOL_SHORT_PAUSE,
+            start + MEMPOOL_THROTTLE,
+        );
+        tokio::pin!(changed);
+
+        for millisecond in 0..u32::try_from(MEMPOOL_SHORT_PAUSE.as_millis()).unwrap() {
+            if millisecond % interval_ms == 0 {
+                let ids: HashSet<_> = (0..batch_size)
+                    .map(|index| {
+                        let mut bytes = [0; 32];
+                        bytes[..4]
+                            .copy_from_slice(&(millisecond * batch_size + index).to_le_bytes());
+                        UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash(bytes))
+                    })
+                    .collect();
+                events.send(MempoolChange::added(ids)).unwrap();
+            }
+            assert!(futures::poll!(&mut changed).is_pending());
+            tokio::time::advance(Duration::from_millis(1)).await;
+        }
+
+        if burst {
+            assert!(futures::poll!(&mut changed).is_pending());
+            tokio::time::advance(MEMPOOL_THROTTLE - MEMPOOL_SHORT_PAUSE - Duration::from_millis(1))
+                .await;
+            assert!(futures::poll!(&mut changed).is_pending());
+            tokio::time::advance(Duration::from_millis(1)).await;
+        }
+        assert!(futures::poll!(&mut changed).is_ready());
+        assert_eq!(
+            start.elapsed(),
+            if burst {
+                MEMPOOL_THROTTLE
+            } else {
+                MEMPOOL_SHORT_PAUSE
+            },
+        );
+    }
+}
+
+/// Buffered additions still extend an elapsed short deadline, including lost notifications.
+#[tokio::test(start_paused = true)]
+async fn mempool_buffered_bursts_extend_the_short_deadline() {
+    for overflow in [false, true] {
+        let template_ids = HashSet::new();
+        let changed_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([0; 32]));
+        let mempool = tower::service_fn(move |request| {
+            assert_eq!(request, mempool::Request::TransactionIds);
+            std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+                mempool::Response::TransactionIds([changed_id].into_iter().collect()),
+            ))
+        });
+        let (events, mut receiver) = broadcast::channel(1);
+        let start = Instant::now();
+        let changed = wait_for_mempool_change(
+            &mut receiver,
+            mempool,
+            &template_ids,
+            start + MEMPOOL_SHORT_PAUSE,
+            start + MEMPOOL_THROTTLE,
+        );
+        tokio::pin!(changed);
+
+        events
+            .send(MempoolChange::added([changed_id].into_iter().collect()))
+            .unwrap();
+        assert!(futures::poll!(&mut changed).is_pending());
+        tokio::time::advance(MEMPOOL_SHORT_PAUSE / 2).await;
+
+        let ids: HashSet<_> = (1..MEMPOOL_BURST_ADDITIONS)
+            .map(|index| {
+                let mut bytes = [0; 32];
+                bytes[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+                UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash(bytes))
+            })
+            .collect();
+        if overflow {
+            // One lost batched notification is enough to make the arrival count unknown.
+            events.send(MempoolChange::added(ids)).unwrap();
+            events
+                .send(MempoolChange::added([changed_id].into_iter().collect()))
+                .unwrap();
+        } else {
+            events.send(MempoolChange::added(ids)).unwrap();
+        }
+
+        // Do not poll the updater until both the short timer and the backlog are ready.
+        tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+        assert!(futures::poll!(&mut changed).is_pending());
+        tokio::time::advance(MEMPOOL_THROTTLE - start.elapsed() - Duration::from_millis(1)).await;
+        assert!(futures::poll!(&mut changed).is_pending());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        assert!(futures::poll!(&mut changed).is_ready());
+        assert_eq!(start.elapsed(), MEMPOOL_THROTTLE);
+    }
 }
 
 /// Slow builds get an equal idle interval, including the backstop, but tip changes bypass it.
