@@ -1949,9 +1949,8 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5af2a9457f494f862cd07b81c2e98a19f50b06a2057b7569450d7c26b167d1c"
+version = "0.4.1"
+source = "git+https://github.com/zcash/halo2?rev=771fbbe8d8218bf554b49d7e4ae6a3bfc1c5f442#771fbbe8d8218bf554b49d7e4ae6a3bfc1c5f442"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -5390,7 +5389,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
