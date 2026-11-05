@@ -33,7 +33,7 @@ use std::{
 
 use futures::{Future, FutureExt, TryFutureExt};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tower::{Service, ServiceExt};
 use tracing::instrument;
 
@@ -219,6 +219,11 @@ where
     /// Resolves once the last verified block has been sent to the state.
     previous_block_sent: Option<oneshot::Receiver<()>>,
 
+    /// The highest checkpoint another component has committed to the state, if any.
+    ///
+    /// When it changes, `poll_ready` fast-forwards the verifier to it.
+    checkpoint_tip: Option<watch::Receiver<Option<(block::Height, block::Hash)>>>,
+
     /// Queued block height progress transmitter.
     #[cfg(feature = "progress-bar")]
     queued_blocks_bar: howudoin::Tx,
@@ -363,6 +368,7 @@ where
             reset_sender: sender,
             epoch: 0,
             previous_block_sent: None,
+            checkpoint_tip: None,
             #[cfg(feature = "progress-bar")]
             queued_blocks_bar,
             #[cfg(feature = "progress-bar")]
@@ -440,6 +446,75 @@ where
             self.queued_blocks_bar.close();
             self.verified_checkpoint_bar.close();
         }
+    }
+
+    /// Fast-forwards the verifier to tips that another component commits to the state.
+    ///
+    /// Each new value of `checkpoint_tip` is a block the local state committed, usually a
+    /// checkpoint, but in the middle of a checkpoint interval if a commit failed there. It is
+    /// applied by `poll_ready` if, and only if, it is above the verifier's progress and, at a
+    /// checkpoint height, has that checkpoint's hash. Any other value is ignored.
+    pub(crate) fn with_checkpoint_tip(
+        mut self,
+        checkpoint_tip: watch::Receiver<Option<(block::Height, block::Hash)>>,
+    ) -> Self {
+        self.checkpoint_tip = Some(checkpoint_tip);
+        self
+    }
+
+    /// Applies a changed `checkpoint_tip`, if it is above the verifier's progress.
+    fn fast_forward_to_checkpoint_tip(&mut self) {
+        let Some(checkpoint_tip) = self.checkpoint_tip.as_mut() else {
+            return;
+        };
+        // Check the borrowed value rather than the channel: `has_changed()` fails once the sender
+        // is dropped, even if its last value has not been seen yet.
+        let checkpoint_tip = checkpoint_tip.borrow_and_update();
+        if !checkpoint_tip.has_changed() {
+            return;
+        }
+        let Some((height, hash)) = *checkpoint_tip else {
+            return;
+        };
+        drop(checkpoint_tip);
+
+        // A tip between checkpoints can't be checked against the list. Like the state tip the
+        // verifier starts from, it is trusted because the local state committed it:
+        // `reset_progress` makes it an `InitialTip`, and the next range must chain from its hash.
+        if self
+            .checkpoint_list
+            .hash(height)
+            .is_some_and(|checkpoint| checkpoint != hash)
+        {
+            tracing::warn!(
+                ?height,
+                ?hash,
+                "ignoring a committed tip whose hash does not match the checkpoint list"
+            );
+            return;
+        }
+        let is_above_progress = match self.previous_checkpoint_height() {
+            BeforeGenesis => true,
+            InitialTip(verified) | PreviousCheckpoint(verified) => height > verified,
+            FinalCheckpoint => false,
+        };
+        if !is_above_progress {
+            tracing::debug!(
+                ?height,
+                progress = ?self.previous_checkpoint_height(),
+                "ignoring a committed tip at or below the verifier's progress"
+            );
+            return;
+        }
+
+        tracing::info!(?height, ?hash, "fast-forwarding to a committed tip");
+        self.reset_progress(Some((height, hash)));
+        // Commit failures from before the fast-forward carry an older state tip, which must not
+        // rewind the verifier below the committed checkpoint.
+        self.epoch = self.epoch.wrapping_add(1);
+        // Blocks queued above the committed checkpoint may now be a complete range, and the
+        // caller might not send another block to trigger their verification.
+        self.process_checkpoint_range();
     }
 
     /// Reset the verifier progress back to given tip.
@@ -1088,6 +1163,29 @@ where
             }
         }
 
+        // An initial tip between checkpoints is not in the checkpoint list, so a range that does
+        // not chain to it is rejected rather than treated as a bad list. The state committed that
+        // tip, so it would reject these blocks too.
+        if let InitialTip(initial_tip_hash) = self.previous_checkpoint_hash() {
+            if expected_hash != initial_tip_hash {
+                tracing::warn!(
+                    ?current_range,
+                    expected = ?initial_tip_hash,
+                    found = ?expected_hash,
+                    "rejecting a checkpoint range that does not chain to the initial tip"
+                );
+                for qblock in rev_valid_blocks.drain(..) {
+                    let _ = qblock
+                        .tx
+                        .send(Err(VerifyCheckpointError::UnexpectedSideChain {
+                            expected: initial_tip_hash,
+                            found: expected_hash,
+                        }));
+                }
+                return;
+            }
+        }
+
         // The checkpoint and the parent hash must match.
         // See the detailed checkpoint comparison comment above.
         assert_eq!(
@@ -1346,6 +1444,9 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Always ready, so a changed tip needs no wakeup: it is applied, and any queued blocks
+        // above it are verified, whenever the caller next checks readiness.
+        self.fast_forward_to_checkpoint_tip();
         Poll::Ready(Ok(()))
     }
 

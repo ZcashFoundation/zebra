@@ -443,3 +443,44 @@ async fn mined_checkpoint_notifications_follow_commit() {
     .await
     .expect("checkpointed local submissions must not stall");
 }
+
+/// With a checkpoint tip that never moves to a valid checkpoint,
+/// `init_with_checkpoint_tip` verifies blocks like `init`.
+#[tokio::test(flavor = "multi_thread")]
+async fn init_with_checkpoint_tip_verifies_like_init() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let (state, read_state, _, _) = zs::init_test_services(&network).await;
+    let (checkpoint_tip_sender, checkpoint_tip) = tokio::sync::watch::channel(None);
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _task_handles,
+        _max_checkpoint_height,
+        _prepared_blocks,
+    ) = super::init_with_checkpoint_tip(
+        Config::default(),
+        &network,
+        state,
+        read_state,
+        oneshot::channel::<
+            Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
+        >()
+        .1,
+        None,
+        checkpoint_tip,
+    )
+    .await;
+
+    // A tip at a checkpoint height with a hash that is not the checkpoint's is ignored.
+    checkpoint_tip_sender.send_replace(Some((block::Height(0), block::Hash([0; 32]))));
+
+    let block_verifier_router =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    transcript.check(block_verifier_router).await.unwrap();
+
+    Ok(())
+}
