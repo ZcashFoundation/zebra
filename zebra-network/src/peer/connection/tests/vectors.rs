@@ -1955,7 +1955,7 @@ fn find_blocks_response_hash_limit() {
         .collect();
 
     for len in [500, 501] {
-        let mut handler = Handler::FindBlocks;
+        let mut handler = Handler::FindBlocks { extends: None };
         let items = hashes[..len]
             .iter()
             .copied()

@@ -66,7 +66,9 @@ pub(super) enum Handler {
         ping_sent_at: Instant,
     },
     Peers,
-    FindBlocks,
+    FindBlocks {
+        extends: Option<block::Hash>,
+    },
     FindHeaders,
     BlocksByHash {
         pending_hashes: HashSet<block::Hash>,
@@ -92,7 +94,7 @@ impl fmt::Display for Handler {
             Handler::Ping { .. } => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
 
-            Handler::FindBlocks => "FindBlocks".to_string(),
+            Handler::FindBlocks { .. } => "FindBlocks".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
             Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
@@ -128,7 +130,7 @@ impl Handler {
             Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks => "FindBlocks".into(),
+            Handler::FindBlocks { .. } => "FindBlocks".into(),
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
@@ -420,12 +422,7 @@ impl Handler {
 
             // An empty inventory can be a late mempool reply after cancellation.
             // Zebra and zcashd send no message for an empty getblocks result.
-            (Handler::FindBlocks, Message::Inv(items))
-                if !items.is_empty()
-                    && items
-                        .iter()
-                        .all(|item| matches!(item, InventoryHash::Block(_))) =>
-            {
+            (Handler::FindBlocks { .. }, Message::Inv(items)) if is_block_inventory(&items) => {
                 let hashes = block_hashes(&items)
                     .take(MAX_FIND_BLOCKS_RESPONSE_HASHES)
                     .collect();
@@ -795,6 +792,10 @@ where
         let mut deferred_peer_bytes = 0;
         loop {
             self.compact.expire();
+            if self.compact.barrier_timed_out() {
+                self.fail_with(PeerError::ConnectionReceiveTimeout).await;
+                break;
+            }
             let recovering = matches!(
                 self.state,
                 State::AwaitingResponse {
@@ -900,6 +901,7 @@ where
                         }
                         Either::Left(Some(Err(e))) => self.fail_with(e).await,
                         Either::Left(Some(Ok(msg))) => {
+                            self.compact.divert_retired_discovery(&msg);
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
                             if let Some(unhandled_msg) = unhandled_msg {
@@ -1077,15 +1079,19 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = match self.state {
-                                State::AwaitingResponse {
-                                    ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
-                                _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
-                                                  self.state,
-                                                  peer_msg,
-                                                  self.client_rx,
-                                ),
+                            let request_msg = if self.compact.divert_retired_discovery(&peer_msg) {
+                                Some(peer_msg)
+                            } else {
+                                match self.state {
+                                    State::AwaitingResponse {
+                                        ref mut handler, ..
+                                    } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
+                                    _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
+                                                      self.state,
+                                                      peer_msg,
+                                                      self.client_rx,
+                                    ),
+                                }
                             };
 
                             self.update_state_metrics(None);
@@ -1306,7 +1312,7 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let authorized = || {
+        let mut authorized = || {
             if version < minimum.current()
                 || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
             {
@@ -1352,6 +1358,12 @@ where
                 .map(|()| Handler::Peers),
 
             (AwaitingRequest, Ping(nonce)) => {
+                // A heartbeat must never share the owned discovery barrier's nonce.
+                let nonce = if self.compact.is_barrier_nonce(nonce) {
+                    Nonce(nonce.0.wrapping_add(1))
+                } else {
+                    nonce
+                };
                 let ping_sent_at = Instant::now();
 
                 self
@@ -1395,13 +1407,22 @@ where
             }
 
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
-                self
-                    .peer_tx
-                    .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
-                    .await
-                    .map(|()|
-                         Handler::FindBlocks
-                    )
+                if let Some(hashes) = known_blocks
+                    .first()
+                    .filter(|_| stop.is_none())
+                    .and_then(|tip| self.compact.take_discovery(tip))
+                {
+                    authorized().map(|()| Handler::Finished(Ok(Response::BlockHashes(hashes))))
+                } else {
+                    let extends = known_blocks.first().copied().filter(|_| stop.is_none());
+                    self
+                        .peer_tx
+                        .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
+                        .await
+                        .map(|()|
+                             Handler::FindBlocks { extends }
+                        )
+                }
             }
             (AwaitingRequest, FindHeaders { known_blocks, stop }) => {
                 self
@@ -2250,6 +2271,14 @@ where
 /// v5 transactions use a witnessed transaction ID.
 fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTxId> + '_ {
     items.iter().filter_map(InventoryHash::unmined_tx_id)
+}
+
+/// Whether an inventory can be a non-empty block discovery response.
+fn is_block_inventory(items: &[InventoryHash]) -> bool {
+    !items.is_empty()
+        && items
+            .iter()
+            .all(|item| matches!(item, InventoryHash::Block(_)))
 }
 
 /// Map a list of inventory hashes to the corresponding block hashes.

@@ -272,3 +272,96 @@ async fn compact_recovery_bounds_deferred_messages_and_preserves_deadline_order(
         drop(response);
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn compact_discovery_serving_orders_pong_after_backpressured_locator() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+        .as_slice()
+        .zcash_deserialize_into()
+        .unwrap();
+    for recovering_peer in [false, true] {
+        for empty in [false, true] {
+            let (started, mut writes) = tokio::sync::mpsc::channel(4);
+            let (release, flushed) = oneshot::channel();
+            let sink = Box::pin(futures::sink::unfold(
+                Some(flushed),
+                move |mut flushed, message| {
+                    let inventory = matches!(&message, Message::Inv(_));
+                    started.try_send(message).unwrap();
+                    async move {
+                        if inventory {
+                            flushed.take().unwrap().await.unwrap();
+                        }
+                        Ok::<_, SerializationError>(flushed)
+                    }
+                },
+            ));
+            let (mut connection, _client, mut inbound, errors) =
+                new_test_connection_with_sink::<PanicAssertion, _>(sink);
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            let _response = recovering_peer.then(|| recovering(&mut connection, &block));
+            let known_blocks = vec![block.header.previous_block_hash];
+            let nonce = Nonce(19);
+            let (mut peer, peer_rx) = futures::channel::mpsc::channel(2);
+            peer.try_send(Ok(Message::GetBlocks {
+                known_blocks: known_blocks.clone(),
+                stop: None,
+            }))
+            .unwrap();
+            peer.try_send(Ok(Message::Ping(nonce))).unwrap();
+            let run = connection.run(peer_rx);
+            tokio::pin!(run);
+            assert!(futures::poll!(&mut run).is_pending());
+            assert!(matches!(writes.try_recv(), Ok(Message::SendCompact { .. })));
+            if recovering_peer {
+                // Both messages wait in the recovery queue, still in their original order.
+                assert!(futures::poll!(&mut run).is_pending());
+                assert!(writes.try_recv().is_err());
+                tokio::time::advance(Duration::from_secs(2)).await;
+                assert!(futures::poll!(&mut run).is_pending());
+                assert_eq!(
+                    writes.try_recv().unwrap(),
+                    Message::GetData(vec![block.hash().into()])
+                );
+            }
+            assert!(futures::poll!(&mut run).is_pending());
+            let request = inbound
+                .expect_request(Request::FindBlocks {
+                    known_blocks,
+                    stop: None,
+                })
+                .now_or_never()
+                .expect("the actual connection calls the locator service before handling its ping");
+            assert!(futures::poll!(&mut run).is_pending());
+            assert!(
+                writes.try_recv().is_err(),
+                "a pending inbound service future must prevent the later pong"
+            );
+            let hashes = if empty {
+                Vec::new()
+            } else {
+                vec![block.hash()]
+            };
+            request.respond(Response::BlockHashes(hashes.clone()));
+            assert!(futures::poll!(&mut run).is_pending());
+            if !empty {
+                assert_eq!(
+                    writes.try_recv().unwrap(),
+                    Message::Inv(hashes.into_iter().map(Into::into).collect())
+                );
+                assert!(futures::poll!(&mut run).is_pending());
+                assert!(
+                    writes.try_recv().is_err(),
+                    "the pong cannot overtake a partially flushed inventory response"
+                );
+                release.send(()).unwrap();
+                assert!(futures::poll!(&mut run).is_pending());
+            }
+            // Inbound serving yields once after its response, before reading the ping.
+            assert!(futures::poll!(&mut run).is_pending());
+            assert_eq!(writes.try_recv().unwrap(), Message::Pong(nonce));
+            assert!(errors.try_get_error().is_none());
+        }
+    }
+}

@@ -188,6 +188,10 @@ pub enum Request {
     /// is no way for the network layer to distinguish them. Singleton inventories
     /// are therefore returned and also forwarded to inbound gossip, so the block is
     /// still fetched if inbound drops the advert.
+    ///
+    /// A screened compact extending the first locator with no stop can answer discovery once,
+    /// allowing reconstruction before commitment. Later requests query the peer again rather than
+    /// repeatedly returning the retained compact and hiding newer blocks.
     FindBlocks {
         /// Hashes of known blocks, ordered from highest height to lowest height.
         //

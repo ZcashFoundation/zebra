@@ -28,6 +28,633 @@ fn assert_reconstructed(response: Response, block: &Arc<Block>, source: crate::P
     assert_eq!(actual_source, Some(source));
 }
 
+#[tokio::test(start_paused = true)]
+async fn screened_compact_discovery_cache_expires() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        for delay in [0, 15] {
+            let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+            let tip = block.header.previous_block_hash;
+            let (mut connection, _client, mut inbound, _outbound, _errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            let receive = connection.receive_compact(compact.clone());
+            let admit = async {
+                inbound
+                    .expect_request(Request::CheckCompactHeader(compact))
+                    .await
+                    .respond(Response::Nil);
+                inbound
+                    .expect_request(Request::AdvertiseCompactBlock(block.hash(), None))
+                    .await
+                    .respond(Response::Nil);
+            };
+            tokio::join!(receive, admit);
+            tokio::time::advance(Duration::from_secs(delay)).await;
+            assert_eq!(
+                connection.compact.take_discovery(&tip),
+                (delay == 0).then(|| vec![block.hash()])
+            );
+            assert_eq!(connection.compact.take_discovery(&tip), None);
+        }
+    })
+    .await
+    .expect("screened compact discovery respects its retention deadline");
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_find_blocks_cached_compact_rechecks_ban() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        let (mut connection, _client, mut inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        let info = Arc::make_mut(&mut connection.connection_info);
+        info.early_block_relay = true;
+        info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+        let (bans, receiver) = tokio::sync::watch::channel(crate::BanList::default());
+        connection.bans_receiver = receiver;
+        let receive = connection.receive_compact(compact.clone());
+        let admit = async {
+            inbound
+                .expect_request(Request::CheckCompactHeader(compact))
+                .await
+                .respond(Response::Nil);
+            inbound
+                .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+                .await
+                .respond(Response::Nil);
+        };
+        tokio::join!(receive, admit);
+        bans.send_modify(|bans| bans.ban(source.ip()));
+        let (tx, response) = oneshot::channel();
+        connection
+            .handle_client_request(
+                ClientRequest {
+                    request: Request::FindBlocks {
+                        known_blocks: vec![block.header.previous_block_hash],
+                        stop: None,
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: Some(source),
+                    span: tracing::Span::none(),
+                }
+                .into(),
+            )
+            .await;
+        assert!(matches!(
+            connection.state,
+            crate::peer::connection::State::Failed
+        ));
+        assert_eq!(
+            response.await.unwrap().unwrap_err().inner_debug(),
+            "ConnectionDropped"
+        );
+        assert_eq!(
+            errors.try_get_error().unwrap().inner_debug(),
+            "ConnectionDropped"
+        );
+        assert!(outbound.try_recv().is_err());
+    })
+    .await
+    .expect("cached discovery must reject a newly banned peer");
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_find_blocks_inflight_compact_rechecks_authorization() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        for mode in ["ban_screen", "version_screen", "ban_admit", "version_admit"] {
+            let (mut template, _client, mut inbound, _outbound, _errors) =
+                new_test_connection::<PanicAssertion>();
+            let (mut minimum, tip) = crate::peer::MinimumPeerVersion::with_mock_chain_tip(
+                &zebra_chain::parameters::Network::Mainnet,
+            );
+            tip.send_best_tip_height(Some(zebra_chain::block::Height(1_687_107)));
+            let info = Arc::make_mut(&mut template.connection_info);
+            info.early_block_relay = true;
+            info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+            info.remote.version = minimum.current();
+            let (peer_tx, mut outbound) = mpsc::channel(0);
+            let peer_tx = peer_tx.sink_map_err(|_| {
+                zebra_chain::serialization::SerializationError::Parse("test peer closed")
+            });
+            let (_client, client_rx) = mpsc::channel(0);
+            let (_adverts, advert_rx) = tokio::sync::mpsc::channel(1);
+            let (bans, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
+            let errors = crate::peer::ErrorSlot::default();
+            let mut connection = crate::peer::Connection::new(
+                inbound.clone(),
+                (
+                    client_rx,
+                    advert_rx,
+                    tokio::sync::watch::channel(None).1,
+                    minimum,
+                    bans_rx,
+                ),
+                errors.clone(),
+                peer_tx,
+                crate::peer_set::ActiveConnectionCounter::new_counter().track_connection(),
+                template.connection_info.clone(),
+                Vec::new(),
+            );
+            let (tx, response) = oneshot::channel();
+            let send = connection.handle_client_request(
+                ClientRequest {
+                    request: Request::FindBlocks {
+                        known_blocks: vec![block.header.previous_block_hash],
+                        stop: None,
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: Some(source),
+                    span: tracing::Span::none(),
+                }
+                .into(),
+            );
+            let ((), request) = tokio::join!(send, outbound.next());
+            assert!(matches!(request, Some(Message::GetBlocks { .. })));
+            let revoke = || {
+                if mode.starts_with("ban") {
+                    bans.send_modify(|bans| bans.ban(source.ip()));
+                } else {
+                    // NU6.1 is below Mainnet's initial NU6.2 minimum, so it would revoke nothing.
+                    tip.send_best_tip_height(
+                        zebra_chain::parameters::NetworkUpgrade::Nu7
+                            .activation_height(&zebra_chain::parameters::Network::Mainnet),
+                    );
+                }
+            };
+            let receive = connection.receive_compact(compact.clone());
+            let screen = async {
+                let header = inbound
+                    .expect_request(Request::CheckCompactHeader(compact.clone()))
+                    .await;
+                if mode.ends_with("screen") {
+                    revoke();
+                    header.respond(Response::Nil);
+                } else {
+                    header.respond(Response::Nil);
+                    assert!(matches!(outbound.next().await, Some(Message::Ping(_))));
+                    let admission = inbound
+                        .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+                        .await;
+                    revoke();
+                    admission.respond(Response::Nil);
+                }
+            };
+            tokio::join!(receive, screen);
+            assert_eq!(
+                response.await.unwrap().unwrap_err().inner_debug(),
+                "ConnectionDropped"
+            );
+            assert_eq!(
+                errors.try_get_error().unwrap().inner_debug(),
+                "ConnectionDropped"
+            );
+            assert!(outbound.try_recv().is_err());
+        }
+    })
+    .await
+    .expect("in-flight compact discovery rechecks bans and the live minimum version");
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_find_blocks_compact_uses_ordered_pong_barrier() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let parent = block.header.previous_block_hash;
+        for mode in ["empty", "gossip", "old", "multi", "heartbeat", "timeout"] {
+            let (mut connection, mut client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
+            let (mut peer, peer_rx) = mpsc::channel(1);
+            let task = tokio::spawn(connection.run(peer_rx));
+            assert!(matches!(
+                outbound.next().await,
+                Some(Message::SendCompact { .. })
+            ));
+            let (tx, discovery) = oneshot::channel();
+            client
+                .send(ClientRequest {
+                    request: Request::FindBlocks {
+                        known_blocks: vec![parent],
+                        stop: None,
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: None,
+                    span: tracing::Span::none(),
+                })
+                .await
+                .unwrap();
+            assert!(matches!(
+                outbound.next().await,
+                Some(Message::GetBlocks { .. })
+            ));
+            peer.send(Ok(Message::CompactBlock(compact.clone())))
+                .await
+                .unwrap();
+            inbound
+                .expect_request(Request::CheckCompactHeader(compact.clone()))
+                .await
+                .respond(Response::Nil);
+            let Some(Message::Ping(barrier)) = outbound.next().await else {
+                panic!("early discovery must place an owned ping after its getblocks")
+            };
+            inbound
+                .expect_request(Request::AdvertiseCompactBlock(block.hash(), None))
+                .await
+                .respond(Response::Nil);
+            assert_eq!(
+                discovery.await.unwrap().unwrap(),
+                Response::BlockHashes(vec![block.hash()])
+            );
+            if mode == "timeout" {
+                tokio::time::advance(crate::constants::REQUEST_TIMEOUT).await;
+                task.await.unwrap();
+                assert_eq!(
+                    errors.try_get_error().unwrap().inner_debug(),
+                    "ConnectionReceiveTimeout"
+                );
+                continue;
+            }
+            if mode == "heartbeat" {
+                let (tx, mut heartbeat) = oneshot::channel();
+                client
+                    .send(ClientRequest {
+                        request: Request::Ping(barrier),
+                        tx,
+                        inv_collector: None,
+                        transient_addr: None,
+                        span: tracing::Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                let Some(Message::Ping(heartbeat_nonce)) = outbound.next().await else {
+                    panic!("a heartbeat still goes on the wire")
+                };
+                assert_ne!(heartbeat_nonce, barrier);
+                peer.send(Ok(Message::Pong(barrier))).await.unwrap();
+                let marker = crate::types::Nonce(11);
+                peer.send(Ok(Message::Ping(marker))).await.unwrap();
+                assert_eq!(outbound.next().await, Some(Message::Pong(marker)));
+                assert!(heartbeat.try_recv().unwrap().is_none());
+                peer.send(Ok(Message::Pong(heartbeat_nonce))).await.unwrap();
+                assert!(matches!(
+                    heartbeat.await.unwrap().unwrap(),
+                    Response::Pong(_)
+                ));
+            }
+            let hashes = vec![block.hash(), zebra_chain::block::Hash([7; 32])];
+            let mut next_discovery = None;
+            if mode != "multi" {
+                let (tx, response) = oneshot::channel();
+                client
+                    .send(ClientRequest {
+                        request: Request::FindBlocks {
+                            known_blocks: vec![parent],
+                            stop: None,
+                        },
+                        tx,
+                        inv_collector: None,
+                        transient_addr: None,
+                        span: tracing::Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    outbound.next().await,
+                    Some(Message::GetBlocks { .. })
+                ));
+                next_discovery = Some(response);
+            }
+            if mode == "gossip" {
+                let gossip = zebra_chain::block::Hash([9; 32]);
+                peer.send(Ok(Message::Inv(vec![gossip.into()])))
+                    .await
+                    .unwrap();
+                inbound
+                    .expect_request(Request::AdvertiseBlock(gossip, None))
+                    .await
+                    .respond(Response::Nil);
+            }
+            if mode == "old" || mode == "gossip" {
+                peer.send(Ok(Message::Inv(vec![
+                    zebra_chain::block::Hash([5; 32]).into(),
+                    zebra_chain::block::Hash([6; 32]).into(),
+                ])))
+                .await
+                .unwrap();
+            } else if mode == "multi" {
+                peer.send(Ok(Message::Inv(
+                    hashes.iter().copied().map(Into::into).collect(),
+                )))
+                .await
+                .unwrap();
+            }
+            if mode != "heartbeat" {
+                peer.send(Ok(Message::Pong(crate::types::Nonce(
+                    barrier.0.wrapping_add(1),
+                ))))
+                .await
+                .unwrap();
+                let marker = crate::types::Nonce(12);
+                peer.send(Ok(Message::Ping(marker))).await.unwrap();
+                assert_eq!(outbound.next().await, Some(Message::Pong(marker)));
+                if let Some(response) = &mut next_discovery {
+                    assert!(response.try_recv().unwrap().is_none());
+                }
+                peer.send(Ok(Message::Pong(barrier))).await.unwrap();
+            }
+            if mode == "multi" {
+                let (tx, response) = oneshot::channel();
+                client
+                    .send(ClientRequest {
+                        request: Request::FindBlocks {
+                            known_blocks: vec![parent],
+                            stop: None,
+                        },
+                        tx,
+                        inv_collector: None,
+                        transient_addr: None,
+                        span: tracing::Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.await.unwrap().unwrap(),
+                    Response::BlockHashes(hashes.clone())
+                );
+                assert!(outbound.try_recv().is_err());
+                let (tx, response) = oneshot::channel();
+                client
+                    .send(ClientRequest {
+                        request: Request::FindBlocks {
+                            known_blocks: vec![parent],
+                            stop: None,
+                        },
+                        tx,
+                        inv_collector: None,
+                        transient_addr: None,
+                        span: tracing::Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    outbound.next().await,
+                    Some(Message::GetBlocks { .. })
+                ));
+                next_discovery = Some(response);
+            }
+            let progressed = vec![hashes[0], hashes[1], zebra_chain::block::Hash([8; 32])];
+            peer.send(Ok(Message::Inv(
+                progressed.iter().copied().map(Into::into).collect(),
+            )))
+            .await
+            .unwrap();
+            assert_eq!(
+                next_discovery.unwrap().await.unwrap().unwrap(),
+                Response::BlockHashes(progressed)
+            );
+            assert!(errors.try_get_error().is_none());
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        }
+    })
+    .await
+    .expect("only the owned pong retires discovery, including an empty old result");
+}
+
+#[tokio::test(start_paused = true)]
+async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        let source = "127.0.0.1:8233".parse().unwrap();
+        let start = tokio::time::Instant::now();
+        for mode in [
+            "unnegotiated",
+            "invalid",
+            "different_locator",
+            "explicit_stop",
+            "valid",
+        ] {
+            let (mut connection, mut client, mut inbound, mut outbound, errors) =
+                new_test_connection::<PanicAssertion>();
+            let info = Arc::make_mut(&mut connection.connection_info);
+            info.early_block_relay = mode != "unnegotiated";
+            info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+            let (mut peer, peer_rx) = mpsc::channel(1);
+            let task = tokio::spawn(connection.run(peer_rx));
+            if mode != "unnegotiated" {
+                assert_eq!(
+                    outbound.next().await,
+                    Some(Message::SendCompact {
+                        high_bandwidth: true,
+                        version: 1
+                    })
+                );
+            }
+            let known_blocks = if mode == "different_locator" {
+                vec![
+                    zebra_chain::block::Hash([0; 32]),
+                    block.header.previous_block_hash,
+                ]
+            } else {
+                vec![block.header.previous_block_hash]
+            };
+            let stop = (mode == "explicit_stop").then_some(block.hash());
+            let (tx, mut discovery) = oneshot::channel();
+            client
+                .send(ClientRequest {
+                    request: Request::FindBlocks {
+                        known_blocks: known_blocks.clone(),
+                        stop,
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: Some(source),
+                    span: tracing::Span::none(),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                outbound.next().await,
+                Some(Message::GetBlocks { known_blocks, stop })
+            );
+            peer.send(Ok(Message::CompactBlock(compact.clone())))
+                .await
+                .unwrap();
+            if mode != "unnegotiated" {
+                let screen = inbound
+                    .expect_request(Request::CheckCompactHeader(compact.clone()))
+                    .await;
+                assert!(
+                    discovery.try_recv().unwrap().is_none(),
+                    "discovery cannot finish before header screening"
+                );
+                if mode == "invalid" {
+                    screen.respond_error(
+                        "compact header does not extend the committed best tip".into(),
+                    );
+                    inbound
+                        .expect_request(Request::AdvertiseBlock(block.hash(), Some(source)))
+                        .await
+                        .respond(Response::Nil);
+                } else {
+                    screen.respond(Response::Nil);
+                    if mode == "valid" {
+                        let Some(Message::Ping(barrier)) = outbound.next().await else {
+                            panic!("early discovery sends an ordering barrier")
+                        };
+                        peer.send(Ok(Message::Pong(barrier))).await.unwrap();
+                    }
+                    inbound
+                        .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+                        .await
+                        .respond(Response::Nil);
+                }
+            }
+            // A pong is a barrier proving the compact was handled, not a discovery response.
+            let nonce = crate::types::Nonce::default();
+            peer.send(Ok(Message::Ping(nonce))).await.unwrap();
+            assert_eq!(outbound.next().await, Some(Message::Pong(nonce)));
+            if mode != "valid" {
+                assert!(
+                    discovery.try_recv().unwrap().is_none(),
+                    "only a screened compact extending a stop-free locator tip may answer discovery"
+                );
+                let hashes = vec![
+                    zebra_chain::block::Hash([2; 32]),
+                    zebra_chain::block::Hash([3; 32]),
+                ];
+                peer.send(Ok(Message::Inv(
+                    hashes.iter().copied().map(Into::into).collect(),
+                )))
+                .await
+                .unwrap();
+                assert_eq!(
+                    discovery.await.unwrap().unwrap(),
+                    Response::BlockHashes(hashes),
+                    "discovery remains on the wire until the peer replies"
+                );
+            } else {
+                assert_eq!(
+                    discovery.await.unwrap().unwrap(),
+                    Response::BlockHashes(vec![block.hash()])
+                );
+
+                // A parent elsewhere in the locator is not enough: only the first hash is the tip.
+                for (known_blocks, stop) in [
+                    (
+                        vec![
+                            zebra_chain::block::Hash([0; 32]),
+                            block.header.previous_block_hash,
+                        ],
+                        None,
+                    ),
+                    (vec![block.header.previous_block_hash], Some(block.hash())),
+                ] {
+                    let (tx, unmatched) = oneshot::channel();
+                    client
+                        .send(ClientRequest {
+                            request: Request::FindBlocks {
+                                known_blocks: known_blocks.clone(),
+                                stop,
+                            },
+                            tx,
+                            inv_collector: None,
+                            transient_addr: Some(source),
+                            span: tracing::Span::none(),
+                        })
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        outbound.next().await,
+                        Some(Message::GetBlocks { known_blocks, stop })
+                    );
+                    drop(unmatched);
+                }
+                let (tx, download) = oneshot::channel();
+                client
+                    .send(ClientRequest {
+                        request: Request::BlockDownload {
+                            hash: block.hash(),
+                            advertiser: Some(source),
+                        },
+                        tx,
+                        inv_collector: None,
+                        transient_addr: Some(source),
+                        span: tracing::Span::none(),
+                    })
+                    .await
+                    .unwrap();
+                inbound
+                    .expect_request(Request::CompactBlockTransactions(compact.clone()))
+                    .await
+                    .respond(Response::CompactBlockTransactions(
+                        block.transactions[1..]
+                            .iter()
+                            .cloned()
+                            .map(Into::into)
+                            .collect(),
+                    ));
+                inbound
+                    .expect_request(Request::CheckCompactBlock(block.clone()))
+                    .await
+                    .respond(Response::Nil);
+                assert_eq!(
+                    download.await.unwrap().unwrap(),
+                    Response::EarlyBlocks(vec![InventoryResponse::Available((
+                        block.clone(),
+                        Some(source)
+                    ))])
+                );
+                assert!(
+                    outbound.try_recv().is_err(),
+                    "cached reconstruction needs neither getdata nor a committed inv"
+                );
+            }
+            assert!(errors.try_get_error().is_none());
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+        }
+        assert_eq!(
+            tokio::time::Instant::now(),
+            start,
+            "discovery and reconstruction must not wait for a timer"
+        );
+    })
+    .await
+    .expect("screened compact discovery frees the connection without an inv or timeout");
+}
+
 #[tokio::test]
 async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
     let _init_guard = zebra_test::init();

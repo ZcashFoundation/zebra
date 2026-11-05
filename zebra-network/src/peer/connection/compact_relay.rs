@@ -19,11 +19,11 @@ use zebra_chain::{
 };
 use zebra_node_services::compact::ReconstructedBlock;
 
-use super::{Connection, Handler, InventoryResponse, State};
+use super::{block_hashes, is_block_inventory, Connection, Handler, InventoryResponse, State};
 use crate::{
     compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock, Reconstruction},
     constants,
-    protocol::external::Message,
+    protocol::external::{types::Nonce, Message},
     BlockAuthorization, BoxError, PeerError, Request, Response,
 };
 
@@ -49,6 +49,19 @@ impl ServingBlock {
     }
 }
 
+struct Discovery {
+    parent: block::Hash,
+    hashes: Vec<block::Hash>,
+    until: Instant,
+}
+
+struct DiscoveryBarrier {
+    nonce: Nonce,
+    parent: block::Hash,
+    hash: block::Hash,
+    deadline: Instant,
+}
+
 #[derive(Default)]
 pub(super) struct CompactRelay {
     pub(super) send: bool,
@@ -59,6 +72,10 @@ pub(super) struct CompactRelay {
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(ReconstructedBlock, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
+    /// A screened announcement or useful retired reply can answer discovery once, not for a TTL.
+    discovery: Option<Discovery>,
+    /// Separate from heartbeat pings: only its matching pong retires the old wire request.
+    discovery_barrier: Option<DiscoveryBarrier>,
 }
 
 impl CompactRelay {
@@ -106,10 +123,73 @@ impl CompactRelay {
         {
             self.reconstructed = None;
         }
+        if self
+            .discovery
+            .as_ref()
+            .is_some_and(|discovery| discovery.until <= now)
+        {
+            self.discovery = None;
+        }
+    }
+
+    /// Consume screened discovery once so later requests can observe the peer's progress.
+    pub(super) fn take_discovery(&mut self, tip: &block::Hash) -> Option<Vec<block::Hash>> {
+        let discovery = self.discovery.as_ref()?;
+        if Instant::now() >= discovery.until || discovery.parent != *tip {
+            return None;
+        }
+        self.discovery.take().map(|discovery| discovery.hashes)
+    }
+
+    pub(super) fn is_barrier_nonce(&self, nonce: Nonce) -> bool {
+        self.discovery_barrier
+            .as_ref()
+            .is_some_and(|barrier| barrier.nonce == nonce)
+    }
+
+    pub(super) fn barrier_timed_out(&self) -> bool {
+        self.discovery_barrier
+            .as_ref()
+            .is_some_and(|barrier| barrier.deadline <= Instant::now())
+    }
+
+    /// Quarantine all block inventories until the owned pong, including unsolicited gossip.
+    /// This relies on honest Zebra connections awaiting locator service calls and writes before
+    /// handling later pings, including deferred recovery traffic. It is not a service-bit guarantee.
+    /// Stock zcashd cannot enter this compact path; a missing owned pong closes it on timeout.
+    pub(super) fn divert_retired_discovery(&mut self, message: &Message) -> bool {
+        let Some(barrier) = &self.discovery_barrier else {
+            return false;
+        };
+        match message {
+            Message::Pong(nonce) if *nonce == barrier.nonce => {
+                self.discovery_barrier = None;
+                true
+            }
+            Message::Inv(items) if is_block_inventory(items) => {
+                // Only an extension of the screened compact's old locator is reusable. A singleton
+                // may be unrelated gossip; it neither consumes the barrier nor repopulates a cache.
+                if items.len() > 1 && items[0].block_hash() == Some(barrier.hash) {
+                    self.discovery = Some(Discovery {
+                        parent: barrier.parent,
+                        hashes: block_hashes(items)
+                            .take(constants::MAX_FIND_BLOCKS_RESPONSE_HASHES)
+                            .collect(),
+                        until: Instant::now() + RETENTION,
+                    });
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn has_cached(&self) -> bool {
-        self.received.is_some() || self.sent.is_some() || self.reconstructed.is_some()
+        self.received.is_some()
+            || self.sent.is_some()
+            || self.reconstructed.is_some()
+            || self.discovery.is_some()
+            || self.discovery_barrier.is_some()
     }
 
     pub(super) fn expiry(&self) -> Instant {
@@ -119,6 +199,12 @@ impl CompactRelay {
             .into_iter()
             .chain(self.sent.as_ref().and_then(|(_, until, _)| *until))
             .chain(self.reconstructed.as_ref().map(|(_, until, _)| *until))
+            .chain(self.discovery.as_ref().map(|discovery| discovery.until))
+            .chain(
+                self.discovery_barrier
+                    .as_ref()
+                    .map(|barrier| barrier.deadline),
+            )
             .min()
             .unwrap_or_else(|| Instant::now() + RETENTION)
     }
@@ -209,16 +295,61 @@ where
                     .await,
                 Some(Response::Nil)
             ) {
+                self.compact.expire();
+                let completes_discovery = self.compact.discovery_barrier.is_none()
+                    && matches!(
+                        self.state,
+                        State::AwaitingResponse {
+                            handler: Handler::FindBlocks { extends: Some(tip) }, ..
+                        } if tip == block.header.previous_block_hash
+                    );
+                if completes_discovery {
+                    let nonce = Nonce::default();
+                    if let Err(error) = self.send_download_request(Message::Ping(nonce)).await {
+                        self.fail_with(error).await;
+                        return;
+                    }
+                    self.compact.discovery_barrier = Some(DiscoveryBarrier {
+                        nonce,
+                        parent: block.header.previous_block_hash,
+                        hash,
+                        deadline: Instant::now() + constants::REQUEST_TIMEOUT,
+                    });
+                }
                 if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
                     if matches!(
                         self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
                             .await,
                         Some(Response::Nil)
                     ) {
+                        if !completes_discovery {
+                            self.compact.discovery = Some(Discovery {
+                                parent: block.header.previous_block_hash,
+                                hashes: vec![hash],
+                                until: Instant::now() + RETENTION,
+                            });
+                        }
                         self.compact.received = Some((block, Instant::now() + RETENTION, permit));
                     }
-                    return;
+                } else {
+                    self.drive_peer_request(Request::AdvertiseBlock(hash, advertiser))
+                        .await;
                 }
+                if completes_discovery {
+                    // Admission and the framed ping write can both wait. Recheck live eligibility
+                    // immediately before returning a synthetic response, like the cached shortcut.
+                    if self.connection_info.remote.version < self.minimum_peer_version.current()
+                        || advertiser
+                            .is_some_and(|addr| self.bans_receiver.borrow().is_banned(addr.ip()))
+                    {
+                        self.fail_with(PeerError::ConnectionDropped).await;
+                        return;
+                    }
+                    if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                        *handler = Handler::Finished(Ok(Response::BlockHashes(vec![hash])));
+                    }
+                }
+                return;
             }
         }
         // Reconstruction starts only after the downloader applies its global/per-IP admission.
