@@ -171,6 +171,7 @@ mod protocol;
 pub mod protocol;
 
 mod quic;
+#[allow(dead_code)]
 mod v2_address_book;
 
 #[allow(unused)]

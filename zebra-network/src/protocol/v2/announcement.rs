@@ -12,7 +12,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use zebra_chain::{block, transaction::UnminedTxId};
+use zebra_chain::{
+    block,
+    serialization::{DateTime32, Duration32},
+    transaction::UnminedTxId,
+};
 
 use crate::{meta_addr::MetaAddr, protocol::external::AddrV2};
 
@@ -86,4 +90,22 @@ pub fn decode_tx_record(payload: &[u8]) -> Result<TxRef, WireError> {
 pub fn decode_addr_record(payload: &[u8]) -> Result<Option<MetaAddr>, WireError> {
     let record = deserialize_exact::<AddrV2>(payload, "address announcement")?;
     Ok(MetaAddr::try_from(record).ok())
+}
+
+/// How far in the future a relayed address record's `time` may be before it is replaced (draft,
+/// "Address Records").
+pub const MAX_RELAYED_TIME_SKEW: Duration32 = Duration32::from_minutes(10);
+
+/// How far in the past a replaced relayed `time` is put (draft, "Address Records").
+pub const CLAMPED_RELAYED_TIME_AGE: Duration32 = Duration32::from_days(5);
+
+/// Clamps the `time` of a relayed address record at `now` (draft, "Address Records"): a `time` of
+/// zero, or more than [`MAX_RELAYED_TIME_SKEW`] in the future, becomes `now` minus
+/// [`CLAMPED_RELAYED_TIME_AGE`]. Any other `time` is kept.
+pub fn clamp_relayed_time(time: DateTime32, now: DateTime32) -> DateTime32 {
+    if time == DateTime32::MIN || time > now.saturating_add(MAX_RELAYED_TIME_SKEW) {
+        now.saturating_sub(CLAMPED_RELAYED_TIME_AGE)
+    } else {
+        time
+    }
 }

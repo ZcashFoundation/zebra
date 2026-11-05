@@ -141,6 +141,10 @@ pub struct AddressBook {
 
     /// The last time we logged a message about the address metrics.
     last_address_log: Option<Instant>,
+
+    /// Whether changes refresh the address metrics, the `candidate_set.*` gauges, and the
+    /// address state logs. Only the legacy address book reports them.
+    reports_metrics: bool,
 }
 
 /// Metrics about the states of the addresses in an [`AddressBook`].
@@ -182,6 +186,31 @@ impl AddressBook {
         max_connections_per_ip: usize,
         span: Span,
     ) -> AddressBook {
+        Self::new_with_metrics(local_listener, network, max_connections_per_ip, span, true)
+    }
+
+    /// Construct an [`AddressBook`] like [`AddressBook::new`], that never refreshes the address
+    /// metrics, sets the `candidate_set.*` gauges, or logs the address states.
+    ///
+    /// Those describe the legacy address book, so a second address book must not overwrite them.
+    /// Without the refresh, which walks the whole address book, a change costs `O(log n)`.
+    pub(crate) fn new_without_metrics(
+        local_listener: SocketAddr,
+        network: &Network,
+        max_connections_per_ip: usize,
+        span: Span,
+    ) -> AddressBook {
+        Self::new_with_metrics(local_listener, network, max_connections_per_ip, span, false)
+    }
+
+    /// Construct an [`AddressBook`], which reports its metrics if `reports_metrics`.
+    fn new_with_metrics(
+        local_listener: SocketAddr,
+        network: &Network,
+        max_connections_per_ip: usize,
+        span: Span,
+        reports_metrics: bool,
+    ) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
 
@@ -206,6 +235,7 @@ impl AddressBook {
             last_address_log: None,
             most_recent_by_ip: should_limit_outbound_conns_per_ip.then(HashMap::new),
             bans: Default::default(),
+            reports_metrics,
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -726,6 +756,13 @@ impl AddressBook {
         }
     }
 
+    /// Removes the entry with `addr`, returning it if it exists.
+    ///
+    /// Converts `addr` to a canonical address before looking it up.
+    pub(crate) fn remove(&mut self, addr: PeerSocketAddr) -> Option<MetaAddr> {
+        self.take(canonical_peer_addr(*addr))
+    }
+
     /// Returns true if the given [`PeerSocketAddr`] is pending a reconnection
     /// attempt.
     pub fn pending_reconnection_addr(&mut self, addr: PeerSocketAddr) -> bool {
@@ -897,7 +934,13 @@ impl AddressBook {
     }
 
     /// Update the metrics for this address book.
+    ///
+    /// Does nothing for an address book made with [`AddressBook::new_without_metrics`].
     fn update_metrics(&mut self, instant_now: Instant, chrono_now: chrono::DateTime<Utc>) {
+        if !self.reports_metrics {
+            return;
+        }
+
         let _guard = self.span.enter();
 
         let m = self.address_metrics_internal(chrono_now);
@@ -1053,6 +1096,7 @@ impl Clone for AddressBook {
             last_address_log: None,
             most_recent_by_ip: self.most_recent_by_ip.clone(),
             bans: self.bans.clone(),
+            reports_metrics: self.reports_metrics,
         }
     }
 }
