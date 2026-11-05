@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Screened compact blocks answer pending and buffered tip-discovery requests without waiting for a committed block announcement.
+time: 2026-11-05T11:26:40.768252129+01:00
