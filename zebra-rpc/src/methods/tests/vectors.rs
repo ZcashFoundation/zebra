@@ -3956,7 +3956,7 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
             other => panic!("unexpected state request: {other:?}"),
         }))
     });
-    let transactions: Vec<_> = (0..22)
+    let transactions: Vec<_> = (0..122)
         .map(|height| {
             VerifiedUnminedTx::new(
                 Arc::new(Transaction::test_v1(
