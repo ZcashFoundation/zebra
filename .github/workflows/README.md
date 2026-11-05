@@ -162,10 +162,11 @@ Three rules keep the quota usable:
 
 1. **Only main writes.** The main building jobs set
    `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing. (There are some minor exceptions to this rule.)
-2. **Wide matrices share one key.** The `test-crates.yml` matrices use
-   `cache-shared-key` and seed the shared cache from a single build (`zebrad`
-   which has the widest dependency closure; `zebra-rpc` for the MSRV build since
-   it does not build `zebrad` and `zebra-rpc` is second widest option).
+2. **Wide matrices share keys.** The `test-crates.yml` matrices use
+   `cache-shared-key`: one key for each half of the build matrix, and one for
+   the MSRV matrix. Each is seeded from a single build (`zebrad`, which has the
+   widest dependency closure; `zebra-rpc` for the MSRV build since it does not
+   build `zebrad` and `zebra-rpc` is second widest option).
 3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
    crate-matrix generator in `test-crates.yml` set `cache: false`.
 
