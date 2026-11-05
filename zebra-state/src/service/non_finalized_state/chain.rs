@@ -1450,6 +1450,17 @@ impl Chain {
             .hash
     }
 
+    /// Returns the hash of the parent of the non-finalized root block.
+    pub fn non_finalized_root_parent_hash(&self) -> block::Hash {
+        self.blocks
+            .values()
+            .next()
+            .expect("only called while blocks is populated")
+            .block
+            .header
+            .previous_block_hash
+    }
+
     /// Returns the block hash of the `n`th block from the non-finalized root.
     ///
     /// This is the block at `non_finalized_root_height() + n`.
