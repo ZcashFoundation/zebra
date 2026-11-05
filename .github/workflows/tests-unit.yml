@@ -74,10 +74,10 @@ jobs:
       contents: read
       statuses: write
     # Most of this job is the release build of the workspace crates, which a 4-CPU runner limits.
-    # The organisation's larger runner is billed and exists only here, so forks' own runs and pull
-    # requests from forks use the standard runner; their merge-queue runs use the larger one.
+    # The organisation's larger runner is billed, so only the merge queue and pushes to `main` use
+    # it. Pull requests and forks use the standard runner, which is free for this public repository.
     runs-on: >-
-      ${{ github.repository_owner == 'ZcashFoundation' && !github.event.pull_request.head.repo.fork
+      ${{ github.repository_owner == 'ZcashFoundation' && github.event_name != 'pull_request'
       && 'ubuntu-latest-xl' || 'ubuntu-26.04' }}
     timeout-minutes: 120
     env:
