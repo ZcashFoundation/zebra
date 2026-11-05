@@ -886,6 +886,10 @@ fn founders_reward_with_slow_start_interval_three() -> Result<(), Report> {
     assert_ne!(subsidy.zatoshis() % 5, 0);
 
     assert_eq!(founders_reward(&network, height).zatoshis(), 166_666_666);
+    assert_eq!(
+        miner_subsidy(height, &network, subsidy)?.zatoshis(),
+        833_333_332 - 166_666_666
+    );
 
     Ok(())
 }
