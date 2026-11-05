@@ -28,7 +28,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
-    work::difficulty::PartialCumulativeWork,
+    work::{difficulty::PartialCumulativeWork, equihash::Solution},
 };
 
 use crate::{
@@ -1456,9 +1456,9 @@ impl Chain {
     /// Replaces the tip block with `block`, a block with the same transactions and the same
     /// header apart from the nonce and Equihash solution, such as a solved block template.
     ///
-    /// Only the block hash index, the tip's history tree and the stored block depend on those
-    /// header fields, so this costs a history tree append rather than a block push. An error
-    /// leaves the chain unchanged.
+    /// Only the block hash index, the tip's history tree, the stored block and its recorded size
+    /// depend on those header fields, so this costs a history tree append rather than a block
+    /// push. An error leaves the chain unchanged.
     ///
     /// # Panics
     ///
@@ -1478,6 +1478,8 @@ impl Chain {
             "rebinding keeps the tip's transactions"
         );
         let previous_hash = previous.hash;
+        // Proposals skip proof of work, so the solution can change length when it is solved.
+        let size_change = (solution_size(&previous.block), solution_size(&block.block));
 
         let mut history_tree = self
             .parent_history_tree()
@@ -1498,6 +1500,12 @@ impl Chain {
             .map_err(Arc::new)?;
 
         self.history_trees_by_height.insert(height, history_tree);
+        let info = self
+            .block_info_by_height
+            .get_mut(&height)
+            .expect("every block in the chain has block info");
+        let (previous_size, size) = size_change;
+        *info = BlockInfo::new(*info.value_pools(), info.size() + size - previous_size);
         self.height_by_hash.remove(&previous_hash);
         self.height_by_hash.insert(block.hash, height);
         self.blocks.insert(height, Arc::new(block));
@@ -2422,6 +2430,15 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
         }
         self.block_info_by_height.remove(height);
     }
+}
+
+/// Returns the serialized length of `block`'s Equihash solution, including its length prefix.
+fn solution_size(block: &block::Block) -> u32 {
+    let size = match block.header.solution {
+        Solution::Common(_) => Solution::SERIALIZED_SIZE,
+        Solution::Regtest(_) => Solution::REGTEST_SERIALIZED_SIZE,
+    };
+    u32::try_from(size).expect("solutions are shorter than a block, which fits in a u32")
 }
 
 impl Ord for Chain {
