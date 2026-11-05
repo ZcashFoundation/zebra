@@ -49,7 +49,7 @@ use crate::{
     },
     peer_set::{
         initialize::{recent_by_ip, DiscoveredPeer},
-        ActiveConnectionCounter, ConnectionTracker, InventoryChange,
+        ActiveConnectionCounter, ConnectedPeers, ConnectionTracker, InventoryChange,
     },
     protocol::{
         external::{canonical_peer_addr, types::PeerServices, MAX_USER_AGENT_LENGTH},
@@ -88,6 +88,9 @@ pub(super) struct Shared<S, C> {
     connection_params: ConnectionParams<S>,
     /// The version 2 address segment, which records this node's outbound connections.
     address_book: V2BookHandle,
+    /// The peer set's connected peers, over either protocol, so the dialers do not dial a host
+    /// whose connection the peer set would drop.
+    connected_peers: ConnectedPeers,
 }
 
 impl<S, C> Shared<S, C>
@@ -110,6 +113,7 @@ where
         reconnection_delay: Duration,
         inbound_interval: Duration,
         address_book: V2BookHandle,
+        connected_peers: ConnectedPeers,
     ) -> (Self, watch::Sender<OpenInbound>) {
         let (open_inbound_tx, open_inbound) = watch::channel(OpenInbound::new());
         let shared = Shared {
@@ -135,6 +139,7 @@ where
             endpoint,
             identity,
             address_book,
+            connected_peers,
         };
         (shared, open_inbound_tx)
     }
@@ -190,6 +195,7 @@ pub(super) fn start<S, C>(
     bans_receiver: watch::Receiver<BanList>,
     misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    connected_peers: ConnectedPeers,
 ) -> Option<JoinHandle<Result<(), BoxError>>>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -205,6 +211,7 @@ where
         bans_receiver,
         misbehavior_tx,
         peerset_tx,
+        connected_peers,
         constants::MIN_PEER_RECONNECTION_DELAY,
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
     )
@@ -222,6 +229,7 @@ pub(super) fn start_with_intervals<S, C>(
     bans_receiver: watch::Receiver<BanList>,
     misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    connected_peers: ConnectedPeers,
     reconnection_delay: Duration,
     inbound_interval: Duration,
 ) -> Option<JoinHandle<Result<(), BoxError>>>
@@ -295,6 +303,7 @@ where
         reconnection_delay,
         inbound_interval,
         address_book.clone(),
+        connected_peers,
     );
 
     // One task for all of them. The listener runs for the life of the peer set, so its exit is
@@ -662,9 +671,10 @@ impl InitialPeerSlots {
 /// The outbound slots are shared between the configured hosts as
 /// [`InitialPeerSlots`] describes, and an address frees its slot once its
 /// connection failed or ended and the reconnection delay passed. An address
-/// that is not dialled, because it is banned or already connected to this
-/// node, takes no slot, and is offered one again after the reconnection
-/// delay.
+/// that is not dialled, because it is banned, already connected to this
+/// node over either protocol, or its IP is at the per-IP limit in
+/// the peer set, takes no slot, and is offered one again after the
+/// reconnection delay.
 ///
 /// Resolution runs here rather than in `start`, so a slow or failing DNS
 /// lookup does not delay peer set initialization. Returns once there are no
@@ -850,7 +860,10 @@ fn not_dialled<S, C>(
     } else if shared.open_inbound.borrow().contains_key(&addr) {
         Some("already connected to us")
     } else {
-        None
+        // The peer set would drop this connection, because the address has a legacy
+        // connection, or its IP is at the per-IP limit. An existing legacy connection
+        // is kept, rather than replaced by a version 2 one.
+        shared.connected_peers.blocks_dial(addr)
     }
 }
 

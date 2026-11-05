@@ -157,15 +157,14 @@ pub struct Config {
     /// # Experimental
     ///
     /// The version 2 protocol is a draft and this implementation is incomplete.
-    /// Peers are keyed by address and port whatever their protocol, and
-    /// `max_connections_per_ip` applies across both protocols, so while Zebra
-    /// has a legacy connection to a host listed in `initial_v2_peers`, the
-    /// version 2 connection to it is dropped and redialled after the
-    /// reconnection delay. While Zebra has a version 2 connection to such a
-    /// host, the legacy crawler may still dial its address over TCP, and that
-    /// connection is dropped. Configured version 2 peers are redialled after a
-    /// disconnection. Version 2 connections add up to half of each legacy
-    /// connection limit, on top of it.
+    /// Zebra keeps at most one connection to each address and port, whatever
+    /// its protocol, and `max_connections_per_ip` applies across both
+    /// protocols. Each protocol's dialer skips a host the other protocol is
+    /// already connected to, so while Zebra has a legacy connection to a host
+    /// listed in `initial_v2_peers`, it dials that host over version 2 only
+    /// after the legacy connection closes. Configured version 2 peers are
+    /// redialled after a disconnection. Version 2 connections add up to half of
+    /// each legacy connection limit, on top of it.
     pub v2_listen_addr: Option<SocketAddr>,
 
     /// Peers to connect to over the version 2 protocol at startup, as
