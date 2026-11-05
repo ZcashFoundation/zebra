@@ -2311,11 +2311,10 @@ impl Service<ReadRequest> for ReadStateService {
                     .remove_chain_with_tip(hash)
                     .expect("successful proposal validation inserted its block");
                 let contextual = chain
-                    .block(hash.into())
-                    .expect("the selected chain contains the proposal")
-                    .clone();
+                    .tip_block_arc()
+                    .expect("the selected chain ends with the proposal");
                 latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(chain));
-                Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
+                Ok(ReadResponse::ValidBlockProposal(contextual))
             }
 
             ReadRequest::TipBlockSize => {

@@ -1179,11 +1179,19 @@ where
     ///
     /// The updater validates its own builds, so this only runs without a live updater. A failed
     /// check is logged: the template is already served, as the updater's first build for a tip is.
+    ///
+    /// The check shares the limit on proposal checks requested over the RPC, and is skipped when
+    /// that limit is reached: it only lets a solve skip verification.
     fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
+        let Ok(admitted) = self.gbt.proposal_checks().try_acquire_owned() else {
+            tracing::debug!("skipping fallback template validation while proposal checks are busy");
+            return;
+        };
         let network = self.network.clone();
         let template = template.clone();
         let verifier = self.gbt.block_verifier_router();
         tokio::spawn(async move {
+            let _admitted = admitted;
             let proposal = tokio::task::spawn_blocking(move || {
                 proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
             })

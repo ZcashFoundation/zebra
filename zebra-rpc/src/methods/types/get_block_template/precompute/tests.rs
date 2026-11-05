@@ -950,7 +950,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                             Response::Utxo(utxo.utxo)
                         }
                         Request::CheckBlockProposalValidity(block) => {
-                            Response::ValidBlockProposal(Box::new(
+                            Response::ValidBlockProposal(Arc::new(
                                 ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                                     block,
                                     HashMap::from([(outpoint, utxo)]),
@@ -1072,8 +1072,8 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             "the validated build is served once the verifier accepts it"
         );
         let cached = prepared
-            .deserialize(&expected.zcash_serialize_to_vec().unwrap())
-            .unwrap();
+            .reuse(&expected.zcash_serialize_to_vec().unwrap())
+            .expect("the validated proposal is cached");
         assert!(
             Arc::ptr_eq(&cached.block().transactions[1], transaction),
             "validated proposal cache must share the mempool transaction allocation"

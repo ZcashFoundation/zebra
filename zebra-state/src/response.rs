@@ -215,8 +215,9 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    /// Response to [`Request::CheckBlockProposalValidity`]
-    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
+    /// Response to [`Request::CheckBlockProposalValidity`], sharing the proposal with the chain
+    /// the state prepared for its commit.
+    ValidBlockProposal(Arc<ContextuallyVerifiedBlock>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -657,8 +658,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    /// Response to [`ReadRequest::CheckBlockProposalValidity`]
-    ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
+    /// Response to [`ReadRequest::CheckBlockProposalValidity`], sharing the proposal with the
+    /// chain the state prepared for its commit.
+    ValidBlockProposal(Arc<ContextuallyVerifiedBlock>),
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
