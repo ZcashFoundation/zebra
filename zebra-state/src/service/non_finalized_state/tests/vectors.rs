@@ -1230,6 +1230,50 @@ fn prevalidated_side_commit_compares_chains_without_retained_finalized_root() ->
     Ok(())
 }
 
+/// The non-finalized root's parent matches the finalized tip without reading the database,
+/// including while finalization keeps the finalized root in the best chain, so a block on the
+/// finalized tip starts a new chain.
+#[test]
+fn root_parent_hash_matches_finalized_tip_while_finalization_keeps_the_root() -> Result<()> {
+    use crate::{
+        service::write::validate_and_commit_non_finalized,
+        tests::setup::new_state_with_mainnet_genesis,
+    };
+
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+    assert_eq!(state.root_parent_hash(), None);
+
+    let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let child = root.make_fake_child().set_work(10);
+    validate_and_commit_non_finalized(&finalized.db, &mut state, root.clone().prepare())?;
+    validate_and_commit_non_finalized(&finalized.db, &mut state, child.clone().prepare())?;
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(
+        state.root_parent_hash(),
+        Some(finalized.db.finalized_tip_hash())
+    );
+
+    let finalizable = state.finalize_keeping_best_chain(Height(1));
+    finalized.commit_finalized_direct(finalizable, None, "test")?;
+    assert!(state.any_chain_contains(&root.hash()));
+    assert_eq!(state.root_parent_hash(), Some(root.hash()));
+    assert_eq!(
+        state.root_parent_hash(),
+        Some(finalized.db.finalized_tip_hash())
+    );
+
+    let fork = root.make_fake_child().set_work(1);
+    validate_and_commit_non_finalized(&finalized.db, &mut state, fork.clone().prepare())?;
+
+    assert_eq!(state.chain_count(), 2);
+    let fork_chain = state
+        .find_chain(|chain| chain.non_finalized_tip_hash() == fork.hash())
+        .expect("the fork was committed as its own chain");
+    assert_eq!(fork_chain.non_finalized_root_hash(), fork.hash());
+    Ok(())
+}
+
 /// A reconsidered fork doesn't keep the retained finalized root, so it survives the next
 /// finalization.
 #[test]

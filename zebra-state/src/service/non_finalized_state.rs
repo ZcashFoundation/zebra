@@ -1299,6 +1299,20 @@ impl NonFinalizedState {
             .map(|chain| chain.non_finalized_root_height())
     }
 
+    /// Returns the hash of the finalized tip block that the non-finalized state is built on,
+    /// without reading the database, or `None` if the non-finalized state is empty.
+    ///
+    /// This is the parent of the non-finalized root block. While the best chain keeps blocks
+    /// that [`Self::finalize_keeping_best_chain`] already finalized, it's the highest kept block.
+    pub fn root_parent_hash(&self) -> Option<block::Hash> {
+        let best_chain = self.best_chain()?;
+
+        match self.retained_finalized_height {
+            Some(height) => best_chain.hash_by_height(height),
+            None => Some(best_chain.non_finalized_root_parent_hash()),
+        }
+    }
+
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
     #[allow(dead_code)]
