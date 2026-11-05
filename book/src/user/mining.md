@@ -5,6 +5,7 @@ Zebra's RPC methods support miners and mining pools.
 Contents:
 
 - [Download Zebra](#download-and-build-zebra)
+  - [Pasta assembly](#pasta-assembly)
 - [Configure zebra for mining](#configure-zebra-for-mining)
   - [Miner address](#miner-address)
   - [Extra coinbase data](#extra-coinbase-data)
@@ -22,6 +23,30 @@ The easiest way to run Zebra for mining is with [our docker images](https://zebr
 
 If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.html), follow the
 instructions below to start mining:
+
+### Pasta assembly
+
+Official releases and builds with `default-release-binaries` enable faster Pasta field arithmetic
+through the `pasta-asm` feature:
+
+```sh
+cargo build --release -p zebrad --features default-release-binaries
+```
+
+On non-Apple x86_64 targets with 64-bit pointers, runtime CPU detection selects assembly when both
+**BMI2** and **ADX** are available (Intel Broadwell / AMD Zen or newer). CPUs missing either feature
+automatically use portable arithmetic; they do not need a separate build.
+AArch64 targets use base-ISA assembly without extra CPU requirements. Other targets, including
+Apple x86_64 and x32, use portable arithmetic.
+The selected backend is logged during node startup.
+
+Cargo unifies dependency features across the whole build: selecting `zebrad/pasta-asm` also enables
+the backend for other workspace packages built alongside it. Runtime fallback applies to those
+packages and test harnesses too.
+
+In measurements before runtime dispatch was added, cold Orchard submissions were 6.1 ms faster for a
+1.9 MB block (observed improvement: 4.8–6.5 ms) and 1.4 ms faster for a 250 kB block (1.0–2.1 ms).
+Warm submissions showed no change; these measurements are not a throughput guarantee.
 
 ## Configure zebra for mining
 

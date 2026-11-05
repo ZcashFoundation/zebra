@@ -3711,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.1"
-source = "git+https://github.com/upbqdn/pasta_curves?rev=8cf375255b07e486b3eeceaa2ec465ec79bb2086#8cf375255b07e486b3eeceaa2ec465ec79bb2086"
+source = "git+https://github.com/upbqdn/pasta_curves?rev=65e2c6de9546a76eaf9b06970dc9ba198a3acc36#65e2c6de9546a76eaf9b06970dc9ba198a3acc36"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -7730,6 +7730,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pasta_curves",
  "pin-project",
  "proptest",
  "proptest-derive",
