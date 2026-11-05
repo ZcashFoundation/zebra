@@ -2415,7 +2415,8 @@ async fn inbound_announcements_reach_the_node() {
         let raw_addr: PeerSocketAddr =
             canonical_peer_addr(raw._endpoints.0.local_addr().expect("bound"));
 
-        let addrs: Vec<MetaAddr> = ["203.0.113.7:8233", "203.0.113.8:8233"]
+        // A new connection's address budget is one record.
+        let addrs: Vec<MetaAddr> = ["203.0.113.7:8233"]
             .into_iter()
             .map(|addr| {
                 MetaAddr::new_gossiped_meta_addr(

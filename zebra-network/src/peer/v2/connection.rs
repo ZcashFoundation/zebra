@@ -1,7 +1,8 @@
 //! The version 2 connection task.
 //!
 //! After the handshake, one task owns a connection for its whole life: the
-//! QUIC connection, the open handshake stream, and the announcement writers. It accepts the peer's
+//! QUIC connection, the open handshake stream, the peer's address announcement
+//! budget, and the announcement writers. It accepts the peer's
 //! streams, serves the peer's requests through the inbound service, drives
 //! this node's requests to the peer, and presents the connection to the
 //! peer set as an ordinary [`peer::Client`](crate::peer::Client).
@@ -61,6 +62,7 @@ use crate::{
 
 use super::{handshake::CompletedHandshake, misbehavior::MisbehaviorScores};
 
+mod addr_budget;
 mod announcements;
 mod inbound;
 mod outbound;
@@ -68,6 +70,7 @@ mod outbound;
 #[cfg(test)]
 mod tests;
 
+use addr_budget::AddrTokenBucket;
 use announcements::{AnnouncementPermits, AnnouncementWriter};
 
 /// What this node provides to every version 2 connection.
@@ -373,6 +376,7 @@ where
         client_rx: server_rx.into(),
         error_slot: error_slot.clone(),
         _connection_tracker: connection_tracker,
+        addr_budget: AddrTokenBucket::new(tokio::time::Instant::now()),
         tx_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
@@ -438,6 +442,9 @@ struct ConnectionTask<S> {
     error_slot: ErrorSlot,
     /// Reduces the open connection count when dropped.
     _connection_tracker: ConnectionTracker,
+    /// The budget for the address records the peer announces, on all its address announcement
+    /// streams.
+    addr_budget: AddrTokenBucket,
     /// This node's transaction announcement stream to the peer, opened on first use. Block
     /// announcements need a header the internal request does not carry, and address
     /// announcements wait for address relay.
@@ -663,13 +670,11 @@ where
             Event::Addresses(addrs) => {
                 // # Security
                 //
-                // Announced addresses only go to the version 2 address segment, which admits
-                // them through its intake rules and buckets; the peer cannot fill the address
-                // books directly, and version 2 addresses never reach the legacy one.
-                if let (Some(book), Some(source)) = (&self.params.address_book, self.transient_addr)
-                {
-                    book.intake(source, addrs, Via::Announcement);
-                }
+                // Announced addresses pass the peer's address budget, and go to the version 2
+                // address segment, which admits them through its intake rules and buckets; the
+                // peer cannot fill the address books directly, and version 2 addresses never
+                // reach the legacy one.
+                self.accept_announced_addresses(addrs);
                 None
             }
             // Like the legacy connection, an overload drop blames the inbound service's load,
@@ -811,6 +816,41 @@ where
         };
 
         let _ = tx.send(response);
+    }
+
+    /// Applies the peer's address budget to a batch of addresses it
+    /// announced, and hands the rest to the version 2 address segment.
+    ///
+    /// # Security
+    ///
+    /// Records over the budget are dropped without penalty (draft,
+    /// "Misbehavior and Banning": rate limits), so a peer can't flood the
+    /// address segment, whichever of its streams it uses.
+    fn accept_announced_addresses(&mut self, addrs: Vec<MetaAddr>) {
+        let now = tokio::time::Instant::now();
+
+        let mut rate_limited: u64 = 0;
+        let mut accepted = Vec::with_capacity(addrs.len());
+        for addr in addrs {
+            if !self.addr_budget.try_take(now) {
+                rate_limited += 1;
+                continue;
+            }
+            accepted.push(addr);
+        }
+        if rate_limited > 0 {
+            metrics::counter!("zcash.net.v2.addresses.rate_limited").increment(rate_limited);
+        }
+
+        let Some(source) = self.transient_addr else {
+            return;
+        };
+        if accepted.is_empty() {
+            return;
+        }
+        if let Some(book) = &self.params.address_book {
+            book.intake(source, accepted, Via::Announcement);
+        }
     }
 
     /// Queues one batch of transaction announcement records, opening the
