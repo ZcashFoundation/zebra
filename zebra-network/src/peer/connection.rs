@@ -429,6 +429,13 @@ impl Handler {
                 }
                 Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
+            // A compact block announces the peer's new tip, like a singleton block inventory.
+            // Complete the tip poll with it, and also handle the announcement.
+            (Handler::FindBlocks, Message::CompactBlock(block)) => {
+                let hash = block.header.hash();
+                ignored_msg = Some(Message::CompactBlock(block));
+                Handler::Finished(Ok(Response::BlockHashes(vec![hash])))
+            }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
             }
@@ -789,15 +796,6 @@ where
                     ..
                 }
             );
-            // Peers send nothing for a `getblocks` with no new blocks, so a tip poll can stay
-            // pending until the peer's next block inventory. Let a new request supersede it.
-            let tip_poll_pending = matches!(
-                self.state,
-                State::AwaitingResponse {
-                    handler: Handler::FindBlocks,
-                    ..
-                }
-            );
             if !recovering && !matches!(self.state, State::Failed) {
                 if let Some(message) = deferred_peer_message.take() {
                     self.handle_message_as_request(message).await;
@@ -1047,24 +1045,6 @@ where
                         msg = peer_rx.next(), if deferred_peer_message.is_none() => msg,
                         Some(hash) = self.block_advert_rx.recv(), if !recovering => {
                             self.send_block_advert(hash).await;
-                            continue;
-                        }
-                        // A tip poll blocks the peer's request slot, which delays block downloads
-                        // until the peer's next block inventory. The syncer polls again, so
-                        // answer the pending poll with no new hashes and take the new request.
-                        req = self.client_rx.next(), if tip_poll_pending => {
-                            let Some(req) = req else {
-                                trace!("client_rx closed, ending connection");
-                                self.shutdown_async(PeerError::ClientDropped).await;
-                                break;
-                            };
-                            if let State::AwaitingResponse { tx, .. } =
-                                std::mem::replace(&mut self.state, State::AwaitingRequest)
-                            {
-                                let _ = tx.send(Ok(Response::BlockHashes(Vec::new())));
-                            }
-                            let span = req.span.clone();
-                            self.handle_client_request(req).instrument(span).await;
                             continue;
                         }
                     };
@@ -1381,6 +1361,22 @@ where
                          })
             }
 
+            // The peer only answers a tip poll after it commits the block it just announced, and
+            // the poll would hold this connection's request slot until then. The answer is that
+            // block, so give it now.
+            (AwaitingRequest, FindBlocks { known_blocks, stop: None })
+                if known_blocks
+                    .first()
+                    .and_then(|tip| self.compact.announced_child(*tip))
+                    .is_some() =>
+            {
+                let tip = known_blocks.first().expect("the guard checked the locator tip");
+                let child = self
+                    .compact
+                    .announced_child(*tip)
+                    .expect("the guard checked the announced child");
+                Ok(Handler::Finished(Ok(Response::BlockHashes(vec![child]))))
+            }
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
                 self
                     .peer_tx
