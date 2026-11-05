@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -568,7 +569,15 @@ impl Config {
             return Ok(HashSet::new());
         };
 
-        let peer_list = match fs::read_to_string(&peer_cache_file).await {
+        self.load_peer_cache_at(&peer_cache_file).await
+    }
+
+    /// Returns the addresses in the peer list cache file at `peer_cache_file`, if it exists.
+    pub async fn load_peer_cache_at(
+        &self,
+        peer_cache_file: &Path,
+    ) -> io::Result<HashSet<PeerSocketAddr>> {
+        let peer_list = match fs::read_to_string(peer_cache_file).await {
             Ok(peer_list) => peer_list,
             Err(peer_list_error) => {
                 // We expect that the cache will be missing for new Zebra installs
@@ -639,6 +648,18 @@ impl Config {
             return Ok(());
         };
 
+        self.update_peer_cache_at(peer_cache_file, peer_list).await
+    }
+
+    /// Atomically writes a new `peer_list` to the peer list cache file at `peer_cache_file`.
+    /// If the list is empty, keeps the previous cache file.
+    ///
+    /// Also creates the peer cache directory, if it doesn't already exist.
+    pub async fn update_peer_cache_at(
+        &self,
+        peer_cache_file: PathBuf,
+        peer_list: HashSet<PeerSocketAddr>,
+    ) -> io::Result<()> {
         if peer_list.is_empty() {
             info!(
                 ?peer_cache_file,
