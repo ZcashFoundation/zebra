@@ -115,14 +115,15 @@ version 2 peers are recorded in a separate version 2 address book.
 
 ## Known limitations
 
-- **One connection per host across both protocols.** Peers are keyed by IP
-  address and port whatever their protocol, and `max_connections_per_ip`
-  applies across both. While Zebra has a legacy connection to a host in
-  `initial_v2_peers`, the version 2 connection to it is dropped and redialled
-  after the reconnection delay. While it has a version 2 connection to such a
-  host, its legacy crawler may still dial the same address over TCP, and that
-  connection is dropped. Version 2 connections add up to half of each legacy
-  connection limit on top of it.
+- **One connection per host across both protocols.** By design, Zebra keeps
+  at most one connection to each IP address and port, whatever its protocol.
+  Each protocol's dialer skips a host that the other protocol is already
+  connected to, so connections are not dropped and redialled. An existing
+  legacy connection is not replaced with a version 2 one: while Zebra has a
+  legacy connection to a version 2 peer, configured or discovered, it dials
+  that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
+  still applies across both protocols. Version 2 connections add up to half of
+  each legacy connection limit on top of it.
 - **Blocks and addresses are not announced to version 2 peers.** A version 2
   block announcement carries the block header, which Zebra's block gossip does
   not have yet, and address relay is not implemented. Version 2 peers learn of
