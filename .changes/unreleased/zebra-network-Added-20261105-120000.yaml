@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'Added the `v2_peer_discovery` config field, which defaults to on and only takes effect with `v2_listen_addr`. When it is on, Zebra discovers version 2 peers from DNS seeds and the version 2 peers it connects to, and keeps them in a separate `<network>.v2-peers` peer cache file. Added `Config::v2_advertised_addr`, `Config::load_peer_cache_at`, `Config::update_peer_cache_at` and `CacheDir::v2_peer_cache_file_path`.'
+time: 2026-11-05T12:00:00.000000000+01:00

@@ -39,6 +39,7 @@ fn segment(local_listener: &str) -> V2Book {
     V2Book::new(
         &Network::Mainnet,
         local_listener.parse().expect("valid address"),
+        false,
         1,
         BanList::default(),
         stats_tx,
@@ -310,12 +311,13 @@ fn next_candidate_skips_excluded_busy_and_pending_addresses() {
     let ipv6 = addr("[2001:db8::1]:8233");
     let free = addr_in(3, 1);
     relay(&mut book, &[excluded, busy, ipv6, free]);
+    book.ipv4_only = true;
 
     let exclude: HashSet<_> = [excluded].into();
     let busy_groups: HashSet<_> = [Group::of(busy.ip())].into();
 
     let candidate = book
-        .next_candidate(&exclude, &busy_groups, true)
+        .next_candidate(&exclude, &busy_groups)
         .expect("one candidate is left");
     assert_eq!(candidate.addr, free);
     assert_eq!(
@@ -326,12 +328,13 @@ fn next_candidate_skips_excluded_busy_and_pending_addresses() {
     book.change(MetaAddr::new_reconnect(free), Instant::now());
 
     assert_eq!(
-        book.next_candidate(&exclude, &busy_groups, true),
+        book.next_candidate(&exclude, &busy_groups),
         None,
         "pending, excluded, busy, and unreachable addresses are not candidates",
     );
+    book.ipv4_only = false;
     assert_eq!(
-        book.next_candidate(&exclude, &busy_groups, false)
+        book.next_candidate(&exclude, &busy_groups)
             .map(|candidate| candidate.addr),
         Some(ipv6),
         "an IPv6 endpoint reaches IPv6 addresses",
@@ -342,16 +345,29 @@ fn next_candidate_skips_excluded_busy_and_pending_addresses() {
     bans.ban(excluded.ip());
     book.apply_bans(bans);
     assert_eq!(
-        book.next_candidate(&HashSet::new(), &[Group::of(ipv6.ip())].into(), false)
+        book.next_candidate(&HashSet::new(), &[Group::of(ipv6.ip())].into())
             .map(|candidate| candidate.addr),
         Some(busy),
     );
     book.change(MetaAddr::new_reconnect(busy), Instant::now());
     book.change(MetaAddr::new_reconnect(ipv6), Instant::now());
-    assert_eq!(
-        book.next_candidate(&HashSet::new(), &HashSet::new(), false),
-        None
-    );
+    assert_eq!(book.next_candidate(&HashSet::new(), &HashSet::new()), None);
+}
+
+#[test]
+fn stats_count_unreachable_addresses_as_not_dialable() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment("0.0.0.0:8233");
+    let ipv4 = addr_in(1, 1);
+    let ipv6 = addr("[2001:db8::1]:8233");
+    relay(&mut book, &[ipv4, ipv6]);
+    assert_eq!(book.stats().dialable, 2);
+
+    // An IPv4 endpoint never dials the IPv6 entry, so the DNS reseed check must not count it.
+    book.ipv4_only = true;
+    assert_eq!(book.stats().dialable, 1);
+    assert_eq!(book.stats().relayed, 2, "the entry is still kept");
 }
 
 /// Returns how often `expected` is the first candidate of `trials` segments made by `make`.
@@ -359,7 +375,7 @@ fn first_candidate_share(trials: u32, expected: PeerSocketAddr, make: impl Fn() 
     let chosen = (0..trials)
         .filter(|_| {
             make()
-                .next_candidate(&HashSet::new(), &HashSet::new(), false)
+                .next_candidate(&HashSet::new(), &HashSet::new())
                 .map(|candidate| candidate.addr)
                 == Some(expected)
         })
@@ -448,7 +464,6 @@ fn next_candidate_prefers_entries_that_answered() {
         book.next_candidate_at(
             &none,
             &HashSet::new(),
-            false,
             Instant::now() + after,
             chrono::Utc::now() + after,
         )
@@ -662,7 +677,13 @@ async fn v2_peer_cache_round_trips_without_touching_the_legacy_cache() {
 
     let (_bans_tx, bans_rx) = watch::channel(BanList::default());
     let unspecified: SocketAddr = "0.0.0.0:8233".parse().expect("valid address");
-    let (handle, _stats, _task) = spawn(&config, &config.network, unspecified, bans_rx.clone());
+    let (handle, _stats, _task) = spawn(
+        &config,
+        &config.network,
+        unspecified,
+        false,
+        bans_rx.clone(),
+    );
     let tried: HashSet<PeerSocketAddr> = [addr_in(1, 1), addr_in(2, 1)].into();
     let relayed_only = addr_in(3, 1);
     handle.intake(
@@ -713,7 +734,7 @@ async fn v2_peer_cache_round_trips_without_touching_the_legacy_cache() {
     );
 
     // A fresh segment loads the cache as trusted entries.
-    let (handle, stats, _task) = spawn(&config, &config.network, unspecified, bans_rx);
+    let (handle, stats, _task) = spawn(&config, &config.network, unspecified, false, bans_rx);
     assert_eq!(load_v2_peer_cache(&config, &handle).await, tried.len());
     // A reply comes after the seed was applied, and the statistics were published before it.
     let _ = handle.cacheable().await;
