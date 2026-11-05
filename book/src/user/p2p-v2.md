@@ -93,6 +93,14 @@ version 2 peers are recorded in a separate version 2 address book.
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
   results fail to connect, which Zebra logs at the `debug` level.
+- Relaying version 2 addresses. Zebra relays each fresh address a version 2
+  peer announces to two of its other version 2 peers, and limits each peer to
+  about one announced address every 10 seconds, dropping the rest. It also
+  advertises its own version 2 address to each version 2 peer soon after
+  connecting and then about once a day: the IP address of `external_addr` with
+  the port of `v2_listen_addr` if `external_addr` is set, otherwise
+  `v2_listen_addr` if it is a specific address. An unspecified listener, like
+  `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
   announcements from peers are received and acted on.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
@@ -124,12 +132,11 @@ version 2 peers are recorded in a separate version 2 address book.
   that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
   still applies across both protocols. Version 2 connections add up to half of
   each legacy connection limit on top of it.
-- **Blocks and addresses are not announced to version 2 peers.** A version 2
-  block announcement carries the block header, which Zebra's block gossip does
-  not have yet, and address relay is not implemented. Version 2 peers learn of
-  new blocks from their other peers, or by requesting headers. Early block
-  relay and compact blocks (`experimental_early_block_relay`) also use legacy
-  connections only.
+- **Blocks are not announced to version 2 peers.** A version 2 block
+  announcement carries the block header, which Zebra's block gossip does not
+  have yet. Version 2 peers learn of new blocks from their other peers, or by
+  requesting headers. Early block relay and compact blocks
+  (`experimental_early_block_relay`) also use legacy connections only.
 - **Host names are resolved once.** A host name in `initial_v2_peers` that does
   not resolve at startup is retried, but once it resolves Zebra keeps using
   that address. Restart Zebra to pick up a changed address.
