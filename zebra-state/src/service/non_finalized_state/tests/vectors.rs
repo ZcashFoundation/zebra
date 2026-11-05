@@ -10,10 +10,11 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::BlockCommitmentTreeRoots,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtree,
     transparent,
     value_balance::ValueBalance,
+    work::equihash,
 };
 use zebra_test::prelude::*;
 
@@ -233,6 +234,168 @@ fn large_transfer_chain(
     Ok((chain, blocks, addresses, value))
 }
 
+/// A spare chain replays finalized roots and new tip blocks into a private copy of the current
+/// chain, and is kept while a reader shares it or it belongs to another fork.
+#[test]
+fn spare_chain_replays_into_a_private_copy() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0], &[1], &[0]])?;
+    // `chains[n]` holds the first `n` blocks.
+    let mut chains = vec![base.clone()];
+    for block in &blocks {
+        let next = chains
+            .last()
+            .expect("the base chain is present")
+            .clone()
+            .push(block.clone())?;
+        chains.push(next);
+    }
+    // The same first two blocks, then a different third block.
+    let (_, fork_blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[1]])?;
+    assert_eq!(fork_blocks[1].hash, blocks[1].hash);
+    assert_ne!(fork_blocks[2].hash, blocks[2].hash);
+    let fork = chains[2].clone().push(fork_blocks[2].clone())?;
+    let mut state = NonFinalizedState::new(&Network::Mainnet);
+
+    // Without a spare, nothing is replayed.
+    assert!(state.take_spare(&chains[5]).is_none());
+
+    // An earlier version of the chain is extended to the current tip, and consumed.
+    state.spare = Some(Arc::new(chains[3].clone()));
+    let replayed = state
+        .take_spare(&chains[5])
+        .expect("an earlier version of the chain is replayed");
+    assert!(replayed.eq_internal_state(&chains[5]));
+    assert!(state.spare.is_none());
+
+    // Finalized roots are popped before new tip blocks are pushed.
+    let mut finalized = chains[4].clone();
+    finalized.pop_root();
+    state.spare = Some(Arc::new(chains[3].clone()));
+    let replayed = state
+        .take_spare(&finalized)
+        .expect("a spare that starts before the current root is replayed");
+    assert!(replayed.eq_internal_state(&finalized));
+
+    // A spare that a reader still shares is kept for a later commit.
+    let shared = Arc::new(chains[3].clone());
+    state.spare = Some(shared.clone());
+    assert!(state.take_spare(&chains[5]).is_none());
+    assert!(state.spare.is_some());
+    drop(shared);
+    assert!(state.take_spare(&chains[5]).is_some());
+
+    // Tip blocks that the target lacks, such as an unsolved proposal or a fork, are popped.
+    for spare in [fork.clone(), chains[5].clone()] {
+        state.spare = Some(Arc::new(spare));
+        let replayed = state
+            .take_spare(&chains[4])
+            .expect("extra tip blocks are popped");
+        assert!(replayed.eq_internal_state(&chains[4]));
+    }
+
+    // A spare that does not contain the target's root is kept for a later commit.
+    let (_, other_blocks, _, _) = large_transfer_chain(&[&[1]])?;
+    assert_ne!(other_blocks[0].hash, blocks[0].hash);
+    let other_root = base.clone().push(other_blocks[0].clone())?;
+    for spare in [other_root, finalized.clone()] {
+        state.spare = Some(Arc::new(spare));
+        assert!(state.take_spare(&chains[4]).is_none());
+        assert!(state.spare.is_some());
+    }
+
+    // A new chain from the finalized tip has no blocks to compare against.
+    state.spare = Some(Arc::new(chains[3].clone()));
+    assert!(state.take_spare(&base).is_none());
+    assert!(state.spare.is_some());
+
+    // An empty spare is discarded.
+    state.spare = Some(Arc::new(base.clone()));
+    assert!(state.take_spare(&chains[5]).is_none());
+    assert!(state.spare.is_none());
+
+    Ok(())
+}
+
+/// A solved proposal commits by rebinding the prepared chain's tip, which equals pushing the
+/// solved block, and retires the parent chain as the prepared chain for the next proposal.
+///
+/// Proposals skip proof of work, so solving can also change the Equihash solution's length, and
+/// with it the block size that `getblock` and `getmininginfo` report.
+#[test]
+fn prepared_chain_commits_a_solved_proposal_by_rebinding() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let solves: [fn(&mut block::Header); 2] = [
+        |header| header.nonce = [0x55; 32].into(),
+        |header| {
+            header.nonce = [0x55; 32].into();
+            header.solution = equihash::Solution::Regtest([0; 36]);
+        },
+    ];
+    for solve in solves {
+        commit_a_solved_proposal_by_rebinding(solve)?;
+    }
+
+    Ok(())
+}
+
+fn commit_a_solved_proposal_by_rebinding(solve: fn(&mut block::Header)) -> Result<()> {
+    let network = Network::Mainnet;
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
+    let published = base
+        .clone()
+        .push(blocks[0].clone())?
+        .push(blocks[1].clone())?;
+    let proposal = blocks[2].clone();
+    let prepared = published.clone().push(proposal.clone())?;
+
+    let mut solved_block = Block::clone(&proposal.block);
+    let mut header = block::Header::clone(&solved_block.header);
+    solve(&mut header);
+    solved_block.header = Arc::new(header);
+    let mut solved = proposal.clone();
+    solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+    assert_ne!(solved.hash, proposal.hash);
+    let expected = published.clone().push(solved.clone())?;
+
+    let mut rebound = prepared.clone();
+    assert!(rebound.can_rebind_tip());
+    rebound.rebind_tip(solved.clone())?;
+    assert!(rebound.eq_internal_state(&expected));
+
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    let mut state = NonFinalizedState::new(&network);
+    state.insert(Arc::new(published.clone()));
+    state.store_prepared(prepared);
+    state.commit_prevalidated_contextual(solved.clone(), &finalized_state.db, None)?;
+    let best_chain = state.best_chain().expect("the solved block was committed");
+    assert_eq!(best_chain.non_finalized_tip_hash(), solved.hash);
+    assert!(best_chain.eq_internal_state(&expected));
+    let info = crate::service::read::block_info(
+        state.best_chain(),
+        &finalized_state.db,
+        solved.hash.into(),
+    )
+    .expect("the solved block was committed");
+    assert_eq!(
+        usize::try_from(info.size())?,
+        solved.block.zcash_serialized_size()
+    );
+    let retired = state
+        .prepared()
+        .take()
+        .expect("the parent chain is kept for the next proposal");
+    assert!(retired.eq_internal_state(&published));
+
+    Ok(())
+}
+
 /// Opt in with `ZEBRA_STATE_APPEND_BENCH=1` and run alone with
 /// `--ignored --nocapture --test-threads=1`; fixture setup is excluded from timings.
 #[test]
@@ -245,7 +408,6 @@ fn transparent_chain_push_microbenchmark() -> Result<()> {
     use crate::service::read::tests::spent_outputs::count_allocations;
     use std::{hint::black_box, time::Instant};
     use zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
-    use zebra_chain::serialization::ZcashSerialize;
 
     if std::env::var("ZEBRA_STATE_APPEND_BENCH").as_deref() != Ok("1") {
         println!("Skipping append benchmark; set ZEBRA_STATE_APPEND_BENCH=1 to run it.");
