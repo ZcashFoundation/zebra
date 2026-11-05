@@ -18,6 +18,10 @@ use super::{
     wire::{ensure_consumed, read_count, read_flag, write_count, WireError},
 };
 
+pub mod block_range;
+
+pub use block_range::GetBlockRange;
+
 /// The longest body a conforming request on `stream_type` can have, or `None`
 /// for a type this node does not serve; a request is read up to this bound, so
 /// a peer cannot make this node buffer more than its format allows.
@@ -55,6 +59,9 @@ pub enum Request {
     /// A `get-mempool` request (stream type `0x05`); its body is empty and its
     /// response is an open-ended sequence of transaction reference records.
     Mempool,
+
+    /// A `get-block-range` request (stream type `0x07`).
+    BlockRange(GetBlockRange),
 }
 
 impl Request {
@@ -66,6 +73,7 @@ impl Request {
             Request::Tx(_) => StreamType::GetTx,
             Request::Addr => StreamType::GetAddr,
             Request::Mempool => StreamType::GetMempool,
+            Request::BlockRange(_) => StreamType::GetBlockRange,
         }
     }
 
@@ -77,14 +85,15 @@ impl Request {
             Request::Blocks(request) => request.write(&mut body)?,
             Request::Tx(request) => request.write(&mut body)?,
             Request::Addr | Request::Mempool => {}
+            Request::BlockRange(request) => request.write(&mut body)?,
         }
         Ok(body.into())
     }
 
     /// Decodes the complete body of a request received on `stream_type`.
     ///
-    /// Only the five served request types have a format here; any other type
-    /// is [`NotARequest`](WireError::NotARequest). The stream's owner decides
+    /// Only the five served request types and `get-block-range` have a format
+    /// here; any other type is [`NotARequest`](WireError::NotARequest). The stream's owner decides
     /// before calling whether such a stream is refused or a connection error,
     /// and refuses unknown type bytes as `UNSUPPORTED_STREAM_TYPE` without
     /// reading a request.
@@ -96,6 +105,7 @@ impl Request {
             StreamType::GetTx => Request::Tx(GetTx::read(&mut reader)?),
             StreamType::GetAddr => Request::Addr,
             StreamType::GetMempool => Request::Mempool,
+            StreamType::GetBlockRange => Request::BlockRange(GetBlockRange::read(&mut reader)?),
             stream_type => return Err(WireError::NotARequest { stream_type }),
         };
         ensure_consumed(reader, "request")?;

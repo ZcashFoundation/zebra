@@ -325,6 +325,9 @@ where
             serve_addr(response, address_book).await
         }
         WireRequest::Mempool => serve_mempool(response, inbound_service).await,
+        // Unreachable until get-block-range has a `max_body_len`: until then it is refused above,
+        // before any body is read.
+        WireRequest::BlockRange(_) => Err(Outcome::Refuse(ErrorCode::Refused)),
     }?;
 
     metrics::counter!(
