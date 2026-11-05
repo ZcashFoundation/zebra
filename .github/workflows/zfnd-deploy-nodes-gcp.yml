@@ -97,8 +97,7 @@ on:
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
-    # Draft pull requests skip the image build, which runs on billed larger runners, so
-    # `ready_for_review` builds the image once the draft is ready.
+    # `ready_for_review` builds the image once a skipped draft is ready.
     types: [opened, synchronize, reopened, ready_for_review]
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
@@ -235,7 +234,7 @@ jobs:
       attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     # Build for:
-    # - Pull requests that are not drafts
+    # - Pull requests that are not drafts, because the build uses billed larger runners
     # - Manual workflow_dispatch
     # - Push to main and next branches
     # - Releases

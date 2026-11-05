@@ -74,10 +74,8 @@ jobs:
       contents: read
       statuses: write
     # Most of this job is the release build of the workspace crates, which a 4-CPU runner limits.
-    # The organisation's larger runner is billed per minute at many times the standard rate, and
-    # pull requests push far more often than anything reaches the merge queue, so only the merge
-    # queue and pushes to `main` use it. Pull requests and forks use the standard runner, which is
-    # free for this public repository.
+    # The organisation's larger runner is billed, so only the merge queue and pushes to `main` use
+    # it. Pull requests and forks use the standard runner, which is free for this public repository.
     runs-on: >-
       ${{ github.repository_owner == 'ZcashFoundation' && github.event_name != 'pull_request'
       && 'ubuntu-latest-xl' || 'ubuntu-26.04' }}

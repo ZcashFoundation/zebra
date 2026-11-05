@@ -3,8 +3,7 @@ name: Test Docker Config
 on:
   pull_request:
     branches: [main]
-    # Draft pull requests skip these tests, which build on a billed larger runner, so
-    # `ready_for_review` runs them once the draft is ready.
+    # `ready_for_review` runs the tests once a skipped draft is ready.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
@@ -31,8 +30,9 @@ env:
 
 jobs:
   changes:
-    # Skipping this job skips the whole workflow, which is not a required check.
-    if: github.event.pull_request.draft != true
+    # Draft pull requests skip every job here, because the image build uses a billed
+    # larger runner. This workflow is not a required check.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
@@ -88,9 +88,7 @@ jobs:
       contents: read
       actions: read
       checks: read
-    # Each check only starts the prebuilt image and greps its logs, in under a minute. A larger
-    # runner is billed per started minute at many times the standard rate, so these stay on the
-    # standard runner, which is free for this public repository.
+    # Each check runs the prebuilt image for under a minute, so a billed larger runner gains nothing.
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
