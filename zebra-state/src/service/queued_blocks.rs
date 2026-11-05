@@ -84,7 +84,7 @@ impl QueuedBlocks {
     /// # Panics
     ///
     /// - if a block with the same `block::Hash` has already been queued.
-    #[instrument(skip(self), fields(height = ?new.0.height, hash = %new.0.hash))]
+    #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;

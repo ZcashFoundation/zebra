@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Prevent requests from starting wire writes to peers banned, or made obsolete by a network upgrade, after readiness checking, including while waiting for the connection to become writable.
+time: 2026-10-23T14:26:54.023700112+02:00

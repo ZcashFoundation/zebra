@@ -99,11 +99,8 @@ Code is primarily in each crate's `src/`; integration tests are in `*/tests/`; m
 ## Build, Test, and Development Commands
 
 All of these must pass before submitting a PR. Run the tests with
-[`cargo nextest`](https://nexte.st/) (`cargo install cargo-nextest`), not plain
-`cargo test`: the test harness installs a global error hook once per process,
-and `cargo test` runs tests as threads in one process, so it fails with
-"a hook has already been installed" even on an unmodified checkout. CI uses
-nextest, which runs one process per test.
+[`cargo nextest`](https://nexte.st/) (`cargo install cargo-nextest`), as the Linux CI
+jobs do; it runs each test in its own process.
 
 ```bash
 # Optional full build check
