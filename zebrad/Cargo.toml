@@ -62,7 +62,7 @@ path = "tests/main.rs"
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry", "pasta-asm"]
 
 
 # Default features for official ZF binary release builds
@@ -98,6 +98,9 @@ progress-bar = [
 prometheus = ["metrics-exporter-prometheus", "metrics-util"]
 
 # Production features that modify dependency behaviour
+
+# Enable Pasta assembly on AArch64 and runtime-selected BMI2/ADX x86_64 CPUs.
+pasta-asm = ["dep:pasta_curves", "pasta_curves/asm"]
 
 # Enable additional error debugging in release builds
 error-debug = ["color-eyre/track-caller", "color-eyre/capture-spantrace"]
@@ -173,6 +176,8 @@ chrono = { workspace = true, features = ["clock", "std"] }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true }
 lazy_static = { workspace = true }
+# Unify assembly with Halo 2 and Orchard; startup diagnostics require runtime dispatch.
+pasta_curves = { version = "0.6.1", optional = true, default-features = false }
 semver = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 toml = { workspace = true }

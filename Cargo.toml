@@ -407,3 +407,7 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+# Runtime x86-64 assembly dispatch: https://github.com/zcash/pasta_curves/pull/183
+pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "945bdf231d43cce9f4c6499161361a2b8d93280a" }
