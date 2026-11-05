@@ -108,7 +108,7 @@ async fn a_publication_during_the_candidate_read_does_not_withdraw_live_work() {
             verifier,
         ));
         candidate_read_started.notified().await;
-        let zebra_state::Response::MiningCandidate(Some(_candidate_guard)) = state
+        let zebra_state::Response::MiningCandidate(Some(candidate_guard)) = state
             .clone()
             .oneshot(zebra_state::Request::MiningCandidate(candidate))
             .await
@@ -116,6 +116,7 @@ async fn a_publication_during_the_candidate_read_does_not_withdraw_live_work() {
         else {
             panic!("the test and updater subscriptions enable candidate publication");
         };
+        candidate_guard.body_bound();
         candidates.changed().await;
         assert!(candidates.is_current(candidate_hash));
         release_candidate_read.send_replace(true);

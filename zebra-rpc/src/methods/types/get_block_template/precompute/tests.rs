@@ -1642,7 +1642,7 @@ async fn candidate_interrupts_a_queued_build_permit_without_deadlock() {
         let candidate_hash = candidate.hash();
         // Keep the original state buffer alive: dropping its last sender closes the write/tip
         // channels and stops the updater before it can observe the candidate.
-        let zebra_state::Response::MiningCandidate(Some(_candidate_guard)) = state
+        let zebra_state::Response::MiningCandidate(Some(candidate_guard)) = state
             .clone()
             .oneshot(zebra_state::Request::MiningCandidate(candidate))
             .await
@@ -1650,6 +1650,7 @@ async fn candidate_interrupts_a_queued_build_permit_without_deadlock() {
         else {
             panic!("the real candidate subscription enables early work");
         };
+        candidate_guard.body_bound();
         candidate_read.notified().await;
         // The replacement has now reached the same mutex. Releasing it must not hand ownership
         // to a retained future that the updater no longer polls.
@@ -2016,6 +2017,7 @@ async fn candidate_fee_coinbase_is_reused_after_commit_and_rebuilt_for_changed_f
             else {
                 panic!("the updater subscribes before publishing its first template");
             };
+            candidate_guard.body_bound();
             loop {
                 if let Some(early) =
                     cache.template_for_tip(candidate_hash, &network, DateTime32::now())

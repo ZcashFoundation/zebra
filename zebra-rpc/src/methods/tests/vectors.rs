@@ -5615,6 +5615,7 @@ async fn getblocktemplate_candidate_withdrawal_preserves_waits() {
             else {
                 panic!("the candidate subscription enables early work");
             };
+            guard.body_bound();
             candidates.changed().await;
             assert!(
                 candidates.is_current(candidate_hash),

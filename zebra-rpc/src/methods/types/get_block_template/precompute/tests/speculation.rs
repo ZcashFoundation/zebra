@@ -68,6 +68,7 @@ async fn live_candidate() -> (
     else {
         panic!("the subscription enables candidate publication");
     };
+    guard.body_bound();
     candidates.changed().await;
     let info = mining_candidate(read_state).await.unwrap();
     (network, miner, block, info, candidates, (guard, state))

@@ -322,6 +322,7 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
             else {
                 panic!("the first candidate should reserve the available computation slot");
             };
+            guard.body_bound();
 
             // Signal the same cancellation branch as guard drop, but retain the sender so
             // its closed notification proves the outer task exited before another admission.
@@ -413,6 +414,7 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
         else {
             panic!("the first candidate must reserve the available slot");
         };
+        guard.body_bound();
         changes.changed().await;
         assert!(Arc::ptr_eq(&changes.block(block.hash()).unwrap(), &block));
         assert!(changes.block(block::Hash([0xff; 32])).is_none());
@@ -471,6 +473,89 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
     .expect("candidate expiry must not release the slot before verification finishes");
 }
 
+/// Early work is computed before the verifier binds the body, but only published after it does.
+#[tokio::test]
+async fn mining_candidate_is_published_only_after_its_body_is_bound() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let block = Arc::new(block);
+        let ReadResponse::MiningCandidateChanges(mut changes) = read_state
+            .clone()
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return a candidate subscription");
+        };
+
+        // An unbound candidate is withdrawn without ever being published.
+        let Response::MiningCandidate(Some(guard)) = state
+            .clone()
+            .oneshot(Request::MiningCandidate(block.clone()))
+            .await
+            .unwrap()
+        else {
+            panic!("the first candidate must reserve the available slot");
+        };
+        // The computation holds a clone of the slot permit until it finishes, so wait for it to
+        // start, then to finish.
+        while Arc::strong_count(&guard.0.borrow()) < 2 {
+            tokio::task::yield_now().await;
+        }
+        while Arc::strong_count(&guard.0.borrow()) > 1 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), changes.changed())
+                .await
+                .is_err(),
+            "computed work must wait for the body to be bound"
+        );
+        drop(guard);
+        let mut admitted = None;
+        while admitted.is_none() {
+            if let Response::MiningCandidate(Some(guard)) = state
+                .clone()
+                .oneshot(Request::MiningCandidate(block.clone()))
+                .await
+                .unwrap()
+            {
+                admitted = Some(guard);
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(!changes.is_current(block.hash()));
+
+        // Binding the body publishes the work.
+        let guard = admitted.expect("the loop exits once a candidate is admitted");
+        guard.body_bound();
+        changes.changed().await;
+        assert!(changes.is_current(block.hash()));
+    })
+    .await
+    .expect("candidate publication must finish within the timeout");
+}
+
 /// A live verifier cannot authorize a candidate after its sibling becomes the committed tip.
 #[tokio::test]
 async fn mining_candidate_is_withdrawn_when_a_sibling_commits() {
@@ -515,6 +600,7 @@ async fn mining_candidate_is_withdrawn_when_a_sibling_commits() {
         else {
             panic!("the subscription enables candidate publication");
         };
+        guard.body_bound();
         changes.changed().await;
         assert!(changes.is_current(hash));
         // Hold the publication independently of the withdrawal task to exercise final authorization.
