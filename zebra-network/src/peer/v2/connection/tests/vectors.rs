@@ -283,7 +283,8 @@ fn spawn_node_scored(
             block_range_permits: global_block_range_permits(),
         },
         None,
-    );
+    )
+    .0;
     TestNode {
         client,
         inv_rx,

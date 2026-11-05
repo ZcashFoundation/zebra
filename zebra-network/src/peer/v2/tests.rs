@@ -23,7 +23,7 @@ pub(super) const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(10);
 
 /// A connected pair of loopback QUIC connections on `network`, with the
 /// endpoints kept alive.
-pub(super) async fn connected_pair(
+pub(crate) async fn connected_pair(
     network: &Network,
 ) -> (Connection, Connection, Endpoint, Endpoint) {
     connected_pair_with(network, None).await
@@ -60,7 +60,7 @@ pub(super) async fn connected_pair_with(
 }
 
 /// The identity a test node presents.
-pub(super) fn identity(user_agent: &str) -> LocalIdentity {
+pub(crate) fn identity(user_agent: &str) -> LocalIdentity {
     LocalIdentity {
         user_agent: user_agent.to_string(),
         services: PeerServices::NODE_NETWORK,
@@ -69,7 +69,7 @@ pub(super) fn identity(user_agent: &str) -> LocalIdentity {
 }
 
 /// Runs the handshake as `role` on `connection`.
-pub(super) async fn run_handshake(
+pub(crate) async fn run_handshake(
     connection: &Connection,
     role: Role,
     network: &Network,

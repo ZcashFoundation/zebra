@@ -670,14 +670,16 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         counter.track_connection(),
         params.clone(),
         None,
-    );
+    )
+    .0;
     let peer = spawn_connection(
         inbound,
         listener_handshake.expect("the handshake completes"),
         counter.track_connection(),
         params,
         None,
-    );
+    )
+    .0;
 
     (client, (peer, [dialer, listener]))
 }

@@ -36,6 +36,7 @@ use crate::{
     },
     peer::address_is_valid_for_outbound_connections,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    sync_peer::SyncPeersSender,
     BoxError, PeerSocketAddr,
 };
 
@@ -307,6 +308,15 @@ pub struct Config {
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
     /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
+
+    /// Where version 2 connections are registered for the checkpoint sync
+    /// engine, or `None` to register none.
+    ///
+    /// Runtime-only: `zebrad` sets it from
+    /// [`SyncPeersSender::spawn`](crate::SyncPeersSender::spawn), and config
+    /// files never contain it.
+    #[serde(skip)]
+    pub v2_sync_peers: Option<SyncPeersSender>,
 }
 
 impl Config {
@@ -824,6 +834,7 @@ impl Default for Config {
             // so that idle peers don't use too many connection slots.
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
+            v2_sync_peers: None,
         }
     }
 }
@@ -998,6 +1009,7 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            v2_sync_peers: _,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -1151,6 +1163,7 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            v2_sync_peers: None,
         })
     }
 }
