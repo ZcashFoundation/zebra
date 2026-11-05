@@ -376,6 +376,10 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `download_concurrency_limit` | `usize` | `50` | Parallel block-download requests. Values below `1` are raised to `1` with a warning. The old key `max_concurrent_block_requests` is an accepted alias. |
+| `v2_checkpoint_sync` | `bool` | `false` | Downloads the checkpointed part of the chain from version 2 peers with `get-block-range` requests, beside the legacy syncer. Needs `network.v2_listen_addr` and version 2 peers. See [Checkpoint sync over version 2](p2p-v2.md#checkpoint-sync-over-version-2). |
+| `v2_lookahead_bytes` | `u64` | `536870912` (512 MiB) | The most block data the checkpoint sync engine requests ahead of the committed tip, in bytes. Values below 2000000, one maximum-size block, are raised to it. |
+| `v2_min_peer_rate` | `u64` | `262144` (256 KiB/s) | The slowest rate, in bytes per second, at which the engine keeps downloading from a peer before moving its request to another peer. |
+| `v2_target_peers` | `usize` | `8` | The number of version 2 peers the engine downloads from at the same time. A value of 0 is raised to 1. |
 | `checkpoint_verify_concurrency_limit` | `usize` | `1000` | Blocks submitted concurrently to checkpoint verification. Values below `400` are raised to `400` with a warning. The old key `lookahead_limit` is an accepted alias. |
 | `full_verify_concurrency_limit` | `usize` | `20` | Blocks submitted concurrently to full verification. Values below `1` are raised to `1` with a warning. |
 | `parallel_cpu_threads` | `usize` | `0` | Rayon worker threads for CPU-intensive verification. Zero delegates thread-count selection to Rayon; a positive value overrides its automatic selection. |

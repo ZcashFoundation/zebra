@@ -100,7 +100,7 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, Submitt
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
-        health,
+        checkpoint_sync, health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
@@ -272,6 +272,75 @@ impl StartCmd {
         false
     }
 
+    /// Spawns the checkpoint sync engine's supervisor, which streams
+    /// checkpointed blocks from version 2 `peers` beside the syncer, and
+    /// records which of them owns block download in `sync.v2.owner`.
+    ///
+    /// Without `peers` and `ownership`, which `start` creates only when
+    /// `sync.v2_checkpoint_sync` is set, the returned task never finishes.
+    fn spawn_checkpoint_sync_engine<ZS, ZSTip>(
+        config: &ZebradConfig,
+        peers: Option<zebra_network::SyncPeers>,
+        ownership: Option<checkpoint_sync::EngineOwnership>,
+        state: ZS,
+        latest_chain_tip: ZSTip,
+    ) -> tokio::task::JoinHandle<Result<(), Report>>
+    where
+        ZS: tower::Service<
+                zebra_state::Request,
+                Response = zebra_state::Response,
+                Error = zebra_chain::BoxError,
+            > + Send
+            + Clone
+            + 'static,
+        ZS::Future: Send,
+        ZSTip: zebra_chain::chain_tip::ChainTip + Clone + Send + 'static,
+    {
+        let (Some(peers), Some(ownership)) = (peers, ownership) else {
+            return tokio::spawn(std::future::pending().in_current_span());
+        };
+
+        if config.network.v2_listen_addr.is_none() {
+            warn!(
+                "sync.v2_checkpoint_sync is set, but network.v2_listen_addr is not, \
+                 so the checkpoint sync engine has no version 2 peers"
+            );
+        }
+
+        if !config.network.v2_peer_discovery && config.network.initial_v2_peers.len() < 2 {
+            warn!(
+                initial_v2_peers = config.network.initial_v2_peers.len(),
+                "sync.v2_checkpoint_sync is set, but network.v2_peer_discovery is off and \
+                 fewer than two network.initial_v2_peers are listed, so the checkpoint sync \
+                 engine only takes over once two version 2 peers that serve block ranges \
+                 connect to this node"
+            );
+        }
+
+        info!("spawning checkpoint sync engine");
+        let owner = ownership.owner.subscribe();
+        let supervisor = checkpoint_sync::CheckpointSync::new(
+            config.sync.v2_engine_config(),
+            config.network.network.clone(),
+            peers,
+            state,
+            latest_chain_tip,
+            ownership,
+            None,
+        );
+
+        tokio::spawn(
+            async move {
+                select! {
+                    biased;
+                    result = supervisor.run() => result,
+                    never = record_sync_owner(owner) => match never {},
+                }
+            }
+            .in_current_span(),
+        )
+    }
+
     async fn start(&self) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
@@ -425,9 +494,22 @@ impl StartCmd {
                     .with_block_range_state(read_only_state_service.clone()),
             );
 
+        // The checkpoint sync engine streams blocks from the version 2 connections
+        // that this registry collects.
+        let (v2_sync_peers, sync_peers) = if config.sync.v2_checkpoint_sync {
+            let (sender, receiver) = zebra_network::SyncPeersSender::spawn();
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+        let network_config = zebra_network::Config {
+            v2_sync_peers,
+            ..config.network.clone()
+        };
+
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
-                config.network.clone(),
+                network_config,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),
@@ -436,6 +518,18 @@ impl StartCmd {
             .await;
 
         // Start health server if configured (after sync_status is available)
+
+        // The checkpoint sync engine and the syncer share block download through
+        // these channels. Without the engine, the syncer always owns it, and the
+        // checkpoint verifier's external tip never changes.
+        let (engine_ownership, legacy_ownership, checkpoint_tip, _inert_checkpoint_tip) =
+            if config.sync.v2_checkpoint_sync {
+                let (engine, legacy, checkpoint_tip) = checkpoint_sync::ownership_channels();
+                (Some(engine), Some(legacy), checkpoint_tip, None)
+            } else {
+                let (sender, receiver) = watch::channel(None);
+                (None, None, receiver, Some(sender))
+            };
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
@@ -446,18 +540,27 @@ impl StartCmd {
             consensus_task_handles,
             max_checkpoint_height,
             prepared_blocks,
-        ) = zebra_consensus::router::init(
+        ) = zebra_consensus::router::init_with_checkpoint_tip(
             config.consensus.clone(),
             &config.network.network,
             state.clone(),
             read_only_state_service.clone(),
             tx_verifier_setup_rx,
             Some(block_verifier_setup_rx),
+            checkpoint_tip,
         )
         .await;
 
+        let mut checkpoint_sync_task_handle = Self::spawn_checkpoint_sync_engine(
+            &config,
+            sync_peers,
+            engine_ownership,
+            state.clone(),
+            latest_chain_tip.clone(),
+        );
+
         info!("initializing syncer");
-        let (mut syncer, sync_status) = ChainSync::new(
+        let (syncer, sync_status) = ChainSync::new(
             &config,
             max_checkpoint_height,
             peer_set.clone(),
@@ -467,6 +570,10 @@ impl StartCmd {
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );
+        let mut syncer = match legacy_ownership {
+            Some(ownership) => syncer.with_ownership(ownership),
+            None => syncer,
+        };
 
         info!("initializing mempool");
         let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
@@ -846,6 +953,11 @@ impl StartCmd {
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
 
+        // The checkpoint sync engine can exit while Zebra keeps running, so its handle must be
+        // fused.
+        let checkpoint_sync_task_handle_fused = (&mut checkpoint_sync_task_handle).fuse();
+        pin!(checkpoint_sync_task_handle_fused);
+
         // The zcashd-compat supervisor exits when supervision is disabled or fails,
         // but Zebra keeps running, so its handle must be fused.
         let mut zcashd_compat_task_finished = false;
@@ -888,6 +1000,23 @@ impl StartCmd {
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
+
+                // The checkpoint sync engine hands block download back to the syncer
+                // before it exits, so Zebra keeps running without it.
+                checkpoint_sync_result = &mut checkpoint_sync_task_handle_fused => {
+                    match checkpoint_sync_result
+                        .expect("unexpected panic in the checkpoint sync task")
+                    {
+                        Ok(()) => info!("checkpoint sync task exited"),
+                        Err(error) => warn!(
+                            ?error,
+                            "checkpoint sync task failed, the syncer downloads every block"
+                        ),
+                    }
+
+                    exit_when_task_finishes = false;
+                    Ok(())
+                }
 
                 block_gossip_result = &mut block_gossip_task_handle => block_gossip_result
                     .expect("unexpected panic in the chain tip block gossip task")
@@ -996,6 +1125,7 @@ impl StartCmd {
         health_task_handle.abort();
         tip_delay_task_handle.abort();
         syncer_task_handle.abort();
+        checkpoint_sync_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();
         zmq_task_handle.abort();
@@ -1068,6 +1198,22 @@ impl StartCmd {
         .into_iter()
         .max()
         .unwrap()
+    }
+}
+
+/// Records which component owns block download in the `sync.v2.owner` gauge:
+/// 0 for the syncer, 1 for the checkpoint sync engine. Never returns.
+async fn record_sync_owner(
+    mut owner: watch::Receiver<checkpoint_sync::SyncOwner>,
+) -> std::convert::Infallible {
+    loop {
+        let engine_owns = !owner.borrow_and_update().is_legacy();
+        metrics::gauge!("sync.v2.owner").set(if engine_owns { 1.0 } else { 0.0 });
+
+        if owner.changed().await.is_err() {
+            // The supervisor exited, and the task that runs it stops polling this.
+            std::future::pending::<()>().await;
+        }
     }
 }
 
