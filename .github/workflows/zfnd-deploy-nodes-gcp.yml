@@ -97,8 +97,9 @@ on:
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
-    # `ready_for_review` builds the image once a skipped draft is ready.
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `ready_for_review` builds the image once a skipped draft is ready;
+    # `converted_to_draft` cancels a build in progress.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
