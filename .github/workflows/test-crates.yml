@@ -138,10 +138,12 @@ jobs:
           # through the repo's default 10 GB quota on their own.
           cache-shared-key: crate-build-${{ matrix.features }}
           cache-on-failure: true
-          # Only main writes the shared caches, and only from the crate with the
-          # widest dependency closure, so the other legs restore a superset
-          # rather than whichever leg happened to finish first.
-          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebrad' }}
+          # Manual runs seed caches on the isolated measurement branch; PRs still only restore.
+          # Keep zebrad as the sole writer for each half.
+          cache-save-if: >-
+            ${{ matrix.crate == 'zebrad' && (github.ref == 'refs/heads/main' ||
+            (github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/ci/crate-build-cache-measurement')) }}
 
       - uses: ./.github/actions/setup-zebra-build
 
