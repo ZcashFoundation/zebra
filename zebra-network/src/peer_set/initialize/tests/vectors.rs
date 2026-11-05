@@ -34,7 +34,11 @@ use tokio::{
 };
 use tower::{service_fn, Layer, Service, ServiceExt};
 
-use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
+use zebra_chain::{
+    chain_tip::NoChainTip,
+    parameters::Network,
+    serialization::{DateTime32, ZcashDeserialize},
+};
 
 use crate::{
     address_book_updater::{change_channel, AddressBookUpdater},
@@ -3211,8 +3215,7 @@ async fn mixed_legacy_and_v2_peers_route_by_capability() {
         probe.local_addr().expect("bound")
     };
 
-    // The version 2 responder answers peers, but has no mempool answer (like a v2 connection).
-    let v2_gossiped: PeerSocketAddr = "203.0.113.5:8233".parse::<SocketAddr>().unwrap().into();
+    // The version 2 responder answers headers, but has no mempool answer (like a v2 connection).
     let responder_config = Config {
         listen_addr: "127.0.0.1:0".parse().unwrap(),
         network: network.clone(),
@@ -3224,11 +3227,7 @@ async fn mixed_legacy_and_v2_peers_route_by_capability() {
     };
     let responder_inbound = service_fn(move |request: Request| async move {
         match request {
-            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
-                v2_gossiped,
-                PeerServices::NODE_NETWORK,
-                DateTime32::now(),
-            )])),
+            Request::FindHeaders { .. } => Ok(v2_headers_answer()),
             _ => Ok::<Response, BoxError>(Response::Nil),
         }
     });
@@ -3259,13 +3258,10 @@ async fn mixed_legacy_and_v2_peers_route_by_capability() {
 
     // The version 2 peer is dialled in the background and is the only peer that can answer yet,
     // so the first answer proves the version 2 connection was established.
-    match first_response(&mut peer_set, Request::Peers).await {
-        Response::Peers(addrs) => {
-            assert_eq!(addrs.len(), 1);
-            assert_eq!(addrs[0].addr(), v2_gossiped);
-        }
-        other => panic!("unexpected response {other}"),
-    }
+    assert_eq!(
+        first_response(&mut peer_set, v2_headers_request()).await,
+        v2_headers_answer(),
+    );
 
     // A legacy peer connects inbound over TCP; its mempool answer is recognisable.
     let legacy_tx_id =
@@ -3326,7 +3322,6 @@ async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
         probe.local_addr().expect("bound")
     };
 
-    let v2_gossiped: PeerSocketAddr = "203.0.113.5:8233".parse::<SocketAddr>().unwrap().into();
     let responder_config = Config {
         listen_addr: "127.0.0.1:0".parse().unwrap(),
         network: network.clone(),
@@ -3338,11 +3333,7 @@ async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
     };
     let responder_inbound = service_fn(move |request: Request| async move {
         match request {
-            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
-                v2_gossiped,
-                PeerServices::NODE_NETWORK,
-                DateTime32::now(),
-            )])),
+            Request::FindHeaders { .. } => Ok(v2_headers_answer()),
             _ => Ok::<Response, BoxError>(Response::Nil),
         }
     });
@@ -3374,13 +3365,30 @@ async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
     let (mut peer_set, _address_book, _, _advertiser) =
         init(config, inbound, NoChainTip, "ipv4 node".to_string()).await;
 
-    match first_response(&mut peer_set, Request::Peers).await {
-        Response::Peers(addrs) => {
-            assert_eq!(addrs.len(), 1);
-            assert_eq!(addrs[0].addr(), v2_gossiped);
-        }
-        other => panic!("unexpected response {other}"),
+    assert_eq!(
+        first_response(&mut peer_set, v2_headers_request()).await,
+        v2_headers_answer(),
+    );
+}
+
+/// A request that the version 2 test responders answer with [`v2_headers_answer`]: the headers
+/// after the Mainnet genesis block.
+fn v2_headers_request() -> Request {
+    Request::FindHeaders {
+        known_blocks: vec![Mainnet.genesis_hash()],
+        stop: None,
     }
+}
+
+/// The version 2 test responders' answer to [`v2_headers_request`]: the Mainnet block 1 header.
+fn v2_headers_answer() -> Response {
+    let block_1 = zebra_chain::block::Block::zcash_deserialize(
+        &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+    )
+    .expect("the test vector is a valid block");
+    Response::BlockHeaders(vec![zebra_chain::block::CountedHeader {
+        header: block_1.header,
+    }])
 }
 
 /// Polls `peer_set` with `request` until a peer answers it: peers connect in
@@ -3603,6 +3611,7 @@ async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
         misbehavior_tx,
         V2_TEST_RECONNECTION_DELAY,
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        crate::v2_address_book::V2BookHandle::new(tokio::sync::mpsc::channel(1).0),
     );
     let (peerset_tx, _peerset_rx) = mpsc::channel(1);
 

@@ -32,14 +32,9 @@ use crate::{
     BanList, Config, PeerSocketAddr,
 };
 
-// The version 2 connections and dialer use the segment from the next commit.
-#[allow(dead_code)]
 mod actor;
-#[allow(dead_code)]
 mod buckets;
-#[allow(dead_code)]
 mod cache;
-#[allow(dead_code)]
 mod intake;
 
 #[cfg(test)]
