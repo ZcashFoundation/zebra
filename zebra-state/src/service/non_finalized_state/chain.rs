@@ -498,7 +498,6 @@ impl Chain {
 
     /// Returns the [`transaction::Hash`] for the transaction at [`TransactionLocation`],
     /// if it exists in this chain.
-    #[allow(dead_code)]
     pub fn transaction_hash_by_loc(
         &self,
         tx_loc: TransactionLocation,
@@ -1586,34 +1585,130 @@ impl Chain {
     }
 
     /// Returns a tuple of the transparent balance change and the total received funds for
-    /// `addresses` in this non-finalized chain.
+    /// `addresses` in the blocks of this non-finalized chain at or above `min_height`.
     ///
     /// If the balance doesn't change for any of the addresses, returns zero.
+    ///
+    /// Blocks below `min_height` are skipped without modifying the chain, so this can be used
+    /// on a chain that is shared with the rest of the state, without cloning it.
     ///
     /// # Correctness
     ///
     /// Callers should apply this balance change to the finalized state balance for `addresses`.
     ///
-    /// The total balance will only be correct if this partial chain matches the finalized state.
-    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    /// The total balance will only be correct if `min_height` is the height of the child block
+    /// of the finalized tip, and the root of this partial chain is at or below `min_height`.
     pub fn partial_transparent_balance_change(
         &self,
         addresses: &HashSet<transparent::Address>,
+        min_height: Height,
     ) -> (Amount<NegativeAllowed>, u64) {
-        let (balance, received) = self.partial_transparent_indexes(addresses).fold(
-            (Ok(Amount::zero()), 0u64),
-            |(balance, received), transfers| {
-                let balance = balance + transfers.balance();
-                // Saturate: each per-address `received()` can already reach `u64::MAX`, so
-                // summing several of them could overflow. Matches the finalized path (#10556).
-                (balance, received.saturating_add(transfers.received()))
-            },
-        );
+        // The heights of the blocks at the start of this chain that are also in the finalized
+        // state. The chain is contiguous, so it has all of them if it has the last one.
+        let overlap_heights = min_height
+            .previous()
+            .ok()
+            .filter(|max_overlap_height| self.blocks.contains_key(max_overlap_height))
+            .map(|max_overlap_height| Height::MIN..=max_overlap_height);
+
+        let (balance, received) = addresses
+            .iter()
+            .filter_map(|address| {
+                let transfers = self.partial_transparent_transfers.get(address)?;
+                Some((address, transfers))
+            })
+            .fold(
+                (Ok(Amount::zero()), 0u64),
+                |(balance, received), (address, transfers)| {
+                    let mut balance = balance + transfers.balance();
+
+                    if let Some(overlap_heights) = overlap_heights.clone() {
+                        balance -=
+                            self.transparent_balance_change_in(address, transfers, overlap_heights);
+                    }
+
+                    // Saturate: each per-address `received_from()` can already reach `u64::MAX`,
+                    // so summing several of them could overflow. Matches the finalized path
+                    // (#10556).
+                    (
+                        balance,
+                        received.saturating_add(transfers.received_from(min_height)),
+                    )
+                },
+            );
 
         (balance.expect("unexpected amount overflow"), received)
     }
 
-    /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.
+    /// Returns the transparent balance change for `address` in the blocks of this chain at
+    /// `heights`.
+    ///
+    /// `transfers` must be the address index for `address` in this chain.
+    ///
+    /// Only looks at the transactions that sent or received funds to `address`, using the same
+    /// transparent outputs and spent outputs as [`Chain::push`].
+    fn transparent_balance_change_in(
+        &self,
+        address: &transparent::Address,
+        transfers: &TransparentTransfers,
+        heights: RangeInclusive<Height>,
+    ) -> Amount<NegativeAllowed> {
+        let mut balance = Ok(Amount::zero());
+
+        let tx_locs: BTreeSet<TransactionLocation> = transfers
+            .tx_ids(&self.tx_loc_by_hash, heights)
+            .map(|(tx_loc, _tx_hash)| tx_loc)
+            .collect();
+
+        for tx_loc in tx_locs {
+            let block = self
+                .blocks
+                .get(&tx_loc.height)
+                .expect("indexed transactions are in a block in this chain");
+            let transaction = &block.block.transactions[tx_loc.index.as_usize()];
+
+            // Spends are subtracted before outputs are added, so every partial sum is the
+            // difference between two amounts held by the address, in chain order.
+            for input in transaction.inputs() {
+                // Coinbase inputs don't spend outputs. Some tests don't supply spent outputs,
+                // but `push()` panics on missing spent outputs outside tests.
+                let Some(spent_output) = input
+                    .outpoint()
+                    .and_then(|spent_outpoint| block.spent_outputs.get(&spent_outpoint))
+                else {
+                    continue;
+                };
+
+                if spent_output.utxo.output.address(&self.network).as_ref() == Some(address) {
+                    balance -= spent_output
+                        .utxo
+                        .output
+                        .value()
+                        .constrain()
+                        .expect("NonNegative values are always valid NegativeAllowed values");
+                }
+            }
+
+            for output in transaction.outputs() {
+                if output.address(&self.network).as_ref() == Some(address) {
+                    balance += output
+                        .value()
+                        .constrain()
+                        .expect("NonNegative values are always valid NegativeAllowed values");
+                }
+            }
+        }
+
+        balance.expect(
+            "partial sums are differences between amounts held by the address, \
+             which are between zero and the total money supply",
+        )
+    }
+
+    /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain:
+    /// - the UTXOs created by this chain in `query_height_range` that it doesn't spend,
+    ///   at most `max_entries` of them, the first in chain order, and
+    /// - the outputs this chain spends.
     ///
     /// If the UTXOs don't change for any of the addresses, returns empty lists.
     ///
@@ -1626,16 +1721,44 @@ impl Chain {
     ///
     /// Specifically, a block in the partial chain must be a child block of the finalized tip.
     /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// Combining these UTXOs with finalized UTXOs, removing the spent outputs, and keeping the
+    /// first `max_entries` gives the same result as using all the created UTXOs: the unspent
+    /// UTXOs this method leaves out are all after the ones it returns.
     pub fn partial_transparent_utxo_changes(
         &self,
         addresses: &HashSet<transparent::Address>,
+        query_height_range: &RangeInclusive<Height>,
+        max_entries: Option<usize>,
     ) -> (
         BTreeMap<OutputLocation, transparent::Output>,
         BTreeSet<OutputLocation>,
     ) {
-        let created_utxos = self
-            .partial_transparent_indexes(addresses)
-            .flat_map(|transfers| transfers.created_utxos())
+        let min_location = OutputLocation::from_output_index(
+            TransactionLocation::min_for_height(*query_height_range.start()),
+            0,
+        );
+
+        // Only clone the outputs that can be in the result, so the work done by this query is
+        // bounded by `max_entries`, not by the number of outputs the addresses received.
+        let mut created_utxos = BTreeMap::new();
+        for transfers in self.partial_transparent_indexes(addresses) {
+            let unspent_utxos = transfers
+                .created_utxos()
+                .range(min_location..)
+                .take_while(|(out_loc, _output)| query_height_range.contains(&out_loc.height()))
+                .filter(|(out_loc, _output)| !transfers.spent_utxos().contains(out_loc));
+
+            for (out_loc, output) in unspent_utxos {
+                // Each address' UTXOs are in chain order, so if this UTXO isn't in the first
+                // `max_entries`, its later UTXOs aren't either.
+                if !insert_within_limit(&mut created_utxos, out_loc, output, max_entries) {
+                    break;
+                }
+            }
+        }
+        let created_utxos = created_utxos
+            .into_iter()
             .map(|(out_loc, output)| (*out_loc, output.clone()))
             .collect();
 
@@ -1662,7 +1785,8 @@ impl Chain {
     }
 
     /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds,
-    /// in the non-finalized chain, filtered using the `query_height_range`.
+    /// in the non-finalized chain, filtered using the `query_height_range`,
+    /// at most `max_entries` of them, the first in chain order.
     ///
     /// If none of the addresses receive or spend funds in this partial chain, returns an empty list.
     ///
@@ -1684,12 +1808,20 @@ impl Chain {
         &self,
         addresses: &HashSet<transparent::Address>,
         query_height_range: RangeInclusive<Height>,
+        max_entries: Option<usize>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
-        self.partial_transparent_indexes(addresses)
-            .flat_map(|transfers| {
+        // Keep the result bounded by `max_entries`, not by the number of transactions the
+        // addresses have in this chain.
+        let mut tx_ids = BTreeMap::new();
+        for transfers in self.partial_transparent_indexes(addresses) {
+            for (tx_loc, tx_hash) in
                 transfers.tx_ids(&self.tx_loc_by_hash, query_height_range.clone())
-            })
-            .collect()
+            {
+                insert_within_limit(&mut tx_ids, tx_loc, tx_hash, max_entries);
+            }
+        }
+
+        tx_ids
     }
 
     /// Update the chain tip with the `contextually_valid` block,
@@ -1895,6 +2027,26 @@ impl Chain {
         self.update_chain_tip_with(&(*chain_value_pool_change, height, size))?;
 
         Ok(())
+    }
+}
+
+/// Inserts `key` and `value` into `map`, then removes its last entry if it has more than
+/// `limit` entries.
+///
+/// Returns `false` if the inserted entry was removed, because it was the last entry.
+fn insert_within_limit<K: Ord + Copy, V>(
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    value: V,
+    limit: Option<usize>,
+) -> bool {
+    map.insert(key, value);
+
+    match limit {
+        Some(limit) if map.len() > limit => {
+            map.pop_last().map(|(last_key, _value)| last_key) != Some(key)
+        }
+        _ => true,
     }
 }
 

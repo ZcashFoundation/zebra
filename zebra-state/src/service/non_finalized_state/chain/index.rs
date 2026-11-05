@@ -230,25 +230,30 @@ impl TransparentTransfers {
         self.balance
     }
 
-    /// Returns the partial received balance for this address.
+    /// Returns the partial received balance for this address, in the blocks at or above
+    /// `min_height`.
     ///
-    /// This is a cumulative total of every UTXO ever created for the address in this partial
-    /// chain (spent UTXOs are not removed from the count). An address that repeatedly receives
+    /// This is a cumulative total of every UTXO ever created for the address in those blocks
+    /// (spent UTXOs are not removed from the count). An address that repeatedly receives
     /// and re-sends can therefore push the total past `u64::MAX` even though its balance stays
     /// bounded, so the sum saturates rather than overflowing, matching the finalized path. See
     /// #10556.
-    pub fn received(&self) -> u64 {
+    pub fn received_from(&self, min_height: Height) -> u64 {
+        let min_location =
+            OutputLocation::from_output_index(TransactionLocation::min_for_height(min_height), 0);
+
         self.created_utxos
-            .values()
-            .map(|out| u64::from(out.value()))
+            .range(min_location..)
+            .map(|(_location, out)| u64::from(out.value()))
             .fold(0, u64::saturating_add)
     }
 
-    /// Returns the [`transaction::Hash`]es of the transactions that sent or
-    /// received transparent transfers to this address, in this partial chain,
+    /// Returns the [`TransactionLocation`]s and [`transaction::Hash`]es of the transactions that
+    /// sent or received transparent transfers to this address, in this partial chain,
     /// filtered by `query_height_range`.
     ///
-    /// The transactions are returned in chain order.
+    /// The transactions are returned in an arbitrary order, without collecting them, so callers
+    /// can limit the number of transactions they keep.
     ///
     /// `chain_tx_loc_by_hash` should be the `tx_loc_by_hash` field from the
     /// [`Chain`][1] containing this index.
@@ -259,25 +264,22 @@ impl TransparentTransfers {
     /// index.
     ///
     /// [1]: super::super::Chain
-    pub fn tx_ids(
-        &self,
-        chain_tx_loc_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
+    pub fn tx_ids<'a>(
+        &'a self,
+        chain_tx_loc_by_hash: &'a HashMap<transaction::Hash, TransactionLocation>,
         query_height_range: RangeInclusive<Height>,
-    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
-        self.tx_ids
-            .distinct_elements()
-            .filter_map(|tx_hash| {
-                let tx_loc = *chain_tx_loc_by_hash
-                    .get(tx_hash)
-                    .expect("all hashes are indexed");
+    ) -> impl Iterator<Item = (TransactionLocation, transaction::Hash)> + 'a {
+        self.tx_ids.distinct_elements().filter_map(move |tx_hash| {
+            let tx_loc = *chain_tx_loc_by_hash
+                .get(tx_hash)
+                .expect("all hashes are indexed");
 
-                if query_height_range.contains(&tx_loc.height) {
-                    Some((tx_loc, *tx_hash))
-                } else {
-                    None
-                }
-            })
-            .collect()
+            if query_height_range.contains(&tx_loc.height) {
+                Some((tx_loc, *tx_hash))
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the new transparent outputs sent to this address,
@@ -350,6 +352,6 @@ mod tests {
                 .insert(output_location, output.clone());
         }
 
-        assert_eq!(transfers.received(), u64::MAX);
+        assert_eq!(transfers.received_from(Height::MIN), u64::MAX);
     }
 }

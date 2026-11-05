@@ -1744,3 +1744,285 @@ fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
 
     Ok(())
 }
+
+/// Returns a chain of 8 blocks, and the transparent addresses its transactions send funds to.
+///
+/// Every coinbase pays each address, and every later block spends the two oldest outputs,
+/// sending half of each one back to the same address, a quarter to the next address, and the
+/// rest as fees.
+fn transparent_transfers_chain(network: &Network) -> Result<(Chain, [transparent::Address; 3])> {
+    use std::collections::VecDeque;
+
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::NetworkKind,
+        transaction::{LockTime, Transaction},
+    };
+
+    use crate::ContextuallyVerifiedBlock;
+
+    let addresses = [
+        transparent::Address::from_pub_key_hash(NetworkKind::Mainnet, [1; 20]),
+        transparent::Address::from_pub_key_hash(NetworkKind::Mainnet, [2; 20]),
+        transparent::Address::from_script_hash(NetworkKind::Mainnet, [3; 20]),
+    ];
+
+    let template: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+    let first_height = template
+        .coinbase_height()
+        .expect("block 434873 has its height in its coinbase");
+
+    let mut chain = Chain::new(
+        network,
+        (first_height - 1).expect("block 434873 is not the genesis block"),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    );
+
+    // The unspent outputs sent to `addresses`, as (outpoint, address index, value), oldest first.
+    let mut unspent = VecDeque::new();
+    let mut previous_block_hash = template.header.previous_block_hash;
+
+    for block_index in 0..8 {
+        let height = Height(first_height.0 + block_index);
+
+        let coinbase_outputs = addresses
+            .iter()
+            .map(|address| {
+                let value = Amount::try_from(1_000_000 * (i64::from(block_index) + 1))?;
+                Ok(transparent::Output::new(value, address.script()))
+            })
+            .collect::<Result<_>>()?;
+        let mut transactions = vec![Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            coinbase_outputs,
+            LockTime::unlocked(),
+            height,
+        ))];
+
+        if block_index > 0 {
+            let spent: Vec<(transparent::OutPoint, usize, Amount<NonNegative>)> =
+                unspent.drain(..2).collect();
+            let inputs = spent
+                .iter()
+                .map(|(outpoint, _, _)| transparent::Input::PrevOut {
+                    outpoint: *outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: u32::MAX,
+                })
+                .collect();
+            let mut outputs = Vec::new();
+            for (_, address_index, value) in &spent {
+                let next_address_index = (address_index + 1) % addresses.len();
+                outputs.push(transparent::Output::new(
+                    (*value / 2)?,
+                    addresses[*address_index].script(),
+                ));
+                outputs.push(transparent::Output::new(
+                    (*value / 4)?,
+                    addresses[next_address_index].script(),
+                ));
+            }
+            transactions.push(Arc::new(Transaction::test_v4(
+                inputs,
+                outputs,
+                LockTime::unlocked(),
+                height,
+            )));
+        }
+
+        for transaction in &transactions {
+            let hash = transaction.hash();
+            for (index, output) in transaction.outputs().iter().enumerate() {
+                let address = output.address(network);
+                let address_index = addresses
+                    .iter()
+                    .position(|candidate| Some(candidate) == address.as_ref())
+                    .expect("all outputs pay one of the addresses");
+                let outpoint = transparent::OutPoint {
+                    hash,
+                    index: index.try_into()?,
+                };
+                unspent.push_back((outpoint, address_index, output.value()));
+            }
+        }
+
+        let mut block = Block::clone(&template);
+        Arc::make_mut(&mut block.header).previous_block_hash = previous_block_hash;
+        block.transactions = transactions;
+        let block = Arc::new(block);
+        previous_block_hash = block.hash();
+
+        let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block.prepare(),
+            chain.unspent_utxos(),
+            DeferredPoolBalanceChange::zero(),
+            network,
+            chain.chain_value_pools,
+        )?;
+        chain = chain.push(block)?;
+    }
+
+    Ok((chain, addresses))
+}
+
+/// Returns each of `addresses` on its own, all of them, and an address without any transfers.
+fn transparent_address_sets(
+    addresses: &[transparent::Address],
+) -> Vec<std::collections::HashSet<transparent::Address>> {
+    use std::collections::HashSet;
+
+    use zebra_chain::parameters::NetworkKind;
+
+    let unused_address = transparent::Address::from_pub_key_hash(NetworkKind::Mainnet, [4; 20]);
+
+    addresses
+        .iter()
+        .map(|address| HashSet::from([*address]))
+        .chain([
+            addresses.iter().cloned().collect(),
+            HashSet::from([unused_address]),
+        ])
+        .collect()
+}
+
+/// A chain's transparent balance change from a height in the middle of the chain is the same as
+/// the balance change of that chain after popping the blocks below that height.
+///
+/// Balance reads use this to skip the blocks of a shared chain that are already finalized,
+/// instead of cloning the chain and popping them. Regression test for GHSA-hj54-2mfv-4xg8.
+#[test]
+fn transparent_balance_change_skips_blocks_below_min_height() -> Result<()> {
+    use zebra_chain::amount::NegativeAllowed;
+
+    let _init_guard = zebra_test::init();
+
+    let (chain, addresses) = transparent_transfers_chain(&Network::Mainnet)?;
+    let address_sets = transparent_address_sets(&addresses);
+    let all_addresses = &address_sets[addresses.len()];
+
+    let root = chain.non_finalized_root_height();
+    let tip = chain.non_finalized_tip_height();
+    let mut popped_chain = chain.clone();
+
+    for min_height in root.0..=tip.0 {
+        let min_height = Height(min_height);
+        while popped_chain.non_finalized_root_height() < min_height {
+            popped_chain.pop_root();
+        }
+
+        for address_set in &address_sets {
+            assert_eq!(
+                chain.partial_transparent_balance_change(address_set, min_height),
+                popped_chain.partial_transparent_balance_change(address_set, min_height),
+                "skipping the blocks below {min_height:?} must match popping them, \
+                 for {address_set:?}",
+            );
+        }
+    }
+
+    // The test must actually skip some balance changes.
+    let full_change = chain.partial_transparent_balance_change(all_addresses, root);
+    let skipped_change =
+        chain.partial_transparent_balance_change(all_addresses, (root + 1).expect("valid height"));
+    assert_ne!(full_change, skipped_change);
+    assert_ne!(skipped_change.0, Amount::<NegativeAllowed>::zero());
+
+    // If all the blocks are skipped, there is no change.
+    assert_eq!(
+        chain.partial_transparent_balance_change(all_addresses, (tip + 1).expect("valid height")),
+        (Amount::zero(), 0),
+    );
+
+    Ok(())
+}
+
+/// A chain's limited transparent UTXO and transaction ID queries return the first entries of
+/// the unlimited queries, in chain order, without collecting the rest.
+#[test]
+fn transparent_address_queries_are_limited_to_max_entries() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (chain, addresses) = transparent_transfers_chain(&Network::Mainnet)?;
+    let address_sets = transparent_address_sets(&addresses);
+    let all_addresses = &address_sets[addresses.len()];
+
+    let root = chain.non_finalized_root_height();
+    let tip = chain.non_finalized_tip_height();
+    let height_ranges = [
+        root..=tip,
+        (root + 2).expect("valid height")..=tip,
+        root..=(tip - 3).expect("valid height"),
+        tip..=root,
+    ];
+
+    // The test must use more UTXOs and transactions than the limits.
+    let (all_created, all_spent) =
+        chain.partial_transparent_utxo_changes(all_addresses, &(root..=tip), None);
+    assert!(all_created.len() > 6);
+    assert!(!all_spent.is_empty());
+    assert!(
+        chain
+            .partial_transparent_tx_ids(all_addresses, root..=tip, None)
+            .len()
+            > 6
+    );
+
+    for address_set in &address_sets {
+        for height_range in &height_ranges {
+            // The expected UTXOs are the unspent UTXOs in the range, like the query used to
+            // return them before it was limited.
+            let (unlimited_created, unlimited_spent) =
+                chain.partial_transparent_utxo_changes(address_set, &(root..=tip), None);
+            let expected_utxos: Vec<_> = unlimited_created
+                .into_iter()
+                .filter(|(out_loc, _output)| {
+                    height_range.contains(&out_loc.height()) && !unlimited_spent.contains(out_loc)
+                })
+                .collect();
+            let unlimited_tx_ids =
+                chain.partial_transparent_tx_ids(address_set, height_range.clone(), None);
+
+            for max_entries in [0, 1, 2, 5, usize::MAX] {
+                let (created, spent) = chain.partial_transparent_utxo_changes(
+                    address_set,
+                    height_range,
+                    Some(max_entries),
+                );
+                assert_eq!(
+                    created.into_iter().collect::<Vec<_>>(),
+                    expected_utxos
+                        .iter()
+                        .take(max_entries)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    "UTXOs for {address_set:?} in {height_range:?}, at most {max_entries}",
+                );
+                assert_eq!(spent, unlimited_spent);
+
+                let tx_ids = chain.partial_transparent_tx_ids(
+                    address_set,
+                    height_range.clone(),
+                    Some(max_entries),
+                );
+                assert_eq!(
+                    tx_ids.into_iter().collect::<Vec<_>>(),
+                    unlimited_tx_ids
+                        .iter()
+                        .take(max_entries)
+                        .map(|(tx_loc, tx_hash)| (*tx_loc, *tx_hash))
+                        .collect::<Vec<_>>(),
+                    "transaction IDs for {address_set:?} in {height_range:?}, at most {max_entries}",
+                );
+            }
+        }
+    }
+
+    Ok(())
+}

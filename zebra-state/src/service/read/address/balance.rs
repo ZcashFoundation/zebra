@@ -52,7 +52,7 @@ pub fn transparent_balance(
     // Apply the non-finalized balance changes
     if let Some(chain) = chain {
         let chain_balance_change =
-            chain_transparent_balance_change(chain, &addresses, finalized_tip);
+            chain_transparent_balance_change(&chain, &addresses, finalized_tip);
 
         balance = apply_balance_change(balance, chain_balance_change)?;
     }
@@ -96,7 +96,7 @@ fn finalized_transparent_balance(
 ///
 /// If the addresses do not exist in the non-finalized `chain`, returns zero.
 fn chain_transparent_balance_change(
-    mut chain: Arc<Chain>,
+    chain: &Chain,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
 ) -> (Amount<NegativeAllowed>, u64) {
@@ -108,8 +108,6 @@ fn chain_transparent_balance_change(
     let required_chain_root = finalized_tip
         .map(|tip| (tip + 1).unwrap())
         .unwrap_or(Height(0));
-
-    let chain = Arc::make_mut(&mut chain);
 
     assert!(
         chain.non_finalized_root_height() <= required_chain_root,
@@ -125,13 +123,12 @@ fn chain_transparent_balance_change(
     }
 
     // Correctness: some balances might have duplicate creates or spends,
-    // so we pop root blocks from `chain` until the chain root is a child of the finalized tip.
-    while chain.non_finalized_root_height() < required_chain_root {
-        // TODO: just revert the transparent balances, to improve performance
-        chain.pop_root();
-    }
-
-    chain.partial_transparent_balance_change(addresses)
+    // so we skip the chain blocks below the child of the finalized tip.
+    //
+    // Security: this chain is shared with the rest of the state, so it must not be modified
+    // here. Mutating it would clone the whole chain on every balance request.
+    // (This overlap is common: the best chain is sent to readers before its root is finalized.)
+    chain.partial_transparent_balance_change(addresses, required_chain_root)
 }
 
 /// Add the supplied finalized and non-finalized balances together,
