@@ -68,6 +68,12 @@ version 2 peers are recorded in a separate version 2 address book.
 - Serving and requesting headers, blocks, and transactions. Zebra answers
   block and transaction requests in request order, up to about 1 MB per
   response.
+- Serving `get-block-range` requests, which a syncing peer uses to download
+  up to 64 MiB of consecutive blocks in one stream. See
+  [Serving block ranges](#serving-block-ranges).
+- Downloading the checkpointed part of the chain with `get-block-range`, when
+  `sync.v2_checkpoint_sync` is set. See
+  [Checkpoint sync over version 2](#checkpoint-sync-over-version-2).
 - Exchanging peer addresses as the draft recommends: Zebra asks for addresses
   once, on connections it made, and answers once, on connections it accepted.
 - Discovering version 2 peers, unless `v2_peer_discovery` is `false`. Version 2
@@ -120,6 +126,108 @@ version 2 peers are recorded in a separate version 2 address book.
   one connection attempt per IP address per reconnection delay, so a restarted
   node can take two to three minutes to reconnect to a peer it connected to just
   before it stopped.
+
+## Serving block ranges
+
+A node with `v2_listen_addr` set answers `get-block-range` requests from its
+version 2 peers. A request names a block and asks for it and its ancestors,
+newest first, up to a block count and a byte limit that the requester chooses,
+at most 65,536 blocks and 64 MiB. Zebra sends the whole range unless it reaches
+the genesis block, or a block it does not have.
+
+Serving is bounded so that it cannot crowd out the node's other work:
+
+- Each peer can have two block-range streams open at once, separate from its
+  other requests, and the node serves eight streams at once in total. A
+  request beyond either limit is refused, and the peer asks another node.
+- Zebra reads at most 2 MiB of blocks at a time for each stream, plus the
+  part's first block, and keeps two buffers of up to one block each. With
+  2 MB blocks that is at most about 8 MB of block data per stream, so eight
+  streams hold at most about 64 MB of blocks in memory.
+- A stream is cancelled if its reader does not take each 2 MiB part within
+  20 seconds, if it is sent at less than 64 KiB/s on average over 20 seconds,
+  or if it lasts longer than 5 minutes.
+
+Set `network.v2_serve_block_ranges = false` to refuse every block-range
+request.
+
+## Checkpoint sync over version 2
+
+With `sync.v2_checkpoint_sync = true`, Zebra downloads the part of the chain
+below its final checkpoint from version 2 peers with `get-block-range`
+requests, instead of asking legacy peers for one block hash list and a few
+blocks at a time. It is off by default.
+
+```toml
+[network]
+v2_listen_addr = "[::]:8233"
+
+[sync]
+v2_checkpoint_sync = true
+```
+
+The engine downloads from the version 2 peers Zebra connects to, configured or
+discovered. With `v2_peer_discovery = false`, list at least two peers that
+serve block ranges in `initial_v2_peers`: with fewer, the engine takes over
+only if other version 2 peers connect to this node, which a syncing node rarely
+sees, and Zebra warns at startup.
+
+How it works:
+
+- The checkpoint sync engine runs beside the legacy syncer, and only one of
+  them downloads blocks at a time. The legacy syncer always downloads the
+  genesis block first. Then, if the state tip is below the final checkpoint,
+  it waits up to 5 seconds for the engine to take over before it downloads
+  more blocks.
+- The engine takes over when at least two version 2 peers that serve block
+  ranges are connected, and the state tip is still far below the final
+  checkpoint (about 20 checkpoint intervals). It uses every version 2
+  connection, whichever node opened it.
+- It streams whole checkpoint intervals from several peers at once, newest
+  block first, and checks that each block's hash chains to the next one up to
+  a checkpoint before it commits the blocks in height order. Blocks below the
+  final checkpoint are checked against the checkpoint list, as the legacy
+  checkpoint sync checks them.
+- It hands block download back to the legacy syncer at the state tip, which is
+  a checkpoint height unless a block commit failed: when it reaches its target,
+  which is at most the final checkpoint, or when fewer than two of its peers
+  stay connected for a minute, or when the oldest blocks it needs fail to
+  download five times without progress, from five different peers or from
+  every peer it can use. The legacy syncer then downloads the rest of the
+  chain, including every block above the final checkpoint. If version 2 peers
+  come back while the tip is still far behind, the engine takes over again a
+  minute later, without using peers at the IP addresses it blamed for its
+  last hand-back, even over new connections.
+- While the engine downloads, the mempool and block gossip stay off, as they do
+  during a legacy initial sync.
+
+The engine logs when it takes over and when it hands back:
+
+```text
+the checkpoint sync engine owns block download, waiting for it to finish target=Height(...)
+the checkpoint sync engine handed block download back to the syncer state_tip=Some(Height(...))
+```
+
+Its settings are in the `[sync]` section:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `v2_checkpoint_sync` | `false` | Turns the engine on. |
+| `v2_lookahead_bytes` | `536870912` (512 MiB) | The most block data the engine requests ahead of the committed tip. More keeps more peers busy and uses more memory. Values below `2000000`, one maximum-size block, are raised to it. |
+| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. |
+| `v2_target_peers` | `8` | The number of peers the engine downloads from at once. `0` is raised to `1`. |
+
+The engine reports which component owns block download and how its downloads
+go in these metrics, and its progress in the usual `state.*` and
+`zcash.chain.*` ones:
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `sync.v2.owner` | gauge | `1` while the engine owns block download, `0` while the legacy syncer does |
+| `sync.v2.lookahead.bytes` | gauge | The block data the engine has requested or downloaded and not yet committed, counted against `v2_lookahead_bytes` (downloaded blocks count three times their size, for their size in memory) |
+| `sync.v2.peer.rate` | histogram | Each downloading peer's measured rate, in bytes per second, sampled four times a second |
+| `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (below `v2_min_peer_rate` for 10 seconds) or `slow` (below a quarter of the median rate for 15 seconds) |
+| `sync.v2.unit.bytes` | histogram | The bytes of each completed download unit, one or more checkpoint intervals |
 
 ## Known limitations
 
