@@ -1035,7 +1035,8 @@ fn v2_advertised_addr_prefers_the_external_ip() {
     );
 }
 
-/// Version 2 discovery is on by default, and survives a round trip.
+/// Version 2 discovery is on by default, survives a round trip, and dials a share of the
+/// initial target size.
 #[test]
 fn v2_peer_discovery_defaults_on_and_round_trips() {
     let _init_guard = zebra_test::init();
@@ -1048,4 +1049,20 @@ fn v2_peer_discovery_defaults_on_and_round_trips() {
     let round_trip: Config =
         toml::from_str(&toml::to_string(&config).expect("serializes")).expect("deserializes");
     assert_eq!(round_trip, config);
+
+    let v2 = Config {
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        ..Config::default()
+    };
+    assert_eq!(v2.v2_outbound_target(), v2.peerset_initial_target_size / 2);
+    let tiny = Config {
+        peerset_initial_target_size: 1,
+        ..v2
+    };
+    assert_eq!(tiny.v2_outbound_target(), 1);
+    assert_eq!(
+        Config::default().v2_outbound_target(),
+        0,
+        "no endpoint, no slots"
+    );
 }

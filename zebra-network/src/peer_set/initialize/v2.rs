@@ -1,13 +1,20 @@
 //! Starting the experimental version 2 protocol: a QUIC endpoint that
-//! accepts inbound connections, and connections to the configured initial
-//! version 2 peers.
+//! accepts inbound connections, connections to the configured initial
+//! version 2 peers, and, with discovery on, to the version 2 peers that the
+//! version 2 address segment learns of.
 //!
 //! Everything here is off unless `v2_listen_addr` is configured. Each
 //! successful handshake becomes a [`peer::Client`] on the same channel the
 //! legacy listener and connector feed, so the peer set treats version 2
 //! peers like any other.
 
-use std::{collections::HashMap, pin::pin, sync::OnceLock, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    pin::pin,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use futures::{sink::SinkExt, FutureExt};
 use indexmap::{IndexMap, IndexSet};
@@ -29,6 +36,7 @@ use crate::{
         record_inbound_connection_rejected, ConnectionDirection,
     },
     constants,
+    meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
         self,
         v2::{
@@ -37,7 +45,7 @@ use crate::{
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
         },
-        ConnectedAddr, MinimumPeerVersion,
+        ConnectedAddr, ConnectionInfo, MinimumPeerVersion,
     },
     peer_set::{
         initialize::{recent_by_ip, DiscoveredPeer},
@@ -48,13 +56,17 @@ use crate::{
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
-    v2_address_book::{self, V2BookHandle},
+    v2_address_book::{self, Group, Provenance, V2BookHandle, V2BookStats},
     BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
+/// The least time between DNS seed lookups for version 2 peers, which are only made while the
+/// version 2 address segment has too few addresses to dial.
+pub(super) const V2_DNS_RESEED_INTERVAL: Duration = Duration::from_secs(30 * 60);
+
 /// The remote addresses of the open inbound version 2 connections, each with its number of
 /// open connections.
-type OpenInbound = HashMap<PeerSocketAddr, usize>;
+pub(super) type OpenInbound = HashMap<PeerSocketAddr, usize>;
 
 /// What every version 2 connection attempt shares.
 #[derive(Clone)]
@@ -74,6 +86,8 @@ pub(super) struct Shared<S, C> {
     nonces: NonceRegistry,
     minimum_peer_version: MinimumPeerVersion<C>,
     connection_params: ConnectionParams<S>,
+    /// The version 2 address segment, which records this node's outbound connections.
+    address_book: V2BookHandle,
 }
 
 impl<S, C> Shared<S, C>
@@ -115,11 +129,12 @@ where
                     misbehavior_tx,
                     config.peerset_total_connection_limit(),
                 ),
-                address_book: Some(address_book),
+                address_book: Some(address_book.clone()),
                 discovery: config.v2_peer_discovery,
             },
             endpoint,
             identity,
+            address_book,
         };
         (shared, open_inbound_tx)
     }
@@ -249,15 +264,26 @@ where
     // Version 2 addresses are QUIC endpoints, so they have their own address book, which the
     // connections and the dialer share. Its actor stops once they have all stopped.
     let local_listener = config.v2_advertised_addr().unwrap_or(listen_addr);
-    let (address_book, _address_book_stats, _address_book_task) = v2_address_book::spawn(
+    let (address_book, address_book_stats, _address_book_task) = v2_address_book::spawn(
         &config,
         &config.network,
         local_listener,
+        endpoint_is_ipv4(&endpoint),
         bans_receiver.clone(),
     );
 
     // The peer set's own limit includes both of these, so it has room for every v2 connection.
+    // Configured peers have the first claim on the outbound slots: discovered peers get at most
+    // the slots the configured hosts cannot all use, and no more than the discovery target.
     let outbound_limit = config.v2_outbound_connection_limit();
+    let discovery = config.v2_peer_discovery;
+    let discovered_limit = if discovery {
+        config
+            .v2_outbound_target()
+            .min(outbound_limit.saturating_sub(config.initial_v2_peers.len()))
+    } else {
+        0
+    };
     let (shared, open_inbound_tx) = Shared::new(
         &config,
         endpoint,
@@ -268,13 +294,27 @@ where
         misbehavior_tx,
         reconnection_delay,
         inbound_interval,
-        address_book,
+        address_book.clone(),
     );
 
-    // One task for both. The listener runs for the life of the peer set, so its exit is fatal,
-    // like the legacy listener's; the peer set aborts the task on shutdown. The dialer returns once
-    // there is nothing to keep connected (no configured peers), and the listener runs on.
-    let initial_v2_peers = config.initial_v2_peers;
+    // One task for all of them. The listener runs for the life of the peer set, so its exit is
+    // fatal, like the legacy listener's; the peer set aborts the task on shutdown. The configured
+    // peer dialer returns once there is nothing to keep connected (no configured peers), and the
+    // others run on. With discovery off, the discovered peer dialer and the cache updater return
+    // at once.
+    let (configured_tx, configured_rx) = watch::channel(HashSet::new());
+    let discovered = Discovery {
+        book: address_book.clone(),
+        stats: address_book_stats,
+        limit: discovered_limit,
+        target: config.v2_outbound_target(),
+        configured: configured_rx,
+        await_configured: !config.initial_v2_peers.is_empty(),
+        open_inbound: shared.open_inbound.clone(),
+        dial_interval: constants::MIN_OUTBOUND_PEER_CONNECTION_INTERVAL,
+        retry_interval: constants::MIN_PEER_RECONNECTION_DELAY,
+    };
+    let initial_v2_peers = config.initial_v2_peers.clone();
     Some(tokio::spawn(
         async move {
             let mut listener = pin!(accept_connections(
@@ -284,18 +324,42 @@ where
                 open_inbound_tx,
             ));
             let mut dialer = pin!(keep_initial_peers_connected(
-                shared,
+                shared.clone(),
                 initial_v2_peers,
-                outbound_limit,
-                bans_receiver,
-                peerset_tx
+                outbound_limit - discovered_limit,
+                bans_receiver.clone(),
+                peerset_tx.clone(),
+                configured_tx,
             )
+            .fuse());
+            let mut discovered = pin!(async {
+                if discovery {
+                    v2_address_book::load_v2_peer_cache(&config, &address_book).await;
+                    keep_discovered_peers_connected_with(
+                        shared,
+                        discovered,
+                        bans_receiver,
+                        peerset_tx,
+                        &config,
+                    )
+                    .await;
+                }
+            }
+            .fuse());
+            let mut cache_updater = pin!(async {
+                if discovery {
+                    v2_address_book::v2_peer_cache_updater(config.clone(), address_book.clone())
+                        .await;
+                }
+            }
             .fuse());
             loop {
                 tokio::select! {
                     result = &mut listener => return result,
-                    // A finished `Fuse` stays pending, so from here on only the listener is awaited.
+                    // A finished `Fuse` stays pending, so from here on the others are awaited.
                     () = &mut dialer => {}
+                    () = &mut discovered => {}
+                    () = &mut cache_updater => {}
                 }
             }
         }
@@ -615,6 +679,7 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
     outbound_limit: usize,
     bans_receiver: watch::Receiver<BanList>,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    configured: watch::Sender<HashSet<PeerSocketAddr>>,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -645,12 +710,7 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
     let mut unresolved = hosts;
     // The hosts that resolved in this round, with their addresses, to log any that wait for a slot.
     let mut newly_resolved: Vec<(String, IndexSet<PeerSocketAddr>)> = Vec::new();
-    // quinn refuses to send to an IPv6 address from an IPv4 socket, so such a peer could never be
-    // reached; an IPv6 endpoint sends to IPv4 peers as IPv4-mapped addresses.
-    let endpoint_is_ipv4 = shared
-        .endpoint
-        .local_addr()
-        .is_ok_and(|local_addr| local_addr.is_ipv4());
+    let endpoint_is_ipv4 = endpoint_is_ipv4(&shared.endpoint);
     // Resolve straight away, then retry whatever did not resolve after the reconnection delay.
     let mut resolve_at = pin!(tokio::time::sleep(Duration::ZERO));
     // Fires when the earliest deferral ends, so the address is offered a slot again then. It is
@@ -662,6 +722,7 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
             () = &mut resolve_at, if !unresolved.is_empty() => {
                 let (resolved, still_unresolved) =
                     Config::resolve_initial_v2_peers(&unresolved).await;
+                let mut round: Vec<PeerSocketAddr> = Vec::new();
                 unresolved = still_unresolved;
                 slots.set_unresolved_hosts(unresolved.len());
                 for (host, addrs) in resolved {
@@ -684,8 +745,19 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
                         .collect();
                     // Each host's addresses are added together, so they share its turns.
                     slots.add_host(addrs.iter().copied());
+                    // Recorded in the version 2 address segment, so the configured peers that
+                    // answer are served and cached.
+                    shared
+                        .address_book
+                        .seed(addrs.iter().copied().collect(), Provenance::Configured)
+                        .await;
+                    round.extend(addrs.iter().copied());
                     newly_resolved.push((host, addrs));
                 }
+                // Kept out of discovered dialling. Sent once per round, even when nothing
+                // resolved, because the discovered peer dialer waits for the end of the first
+                // round: until then, a cached configured peer could be dialled as discovered.
+                configured.send_modify(|configured| configured.extend(round));
                 resolve_at
                     .as_mut()
                     .reset(Instant::now() + shared.reconnection_delay);
@@ -715,6 +787,7 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
                     reason,
                     "initial v2 peer is not dialled, deferring it"
                 );
+                record_dial("configured", "skipped");
                 // At least the dial interval, so a deferral cannot end within the round of dials
                 // that made it and offer the address a slot again in it: no caller passes such a
                 // short delay, so this only guards against one.
@@ -801,9 +874,12 @@ where
     let network = shared.network.clone();
     let reconnection_delay = shared.reconnection_delay;
 
+    let address_book = shared.address_book.clone();
+
     let (exit_tx, exit_rx) = oneshot::channel();
+    address_book.change(MetaAddr::new_reconnect(addr)).await;
     record_connection_attempt_started(&network, ConnectionDirection::Outbound, addr);
-    let result: Result<(), BoxError> = async move {
+    let result: Result<Arc<ConnectionInfo>, BoxError> = async move {
         // The QUIC handshake has its own timeout inside `connect`; the application handshake's
         // deadline runs from the connection's establishment, as the draft asks.
         let connection = quic::connect(&shared.endpoint, *addr).await?;
@@ -829,19 +905,51 @@ where
     );
 
     match result {
-        Ok(()) => {
+        Ok(connection_info) => {
             tracing::info!(?addr, "connected to initial v2 peer");
-            // Wait for the connection task to end, however it ends.
-            let _ = exit_rx.await;
+            record_dial("configured", "ok");
+            address_book
+                .change(connected_change(addr, &connection_info))
+                .await;
+            wait_for_disconnect(&address_book, addr, exit_rx).await;
+            address_book.change(MetaAddr::new_shutdown(addr)).await;
             tracing::info!(?addr, "initial v2 peer disconnected, will reconnect");
         }
         Err(error) => {
             tracing::info!(?addr, %error, "initial v2 peer connection failed, will retry");
+            record_dial("configured", "failed");
+            address_book.change(MetaAddr::new_errored(addr, None)).await;
         }
     }
 
     tokio::time::sleep(with_jitter(reconnection_delay)).await;
     addr
+}
+
+/// Waits for the outbound connection to `addr` to end, however it ends, which `exit` reports, and
+/// tells `book` that the peer responded every [`constants::HEARTBEAT_INTERVAL`] until then.
+///
+/// The segment's record of a peer ages from its last response, like the legacy address book's,
+/// which its heartbeats refresh. Without this, a peer that stays connected would leave the
+/// `get-addr` answers and the peer cache [`constants::MAX_PEER_ACTIVE_FOR_GOSSIP`] after its
+/// handshake, and once it disconnected, it would not be dialled again if it had been connected
+/// for more than [`constants::MAX_RECENT_PEER_AGE`].
+pub(super) async fn wait_for_disconnect(
+    book: &V2BookHandle,
+    addr: PeerSocketAddr,
+    mut exit: oneshot::Receiver<()>,
+) {
+    let mut responded = tokio::time::interval_at(
+        Instant::now() + constants::HEARTBEAT_INTERVAL,
+        constants::HEARTBEAT_INTERVAL,
+    );
+    responded.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = &mut exit => return,
+            _ = responded.tick() => book.change(MetaAddr::new_responded(addr, None)).await,
+        }
+    }
 }
 
 /// Returns `delay` plus a random jitter of up to a quarter of it, so two nodes that dropped each
@@ -863,7 +971,7 @@ async fn finish_connection<S, C>(
     deadline: Instant,
     mut peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     exit_notifier: Option<oneshot::Sender<()>>,
-) -> Result<(), BoxError>
+) -> Result<Arc<ConnectionInfo>, BoxError>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -891,11 +999,299 @@ where
         shared.connection_params,
         exit_notifier,
     );
+    let connection_info = client.connection_info.clone();
 
     // The peer set closed: nothing more to do, the client is dropped and the connection ends.
     peerset_tx
         .send((addr, client))
         .await
         .map_err(|_| "peer set channel closed")?;
-    Ok(())
+    Ok(connection_info)
+}
+
+/// Returns whether `endpoint` is bound to an IPv4 address.
+///
+/// quinn refuses to send to an IPv6 address from an IPv4 socket, so such a peer could never be
+/// reached; an IPv6 endpoint sends to IPv4 peers as IPv4-mapped addresses.
+fn endpoint_is_ipv4(endpoint: &quinn::Endpoint) -> bool {
+    endpoint
+        .local_addr()
+        .is_ok_and(|local_addr| local_addr.is_ipv4())
+}
+
+/// The address segment change for an outbound connection to `addr` whose handshake completed.
+fn connected_change(addr: PeerSocketAddr, connection_info: &ConnectionInfo) -> MetaAddrChange {
+    MetaAddr::new_connected(
+        addr,
+        &connection_info.remote.services(),
+        false,
+        connection_info.remote.user_agent().to_string(),
+        connection_info.negotiated_version,
+        connection_info.remote.start_height(),
+    )
+}
+
+/// Counts an outbound version 2 connection attempt to a peer from `source`, `configured` or
+/// `discovered`, by its `outcome`: `ok`, `failed`, or `skipped` before it was dialled.
+fn record_dial(source: &'static str, outcome: &'static str) {
+    metrics::counter!("zcash.net.v2.dials", "source" => source, "outcome" => outcome).increment(1);
+}
+
+/// What the discovered peer dialer works with.
+pub(super) struct Discovery {
+    /// The version 2 address segment, which supplies the candidates and records the attempts.
+    pub book: V2BookHandle,
+
+    /// The segment's statistics, which wake the dialer when they change.
+    pub stats: watch::Receiver<V2BookStats>,
+
+    /// The most discovered peers dialled or connected at once.
+    pub limit: usize,
+
+    /// The number of dialable addresses below which the DNS seeders are asked for more.
+    pub target: usize,
+
+    /// The configured peers' addresses, which the configured peer dialer owns, and updates at
+    /// the end of each round of host resolution.
+    pub configured: watch::Receiver<HashSet<PeerSocketAddr>>,
+
+    /// Whether to wait for the first update of `configured` before dialling, because there are
+    /// configured hosts. The version 2 peer cache has the configured peers that answered last
+    /// time, so a candidate from it could otherwise be a configured peer that has not resolved
+    /// yet, which the configured peer dialer would then dial again.
+    pub await_configured: bool,
+
+    /// The open inbound connections.
+    pub open_inbound: watch::Receiver<OpenInbound>,
+
+    /// The least time between two dials.
+    pub dial_interval: Duration,
+
+    /// How often the dialer looks for candidates without a change in the segment, for addresses
+    /// whose reconnection delay passed.
+    pub retry_interval: Duration,
+}
+
+/// [`keep_discovered_peers_connected`] with this node's version 2 handshake, and the DNS seeders
+/// of `config`.
+async fn keep_discovered_peers_connected_with<S, C>(
+    shared: Shared<S, C>,
+    discovery: Discovery,
+    bans_receiver: watch::Receiver<BanList>,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    config: &Config,
+) where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    let mut counter = ActiveConnectionCounter::new_counter_with(
+        discovery.limit,
+        "Outbound v2 Discovered Connections",
+    );
+    let dial_shared = shared.clone();
+    let dial = move |addr: PeerSocketAddr| {
+        let tracker = counter.track_connection();
+        counter.update_count();
+        dial_discovered(dial_shared.clone(), addr, tracker, peerset_tx.clone()).in_current_span()
+    };
+    let not_dialled = move |addr: PeerSocketAddr| not_dialled(&shared, &bans_receiver, addr);
+    let resolve_seeds = move || {
+        let config = config.clone();
+        async move { config.resolve_v2_dns_seeds().await }
+    };
+
+    keep_discovered_peers_connected(discovery, not_dialled, dial, resolve_seeds).await
+}
+
+/// Dials the discovered version 2 peer at `addr`, with the same handshake as a configured peer.
+///
+/// Returns the segment change for the completed handshake, and a receiver that ends when the
+/// connection ends.
+async fn dial_discovered<S, C>(
+    shared: Shared<S, C>,
+    addr: PeerSocketAddr,
+    tracker: ConnectionTracker,
+    peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+) -> Result<(MetaAddrChange, oneshot::Receiver<()>), BoxError>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    let network = shared.network.clone();
+    let (exit_tx, exit_rx) = oneshot::channel();
+    record_connection_attempt_started(&network, ConnectionDirection::Outbound, addr);
+    let result = async move {
+        let connection = quic::connect(&shared.endpoint, *addr).await?;
+        let deadline = Instant::now() + constants::HANDSHAKE_TIMEOUT;
+        finish_connection(
+            shared,
+            connection,
+            ConnectedAddr::new_outbound_direct(addr),
+            Role::Initiator,
+            tracker,
+            deadline,
+            peerset_tx,
+            Some(exit_tx),
+        )
+        .await
+    }
+    .await;
+    record_connection_attempt_finished(
+        &network,
+        ConnectionDirection::Outbound,
+        addr,
+        result.as_ref().err(),
+    );
+
+    let connection_info = result?;
+    Ok((connected_change(addr, &connection_info), exit_rx))
+}
+
+/// Keeps up to `discovery.limit` connections to version 2 peers that the version 2 address
+/// segment discovered, for as long as the peer set runs.
+///
+/// Candidates come from the segment, and are marked as attempted there when they are dialled.
+/// They are never configured peers or peers connected to this node, and at most one at a time
+/// comes from each address group (draft, "Address Book": diversify outbound connections).
+/// `not_dialled` skips candidates on the same grounds as configured peers, without recording a
+/// failure, so a skipped candidate is offered again in the next round of dials. If
+/// `discovery.await_configured`, nothing is dialled until the configured peer dialer has finished
+/// its first round of host resolution, so a cached configured peer is not dialled as discovered.
+/// `dial` makes the connection, and returns the segment change for its handshake and a receiver
+/// that ends with the connection, which keeps its entry fresh until then. A slot is free again as
+/// soon as its connection fails or ends: the segment's reconnection delays space out redials.
+///
+/// When the segment runs out of candidates and has fewer than `discovery.target` dialable
+/// addresses, the DNS seeders are asked for more with `resolve_seeds`, at most once per
+/// [`V2_DNS_RESEED_INTERVAL`].
+pub(super) async fn keep_discovered_peers_connected<N, D, DF, R, RF>(
+    mut discovery: Discovery,
+    mut not_dialled: N,
+    mut dial: D,
+    mut resolve_seeds: R,
+) where
+    N: FnMut(PeerSocketAddr) -> Option<&'static str>,
+    D: FnMut(PeerSocketAddr) -> DF,
+    DF: Future<Output = Result<(MetaAddrChange, oneshot::Receiver<()>), BoxError>> + Send + 'static,
+    R: FnMut() -> RF,
+    RF: Future<Output = Vec<PeerSocketAddr>>,
+{
+    if discovery.limit == 0 {
+        tracing::debug!("no outbound v2 slots for discovered peers");
+        return;
+    }
+
+    // DNS lookups have a timeout, so the first round ends soon. An error means the configured
+    // peer dialer has stopped, so there is nothing to wait for.
+    if discovery.await_configured {
+        let _ = discovery.configured.changed().await;
+    }
+
+    let book = discovery.book.clone();
+    let mut attempts: JoinSet<PeerSocketAddr> = JoinSet::new();
+    // The candidates that were not dialled in this round of dials. They are left as they are in
+    // the segment, so they are offered again in the next round.
+    let mut skipped: HashSet<PeerSocketAddr> = HashSet::new();
+    // The discovered peers that hold a slot, with their groups.
+    let mut in_slots: HashMap<PeerSocketAddr, Group> = HashMap::new();
+    let mut last_dns_seed: Option<Instant> = None;
+    let mut retry_at = pin!(tokio::time::sleep(Duration::ZERO));
+
+    loop {
+        // Fill the free slots.
+        let mut out_of_candidates = false;
+        skipped.clear();
+        while in_slots.len() < discovery.limit {
+            let mut exclude: HashSet<PeerSocketAddr> = discovery.configured.borrow().clone();
+            exclude.extend(discovery.open_inbound.borrow().keys().copied());
+            exclude.extend(in_slots.keys().copied());
+            exclude.extend(skipped.iter().copied());
+            let busy_groups: HashSet<Group> = in_slots.values().copied().collect();
+
+            let Some(candidate) = book.next_candidate(exclude, busy_groups).await else {
+                out_of_candidates = true;
+                break;
+            };
+            let addr = candidate.addr;
+
+            if let Some(reason) = not_dialled(addr) {
+                tracing::debug!(?addr, reason, "discovered v2 peer is not dialled");
+                record_dial("discovered", "skipped");
+                // Not a failure of the peer, so the segment is not told: a trusted entry that
+                // failed would never be a candidate again, because it has no last-seen time.
+                skipped.insert(addr);
+                continue;
+            }
+
+            book.change(MetaAddr::new_reconnect(addr)).await;
+            in_slots.insert(addr, Group::of(addr.ip()));
+            let connecting = dial(addr);
+            let book = book.clone();
+            attempts.spawn(
+                async move {
+                    match connecting.await {
+                        Ok((connected, exit)) => {
+                            tracing::debug!(?addr, "connected to discovered v2 peer");
+                            record_dial("discovered", "ok");
+                            book.change(connected).await;
+                            wait_for_disconnect(&book, addr, exit).await;
+                            book.change(MetaAddr::new_shutdown(addr)).await;
+                            tracing::debug!(?addr, "discovered v2 peer disconnected");
+                        }
+                        Err(error) => {
+                            tracing::debug!(?addr, %error, "discovered v2 peer connection failed");
+                            record_dial("discovered", "failed");
+                            book.change(MetaAddr::new_errored(addr, None)).await;
+                        }
+                    }
+                    addr
+                }
+                .in_current_span(),
+            );
+
+            // Space out connection attempts, like the configured peer dialer.
+            tokio::time::sleep(discovery.dial_interval).await;
+        }
+
+        // Ask the DNS seeders when the segment has too few addresses to dial.
+        let short = discovery.stats.borrow().dialable < discovery.target;
+        let reseed_due =
+            last_dns_seed.is_none_or(|seeded_at| seeded_at.elapsed() >= V2_DNS_RESEED_INTERVAL);
+        if out_of_candidates && short && reseed_due {
+            last_dns_seed = Some(Instant::now());
+            let seeds = resolve_seeds().await;
+            tracing::debug!(count = seeds.len(), "seeding v2 peers from the DNS seeders");
+            // The cast is safe: there are far fewer seed addresses than 2^64.
+            metrics::counter!("zcash.net.v2.dns_seed.addresses").increment(seeds.len() as u64);
+            if !seeds.is_empty() {
+                book.seed(seeds, Provenance::DnsSeed).await;
+                continue;
+            }
+        }
+
+        // Wait for a free slot, a change in the segment, or for reconnection delays to pass.
+        retry_at
+            .as_mut()
+            .reset(Instant::now() + discovery.retry_interval);
+        tokio::select! {
+            Some(finished) = attempts.join_next(), if !attempts.is_empty() => {
+                // A cancelled attempt has no address to free, and the dialer cancels none.
+                if let Ok(addr) = finished.panic_if_task_has_panicked() {
+                    in_slots.remove(&addr);
+                }
+            }
+            changed = discovery.stats.changed() => {
+                if changed.is_err() {
+                    // This dialer holds a handle, so the segment outlives it.
+                    tracing::warn!(
+                        "the v2 address segment stopped, so discovered v2 peers are not dialled"
+                    );
+                    return;
+                }
+            }
+            () = &mut retry_at => {}
+        }
+    }
 }

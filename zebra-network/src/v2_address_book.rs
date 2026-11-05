@@ -41,7 +41,6 @@ mod intake;
 mod tests;
 
 pub(crate) use buckets::Group;
-#[allow(unused_imports)]
 pub(crate) use cache::{load_v2_peer_cache, v2_peer_cache_updater};
 
 /// How long a failed entry stays out of reach of a new seed: a seed for an address the segment
@@ -98,7 +97,8 @@ pub(crate) struct V2BookStats {
     /// Configured, DNS seed, and cached entries.
     pub trusted: usize,
 
-    /// Entries that have not failed and are not banned: candidates and live connections.
+    /// Entries that have not failed, are not banned, and the endpoint can reach: candidates and
+    /// live connections.
     pub dialable: usize,
 }
 
@@ -133,8 +133,6 @@ pub(crate) enum Message {
         exclude: HashSet<PeerSocketAddr>,
         /// Groups that already have a discovered outbound connection.
         busy_groups: HashSet<Group>,
-        /// Whether the endpoint can only reach IPv4 addresses.
-        ipv4_only: bool,
         /// Where the candidate goes.
         reply: oneshot::Sender<Option<MetaAddr>>,
     },
@@ -198,14 +196,12 @@ impl V2BookHandle {
         &self,
         exclude: HashSet<PeerSocketAddr>,
         busy_groups: HashSet<Group>,
-        ipv4_only: bool,
     ) -> Option<MetaAddr> {
         let (reply, reply_rx) = oneshot::channel();
         self.tx
             .send(Message::NextCandidate {
                 exclude,
                 busy_groups,
-                ipv4_only,
                 reply,
             })
             .await
@@ -241,7 +237,8 @@ impl V2BookHandle {
 
 /// Spawns the segment actor for `config` on `network`, advertising `local_listener` as this
 /// node's own version 2 address when it is valid for outbound connections, and removing the
-/// entries that `bans_receiver` bans.
+/// entries that `bans_receiver` bans. If `ipv4_only`, the endpoint can only reach IPv4
+/// addresses, so IPv6 entries are never candidates, nor counted as dialable.
 ///
 /// Returns its handle, the watch of its statistics, and its task, which ends when every handle
 /// is dropped.
@@ -249,6 +246,7 @@ pub(crate) fn spawn(
     config: &Config,
     network: &Network,
     local_listener: SocketAddr,
+    ipv4_only: bool,
     bans_receiver: watch::Receiver<BanList>,
 ) -> (V2BookHandle, watch::Receiver<V2BookStats>, JoinHandle<()>) {
     let channel_size = config
@@ -260,6 +258,7 @@ pub(crate) fn spawn(
     let book = actor::V2Book::new(
         network,
         local_listener,
+        ipv4_only,
         config.max_connections_per_ip,
         bans_receiver.borrow().clone(),
         stats_tx,

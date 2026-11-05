@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added version 2 peer discovery. With `network.v2_listen_addr` set, Zebra now records the version 2 peers it connects to, saves them across restarts, finds more through DNS seeds on the QUIC port and from its version 2 peers, and connects to them on top of `initial_v2_peers`. Version 2 address requests are answered only with addresses that accept QUIC. Set `network.v2_peer_discovery = false` to connect only to `initial_v2_peers`.'
+time: 2026-11-05T12:00:00.000000000+01:00

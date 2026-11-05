@@ -171,8 +171,6 @@ mod protocol;
 pub mod protocol;
 
 mod quic;
-// The version 2 dialer uses the rest of the segment from the next commit.
-#[allow(dead_code)]
 mod v2_address_book;
 
 #[allow(unused)]

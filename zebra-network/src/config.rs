@@ -358,6 +358,36 @@ impl Config {
         Self::v2_share_of(self.v2_listen_addr, self.peerset_inbound_connection_limit())
     }
 
+    /// The number of outbound version 2 connections Zebra makes to the version 2 peers it
+    /// discovers: a share of the initial target size, at least one, and at most
+    /// [`Self::v2_outbound_connection_limit`].
+    pub(crate) fn v2_outbound_target(&self) -> usize {
+        (self.peerset_initial_target_size / V2_CONNECTION_SHARE)
+            .max(1)
+            .min(self.v2_outbound_connection_limit())
+    }
+
+    /// Resolves the DNS seeders of the configured network for version 2 peers: the addresses
+    /// they return, with the network's default port, which is the QUIC (UDP) port of version 2
+    /// peers (draft, "Peer Discovery"), each once.
+    pub(crate) async fn resolve_v2_dns_seeds(&self) -> Vec<PeerSocketAddr> {
+        let port = self.network.default_port();
+        let lookups = self
+            .initial_peer_hostnames()
+            .into_iter()
+            .map(|host| async move {
+                // One lookup per seeder, like the legacy seed peers.
+                Config::resolve_host(&host, MAX_SINGLE_SEED_PEER_DNS_RETRIES).await
+            });
+        let addrs: IndexSet<PeerSocketAddr> = futures::future::join_all(lookups)
+            .await
+            .into_iter()
+            .flatten()
+            .map(|addr| canonical_peer_addr(SocketAddr::new(addr.ip(), port)))
+            .collect();
+        addrs.into_iter().collect()
+    }
+
     /// Returns the address Zebra advertises to its version 2 peers, if any: the IP address of
     /// `external_addr` with the port of `v2_listen_addr` if both are set, otherwise
     /// `v2_listen_addr` if it is a specific address that peers can dial, otherwise `None`.

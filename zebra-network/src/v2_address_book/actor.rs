@@ -86,15 +86,20 @@ pub(super) struct V2Book {
     /// The latest ban list.
     pub(super) bans: BanList,
 
+    /// Whether the endpoint can only reach IPv4 addresses, so IPv6 entries are never dialled.
+    pub(super) ipv4_only: bool,
+
     /// Where the statistics are published.
     stats_tx: watch::Sender<V2BookStats>,
 }
 
 impl V2Book {
-    /// Returns an empty segment for `network`, advertising `local_listener`.
+    /// Returns an empty segment for `network`, advertising `local_listener`, for an endpoint
+    /// that can only reach IPv4 addresses if `ipv4_only`.
     pub(super) fn new(
         network: &Network,
         local_listener: SocketAddr,
+        ipv4_only: bool,
         max_connections_per_ip: usize,
         bans: BanList,
         stats_tx: watch::Sender<V2BookStats>,
@@ -114,6 +119,7 @@ impl V2Book {
             get_addr_snapshot: None,
             network: network.clone(),
             bans,
+            ipv4_only,
             stats_tx,
         }
     }
@@ -127,11 +133,10 @@ impl V2Book {
             Message::NextCandidate {
                 exclude,
                 busy_groups,
-                ipv4_only,
                 reply,
             } => {
                 // The dialer may have given up, which leaves the book as it was.
-                let _ = reply.send(self.next_candidate(&exclude, &busy_groups, ipv4_only));
+                let _ = reply.send(self.next_candidate(&exclude, &busy_groups));
                 return false;
             }
             Message::GetAddrSample { reply } => {
@@ -214,8 +219,8 @@ impl V2Book {
     }
 
     /// Returns an entry due for an attempt that is not in `exclude`, nor in one of the
-    /// `busy_groups`, nor banned, nor IPv6 when the endpoint is `ipv4_only`. The book is left
-    /// as it is: the dialer marks the entry as attempted when it dials it.
+    /// `busy_groups`, nor banned, nor unreachable from the endpoint. The book is left as it is:
+    /// the dialer marks the entry as attempted when it dials it.
     ///
     /// # Security
     ///
@@ -233,9 +238,8 @@ impl V2Book {
         &self,
         exclude: &HashSet<PeerSocketAddr>,
         busy_groups: &HashSet<Group>,
-        ipv4_only: bool,
     ) -> Option<MetaAddr> {
-        self.next_candidate_at(exclude, busy_groups, ipv4_only, Instant::now(), Utc::now())
+        self.next_candidate_at(exclude, busy_groups, Instant::now(), Utc::now())
     }
 
     /// [`V2Book::next_candidate`] at `instant_now` and `chrono_now`.
@@ -243,7 +247,6 @@ impl V2Book {
         &self,
         exclude: &HashSet<PeerSocketAddr>,
         busy_groups: &HashSet<Group>,
-        ipv4_only: bool,
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
     ) -> Option<MetaAddr> {
@@ -260,7 +263,7 @@ impl V2Book {
                 !exclude.contains(&peer.addr)
                     && !busy_groups.contains(&Group::of(peer.addr.ip()))
                     && !self.bans.is_banned(peer.addr.ip())
-                    && (!ipv4_only || !peer.addr.is_ipv6())
+                    && self.is_reachable(peer.addr)
             })
         {
             if peer.last_response().is_some() {
@@ -315,6 +318,11 @@ impl V2Book {
         cacheable.sort_by_key(|peer| std::cmp::Reverse(peer.last_response()));
         cacheable.truncate(MAX_PEER_DISK_CACHE_SIZE);
         cacheable
+    }
+
+    /// Returns whether the endpoint can dial `addr`.
+    fn is_reachable(&self, addr: PeerSocketAddr) -> bool {
+        !self.ipv4_only || !addr.is_ipv6()
     }
 
     /// Returns the current `get-addr` answer, drawing a new one when it expired at `now`.
@@ -428,6 +436,7 @@ impl V2Book {
             }
             if peer.last_connection_state != PeerAddrState::Failed
                 && !self.bans.is_banned(peer.addr.ip())
+                && self.is_reachable(peer.addr)
             {
                 stats.dialable += 1;
             }

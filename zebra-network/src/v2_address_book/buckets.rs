@@ -184,6 +184,7 @@ impl GossipBuckets {
 
     /// Returns the number of tracked addresses, including any that left the gossiped state and
     /// were not pruned yet.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.buckets.iter().map(IndexSet::len).sum()
     }
