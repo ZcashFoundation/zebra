@@ -40,6 +40,7 @@ use crate::{
     peer::{
         self,
         v2::{
+            addr_relay::AddrRelay,
             connection::{spawn_connection, ConnectionParams},
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
@@ -110,6 +111,7 @@ where
         inv_collector: broadcast::Sender<InventoryChange>,
         latest_chain_tip: C,
         misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
+        bans_receiver: watch::Receiver<BanList>,
         reconnection_delay: Duration,
         inbound_interval: Duration,
         address_book: V2BookHandle,
@@ -135,6 +137,11 @@ where
                 ),
                 address_book: Some(address_book.clone()),
                 discovery: config.v2_peer_discovery,
+                bans: bans_receiver,
+                addr_relay: Some(AddrRelay::spawn(
+                    config.v2_advertised_addr(),
+                    config.network.clone(),
+                )),
             },
             endpoint,
             identity,
@@ -300,6 +307,7 @@ where
         inv_collector,
         latest_chain_tip,
         misbehavior_tx,
+        bans_receiver.clone(),
         reconnection_delay,
         inbound_interval,
         address_book.clone(),
