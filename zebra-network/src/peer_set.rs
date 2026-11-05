@@ -1,4 +1,5 @@
 pub(crate) mod candidate_set;
+pub(crate) mod connected;
 mod initialize;
 mod inventory_registry;
 mod limit;
@@ -11,6 +12,7 @@ pub(crate) use candidate_set::{
     crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, CrawlService,
     NextPeerService,
 };
+pub(crate) use connected::ConnectedPeers;
 pub(crate) use inventory_registry::InventoryChange;
 pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 

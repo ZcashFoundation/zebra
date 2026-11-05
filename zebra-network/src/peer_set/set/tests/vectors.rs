@@ -2,8 +2,10 @@
 
 use std::{
     cmp::max,
+    collections::HashSet,
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -4293,4 +4295,92 @@ fn peer_set_waits_for_busy_failed_peer_as_last_resort() {
             "the waiting retry should be routed to the peer once it is ready",
         );
     });
+}
+
+/// The connected-peers watch lists every connected peer, ready or busy, and follows peers as
+/// they connect, are removed, are cancelled while busy, and as the peer set shuts down.
+#[tokio::test]
+async fn connected_peers_watch_follows_the_peer_set() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let addr =
+        |port| -> PeerSocketAddr { SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port).into() };
+    let [first, second, third] = [addr(1), addr(2), addr(3)];
+
+    let (discover_tx, discover_rx) = mpsc::unbounded();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+        .with_discover(discover_rx.map(Ok::<_, BoxError>))
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(3)
+        .build();
+    let mut connected = peer_set.connected_peers();
+    assert!(connected.borrow_and_update().is_empty());
+
+    let mut harnesses = Vec::new();
+    for key in [first, second, third] {
+        let (client, harness) = ClientTestHarness::build()
+            .with_version(peer_version)
+            .finish();
+        harnesses.push(harness);
+        discover_tx
+            .unbounded_send(Change::Insert(key, client.into()))
+            .expect("the peer set holds the discovery receiver");
+    }
+
+    let keys = |connected: &mut watch::Receiver<Arc<HashSet<PeerSocketAddr>>>| {
+        HashSet::clone(&connected.borrow_and_update())
+    };
+
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .expect("the inserted peers become ready")
+        .expect("the peer set is ready");
+    assert!(connected.has_changed().is_ok());
+    assert_eq!(keys(&mut connected), [first, second, third].into());
+
+    // A busy peer is still connected.
+    let mut busy = peer_set
+        .take_ready_service(&first)
+        .expect("the first peer is ready");
+    // The mock has one buffered slot plus its sender's reserved slot.
+    let _first_request = busy.call(Request::Peers);
+    busy.ready().await.expect("the mock has a second slot");
+    let _second_request = busy.call(Request::Peers);
+    assert!(busy.ready().now_or_never().is_none());
+    peer_set.push_unready(first, busy);
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .expect("the other peers are ready")
+        .expect("the peer set is ready");
+    assert!(peer_set.cancel_handles.contains_key(&first));
+    assert!(
+        !connected.has_changed().expect("the peer set is running"),
+        "a request does not change the connected peers"
+    );
+    assert_eq!(keys(&mut connected), [first, second, third].into());
+
+    // Removing a ready peer, and cancelling a busy one.
+    for key in [second, first] {
+        discover_tx
+            .unbounded_send(Change::Remove(key))
+            .expect("the peer set holds the discovery receiver");
+    }
+    timeout(Duration::from_secs(1), peer_set.ready())
+        .await
+        .expect("the third peer is ready")
+        .expect("the peer set is ready");
+    assert!(!peer_set.cancel_handles.contains_key(&first));
+    assert_eq!(keys(&mut connected), [third].into());
+
+    // Shutting down clears the connected peers.
+    std::mem::drop(peer_set);
+    assert!(connected.borrow().is_empty());
+    assert!(
+        connected.has_changed().is_err(),
+        "the watch closes with the peer set"
+    );
 }
