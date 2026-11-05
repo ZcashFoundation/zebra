@@ -13,9 +13,13 @@ name: Deploy Nodes to GCP
 # we can run different event types concurrently.
 #
 # For pull requests, we only run the tests from this workflow, and don't do any deployments.
-# So an in-progress pull request gets cancelled, just like other tests.
+# So an in-progress pull request gets cancelled, just like other tests. Adding any other label
+# gets a group of its own, so it can't cancel a build that `run-cd-build` started.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.environment }}-${{ inputs.network }}-${{ inputs.zone }}
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.environment }}-${{
+    inputs.network }}-${{ inputs.zone }}-${{ github.event.action == 'labeled' &&
+    github.event.label.name != 'run-cd-build' && github.run_id || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
@@ -95,8 +99,9 @@ on:
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
       - .github/workflows/zfnd-build-docker-image.yml
 
-  # Only runs the Docker image tests, doesn't deploy any instances
+  # Only builds the image, doesn't deploy any instances, and only for PRs with `run-cd-build`
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
@@ -232,13 +237,16 @@ jobs:
       attestations: write # required by the called build workflow's merge job
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     # Build for:
-    # - Pull requests
+    # - Pull requests labelled `run-cd-build`. The build uses billed larger runners, and
+    #   Test Docker Config already builds and tests the amd64 image on pull requests.
     # - Manual workflow_dispatch
     # - Push to main and next branches
     # - Releases
     if: >-
       ${{
-        (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) ||
+        (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork &&
+          contains(github.event.pull_request.labels.*.name, 'run-cd-build') &&
+          (github.event.action != 'labeled' || github.event.label.name == 'run-cd-build')) ||
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'next')) ||
         (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
