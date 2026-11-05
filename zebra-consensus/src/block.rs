@@ -819,15 +819,15 @@ where
                 .await?;
             }
 
-            let now = Utc::now();
-            check::time_is_valid_at(&block.header, now, &height, &hash)
-                .map_err(VerifyBlockError::Time)?;
+            // Bound shielded work before output recovery, proof verification, or computing the
+            // early work's note commitment tree roots.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
             // Start computing early work on this block, including its note commitment tree
             // roots, as soon as its proof of work is valid. The state publishes the work once
-            // `bind_mining_candidate` reports that the remaining checks below have passed, so
-            // a forged body under a valid header never reaches miners. Dropping the sender on an
-            // early return withdraws the work.
+            // `bind_mining_candidate` reports that the Merkle root and the cheap checks below
+            // have passed, so a forged body under a valid header never reaches miners. Dropping
+            // the sender on an early return withdraws the work.
             let (bind_mining_candidate, mining_candidate_bound) = tokio::sync::oneshot::channel();
             let mining_candidate = if request.is_proposal() {
                 None
@@ -974,6 +974,10 @@ where
                 None
             };
 
+            let now = Utc::now();
+            check::time_is_valid_at(&block.header, now, &height, &hash)
+                .map_err(VerifyBlockError::Time)?;
+
             // Since errors cause an early exit, try to do the
             // quick checks first.
 
@@ -1002,8 +1006,10 @@ where
                 Some((expected_block_subsidy, deferred_pool_balance_change))
             };
 
-            // Bound shielded work before output recovery or proof verification.
-            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+            // The body is bound to the header and its cheap checks passed, so the early work can
+            // be published while the remaining checks run.
+            let _ = bind_mining_candidate.send(());
+
             let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
                 && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
             // A solved proposal is advertised through its validated-commit notification and
@@ -1041,10 +1047,6 @@ where
             if early_relay.as_ref().is_some_and(zs::EarlyRelayGuard::is_rejected) {
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
-
-            // The body is bound to the header and its cheap checks passed, so the early work can
-            // be published while the remaining checks run.
-            let _ = bind_mining_candidate.send(());
 
             if let Some(cached) = cached {
                 // Cache hits skip transaction verification, so record their checks and commit
