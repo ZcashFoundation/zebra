@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Block queue and commit spans no longer include whole verified-block payloads; compact height and hash context remains.
+time: 2026-10-19T13:12:24.421150498+02:00
