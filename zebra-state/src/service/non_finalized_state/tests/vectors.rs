@@ -10,10 +10,11 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::BlockCommitmentTreeRoots,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtree,
     transparent,
     value_balance::ValueBalance,
+    work::equihash,
 };
 use zebra_test::prelude::*;
 
@@ -321,9 +322,27 @@ fn spare_chain_replays_into_a_private_copy() -> Result<()> {
 
 /// A solved proposal commits by rebinding the prepared chain's tip, which equals pushing the
 /// solved block, and retires the parent chain as the prepared chain for the next proposal.
+///
+/// Proposals skip proof of work, so solving can also change the Equihash solution's length, and
+/// with it the block size that `getblock` and `getmininginfo` report.
 #[test]
 fn prepared_chain_commits_a_solved_proposal_by_rebinding() -> Result<()> {
     let _init_guard = zebra_test::init();
+    let solves: [fn(&mut block::Header); 2] = [
+        |header| header.nonce = [0x55; 32].into(),
+        |header| {
+            header.nonce = [0x55; 32].into();
+            header.solution = equihash::Solution::Regtest([0; 36]);
+        },
+    ];
+    for solve in solves {
+        commit_a_solved_proposal_by_rebinding(solve)?;
+    }
+
+    Ok(())
+}
+
+fn commit_a_solved_proposal_by_rebinding(solve: fn(&mut block::Header)) -> Result<()> {
     let network = Network::Mainnet;
     let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
     let published = base
@@ -333,10 +352,9 @@ fn prepared_chain_commits_a_solved_proposal_by_rebinding() -> Result<()> {
     let proposal = blocks[2].clone();
     let prepared = published.clone().push(proposal.clone())?;
 
-    // Solving changes the nonce only.
     let mut solved_block = Block::clone(&proposal.block);
     let mut header = block::Header::clone(&solved_block.header);
-    header.nonce = [0x55; 32].into();
+    solve(&mut header);
     solved_block.header = Arc::new(header);
     let mut solved = proposal.clone();
     solved.rebind(Arc::new(solved_block), std::time::Instant::now());
@@ -357,6 +375,16 @@ fn prepared_chain_commits_a_solved_proposal_by_rebinding() -> Result<()> {
     let best_chain = state.best_chain().expect("the solved block was committed");
     assert_eq!(best_chain.non_finalized_tip_hash(), solved.hash);
     assert!(best_chain.eq_internal_state(&expected));
+    let info = crate::service::read::block_info(
+        state.best_chain(),
+        &finalized_state.db,
+        solved.hash.into(),
+    )
+    .expect("the solved block was committed");
+    assert_eq!(
+        usize::try_from(info.size())?,
+        solved.block.zcash_serialized_size()
+    );
     let retired = state
         .prepared()
         .take()
@@ -415,7 +443,6 @@ fn prepared_chain_rebinds_while_finalization_keeps_the_root() -> Result<()> {
 #[ignore = "microbenchmark"]
 fn transparent_chain_push_microbenchmark() -> Result<()> {
     use std::{hint::black_box, time::Instant};
-    use zebra_chain::serialization::ZcashSerialize;
 
     let _init_guard = zebra_test::init();
     let destinations: Vec<_> = (0..9_000).map(|index| index % 2).collect();
