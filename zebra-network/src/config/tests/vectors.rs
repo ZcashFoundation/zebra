@@ -1002,3 +1002,50 @@ async fn peer_cache_at_a_path_matches_the_configured_cache() {
         .expect("a missing cache is not an error")
         .is_empty());
 }
+
+/// The advertised version 2 address is the external IP with the version 2 port, or a specific
+/// version 2 listener, and never an unspecified listener.
+#[test]
+fn v2_advertised_addr_prefers_the_external_ip() {
+    let _init_guard = zebra_test::init();
+
+    let config = |v2_listen_addr: Option<&str>, external_addr: Option<&str>| Config {
+        v2_listen_addr: v2_listen_addr.map(|addr| addr.parse().expect("valid address")),
+        external_addr: external_addr.map(|addr| addr.parse().expect("valid address")),
+        ..Config::default()
+    };
+    let addr = |addr: &str| -> std::net::SocketAddr { addr.parse().expect("valid address") };
+
+    assert_eq!(
+        config(None, Some("203.0.113.1:8233")).v2_advertised_addr(),
+        None
+    );
+    assert_eq!(
+        config(Some("[::]:8233"), Some("203.0.113.1:9999")).v2_advertised_addr(),
+        Some(addr("203.0.113.1:8233")),
+    );
+    assert_eq!(
+        config(Some("198.51.100.1:8233"), None).v2_advertised_addr(),
+        Some(addr("198.51.100.1:8233")),
+    );
+    assert_eq!(config(Some("[::]:8233"), None).v2_advertised_addr(), None);
+    assert_eq!(
+        config(Some("0.0.0.0:8233"), None).v2_advertised_addr(),
+        None
+    );
+}
+
+/// Version 2 discovery is on by default, and survives a round trip.
+#[test]
+fn v2_peer_discovery_defaults_on_and_round_trips() {
+    let _init_guard = zebra_test::init();
+
+    let default = Config::default();
+    assert!(default.v2_peer_discovery);
+
+    let config: Config = toml::from_str("v2_peer_discovery = false").expect("a valid config");
+    assert!(!config.v2_peer_discovery);
+    let round_trip: Config =
+        toml::from_str(&toml::to_string(&config).expect("serializes")).expect("deserializes");
+    assert_eq!(round_trip, config);
+}
