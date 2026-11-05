@@ -809,6 +809,7 @@ fn empty_requests_and_stream_type_handling() {
                 | StreamType::GetTx
                 | StreamType::GetAddr
                 | StreamType::GetMempool
+                | StreamType::GetBlockRange
         );
         if served {
             assert!(max_body_len(stream_type).is_some());
@@ -818,17 +819,6 @@ fn empty_requests_and_stream_type_handling() {
             max_body_len(stream_type).is_none(),
             "{stream_type} is not served"
         );
-
-        // `get-block-range` has a request format, but is not served until its server reads
-        // requests up to a `max_body_len`.
-        if stream_type == StreamType::GetBlockRange {
-            assert_err!(
-                Request::decode(stream_type, &[]),
-                WireError::Truncated { .. },
-                Violation::Close(ErrorCode::ProtocolError)
-            );
-            continue;
-        }
 
         // The handshake and announcement types never carry a request, and a request type this
         // node does not serve is refused by the stream's owner before anything is decoded.

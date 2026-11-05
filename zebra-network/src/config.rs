@@ -201,6 +201,14 @@ pub struct Config {
     /// which suits a closed test network. It still answers version 2 address
     /// requests from the version 2 peers it connected to.
     pub v2_peer_discovery: bool,
+    /// Whether Zebra serves `get-block-range` requests from version 2 peers,
+    /// which download ranges of up to 64 MiB of blocks at once to sync.
+    ///
+    /// Only used when `v2_listen_addr` is set. Zebra serves at most 2 ranges
+    /// to each peer and 8 over all its peers at once, and refuses the rest, so
+    /// the peer asks another node. Set to `false` to refuse every
+    /// `get-block-range` request.
+    pub v2_serve_block_ranges: bool,
 
     /// An optional root directory for storing cached peer address data.
     ///
@@ -803,6 +811,7 @@ impl Default for Config {
             v2_listen_addr: None,
             initial_v2_peers: IndexSet::new(),
             v2_peer_discovery: true,
+            v2_serve_block_ranges: true,
             cache_dir: CacheDir::default(),
             crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
@@ -897,6 +906,7 @@ struct DConfig {
     v2_listen_addr: Option<SocketAddr>,
     initial_v2_peers: IndexSet<String>,
     v2_peer_discovery: bool,
+    v2_serve_block_ranges: bool,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
@@ -918,6 +928,7 @@ impl Default for DConfig {
             v2_listen_addr: config.v2_listen_addr,
             initial_v2_peers: config.initial_v2_peers,
             v2_peer_discovery: config.v2_peer_discovery,
+            v2_serve_block_ranges: config.v2_serve_block_ranges,
             cache_dir: config.cache_dir,
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
@@ -982,6 +993,7 @@ impl From<Config> for DConfig {
             v2_listen_addr,
             initial_v2_peers,
             v2_peer_discovery,
+            v2_serve_block_ranges,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -1020,6 +1032,7 @@ impl From<Config> for DConfig {
             v2_listen_addr,
             initial_v2_peers,
             v2_peer_discovery,
+            v2_serve_block_ranges,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -1044,6 +1057,7 @@ impl<'de> Deserialize<'de> for Config {
             v2_listen_addr,
             initial_v2_peers,
             v2_peer_discovery,
+            v2_serve_block_ranges,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,
@@ -1132,6 +1146,7 @@ impl<'de> Deserialize<'de> for Config {
             v2_listen_addr,
             initial_v2_peers,
             v2_peer_discovery,
+            v2_serve_block_ranges,
             cache_dir,
             peerset_initial_target_size,
             crawl_new_peer_interval,

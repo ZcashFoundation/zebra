@@ -2429,7 +2429,8 @@ where
             | Request::AdvertiseCompactBlock(..)
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
-            | Request::CheckCompactBlock(_) => {
+            | Request::CheckCompactBlock(_)
+            | Request::BlockRange { .. } => {
                 future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 

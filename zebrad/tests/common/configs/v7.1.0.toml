@@ -81,6 +81,7 @@ max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 25
 v2_peer_discovery = true
+v2_serve_block_ranges = true
 
 [notify]
 

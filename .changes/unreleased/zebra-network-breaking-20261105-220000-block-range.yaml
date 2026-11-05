@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Added the `Request::BlockRange` and `Response::BlockRange` variants, which ask the inbound service for the ancestor chain of a block, to serve version 2 `get-block-range` requests, and the `PeerError::V2OnlyRequest` variant, which a legacy connection returns for such a request. These enums are not `#[non_exhaustive]`, so exhaustive matches on them need new arms.'
+time: 2026-11-05T22:00:00.000000000Z

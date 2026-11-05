@@ -12,7 +12,10 @@ use zebra_chain::{
 };
 
 use super::{
-    constants::{MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES, MAX_TXS_PER_REQUEST},
+    constants::{
+        GET_BLOCK_RANGE_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
+        MAX_TXS_PER_REQUEST,
+    },
     txref::TxRef,
     types::StreamType,
     wire::{ensure_consumed, read_count, read_flag, write_count, WireError},
@@ -34,6 +37,8 @@ pub fn max_body_len(stream_type: StreamType) -> Option<usize> {
         // A 3-byte count and references of the largest type.
         StreamType::GetTx => 3 + MAX_TXS_PER_REQUEST * TxRef::MAX_ENCODED_LEN,
         StreamType::GetAddr | StreamType::GetMempool => 0,
+        // A final hash, a count, and a byte bound.
+        StreamType::GetBlockRange => GET_BLOCK_RANGE_REQUEST_LEN,
         _ => return None,
     })
 }

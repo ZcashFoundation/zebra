@@ -22,7 +22,12 @@ use tokio::sync::{
     oneshot::{self, error::TryRecvError},
     Semaphore,
 };
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    timeout::Timeout,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state::{self as zs};
@@ -95,6 +100,7 @@ type BlockDownloadPeerSet =
     Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
+type ReadState = BoxCloneService<zs::ReadRequest, zs::ReadResponse, zs::BoxError>;
 type SemanticBlockVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, RouterError>,
     zebra_consensus::Request,
@@ -242,6 +248,10 @@ pub struct Inbound {
     /// Read-only context for compact reconstruction; absent until explicitly configured.
     compact_relay: Option<(Network, zs::ReadStateService)>,
 
+    /// Read-only state for serving version 2 `get-block-range` requests; absent until
+    /// explicitly configured, and then every block range request fails.
+    block_range_state: Option<ReadState>,
+
     /// Bounds mempool scans and detached blocking checks across all peer connections.
     compact_checks: Arc<Semaphore>,
 }
@@ -262,6 +272,7 @@ impl Inbound {
             submitted_blocks: Default::default(),
             early_blocks: None,
             compact_relay: None,
+            block_range_state: None,
             compact_checks: Arc::new(Semaphore::new(3)),
         }
     }
@@ -284,6 +295,19 @@ impl Inbound {
     /// Provides committed-tip context for negotiated compact reconstruction, without publishing it.
     pub fn with_compact_relay(mut self, network: Network, state: zs::ReadStateService) -> Self {
         self.compact_relay = Some((network, state));
+        self
+    }
+
+    /// Provides the read-only state that version 2 `get-block-range` requests are served from.
+    pub fn with_block_range_state<S>(mut self, read_state: S) -> Self
+    where
+        S: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = zs::BoxError>
+            + Clone
+            + Send
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        self.block_range_state = Some(BoxCloneService::new(read_state));
         self
     }
 
@@ -747,6 +771,25 @@ impl Service<zn::Request> for Inbound {
             zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
 
             zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
+
+            // The version 2 connection reads a range in chunks, and bounds each chunk's size and
+            // the number of ranges it serves at once; the state bounds each read by `count` and
+            // `max_bytes`, and runs it in its blocking read pool.
+            zn::Request::BlockRange { from_hash, count, max_bytes } => {
+                let Some(read_state) = self.block_range_state.clone() else {
+                    return async { Err("block range state is unavailable".into()) }.boxed();
+                };
+                let request = zs::ReadRequest::AncestorBlocks {
+                    hash: from_hash,
+                    count,
+                    max_bytes: max_bytes.into(),
+                };
+                read_state.oneshot(request).map_ok(|resp| match resp {
+                    zs::ReadResponse::AncestorBlocks(blocks) => zn::Response::BlockRange(blocks),
+                    _ => unreachable!("zebra-state should always respond to an `AncestorBlocks` request with an `AncestorBlocks` response"),
+                })
+                    .boxed()
+            }
         }
     }
 }
