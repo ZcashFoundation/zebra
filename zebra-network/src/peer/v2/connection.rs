@@ -1,8 +1,7 @@
 //! The version 2 connection task.
 //!
 //! After the handshake, one task owns a connection for its whole life: the
-//! QUIC connection, the open handshake stream, the cache of addresses the
-//! peer announced, and the announcement writers. It accepts the peer's
+//! QUIC connection, the open handshake stream, and the announcement writers. It accepts the peer's
 //! streams, serves the peer's requests through the inbound service, drives
 //! this node's requests to the peer, and presents the connection to the
 //! peer set as an ordinary [`peer::Client`](crate::peer::Client).
@@ -40,8 +39,8 @@ use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedT
 use crate::{
     meta_addr::MetaAddr,
     peer::{
-        connection::{overload_drop_connection_probability, Handler},
-        CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo, ErrorSlot, PeerError,
+        connection::overload_drop_connection_probability, CancelHeartbeatTask, Client,
+        ClientRequest, ConnectionInfo, ErrorSlot, MustUseClientResponseSender, PeerError,
         SharedPeerError,
     },
     peer_set::{ConnectionTracker, InventoryChange},
@@ -56,6 +55,7 @@ use crate::{
         },
     },
     quic::app_error_code,
+    v2_address_book::{V2BookHandle, Via},
     BoxError, PeerSocketAddr,
 };
 
@@ -86,6 +86,15 @@ pub struct ConnectionParams<S> {
     /// The misbehavior scores of every version 2 peer, which report peers to
     /// ban to the address book.
     pub misbehavior: MisbehaviorScores,
+
+    /// The version 2 address segment, which takes the addresses peers relay and answers their
+    /// `get-addr` requests, or `None` for a connection that neither records nor serves
+    /// addresses.
+    pub(crate) address_book: Option<V2BookHandle>,
+
+    /// Whether this node asks the peers it dialled for addresses, once each (draft,
+    /// "`get-addr`").
+    pub discovery: bool,
 }
 
 /// Something a stream task needs the connection task to act on.
@@ -100,8 +109,7 @@ enum Event {
         code: ErrorCode,
     },
 
-    /// Addresses from the peer: announced, or left over from a `get-addr`
-    /// answer after the client's sample; cached for `Request::Peers`.
+    /// Addresses the peer announced, for the version 2 address segment.
     Addresses(Vec<MetaAddr>),
 
     /// Close the connection because the peer's requests overloaded the
@@ -176,7 +184,7 @@ impl Events {
         let _ = self.fatal.try_send(event);
     }
 
-    /// Hands addresses the peer sent to the connection task's cache, best
+    /// Hands addresses the peer announced to the connection task, best
     /// effort: they are dropped if the connection task is behind.
     fn addresses(&self, addrs: Vec<MetaAddr>) {
         if let Err(mpsc::error::TrySendError::Full(_)) =
@@ -356,7 +364,6 @@ where
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
-        sent_get_addr: false,
         get_addr_allowed: Arc::new(AtomicBool::new(is_inbound)),
         connection_info: connection_info.clone(),
         transient_addr,
@@ -366,7 +373,6 @@ where
         client_rx: server_rx.into(),
         error_slot: error_slot.clone(),
         _connection_tracker: connection_tracker,
-        cached_addrs: Vec::new(),
         tx_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
@@ -418,8 +424,6 @@ struct ConnectionTask<S> {
     connection: Connection,
     /// Whether the peer dialled this node.
     is_inbound: bool,
-    /// Whether this node has sent the peer its one `get-addr` request.
-    sent_get_addr: bool,
     /// Whether the peer may still send a `get-addr` request: only once, and
     /// only on a connection the peer dialled (draft, "`get-addr`"). Shared
     /// with the request stream tasks.
@@ -434,7 +438,6 @@ struct ConnectionTask<S> {
     error_slot: ErrorSlot,
     /// Reduces the open connection count when dropped.
     _connection_tracker: ConnectionTracker,
-    cached_addrs: Vec<MetaAddr>,
     /// This node's transaction announcement stream to the peer, opened on first use. Block
     /// announcements need a header the internal request does not carry, and address
     /// announcements wait for address relay.
@@ -480,6 +483,9 @@ where
 {
     /// The event loop.
     async fn run(mut self) {
+        if !self.is_inbound && self.params.discovery {
+            self.spawn_get_addr();
+        }
         let exit = self.run_loop().await;
 
         tracing::debug!(error = %exit.error, code = ?exit.code, "closing version 2 connection");
@@ -657,11 +663,13 @@ where
             Event::Addresses(addrs) => {
                 // # Security
                 //
-                // Announced addresses, and the part of a `get-addr` answer the client did not
-                // get, only enter the cache, which Zebra's components drain through
-                // `Request::Peers` as a bounded random sample; the peer cannot fill the address
-                // book directly.
-                Handler::update_addr_cache(&mut self.cached_addrs, &addrs, None);
+                // Announced addresses only go to the version 2 address segment, which admits
+                // them through its intake rules and buckets; the peer cannot fill the address
+                // books directly, and version 2 addresses never reach the legacy one.
+                if let (Some(book), Some(source)) = (&self.params.address_book, self.transient_addr)
+                {
+                    book.intake(source, addrs, Via::Announcement);
+                }
                 None
             }
             // Like the legacy connection, an overload drop blames the inbound service's load,
@@ -688,8 +696,46 @@ where
             self.inbound_permits.clone(),
             self.overloads.clone(),
             self.get_addr_allowed.clone(),
+            self.params.address_book.clone(),
             self.events.clone(),
         ));
+    }
+
+    /// Sends the peer this node's one `get-addr` request, on a connection this node dialled
+    /// (draft, "`get-addr`"), and hands the whole answer to the version 2 address segment.
+    ///
+    /// The request is driven like a client's, so an oversized or malformed answer is penalized
+    /// or closes the connection in the same way.
+    fn spawn_get_addr(&mut self) {
+        let (Some(book), Some(source)) = (self.params.address_book.clone(), self.transient_addr)
+        else {
+            return;
+        };
+        let Ok(permit) = self.outbound_permits.clone().try_acquire_owned() else {
+            // Only this task takes permits, and it takes none before this.
+            return;
+        };
+        let (tx, rx) = oneshot::channel();
+        let request = Request::Peers;
+        let tx = MustUseClientResponseSender::new(tx, &request, None, Some(source));
+        let context = self.request_context();
+        self.tasks.spawn(async move {
+            outbound::drive(request, tx, permit, context).await;
+            if let Ok(Ok(Response::Peers(addrs))) = rx.await {
+                book.intake(source, addrs, Via::GetAddr);
+            }
+        });
+    }
+
+    /// What a request this node sends to the peer needs from the connection.
+    fn request_context(&self) -> outbound::RequestContext {
+        outbound::RequestContext {
+            connection: self.connection.clone(),
+            transient_addr: self.transient_addr,
+            genesis_hash: self.params.genesis_hash,
+            misbehavior: self.params.misbehavior.clone(),
+            events: self.events.clone(),
+        }
     }
 
     /// Handles a request from Zebra's components.
@@ -711,20 +757,11 @@ where
         .increment(1);
 
         let response = match request {
-            // Serve peers from the cache first, as the legacy connection does. To impede
-            // address-based fingerprinting, `get-addr` is only sent on a connection this node
-            // dialled, at most once (draft, "`get-addr`"); otherwise the cache is all there is,
-            // even if it is empty.
-            Request::Peers
-                if !self.cached_addrs.is_empty() || self.is_inbound || self.sent_get_addr =>
-            {
-                let addrs = Handler::update_addr_cache(
-                    &mut self.cached_addrs,
-                    &[],
-                    crate::constants::PEER_ADDR_RESPONSE_LIMIT,
-                );
-                Ok(Response::Peers(addrs))
-            }
+            // The legacy address book's crawler does not ask version 2 peers for addresses: their
+            // records are QUIC endpoints, which the connection hands to the version 2 address
+            // segment instead. The peer set does not route this request here, so this only
+            // answers a direct caller.
+            Request::Peers => Ok(Response::Peers(Vec::new())),
 
             // The transport measures round-trip time; no message is needed.
             Request::Ping(_) => Ok(Response::Pong(self.connection.rtt())),
@@ -761,26 +798,14 @@ where
 
             // Everything else is a request stream, driven in its own task.
             request => {
-                if matches!(request, Request::Peers) {
-                    self.sent_get_addr = true;
-                }
                 let permit = self
                     .outbound_permits
                     .clone()
                     .try_acquire_owned()
                     .expect("requests are only taken while a permit is available, and only this task takes permits");
-                self.tasks.spawn(outbound::drive(
-                    request,
-                    tx,
-                    permit,
-                    outbound::RequestContext {
-                        connection: self.connection.clone(),
-                        transient_addr: self.transient_addr,
-                        genesis_hash: self.params.genesis_hash,
-                        misbehavior: self.params.misbehavior.clone(),
-                        events: self.events.clone(),
-                    },
-                ));
+                let context = self.request_context();
+                self.tasks
+                    .spawn(outbound::drive(request, tx, permit, context));
                 return;
             }
         };

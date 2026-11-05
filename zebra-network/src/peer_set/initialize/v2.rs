@@ -48,6 +48,7 @@ use crate::{
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
+    v2_address_book::{self, V2BookHandle},
     BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
@@ -94,6 +95,7 @@ where
         misbehavior_tx: mpsc::Sender<MisbehaviorReport>,
         reconnection_delay: Duration,
         inbound_interval: Duration,
+        address_book: V2BookHandle,
     ) -> (Self, watch::Sender<OpenInbound>) {
         let (open_inbound_tx, open_inbound) = watch::channel(OpenInbound::new());
         let shared = Shared {
@@ -105,8 +107,6 @@ where
             open_inbound,
             nonces: NonceRegistry::spawn(config.peerset_total_connection_limit()),
             minimum_peer_version: MinimumPeerVersion::new(latest_chain_tip, &config.network),
-            // TODO: report version 2 peers to the address book once it records each address's
-            // transport; today the legacy crawler would dial such an entry over TCP.
             connection_params: ConnectionParams {
                 inbound_service,
                 inv_collector,
@@ -115,6 +115,8 @@ where
                     misbehavior_tx,
                     config.peerset_total_connection_limit(),
                 ),
+                address_book: Some(address_book),
+                discovery: config.v2_peer_discovery,
             },
             endpoint,
             identity,
@@ -244,6 +246,16 @@ where
     // Only the first endpoint a process opens is kept for shutdown; a node opens one.
     let _ = OPEN_ENDPOINT.set(endpoint.clone());
 
+    // Version 2 addresses are QUIC endpoints, so they have their own address book, which the
+    // connections and the dialer share. Its actor stops once they have all stopped.
+    let local_listener = config.v2_advertised_addr().unwrap_or(listen_addr);
+    let (address_book, _address_book_stats, _address_book_task) = v2_address_book::spawn(
+        &config,
+        &config.network,
+        local_listener,
+        bans_receiver.clone(),
+    );
+
     // The peer set's own limit includes both of these, so it has room for every v2 connection.
     let outbound_limit = config.v2_outbound_connection_limit();
     let (shared, open_inbound_tx) = Shared::new(
@@ -256,6 +268,7 @@ where
         misbehavior_tx,
         reconnection_delay,
         inbound_interval,
+        address_book,
     );
 
     // One task for both. The listener runs for the life of the peer set, so its exit is fatal,

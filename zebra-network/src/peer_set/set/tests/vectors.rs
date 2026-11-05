@@ -655,6 +655,8 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         inv_collector: tokio::sync::broadcast::channel(16).0,
         genesis_hash: network.genesis_hash(),
         misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
+        address_book: None,
+        discovery: false,
     };
     let client = spawn_connection(
         outbound,
