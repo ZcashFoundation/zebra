@@ -73,7 +73,12 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-26.04
+    # Most of this job is the release build of the workspace crates, which a 4-CPU runner limits.
+    # The organisation's larger runner is billed and exists only here, so forks' own runs and pull
+    # requests from forks use the standard runner; their merge-queue runs use the larger one.
+    runs-on: >-
+      ${{ github.repository_owner == 'ZcashFoundation' && !github.event.pull_request.head.repo.fork
+      && 'ubuntu-latest-xl' || 'ubuntu-26.04' }}
     timeout-minutes: 120
     env:
       # Thin LTO roughly doubles the time to link the release test binaries and
@@ -102,7 +107,11 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Run unit tests
-        run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
+        # Many of the slowest tests wait on timers or peers rather than the CPU, so run twice as many
+        # tests as the runner has CPUs.
+        run: |
+          echo "Running the tests on $(nproc) CPUs"
+          NEXTEST_TEST_THREADS=$((2 * $(nproc))) cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
       - name: Summarize flaky and failed unit tests
         if: always()
