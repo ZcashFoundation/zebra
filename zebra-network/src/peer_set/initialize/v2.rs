@@ -708,20 +708,7 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
         while let Some(addr) = slots.take_next(Instant::now()) {
             // Checked here, before an attempt is spawned, so an address that is not dialled
             // holds no slot, and the addresses that wait for one are logged right below.
-            //
-            // `is_banned` checks the ban's age when it is called, so a lapsed ban is seen when
-            // the address is offered a slot again, without waiting for the ban list to change.
-            // Version 2 connections leave from the listening port, so an outbound connection to
-            // a peer that is connected to this node would have the same peer set key and per-IP
-            // slot as the inbound one, and the peer set would drop one of them, at each end
-            // independently.
-            let not_dialled = if bans_receiver.borrow().is_banned(addr.ip()) {
-                Some("banned")
-            } else if shared.open_inbound.borrow().contains_key(&addr) {
-                Some("already connected to us")
-            } else {
-                None
-            };
+            let not_dialled = not_dialled(&shared, &bans_receiver, addr);
             if let Some(reason) = not_dialled {
                 tracing::debug!(
                     ?addr,
@@ -770,6 +757,27 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
                 );
             }
         }
+    }
+}
+
+/// Returns why `addr` is not dialled now, or `None` if it can be.
+fn not_dialled<S, C>(
+    shared: &Shared<S, C>,
+    bans_receiver: &watch::Receiver<BanList>,
+    addr: PeerSocketAddr,
+) -> Option<&'static str> {
+    // `is_banned` checks the ban's age when it is called, so a lapsed ban is seen when
+    // the address is offered a slot again, without waiting for the ban list to change.
+    // Version 2 connections leave from the listening port, so an outbound connection to
+    // a peer that is connected to this node would have the same peer set key and per-IP
+    // slot as the inbound one, and the peer set would drop one of them, at each end
+    // independently.
+    if bans_receiver.borrow().is_banned(addr.ip()) {
+        Some("banned")
+    } else if shared.open_inbound.borrow().contains_key(&addr) {
+        Some("already connected to us")
+    } else {
+        None
     }
 }
 
