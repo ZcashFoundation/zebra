@@ -1,15 +1,16 @@
 //! Integration with sentry.io for event reporting.
 
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     env,
     panic::PanicHookInfo,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Mutex, MutexGuard, OnceLock, PoisonError,
     },
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use sentry::{
@@ -32,6 +33,11 @@ use crate::{
     components::sync::progress,
 };
 
+mod distributions;
+mod periodic;
+
+pub(crate) use distributions::{send_tip_block_delay, SentryRecorder};
+
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
 /// `zebrad` exits with `process::exit`, which skips destructors, so the guard must be dropped
@@ -41,9 +47,12 @@ static CLIENT_GUARD: Mutex<Option<ClientInitGuard>> = Mutex::new(None);
 /// The network this node runs on, used to find the network upgrade at the tip.
 static NETWORK: OnceLock<Network> = OnceLock::new();
 
+/// Whether the syncer was close to the chain tip when the progress task last checked.
+static CLOSE_TO_TIP: AtomicBool = AtomicBool::new(false);
+
 /// The best chain tip height, or [`UNKNOWN_TIP_HEIGHT`] until the progress task records one.
 ///
-/// Events and logs read this instead of the chain tip watch channel, because Sentry calls
+/// Events, logs, and metrics read this instead of the chain tip watch channel, because Sentry calls
 /// `before_send` and `before_send_log` from inside tracing, where instrumented chain tip reads
 /// would re-enter the tracing layers.
 static TIP_HEIGHT: AtomicU32 = AtomicU32::new(UNKNOWN_TIP_HEIGHT);
@@ -135,6 +144,8 @@ impl Metadata {
 
     fn client_options_with_release(&self, release: String) -> ClientOptions {
         let log_attributes = self.log_attributes();
+        let network = self.tags.get("chain.network").cloned();
+        let started_at = Instant::now();
         let options = ClientOptions::new()
             .release(release)
             .before_send(|mut event| {
@@ -148,6 +159,15 @@ impl Metadata {
                 merge_log_attributes(&mut log, &log_attributes);
                 merge_log_attributes(&mut log, &chain_log_attributes(chain_position()));
                 Some(log)
+            })
+            .before_send_metric(move |mut metric| {
+                add_metric_attributes(
+                    &mut metric.attributes,
+                    network.as_deref(),
+                    chain_position().map(|(_, network_upgrade)| network_upgrade),
+                    started_at.elapsed(),
+                );
+                Some(metric)
             });
 
         match &self.environment {
@@ -212,6 +232,16 @@ pub(crate) fn init(network: &Network) {
         });
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
+    }
+
+    let metrics_flush = thread::Builder::new()
+        .name("sentry metrics flush".to_owned())
+        .spawn(|| loop {
+            thread::sleep(periodic::FLUSH_INTERVAL);
+            periodic::flush();
+        });
+    if let Err(error) = metrics_flush {
+        warn!(?error, "unable to start Sentry metrics flush");
     }
 }
 
@@ -297,10 +327,13 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Ends the release health session with `status`, then closes the client.
+/// Sends the counter totals and gauge values recorded since the last flush, ends the release
+/// health session with `status`, then closes the client.
 ///
-/// Returns `false` if queued events and logs could not be sent before the shutdown timeout.
+/// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
+/// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
+    periodic::flush();
     end_session(status);
 
     let guard = CLIENT_GUARD
@@ -311,9 +344,18 @@ pub(crate) fn end(status: SessionStatus) -> bool {
     guard.is_none_or(|guard| guard.close(None))
 }
 
-/// Records the best chain tip height for the events and logs sent after this call.
+/// Records the best chain tip height for the events, logs, and metrics sent after this call.
 pub(crate) fn record_tip_height(height: Height) {
     TIP_HEIGHT.store(height.0, Ordering::Relaxed);
+}
+
+/// Records whether the syncer is close to the chain tip, which per-block metrics wait for.
+pub(crate) fn record_close_to_tip(close_to_tip: bool) {
+    CLOSE_TO_TIP.store(close_to_tip, Ordering::Relaxed);
+}
+
+fn is_close_to_tip() -> bool {
+    CLOSE_TO_TIP.load(Ordering::Relaxed)
 }
 
 /// Returns the best chain tip height and its network upgrade, once both are known.
@@ -359,6 +401,32 @@ fn chain_log_attributes(
     ]
 }
 
+/// Adds the network, the network upgrade at the tip, and the process uptime to a metric's
+/// attributes, keeping any the metric already has.
+///
+/// Unlike events and logs, metrics don't get the tip height, because a block timing value is often
+/// for a block above the tip.
+fn add_metric_attributes(
+    attributes: &mut Map<Cow<'static, str>, LogAttribute>,
+    network: Option<&str>,
+    network_upgrade: Option<NetworkUpgrade>,
+    uptime: Duration,
+) {
+    if let Some(network) = network {
+        attributes
+            .entry("chain.network".into())
+            .or_insert_with(|| network.to_owned().into());
+    }
+    if let Some(network_upgrade) = network_upgrade {
+        attributes
+            .entry("chain.network_upgrade".into())
+            .or_insert_with(|| network_upgrade.to_string().into());
+    }
+    attributes
+        .entry("process.uptime_seconds".into())
+        .or_insert_with(|| uptime.as_secs().into());
+}
+
 /// Returns the Sentry tracing layer, or `None` if [`init`] has not bound an enabled client.
 ///
 /// Without a client the layer sends nothing, but it still creates a Sentry span for every
@@ -367,11 +435,7 @@ pub(crate) fn tracing_layer<S>() -> Option<impl tracing_subscriber::Layer<S>>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    let client_enabled = Hub::current()
-        .client()
-        .is_some_and(|client| client.is_enabled());
-
-    client_enabled.then(|| {
+    is_client_enabled().then(|| {
         sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
             Level::ERROR => EventFilter::Event | EventFilter::Log,
             Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
@@ -384,6 +448,18 @@ where
             _ => EventFilter::Ignore,
         })
     })
+}
+
+/// Returns the recorder that sends selected histograms to Sentry, or `None` if [`init`] has not
+/// bound an enabled client.
+pub(crate) fn metrics_recorder() -> Option<SentryRecorder> {
+    is_client_enabled().then_some(SentryRecorder)
+}
+
+fn is_client_enabled() -> bool {
+    Hub::current()
+        .client()
+        .is_some_and(|client| client.is_enabled())
 }
 
 /// Builds the Sentry event for a panic.
@@ -539,27 +615,53 @@ mod tests {
         collections::{BTreeMap, HashMap},
         panic,
         sync::{Arc, Mutex},
-        time::SystemTime,
+        time::{Duration, SystemTime},
     };
 
     use sentry::{
         protocol::{
-            Context, EnvelopeItem, Event, Frame, Log, LogAttribute, LogLevel, SessionStatus,
-            Stacktrace,
+            Context, EnvelopeItem, Event, Frame, ItemContainer, Log, LogAttribute, LogLevel, Map,
+            Metric, MetricType, SessionStatus, Stacktrace, Unit, Value,
         },
         test::with_captured_envelopes_options,
         Client, ClientOptions, Hub, Scope,
     };
     use tracing_subscriber::Registry;
-    use zebra_chain::{block::Height, parameters::NetworkUpgrade};
+    use zebra_chain::{
+        block::Height,
+        parameters::{Network, NetworkUpgrade},
+    };
 
     use crate::application::build_version;
 
+    use super::distributions::tip_block_delay;
     use super::{
-        add_chain_tags, chain_log_attributes, end_session, merge_log_attributes, panic_event_from,
-        release_name_from, rotate_session, start_run_sessions, tracing_layer,
-        without_panic_handling_frames, Metadata,
+        add_chain_tags, add_metric_attributes, chain_log_attributes, end_session,
+        merge_log_attributes, panic_event_from, release_name_from, rotate_session,
+        start_run_sessions, tracing_layer, without_panic_handling_frames, Metadata, SentryRecorder,
     };
+
+    /// Returns the metrics sent while `record` runs with [`SentryRecorder`] and a client built from
+    /// `metadata`.
+    fn sent_metrics(metadata: &Metadata, record: impl FnOnce()) -> Vec<Metric> {
+        with_captured_envelopes_options(
+            || metrics::with_local_recorder(&SentryRecorder, record),
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        )
+        .iter()
+        .flat_map(|envelope| envelope.items())
+        .filter_map(|item| match item {
+            EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    fn metric_attribute<'a>(metric: &'a Metric, key: &str) -> Option<&'a Value> {
+        metric.attributes.get(key).map(|attribute| &attribute.0)
+    }
 
     fn tracing_layer_installed_with(client: Option<Client>) -> bool {
         let hub = Hub::new(client.map(Arc::new), Arc::new(Scope::default()));
@@ -874,6 +976,173 @@ mod tests {
                 .and_then(|attr| attr.0.as_str()),
             Some("Nu7"),
         );
+    }
+
+    #[test]
+    fn listed_histograms_become_distributions_with_labels_and_network() {
+        let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+        metadata.tags.insert("chain.network", "Mainnet".to_owned());
+
+        let metrics = sent_metrics(&metadata, || {
+            let queue = metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue");
+
+            // Far from the tip, an initial sync would send a value for every block.
+            queue.record(9.0);
+            super::record_close_to_tip(true);
+            queue.record(0.25);
+            super::record_close_to_tip(false);
+            queue.record(8.0);
+
+            super::record_close_to_tip(true);
+            metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
+            metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected only the listed histogram near the tip, got {metrics:?}");
+        };
+        let attribute = |key: &str| metric_attribute(metric, key).and_then(Value::as_str);
+
+        assert_eq!(metric.name, "state.block_writer.phase.duration_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 0.25);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(attribute("phase"), Some("queue"));
+        assert_eq!(attribute("chain.network"), Some("Mainnet"));
+    }
+
+    #[test]
+    fn tip_block_delays_are_sent_once_with_their_block_height() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        // The Mainnet NU7 activation block, which the tip height read by other metrics often
+        // hasn't reached yet.
+        let height = Height(3_543_405);
+
+        let metrics = sent_metrics(&metadata, || {
+            // The progress task records the histogram for Prometheus and sends the value to
+            // Sentry, so the recorder must not send it again.
+            super::record_close_to_tip(true);
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(2.0);
+            tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected one tip block delay, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "zcash.chain.tip.block_delay_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 2.0);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(
+            metric_attribute(metric, "chain.height").and_then(Value::as_u64),
+            Some(3_543_405),
+        );
+        assert_eq!(
+            metric_attribute(metric, "chain.network_upgrade").and_then(Value::as_str),
+            Some("Nu7"),
+        );
+    }
+
+    #[test]
+    fn metric_attributes_are_added_once_known_and_keep_existing_ones() {
+        let mut attributes = Map::new();
+        add_metric_attributes(&mut attributes, None, None, Duration::ZERO);
+        assert_eq!(
+            attributes.keys().collect::<Vec<_>>(),
+            ["process.uptime_seconds"],
+        );
+
+        let mut attributes = Map::new();
+        attributes.insert("chain.network_upgrade".into(), "metric-upgrade".into());
+        add_metric_attributes(
+            &mut attributes,
+            Some("Mainnet"),
+            Some(NetworkUpgrade::Nu7),
+            Duration::from_millis(90_500),
+        );
+        let attribute = |key: &str| attributes.get(key).map(|attr| &attr.0);
+
+        assert_eq!(
+            attribute("chain.network").and_then(|value| value.as_str()),
+            Some("Mainnet"),
+        );
+        assert_eq!(
+            attribute("chain.network_upgrade").and_then(|value| value.as_str()),
+            Some("metric-upgrade"),
+        );
+        assert_eq!(
+            attribute("process.uptime_seconds").and_then(|value| value.as_u64()),
+            Some(90),
+        );
+    }
+
+    #[test]
+    fn listed_counters_and_gauges_are_sent_once_per_flush() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            for _ in 0..3 {
+                metrics::counter!("sync.block.error.count", "kind" => "not_found").increment(1);
+            }
+            metrics::counter!("sync.downloaded.block.count").increment(1);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
+
+            super::periodic::flush();
+            // No new errors, so only the gauge's latest value is sent again.
+            super::periodic::flush();
+        });
+
+        let mut metrics: Vec<_> = metrics
+            .iter()
+            .map(|metric| {
+                let kind = metric_attribute(metric, "kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                (metric.name.to_string(), metric.r#type, metric.value, kind)
+            })
+            .collect();
+        metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let oldest_age = (
+            "sync.downloads.oldest_age_seconds".to_string(),
+            MetricType::Gauge,
+            90.0,
+            None,
+        );
+        assert_eq!(
+            metrics,
+            [
+                (
+                    "sync.block.error.count".to_string(),
+                    MetricType::Counter,
+                    3.0,
+                    Some("not_found".to_string()),
+                ),
+                oldest_age.clone(),
+                oldest_age,
+            ],
+        );
+    }
+
+    #[test]
+    fn counts_since_the_last_flush_are_sent_at_shutdown() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout").increment(1);
+
+            super::end(SessionStatus::Crashed);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected the restart count, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "sync.restart.count");
+        assert_eq!(metric.value, 1.0);
     }
 
     #[test]

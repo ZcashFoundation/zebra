@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra now starts with its cached peers when DNS resolution of the initial peers fails, instead of waiting for DNS to succeed ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+time: 2026-10-21T14:47:17.991283526Z
