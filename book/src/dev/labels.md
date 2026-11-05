@@ -50,6 +50,7 @@ condition just goes false. Change the workflow in the same PR.
 | `release` | `pr-gate.yml`, `tests-unit.yml`, `release.yml`, `checkpoint-update.yml`, `release-plz.toml` | Marks release PRs; gates release readiness checks. Applied by release-plz and by the release templates |
 | `run-stateful-tests` | `zfnd-ci-integration-tests-gcp.yml` | Adding it to a PR runs the stateful GCP integration tests for that PR |
 | `run-benchmarks` | `benchmarks.yml` | Adding it to a PR runs the benchmark comparison against the base branch |
+| `run-cd-build` | `zfnd-deploy-nodes-gcp.yml` | Adding it to a PR builds the multi-arch CD image on each push, without deploying it. Unlabelled PRs skip that build |
 
 ## Labels written by CI
 

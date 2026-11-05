@@ -1,6 +1,6 @@
 # Zebra Continuous Delivery
 
-The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment, every commit merged to [`next`](next-branch.md) to the `next` environment, and every published release to `prod`, except pre-releases from `next`, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
+The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment, every commit merged to [`next`](next-branch.md) to the `next` environment, and every published release to `prod`, except pre-releases from `next`, on Google Cloud Platform. PR-triggered work uses the `dev` environment: a PR labelled [`run-cd-build`](labels.md#labels-wired-into-automation) builds the CD image there without deploying it.
 
 ## Topology: one zonal MIG per (environment, branch, network, zone)
 
