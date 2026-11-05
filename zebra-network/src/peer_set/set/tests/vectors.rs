@@ -659,6 +659,8 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
         address_book: None,
         discovery: false,
+        bans: tokio::sync::watch::channel(crate::BanList::default()).1,
+        addr_relay: None,
     };
     let client = spawn_connection(
         outbound,

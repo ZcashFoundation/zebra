@@ -14,11 +14,14 @@ use bytes::Bytes;
 
 use zebra_chain::{
     block,
-    serialization::{DateTime32, Duration32},
+    serialization::{DateTime32, Duration32, ZcashSerialize},
     transaction::UnminedTxId,
 };
 
-use crate::{meta_addr::MetaAddr, protocol::external::AddrV2};
+use crate::{
+    meta_addr::MetaAddr,
+    protocol::external::{canonical_peer_addr, AddrV2},
+};
 
 use super::{
     txref::TxRef,
@@ -90,6 +93,32 @@ pub fn decode_tx_record(payload: &[u8]) -> Result<TxRef, WireError> {
 pub fn decode_addr_record(payload: &[u8]) -> Result<Option<MetaAddr>, WireError> {
     let record = deserialize_exact::<AddrV2>(payload, "address announcement")?;
     Ok(MetaAddr::try_from(record).ok())
+}
+
+/// Encodes an address announcement record: one `addrv2` record, the layout
+/// of one `get-addr` response entry (draft, "Address Announcements").
+///
+/// The address must have its services and last-seen time, as gossiped and
+/// sanitized addresses do; one without is a local error.
+pub fn encode_addr_record(addr: &MetaAddr) -> Result<Bytes, WireError> {
+    let unencodable = |reason| WireError::LocalUnencodable {
+        what: "address record",
+        reason,
+    };
+    let untrusted_services = addr
+        .services()
+        .ok_or(unencodable("address has no services"))?;
+    let untrusted_last_seen = addr
+        .last_seen()
+        .ok_or(unencodable("address has no last seen time"))?;
+    let record = AddrV2::IpAddr {
+        untrusted_last_seen,
+        untrusted_services,
+        addr: canonical_peer_addr(addr.addr()),
+    };
+    let mut payload = Vec::new();
+    record.zcash_serialize(&mut payload)?;
+    Ok(payload.into())
 }
 
 /// How far in the future a relayed address record's `time` may be before it is replaced (draft,

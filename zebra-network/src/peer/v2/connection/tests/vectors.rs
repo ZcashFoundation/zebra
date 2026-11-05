@@ -25,6 +25,7 @@ use crate::{
     meta_addr::MetaAddr,
     peer::{
         v2::{
+            addr_relay::{AddrRelay, AddrRelayHandle, Timings},
             connection::{
                 announcements::AnnouncementWriter,
                 inbound::{
@@ -47,7 +48,9 @@ use crate::{
         external::{canonical_peer_addr, types::PeerServices, InventoryHash},
         internal::{InventoryResponse, Request, Response},
         v2::{
-            announcement::{encode_tx_record, BLOCK_ANNOUNCEMENT_HEADER},
+            announcement::{
+                decode_addr_record, encode_addr_record, encode_tx_record, BLOCK_ANNOUNCEMENT_HEADER,
+            },
             constants::MAX_RECORD_PAYLOAD_LEN,
             handshake::{InitRecord, INIT_RECORD_KIND},
             record::RecordCodec,
@@ -62,7 +65,7 @@ use crate::{
     },
     quic::app_error_code,
     v2_address_book::{Message as SegmentMessage, V2BookHandle, Via},
-    BoxError, MisbehaviorReport, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
+    BanList, BoxError, MisbehaviorReport, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 /// Every loopback exchange finishes in well under this.
@@ -211,14 +214,42 @@ fn spawn_node_with(
         inbound_rx,
         MisbehaviorScores::spawn(misbehavior_tx, 8),
         misbehavior_rx,
-        None,
+        Relaying::default(),
     )
+}
+
+/// A node's address relay hub, ban list, and version 2 address segment.
+struct Relaying {
+    addr_relay: Option<AddrRelayHandle>,
+    bans: tokio::sync::watch::Receiver<BanList>,
+    address_book: Option<V2BookHandle>,
+}
+
+impl Default for Relaying {
+    /// No hub, no bans, and no address segment.
+    fn default() -> Self {
+        Relaying {
+            addr_relay: None,
+            bans: tokio::sync::watch::channel(BanList::default()).1,
+            address_book: None,
+        }
+    }
+}
+
+impl Relaying {
+    /// No hub and no bans, with `address_book` as the node's address segment.
+    fn with_address_book(address_book: V2BookHandle) -> Self {
+        Relaying {
+            address_book: Some(address_book),
+            ..Relaying::default()
+        }
+    }
 }
 
 /// Spawns a connection task over `connection` with `inbound_service` and the
 /// `misbehavior` scores, whose reports arrive on `misbehavior_rx` if they
-/// were spawned with its sender. With `address_book`, the connection hands
-/// relayed addresses to it, serves `get-addr` from it, and asks the peer for
+/// were spawned with its sender. With `relaying.address_book`, the connection
+/// hands relayed addresses to it, serves `get-addr` from it, and asks the peer for
 /// addresses if it dialled the peer.
 fn spawn_node_scored(
     connection: Connection,
@@ -227,7 +258,7 @@ fn spawn_node_scored(
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
     misbehavior: MisbehaviorScores,
     misbehavior_rx: tokio::sync::mpsc::Receiver<MisbehaviorReport>,
-    address_book: Option<V2BookHandle>,
+    relaying: Relaying,
 ) -> TestNode {
     let (inv_tx, inv_rx) = broadcast::channel(16);
     let mut counter = ActiveConnectionCounter::new_counter();
@@ -241,8 +272,10 @@ fn spawn_node_scored(
             inv_collector: inv_tx,
             genesis_hash: Network::Mainnet.genesis_hash(),
             misbehavior: misbehavior.clone(),
-            discovery: address_book.is_some(),
-            address_book,
+            discovery: relaying.address_book.is_some(),
+            address_book: relaying.address_book,
+            bans: relaying.bans,
+            addr_relay: relaying.addr_relay,
         },
         None,
     );
@@ -324,7 +357,7 @@ async fn connected_nodes_with_segments(
             inbound_rx,
             MisbehaviorScores::spawn(misbehavior_tx, 8),
             misbehavior_rx,
-            Some(V2BookHandle::new(segment_tx)),
+            Relaying::with_address_book(V2BookHandle::new(segment_tx)),
         );
         (node, segment_rx)
     };
@@ -389,21 +422,37 @@ async fn raw_peer_node_configured(
     relay: bool,
     client_config: Option<quinn::ClientConfig>,
 ) -> RawPeer {
-    raw_peer_node_scored(network, inbound_service, relay, client_config, None, None).await
+    raw_peer_node_scored(
+        network,
+        inbound_service,
+        relay,
+        client_config,
+        None,
+        Relaying::default(),
+    )
+    .await
+}
+
+/// Connects a raw peer to a node serving the fixture, which relays addresses
+/// through `relaying`, and completes the handshake by hand. The raw peer
+/// dials the node.
+async fn raw_peer_node_with_hub(network: &Network, relaying: Relaying) -> RawPeer {
+    raw_peer_node_scored(network, None, true, None, None, relaying).await
 }
 
 /// Connects a raw peer, which uses `client_config` if given, to a node and
 /// completes the handshake by hand, with `relay` in the raw peer's `init`
 /// record. The node serves `inbound_service`, or the fixture if `None`, and
 /// scores the peer's misbehavior in `misbehavior`, or in scores of its own if
-/// `None`. With `address_book`, the node hands relayed addresses to it.
+/// `None`. It relays addresses through `relaying`, and hands relayed addresses to its address
+/// book, if it has one.
 async fn raw_peer_node_scored(
     network: &Network,
     inbound_service: Option<TestService>,
     relay: bool,
     client_config: Option<quinn::ClientConfig>,
     misbehavior: Option<MisbehaviorScores>,
-    address_book: Option<V2BookHandle>,
+    relaying: Relaying,
 ) -> RawPeer {
     let (connection, inbound, client_ep, server_ep) =
         connected_pair_with(network, client_config).await;
@@ -440,30 +489,23 @@ async fn raw_peer_node_scored(
         Some(service) => (service, tokio::sync::mpsc::unbounded_channel().1),
         None => fixture_service(Fixture::new()),
     };
-    let node = match misbehavior {
+    let (misbehavior, misbehavior_rx) = match misbehavior {
         // The shared scores report on their own node's receiver; this one gets nothing.
-        Some(misbehavior) => spawn_node_scored(
-            inbound,
-            completed,
-            inbound_service,
-            inbound_rx,
-            misbehavior,
-            tokio::sync::mpsc::channel(1).1,
-            address_book,
-        ),
+        Some(misbehavior) => (misbehavior, tokio::sync::mpsc::channel(1).1),
         None => {
             let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(8);
-            spawn_node_scored(
-                inbound,
-                completed,
-                inbound_service,
-                inbound_rx,
-                MisbehaviorScores::spawn(misbehavior_tx, 8),
-                misbehavior_rx,
-                address_book,
-            )
+            (MisbehaviorScores::spawn(misbehavior_tx, 8), misbehavior_rx)
         }
     };
+    let node = spawn_node_scored(
+        inbound,
+        completed,
+        inbound_service,
+        inbound_rx,
+        misbehavior,
+        misbehavior_rx,
+        relaying,
+    );
 
     RawPeer {
         connection,
@@ -2010,7 +2052,7 @@ async fn reconnecting_banned_peers_are_closed_on_their_first_violation() {
             true,
             None,
             Some(raw.node.misbehavior.clone()),
-            None,
+            Relaying::default(),
         )
         .await;
         reply_with_misbehavior(&mut again, &non_contiguous).await;
@@ -2409,7 +2451,7 @@ async fn inbound_announcements_reach_the_node() {
             true,
             None,
             None,
-            Some(V2BookHandle::new(segment_tx)),
+            Relaying::with_address_book(V2BookHandle::new(segment_tx)),
         )
         .await;
         let raw_addr: PeerSocketAddr =
@@ -3534,6 +3576,243 @@ async fn response_violations_are_never_crowded_out() {
                 "{code:?}: the address events are untouched"
             );
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// One address announcement record for `addr`.
+fn addr_record(addr: &MetaAddr) -> Bytes {
+    RecordCodec::encode_record(encode_addr_record(addr).expect("encodes")).expect("valid")
+}
+
+/// A gossiped address with a fresh time.
+fn fresh_addr(addr: &str) -> MetaAddr {
+    MetaAddr::new_gossiped_meta_addr(
+        addr.parse::<SocketAddr>().unwrap().into(),
+        PeerServices::NODE_NETWORK,
+        DateTime32::now(),
+    )
+}
+
+/// Opens an address announcement stream from `connection` and writes
+/// `addrs` on it, one record each, returning the stream to keep it open.
+async fn announce_addrs(connection: &Connection, addrs: &[MetaAddr]) -> SendStream {
+    let mut send = connection.open_uni().await.expect("opens");
+    send.write_all(&[StreamType::AddressAnnouncements.code()])
+        .await
+        .expect("writes");
+    for addr in addrs {
+        send.write_all(&addr_record(addr)).await.expect("writes");
+    }
+    send
+}
+
+/// Accepts the address announcement stream the node opens to `connection`,
+/// and returns its records as they arrive.
+async fn accept_addr_stream(
+    connection: &Connection,
+) -> tokio_util::codec::FramedRead<RecvStream, RecordCodec> {
+    let mut recv = connection
+        .accept_uni()
+        .await
+        .expect("the node opens a stream");
+    let mut type_byte = [0u8; 1];
+    recv.read_exact(&mut type_byte).await.expect("reads");
+    assert_eq!(type_byte[0], StreamType::AddressAnnouncements.code());
+    tokio_util::codec::FramedRead::new(recv, RecordCodec)
+}
+
+/// A hub that trickles relayed addresses out at once, and advertises
+/// nothing.
+fn fast_hub() -> AddrRelayHandle {
+    AddrRelay::spawn_with(
+        None,
+        Network::Mainnet,
+        [3; 32],
+        Timings {
+            trickle_mean: Duration::from_millis(10),
+            ..Timings::default()
+        },
+    )
+}
+
+/// Announced addresses beyond the peer's budget are dropped silently: the
+/// connection stays open, and only the first record is relayed.
+#[tokio::test]
+async fn announced_addresses_over_budget_are_dropped_without_an_error() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        let mut raw = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addrs: Vec<MetaAddr> = (1..=5)
+            .map(|index| fresh_addr(&format!("203.0.113.{index}:8233")))
+            .collect();
+        let _send = announce_addrs(&raw.connection, &addrs).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let mut received = Vec::new();
+        while let Ok(Some(payload)) = tokio::time::timeout(SHORT_WAIT, records.next()).await {
+            let payload = payload.expect("a valid record");
+            received.extend(decode_addr_record(&payload).expect("decodes"));
+        }
+        assert_eq!(
+            received.iter().map(MetaAddr::addr).collect::<Vec<_>>(),
+            vec![addrs[0].addr()],
+            "only the first record is within the budget"
+        );
+
+        assert!(
+            call(&mut raw.node.client, Request::Ping(Default::default()))
+                .await
+                .is_ok(),
+            "the connection is still open"
+        );
+        assert!(raw.connection.close_reason().is_none());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An address one peer announces is relayed to another peer on the node's
+/// address announcement stream, in a record `decode_addr_record` reads.
+#[tokio::test]
+async fn announced_addresses_are_relayed_to_other_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        // Both connections register before anything is offered.
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addr = fresh_addr("203.0.113.9:8233");
+        let _send = announce_addrs(&source.connection, std::slice::from_ref(&addr)).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(decode_addr_record(&payload).expect("decodes"), Some(addr));
+
+        // Nothing comes back to the source.
+        assert!(
+            tokio::time::timeout(SHORT_WAIT, source.connection.accept_uni())
+                .await
+                .is_err(),
+            "the source is not sent its own address"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A node relays what it accepts from a burst of more than ten address
+/// records written back to back, as another node's hub flush writes them:
+/// how many arrive together is network timing, not news, so it doesn't stop
+/// the next hop. A new connection's budget keeps only the first record.
+#[tokio::test]
+async fn back_to_back_address_records_are_still_relayed() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addrs: Vec<MetaAddr> = (1..=11)
+            .map(|index| fresh_addr(&format!("203.0.113.{index}:8233")))
+            .collect();
+        let mut send = source.connection.open_uni().await.expect("opens");
+        let mut burst = vec![StreamType::AddressAnnouncements.code()];
+        for addr in &addrs {
+            burst.extend_from_slice(&addr_record(addr));
+        }
+        send.write_all(&burst).await.expect("writes");
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(
+            decode_addr_record(&payload).expect("decodes"),
+            Some(addrs[0].clone()),
+            "the record within the budget is relayed"
+        );
+        assert!(
+            tokio::time::timeout(SHORT_WAIT, records.next())
+                .await
+                .is_err(),
+            "the records over the budget are not"
+        );
+        drop(send);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Banned addresses a peer announces are not relayed.
+#[tokio::test]
+async fn banned_addresses_are_never_relayed() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let banned = fresh_addr("203.0.113.66:8233");
+        let mut ban_list = BanList::default();
+        ban_list.ban(banned.addr().ip());
+        let (_bans_tx, bans) = tokio::sync::watch::channel(ban_list);
+
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            bans: bans.clone(),
+            address_book: None,
+        };
+        let banned_source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+        // Each connection has its own budget, so the allowed address comes from another peer.
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let _banned_send =
+            announce_addrs(&banned_source.connection, std::slice::from_ref(&banned)).await;
+        tokio::time::sleep(SHORT_WAIT).await;
+        let allowed = fresh_addr("203.0.113.67:8233");
+        let _send = announce_addrs(&source.connection, std::slice::from_ref(&allowed)).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(
+            decode_addr_record(&payload).expect("decodes"),
+            Some(allowed),
+            "the first relayed record is the allowed address, not the banned one"
+        );
     })
     .await
     .expect("the test completes well within the timeout");

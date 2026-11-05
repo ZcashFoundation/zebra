@@ -3613,6 +3613,7 @@ async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
         inv_collector,
         NoChainTip,
         misbehavior_tx,
+        no_bans(),
         V2_TEST_RECONNECTION_DELAY,
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
         crate::v2_address_book::V2BookHandle::new(tokio::sync::mpsc::channel(1).0),

@@ -30,7 +30,8 @@ use crate::{
         },
         v2::{
             announcement::{
-                decode_addr_record, decode_block_announcement, decode_tx_record, encode_tx_record,
+                clamp_relayed_time, decode_addr_record, decode_block_announcement,
+                decode_tx_record, encode_addr_record, encode_tx_record,
             },
             constants::{
                 alpn_protocol_id, MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST,
@@ -1437,4 +1438,63 @@ fn addr_record_pins_layout_and_skips_unsupported() {
     let mut long = expected.clone();
     long.push(0);
     assert_err!(decode_addr_record(&long), WireError::TrailingBytes { .. });
+}
+
+#[test]
+fn addr_record_encoding_round_trips() {
+    let addr: PeerSocketAddr = "203.0.113.9:8233".parse::<SocketAddr>().unwrap().into();
+    let meta = MetaAddr::new_gossiped_meta_addr(
+        addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::from(0x6000_0000),
+    );
+
+    // The same layout as one `get-addr` response entry, which the decoder pins.
+    let payload = encode_addr_record(&meta).expect("a gossiped address has every field");
+    let mut expected = vec![0x00, 0x00, 0x00, 0x60, 0x01, 0x01, 0x04, 203, 0, 113, 9];
+    expected.extend_from_slice(&8233u16.to_be_bytes());
+    assert_eq!(&payload[..], &expected[..]);
+    let response = encode_addr_response(std::slice::from_ref(&meta)).expect("encodes");
+    assert_eq!(&payload[..], &response[1..]);
+    assert_eq!(decode_addr_record(&payload).expect("valid"), Some(meta));
+
+    let v6: PeerSocketAddr = "[2001:db8::1]:18233".parse::<SocketAddr>().unwrap().into();
+    let meta = MetaAddr::new_gossiped_meta_addr(v6, PeerServices::NODE_NETWORK, DateTime32::now());
+    let payload = encode_addr_record(&meta).expect("encodes");
+    assert_eq!(decode_addr_record(&payload).expect("valid"), Some(meta));
+
+    // A configured peer that was never attempted has no services to put in the record.
+    let unsanitized = MetaAddr::new_initial_peer(addr)
+        .into_new_meta_addr(std::time::Instant::now(), DateTime32::now());
+    assert_eq!(unsanitized.services(), None);
+    assert_err!(
+        encode_addr_record(&unsanitized),
+        WireError::LocalUnencodable { .. }
+    );
+}
+
+#[test]
+fn relayed_times_are_clamped_at_the_edges() {
+    use zebra_chain::serialization::Duration32;
+
+    let now = DateTime32::from(1_800_000_000);
+    let replaced = now.saturating_sub(Duration32::from_days(5));
+
+    assert_eq!(clamp_relayed_time(DateTime32::from(0), now), replaced);
+    let eleven_minutes_ahead = now.checked_add(Duration32::from_minutes(11)).unwrap();
+    assert_eq!(clamp_relayed_time(eleven_minutes_ahead, now), replaced);
+
+    let nine_minutes_ahead = now.checked_add(Duration32::from_minutes(9)).unwrap();
+    assert_eq!(
+        clamp_relayed_time(nine_minutes_ahead, now),
+        nine_minutes_ahead
+    );
+    let ten_minutes_ahead = now.checked_add(Duration32::from_minutes(10)).unwrap();
+    assert_eq!(
+        clamp_relayed_time(ten_minutes_ahead, now),
+        ten_minutes_ahead
+    );
+    assert_eq!(clamp_relayed_time(now, now), now);
+    let old = now.saturating_sub(Duration32::from_days(40));
+    assert_eq!(clamp_relayed_time(old, now), old);
 }
