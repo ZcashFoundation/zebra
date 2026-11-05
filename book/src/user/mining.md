@@ -163,11 +163,21 @@ INFO zebrad::components::sync::progress: finished initial sync to chain tip, usi
 
 ## Reusing proposal validation
 
-Zebra validates transaction-bearing templates in the background. If you change the coinbase,
-transactions, timestamp or another header field, submit the modified block with
-`getblocktemplate` parameters `{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it.
-A successful proposal lets a later `submitblock` reuse verification when only the nonce and
-Equihash solution differ. Proof of work, current time, size and state application are still checked.
+Zebra validates every transaction-bearing template as a block proposal. When the chain tip changes,
+it serves a coinbase-only template immediately, then serves the first template with mempool
+transactions as soon as it is built and validates it in the background, so miners are not left on
+coinbase-only work. A later rebuild for the same tip, after mempool changes, replaces the served
+template only once it has been validated too. So a solved block that changes only the nonce and
+Equihash solution of a served template reuses the cached verdict in `submitblock`, which then
+checks proof of work and commits the block without repeating transaction and contextual
+validation, as long as the check finished before the solve. The state applies such a block by
+rebinding the chain it prepared while validating the template, so the commit does not depend on
+the number of transactions in the block.
+If you change the coinbase, transactions, timestamp or another header
+field, submit the modified block with `getblocktemplate` parameters
+`{"mode":"proposal","data":"<hex-encoded-block>"}` before mining it. A successful proposal lets a
+later `submitblock` reuse verification when only the nonce and Equihash solution differ. Proof of
+work, current time, size and state application are still checked.
 The cache holds up to eight recent successful proposals within a 576 MiB retained-content budget,
 including spent-output scripts. This uses a conservative retention charge, not measured heap usage.
 It keeps eight representative full-size proposals with 19,215 transactions using 104-byte
@@ -181,7 +191,8 @@ and rechecks the committed parent, synchronization, timestamp range and difficul
 Long polls also recheck synchronization after waking. Expanding a clock-capped timestamp range does
 not cancel still-valid work; a genuine difficulty-boundary transition still replaces it.
 New committed tips interrupt obsolete snapshot reads without abandoning a started proof.
-If the updater stops, cached work is refreshed at the normal mempool polling interval.
+If the updater stops, cached work is refreshed at the normal mempool polling interval, and a
+transaction-bearing template is validated in the background after the RPC returns it.
 Long polls continue observing shared template publications after switching to on-demand refresh.
 When no usable work exists, snapshot failures are returned to the RPC caller rather than hidden
 behind an indefinite cache wait.

@@ -70,6 +70,7 @@ subtle = { workspace = true }
 color-eyre = { workspace = true }
 
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { workspace = true }
 
 # gRPC server dependencies
@@ -149,6 +150,12 @@ zebra-state = { path = "../zebra-state", features = [
 ] }
 
 zebra-test = { path = "../zebra-test" }
+
+criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
+
+[[bench]]
+name = "mining_round_trip"
+harness = false
 
 [lints]
 workspace = true

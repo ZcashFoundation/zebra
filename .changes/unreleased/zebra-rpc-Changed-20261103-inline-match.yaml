@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`submitblock` matches a submission against the validated proposal cache inline, and only decodes an unmatched block off the executor.'
+time: 2026-11-03T00:00:00Z
