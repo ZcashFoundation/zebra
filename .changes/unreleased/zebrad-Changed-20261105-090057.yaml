@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Verify RedPallas signature batches faster with GLV multiscalar multiplication for most batch sizes.
+time: 2026-11-05T09:00:57.442107879+01:00

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Use the RedDSA fork that routes public RedPallas batch verification through Pasta GLV multiscalar multiplication, retaining the existing fallback and signature rejection rules.
+time: 2026-11-05T05:57:50.337306791+01:00
