@@ -104,6 +104,10 @@ checkpoint_verify_concurrency_limit = 1000
 download_concurrency_limit = 50
 full_verify_concurrency_limit = 20
 parallel_cpu_threads = 0
+v2_checkpoint_sync = false
+v2_lookahead_bytes = 536870912
+v2_min_peer_rate = 262144
+v2_target_peers = 8
 
 [tracing]
 buffer_limit = 128000
