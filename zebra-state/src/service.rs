@@ -50,6 +50,7 @@ use crate::{
     },
     request::TimedSpan,
     response::NonFinalizedBlocksListener,
+    service::finalized_state::SpentnessHintsReceiver,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -347,6 +348,25 @@ impl StateService {
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
+        Self::new_with_spentness(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            None,
+        )
+        .await
+    }
+
+    /// Creates a new state service like [`Self::new`], whose finalized writer
+    /// applies the spentness hints that `spentness` delivers, if any.
+    pub(crate) async fn new_with_spentness(
+        config: Config,
+        network: &Network,
+        max_checkpoint_height: block::Height,
+        checkpoint_verify_concurrency_limit: usize,
+        spentness: Option<SpentnessHintsReceiver>,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let (finalized_state, finalized_tip, timer) = {
             let config = config.clone();
             let network = network.clone();
@@ -442,6 +462,7 @@ impl StateService {
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
             early_relay.clone(),
+            spentness.map(|hints| (hints, max_checkpoint_height)),
         );
 
         let mut read_service = ReadStateService::new(
@@ -1180,6 +1201,14 @@ impl ReadStateService {
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn db(&self) -> &ZebraDb {
         &self.db
+    }
+
+    /// Returns `true` if the state has an incomplete hinted sync (or an
+    /// unreadable hint record): its spentness artifact must then be delivered
+    /// to [`init_with_spentness`] again, or the block write task stops at the
+    /// next checkpoint block.
+    pub fn has_incomplete_spentness_hints(&self) -> bool {
+        finalized_state::has_incomplete_spentness_hints(&self.db)
     }
 
     /// Logs rocksdb metrics using the read only state service.
@@ -2346,6 +2375,46 @@ impl Service<ReadRequest> for ReadStateService {
             request_handler()
         })
     }
+}
+
+/// Initializes a state service like [`init`], whose finalized writer applies
+/// spentness hints below their terminal height.
+///
+/// `spentness` delivers the verified artifact once `zebrad` has one; see
+/// [`SpentnessHintsReceiver`] for when the writer adopts it. A sender that
+/// never sends, or sends `None`, gives exactly [`init`]'s behaviour.
+///
+/// The artifact cannot be a plain argument (the design's
+/// `Option<VerifiedArtifact>`): `zebrad` initializes the state before the
+/// network, and the artifact is fetched from peers.
+pub async fn init_with_spentness(
+    config: Config,
+    network: &Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
+    spentness: SpentnessHintsReceiver,
+) -> (
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new_with_spentness(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            Some(spentness),
+        )
+        .await;
+
+    (
+        BoxService::new(state_service),
+        read_only_state_service,
+        latest_chain_tip,
+        chain_tip_change,
+    )
 }
 
 /// Initialize a state service from the provided [`Config`].

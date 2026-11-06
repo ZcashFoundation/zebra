@@ -41,7 +41,7 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
-        zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+        zebra_db::{metrics::block_precommit_metrics, spentness::SpentnessWriter, ZebraDb},
         FromDisk, RawBytes,
     },
     HashOrHeight,
@@ -449,6 +449,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
+        spentness: Option<&mut SpentnessWriter>,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -473,27 +474,42 @@ impl ZebraDb {
             })
             .collect();
 
-        // Read spent UTXOs before deleting any, including outputs created in this block.
-        let outpoints: Vec<_> = finalized
-            .block
-            .transactions
-            .iter()
-            .flat_map(|tx| tx.inputs())
-            .filter_map(|input| input.outpoint())
-            .collect();
-        let read_spent = |outpoint| {
-            read_spent_utxo(
-                self,
-                finalized.height,
-                outpoint,
-                &tx_hash_indexes,
-                &finalized.new_outputs,
-            )
+        let mut batch = DiskWriteBatch::new();
+
+        // Below a spentness-hint artifact's terminal height, the hints resolve the spent
+        // outputs and select the new outputs that enter the UTXO set.
+        let mut hinted = match spentness {
+            Some(spentness) if spentness.applies_to(finalized.height) => Some(
+                spentness.apply_block(self, &finalized, &new_outputs_by_out_loc, &mut batch)?,
+            ),
+            _ => None,
         };
-        let spent_utxos: Vec<_> = if outpoints.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
-            outpoints.into_par_iter().map(read_spent).collect()
+
+        let spent_utxos: Vec<_> = if let Some(hinted) = &mut hinted {
+            std::mem::take(&mut hinted.spent)
         } else {
-            outpoints.into_iter().map(read_spent).collect()
+            // Read spent UTXOs before deleting any, including outputs created in this block.
+            let outpoints: Vec<_> = finalized
+                .block
+                .transactions
+                .iter()
+                .flat_map(|tx| tx.inputs())
+                .filter_map(|input| input.outpoint())
+                .collect();
+            let read_spent = |outpoint| {
+                read_spent_utxo(
+                    self,
+                    finalized.height,
+                    outpoint,
+                    &tx_hash_indexes,
+                    &finalized.new_outputs,
+                )
+            };
+            if outpoints.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
+                outpoints.into_par_iter().map(read_spent).collect()
+            } else {
+                outpoints.into_iter().map(read_spent).collect()
+            }
         };
 
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
@@ -566,16 +582,29 @@ impl ZebraDb {
             }))
         };
 
-        let mut batch = DiskWriteBatch::new();
+        // Hinted outputs that the artifact omits never enter the UTXO set, so spends of
+        // them delete nothing. Their address transaction entries are still written.
+        let (omitted_outputs, spent_utxos_by_out_loc) = match &hinted {
+            Some(hinted) => (
+                new_outputs_by_out_loc
+                    .keys()
+                    .filter(|location| !hinted.survivors.contains_key(location))
+                    .copied()
+                    .collect(),
+                BTreeMap::new(),
+            ),
+            None => (HashSet::new(), spent_utxos_by_out_loc),
+        };
 
         // In case of errors, propagate and do not write the batch.
-        batch.prepare_block_batch(
+        batch.prepare_block_batch_omitting(
             self,
             network,
             &finalized,
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
+            &omitted_outputs,
             #[cfg(feature = "indexer")]
             out_loc_by_outpoint,
             address_balances,
@@ -672,6 +701,43 @@ impl DiskWriteBatch {
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), CommitCheckpointVerifiedError> {
+        self.prepare_block_batch_omitting(
+            zebra_db,
+            network,
+            finalized,
+            new_outputs_by_out_loc,
+            spent_utxos_by_outpoint,
+            spent_utxos_by_out_loc,
+            &HashSet::new(),
+            #[cfg(feature = "indexer")]
+            out_loc_by_outpoint,
+            address_balances,
+            value_pool,
+            prev_note_commitment_trees,
+        )
+    }
+
+    /// [`Self::prepare_block_batch`], where the new outputs in `omitted_outputs`
+    /// get address transaction entries, but no UTXO or address UTXO entries.
+    /// Spentness hints omit the outputs that are spent by their terminal height.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_block_batch_omitting(
+        &mut self,
+        zebra_db: &ZebraDb,
+        network: &Network,
+        finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
+        spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        omitted_outputs: &HashSet<OutputLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
+        address_balances: AddressBalanceLocationUpdates,
+        value_pool: ValueBalance<NonNegative>,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
         // Commit block, transaction, and note commitment tree data.
@@ -697,13 +763,14 @@ impl DiskWriteBatch {
         // calculation also excludes these unspendable outputs; shielded updates are retained.
         if !finalized.height.is_min() {
             // Commit transaction indexes
-            self.prepare_transparent_transaction_batch(
+            self.prepare_transparent_transaction_batch_omitting(
                 zebra_db,
                 network,
                 finalized,
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
+                omitted_outputs,
                 #[cfg(feature = "indexer")]
                 &out_loc_by_outpoint,
                 address_balances,

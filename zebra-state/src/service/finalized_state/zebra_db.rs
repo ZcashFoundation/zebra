@@ -49,6 +49,7 @@ pub mod block;
 pub mod chain;
 pub mod metrics;
 pub mod shielded;
+pub mod spentness;
 pub mod sync_meta;
 pub mod transparent;
 

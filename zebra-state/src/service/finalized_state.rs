@@ -32,6 +32,7 @@ use zebra_chain::{
 };
 use zebra_db::{
     chain::BLOCK_INFO,
+    spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
     sync_meta::SYNC_META_BY_HEIGHT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
@@ -65,7 +66,11 @@ pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
     MAX_ON_DISK_HEIGHT,
 };
-pub use zebra_db::ZebraDb;
+pub(crate) use zebra_db::spentness::{has_incomplete_spentness_hints, SpentnessWriter};
+pub use zebra_db::{
+    spentness::{SpentnessError, SpentnessHintsReceiver},
+    ZebraDb,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
@@ -120,6 +125,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     BLOCK_INFO,
     // Per-block synchronization metadata served to version 2 peers
     SYNC_META_BY_HEIGHT,
+    // Spentness hints
+    SPENTNESS_JOURNAL,
+    SPENTNESS_ARTIFACT,
 ];
 
 /// The finalized part of the chain state, stored in the db.
@@ -300,10 +308,22 @@ impl FinalizedState {
         checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let result = self.commit_finalized_direct(
+        self.commit_finalized_with_spentness(checkpoint_verified, prev_note_commitment_trees, None)
+    }
+
+    /// [`Self::commit_finalized`], applying spentness hints with the block write
+    /// task's `spentness` writer.
+    pub(crate) fn commit_finalized_with_spentness(
+        &mut self,
+        checkpoint_verified: CheckpointVerifiedBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        spentness: Option<&mut SpentnessWriter>,
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        let result = self.commit_finalized_direct_with_spentness(
             checkpoint_verified.clone().into(),
             prev_note_commitment_trees,
             "commit checkpoint-verified request",
+            spentness,
         );
 
         if result.is_ok() {
@@ -339,12 +359,29 @@ impl FinalizedState {
     /// - Propagates any errors from updating history and note commitment trees
     /// - If `hashFinalSaplingRoot` / `hashLightClientRoot` / `hashBlockCommitments`
     ///   does not match the expected value
-    #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_finalized_direct_with_spentness(
+            finalizable_block,
+            prev_note_commitment_trees,
+            source,
+            None,
+        )
+    }
+
+    /// [`Self::commit_finalized_direct`], applying spentness hints with the block
+    /// write task's `spentness` writer.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn commit_finalized_direct_with_spentness(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        source: &str,
+        spentness: Option<&mut SpentnessWriter>,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
@@ -508,6 +545,7 @@ impl FinalizedState {
             prev_note_commitment_trees,
             &self.network(),
             source,
+            spentness,
         );
 
         if result.is_ok() {

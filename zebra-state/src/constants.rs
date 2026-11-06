@@ -45,6 +45,10 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.2.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
+///   families, which hold the omitted outputs and the construction record of a hinted sync
+///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the
+///   journal is emptied when a hinted sync completes.
 /// - 29.1.0: adds the `sync_meta_by_height` column family: 64 bytes of per-block synchronization
 ///   metadata (size, transaction and note commitment counts, ZIP 221 per-pool transaction counts,
 ///   the ZIP 244 authorizing data root, and the cumulative transparent output count, which gives
@@ -64,7 +68,7 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 2;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
