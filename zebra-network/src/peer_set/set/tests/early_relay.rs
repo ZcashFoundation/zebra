@@ -163,7 +163,14 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
                 .with_minimum_peer_version(MinimumPeerVersion::new(NoChainTip, &network))
                 .with_block_gossip_peer_ips(vec![addr.ip()])
                 .build();
+            let mut advertiser = peer_set.block_advertiser();
+            let mut recipients = advertiser.early_relay_recipients();
+            assert!(
+                !*recipients.borrow(),
+                "undiscovered peers do not enable early work"
+            );
             peer_set.ready().await.unwrap();
+            assert_eq!(*recipients.borrow(), early_relay);
             if early_relay {
                 assert_eq!(
                     remote.next().await.unwrap().unwrap(),
@@ -173,7 +180,6 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
                     },
                 );
             }
-            let mut advertiser = peer_set.block_advertiser();
             let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
             let hash = block.hash();
             let result = advertiser
@@ -254,6 +260,11 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
                 remote.next().await.unwrap().unwrap(),
                 Message::Block(block.clone())
             );
+            drop(remote);
+            recipients
+                .wait_for(|needed| !*needed)
+                .await
+                .expect("disconnecting the peer withdraws its early-relay demand");
         }
     })
     .await
