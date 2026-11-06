@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{Outcome, ResponseSend};
+use super::{hashes::StallBackoff, Outcome, ResponseSend};
 
 /// How many of one peer's `get-object` requests are served at once; the rest
 /// are refused rather than queued.
@@ -57,9 +57,10 @@ pub(in crate::peer::v2::connection) const OBJECT_READ_CHUNK: usize = 1 << 20;
 pub(in crate::peer::v2::connection) const OBJECT_EARLY_FIN_MARGIN: Duration =
     Duration::from_secs(4);
 
-/// How long one [`OBJECT_READ_CHUNK`] write to a `get-object` response may
-/// wait for the peer to read, before the response is finished early with the
-/// bytes written so far.
+/// How long one [`OBJECT_READ_CHUNK`] write, or the header write, of a
+/// `get-object` data response may wait for the peer to read, before the
+/// response is finished early with the bytes written so far (or, for the
+/// header, cancelled).
 ///
 /// # Security
 ///
@@ -69,6 +70,13 @@ pub(in crate::peer::v2::connection) const OBJECT_EARLY_FIN_MARGIN: Duration =
 /// than waiting for the deadline: a peer must read about 200 KiB/s, a little
 /// below the rate that Zebra's artifact downloads require of the peers they
 /// fetch from, to keep a stream.
+///
+/// A stall also refuses the connection's `get-object` data requests for
+/// [`HASHES_STALL_BACKOFF`](super::hashes::HASHES_STALL_BACKOFF) (60 s), so the same connection cannot take the
+/// freed permits straight back. Probes and misses take no permit, and are
+/// still answered. As with `get-hashes`, keeping all the global permits held
+/// then takes about 30 addresses that keep reconnecting under the per-IP
+/// connection limits, instead of 4.
 pub(in crate::peer::v2::connection) const OBJECT_WRITE_STALL: Duration = Duration::from_secs(5);
 
 // A response must have time to start before the margin; checked at compile time.
@@ -91,6 +99,10 @@ pub(in crate::peer::v2::connection) struct ObjectServing {
     /// The node's permits, [`MAX_OBJECT_STREAMS_GLOBAL`] of them, shared by
     /// every connection.
     pub global_permits: Arc<Semaphore>,
+
+    /// This connection's backoff after one of its data responses stalled
+    /// (see [`OBJECT_WRITE_STALL`]).
+    pub stall_backoff: Arc<StallBackoff>,
 }
 
 /// Serves a `get-object` request from this node's synchronization artifacts,
@@ -108,7 +120,9 @@ pub(in crate::peer::v2::connection) struct ObjectServing {
 /// A request for data takes one of the peer's and one of the node's object
 /// stream permits, without waiting: when either is exhausted the request is
 /// refused and counted as busy, never as an inbound service overload, so a
-/// peer's downloads never close its connection. The object's file is opened
+/// peer's downloads never close its connection. So is a request for data on a
+/// connection whose data response stalled within the last
+/// [`HASHES_STALL_BACKOFF`](super::hashes::HASHES_STALL_BACKOFF). The object's file is opened
 /// before the response starts, so an unreadable file is refused too. The
 /// data is then read in positional [`OBJECT_READ_CHUNK`] reads on the
 /// blocking pool and written as it arrives, up to the request's `length`.
@@ -164,7 +178,11 @@ pub(in crate::peer::v2::connection) async fn serve_object(
     // Only a few object downloads are served at once, per peer and over all peers; the rest are
     // refused at once, not queued, and the requester tries another peer or waits. A refusal
     // for a busy node is not an overload: the overload policy that drops connections is for
-    // requests the inbound service could not take.
+    // requests the inbound service could not take. A connection whose data response stalled
+    // recently is refused too, so it cannot take the freed permits straight back.
+    if objects.stall_backoff.backing_off(Instant::now()) {
+        return Err(busy());
+    }
     let Ok(peer_permit) = objects.peer_permits.clone().try_acquire_owned() else {
         return Err(busy());
     };
@@ -192,8 +210,18 @@ pub(in crate::peer::v2::connection) async fn serve_object(
         Ok(Err(_)) | Err(_) => return Err(Outcome::Refuse(ErrorCode::Refused)),
     };
 
-    // From here on, the response has started: it is finished, never reset.
-    write_header(response, &header, early_deadline).await?;
+    // From here on, the response has started: it is finished, never reset. The header write holds
+    // the permits too, so it gets the same stall bound as the chunk writes.
+    let header_deadline = early_deadline.min(Instant::now() + OBJECT_WRITE_STALL);
+    match tokio::time::timeout_at(header_deadline, response.write(&header)).await {
+        Ok(written) => written?,
+        // A timed-out write may already have sent a prefix, so it is cancelled, as in
+        // `write_header`, and the connection backs off.
+        Err(_elapsed) => {
+            objects.stall_backoff.stalled(Instant::now());
+            return Err(Outcome::Refuse(response.abandon_code()));
+        }
+    }
 
     let mut sent: u64 = 0;
     while sent < budget {
@@ -237,8 +265,12 @@ pub(in crate::peer::v2::connection) async fn serve_object(
             Ok(Ok(())) => {}
             Ok(Err(error)) => return Err(error),
             // The peer reads slowly: finish with what it has, before the deadline resets, and
-            // free the permits for other requests.
-            Err(_elapsed) => break,
+            // free the permits for other requests. The connection backs off, so it cannot take
+            // them straight back.
+            Err(_elapsed) => {
+                objects.stall_backoff.stalled(Instant::now());
+                break;
+            }
         }
         // `chunk.len()` is at most `want`, which fits in a `u64` as it did in a `usize`.
         sent = sent.saturating_add(chunk.len() as u64);
