@@ -79,7 +79,7 @@ fn mempool_storage_crud_exact_mainnet() {
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
-    let _ = storage.insert(unmined_tx.clone(), Vec::new(), None);
+    let _ = storage.insert(unmined_tx.clone(), Vec::new(), None, &mut HashSet::new());
 
     // Check that it is in the mempool, and not rejected.
     assert!(storage.contains_transaction_exact(&unmined_tx.transaction.id.mined_id()));
@@ -109,7 +109,7 @@ fn mempool_storage_transactions_exact_matches_witnessed_id() {
         .0[0] ^= 1;
 
     assert_eq!(
-        storage.insert(unmined_tx.clone(), Vec::new(), None),
+        storage.insert(unmined_tx.clone(), Vec::new(), None, &mut HashSet::new()),
         Ok(exact_id)
     );
     assert_eq!(
@@ -171,7 +171,12 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     let mut maybe_inserted_transactions = Vec::new();
     let mut some_rejected_transactions = Vec::new();
     for unmined_transaction in unmined_transactions.clone() {
-        let result = storage.insert(unmined_transaction.clone(), Vec::new(), None);
+        let result = storage.insert(
+            unmined_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        );
         match result {
             Ok(_) => {
                 // While the transaction was inserted here, it can be rejected later.
@@ -245,7 +250,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
-    let _ = storage.insert(unmined_tx_1.clone(), Vec::new(), None);
+    let _ = storage.insert(unmined_tx_1.clone(), Vec::new(), None, &mut HashSet::new());
 
     // Check that it is in the mempool, and not rejected.
     assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id.mined_id()));
@@ -268,7 +273,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         Some(SameEffectsChainRejectionError::Mined.into())
     );
     assert_eq!(
-        storage.insert(unmined_tx_1, Vec::new(), None),
+        storage.insert(unmined_tx_1, Vec::new(), None, &mut HashSet::new()),
         Err(SameEffectsChainRejectionError::Mined.into())
     );
 
@@ -286,7 +291,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Insert unmined tx into the mempool.
     assert_eq!(
-        storage.insert(unmined_tx_2.clone(), Vec::new(), None),
+        storage.insert(unmined_tx_2.clone(), Vec::new(), None, &mut HashSet::new()),
         Ok(unmined_tx_2.transaction.id)
     );
 
@@ -311,7 +316,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
         Some(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
     assert_eq!(
-        storage.insert(unmined_tx_2, Vec::new(), None),
+        storage.insert(unmined_tx_2, Vec::new(), None, &mut HashSet::new()),
         Err(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
 }
@@ -358,6 +363,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
         .expect("verification should pass"),
         Vec::new(),
         None,
+        &mut HashSet::new(),
     )?;
 
     assert_eq!(storage.transaction_count(), 1);
@@ -424,7 +430,12 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
         }
 
         storage
-            .insert(unmined_tx.clone(), fake_spent_outpoints, None)
+            .insert(
+                unmined_tx.clone(),
+                fake_spent_outpoints,
+                None,
+                &mut HashSet::new(),
+            )
             .expect("should insert transaction");
 
         // Add up to 5 of this transaction's outputs as fake spent outpoints for the next transaction
