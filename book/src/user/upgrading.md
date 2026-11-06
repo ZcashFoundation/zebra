@@ -136,7 +136,7 @@ resumes the remaining work.
 
 The setting `[state] delete_old_database` (default `true`) makes each start
 delete older major-version directories under the cache directory, except
-registered reusable source directories (`v25` through `v30` for format 32).
+registered reusable source directories (`v25` through `v31` for format 32).
 Setting it to `false` keeps every directory, but does not prevent the rename
 above. Renaming or symlinking a versioned directory by hand does not convert
 its format.
@@ -183,7 +183,7 @@ it opens a newer minor or patch format and records the downgrade (`trying to ope
 newer database format: data should be compatible`).
 
 Snapshot-born state uses the v32 directory barrier and a `snapshot_base` marker.
-Never open it with an older build or rename it to v30, v31, v29, or any older
+Never open it with an older build or rename it to v31, v30, v29, or any older
 directory: those builds would treat its incomplete history as an archive. Keep
 running a snapshot-aware release, or recover from a separate compatible archive
 backup or a full sync.
@@ -211,24 +211,25 @@ genesis. To restore the backup:
 
 Roll back direct readers to builds for the older format at the same time.
 
-Archives that have never been pruned or snapshot-imported are an exception for
-the fixed-height upgrades through format 32: upgrades from v29 and v30 rewrite
-no records, so the directory can be moved back for Zebra 7.0.0. See
-[format 32 and recovery](pruning.md#format-32-recovery-and-copies).
+Archives that have never been pruned, snapshot-imported, or built with
+spentness hints are an exception for the fixed-height upgrades through format
+32: upgrades from v29, v30 and v31 rewrite no records, so the directory can be
+moved back for Zebra 7.0.0. See [format 32 and
+recovery](pruning.md#format-32-recovery-and-copies).
 
 ## Zebra 7.1.0
 
-- **State formats 29 and 30 → 32.** With no existing v32 database, the first
-  start moves the newest reusable v30 or v29 source to `state/v32/<network>`
-  without a resync. The intermediate 30.1 upgrade adds the empty `snapshot_base`
-  column family; these fixed-height upgrades rewrite no existing records. Keep
-  a separate source archive backup before upgrading if rollback matters:
-  disabling old-database cleanup does not preserve the moved directory. Format
-  v31 remains reserved for
-  [#12182's variable-height record migration](https://github.com/ZcashFoundation/zebra/pull/12182).
+- **State formats 29, 30 and 31 → 32.** With no existing v32 database, the
+  first start moves the newest reusable v31, v30 or v29 source to
+  `state/v32/<network>` without a resync. Format 30 adds the empty spentness
+  hint column families, format 31 isolates pruned state, and the intermediate
+  31.1 upgrade adds the empty `snapshot_base` column family; these fixed-height
+  upgrades rewrite no existing records. Keep a separate source archive backup
+  before upgrading if rollback matters: disabling old-database cleanup does not
+  preserve the moved directory.
 - **Snapshot-born state is not downgrade-compatible.** Format 32 holds a
   `snapshot_base` marker recording where an imported snapshot's history starts.
-  Never open that state with an older build, and never move it to `v30`, `v31`,
+  Never open that state with an older build, and never move it to `v31`, `v30`,
   `v29`, or any older directory: those builds would treat its missing pre-window
   bodies as a complete archive. A snapshot-born node must keep running a
   snapshot-aware release or recover from a separate compatible archive backup

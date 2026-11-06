@@ -152,15 +152,14 @@ what is trusted, and how to export and serve a snapshot from a stopped node.
 ## Format 32, recovery, and copies
 
 This release uses database format 32.0.0 for both archive and pruned nodes. When no v32 database
-exists, startup moves the newest reusable source inside the cache directory, preferring v30 and
-then v29, to `state/v32/<network>/`. This is a move, not a backup, and happens even with pruning
+exists, startup moves the newest reusable source inside the cache directory, preferring v31,
+then v30, then v29, to `state/v32/<network>/`. This is a move, not a backup, and happens even with pruning
 disabled. An older binary looking in the source directory will not find the moved state and may
-start syncing again. Format v31 remains reserved for the independent variable-height record
-migration in #12182; this build does not use it as an intermediate directory.
+start syncing again.
 
-For fixed-height v29 and v30 sources, the upgrades through format 32 rewrite no existing records,
-so an archive that has **never** been pruned or snapshot-imported can be rolled back to Zebra 7.0.0
-by moving the directory back:
+For fixed-height v29, v30 and v31 sources, the upgrades through format 32 rewrite no existing
+records, so an archive that has **never** been pruned, snapshot-imported, or built with [spentness
+hints](spentness-hints.md) can be rolled back to Zebra 7.0.0 by moving the directory back:
 
 1. With this release still running, confirm `getblockchaininfo` reports `pruned: false`, and that
    the config does not set `prune_blocks_older_than`.
@@ -175,8 +174,8 @@ missing block bodies, and would serve incomplete blocks to peers and RPC clients
 only return to 7.0.0 from a separate archive backup.
 
 A database built from a [state snapshot](state-snapshot-sync.md) uses format 32.0.0 and records
-where its history starts. Never open it with an older Zebra build, and never move it to `v30`,
-`v31`, `v29`, or any older directory: those builds cannot tell that the history below the snapshot's
+where its history starts. Never open it with an older Zebra build, and never move it to `v31`,
+`v30`, `v29`, or any older directory: those builds cannot tell that the history below the snapshot's
 window is missing, and would treat the database as a complete archive. See the canonical
 [format 32 upgrade and rollback rules](upgrading.md#zebra-710).
 

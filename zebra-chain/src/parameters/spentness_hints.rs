@@ -85,10 +85,39 @@ impl MaxCheckpoint {
         }
     }
 
+    /// The pin for `network` whose artifact has SHA-256 `spentness_hash`: the
+    /// current pin, or a retired one from an earlier release that was not
+    /// revoked, or `None` if this release pins no such artifact.
+    ///
+    /// A hinted sync that an earlier release started must resume with the
+    /// artifact it started with, even after this release pins a newer one.
+    pub fn for_commitment(network: &Network, spentness_hash: [u8; 32]) -> Option<MaxCheckpoint> {
+        let retired = match network {
+            Network::Mainnet => RETIRED_MAINNET_MAX_CHECKPOINTS,
+            Network::Testnet(params) if params.is_default_testnet() => {
+                RETIRED_TESTNET_MAX_CHECKPOINTS
+            }
+            Network::Testnet(_) => &[],
+        };
+        find_pin(Self::for_network(network), retired, spentness_hash)
+    }
+
     /// The `get-object` content address of the pinned artifact.
     pub fn object_hash(&self) -> ObjectHash {
         ObjectHash::from(self.spentness_hash)
     }
+}
+
+/// The pin among `current` and `retired` whose artifact has SHA-256 `spentness_hash`.
+fn find_pin(
+    current: Option<MaxCheckpoint>,
+    retired: &[MaxCheckpoint],
+    spentness_hash: [u8; 32],
+) -> Option<MaxCheckpoint> {
+    current
+        .into_iter()
+        .chain(retired.iter().copied())
+        .find(|pin| pin.spentness_hash == spentness_hash)
 }
 
 /// The pinned Mainnet trust root.
@@ -102,6 +131,18 @@ const MAINNET_MAX_CHECKPOINT: Option<MaxCheckpoint> = None;
 /// `None` until a release generates the first Testnet artifact and pins it;
 /// hinted synchronization stays disabled while it is absent.
 const TESTNET_MAX_CHECKPOINT: Option<MaxCheckpoint> = None;
+
+/// Earlier Mainnet pins, which nodes still use to resume a hinted sync that
+/// an earlier release started (see [`MaxCheckpoint::for_commitment`]).
+///
+/// When a release replaces [`MAINNET_MAX_CHECKPOINT`], move the old pin here,
+/// unless it is being revoked: a revoked pin is left out, so its artifact is
+/// never loaded again, and a node part way through a hinted sync with it stops
+/// at startup instead.
+const RETIRED_MAINNET_MAX_CHECKPOINTS: &[MaxCheckpoint] = &[];
+
+/// Earlier default-Testnet pins; see [`RETIRED_MAINNET_MAX_CHECKPOINTS`].
+const RETIRED_TESTNET_MAX_CHECKPOINTS: &[MaxCheckpoint] = &[];
 
 /// The fixed header of an artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

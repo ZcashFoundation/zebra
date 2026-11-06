@@ -70,7 +70,9 @@ pub use disk_format::{
     MAX_ON_DISK_HEIGHT,
 };
 pub(crate) use zebra_db::history::{PruningWitness, MAX_PRUNING_BATCH_HEIGHTS};
-pub(crate) use zebra_db::spentness::{has_incomplete_spentness_hints, SpentnessWriter};
+pub(crate) use zebra_db::spentness::{
+    has_incomplete_spentness_hints, incomplete_spentness_commitment, SpentnessWriter,
+};
 pub use zebra_db::{
     spentness::{SpentnessError, SpentnessHintsReceiver},
     ZebraDb,
