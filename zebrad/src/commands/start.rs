@@ -495,6 +495,7 @@ impl StartCmd {
             state_hints.for_state(
                 &latest_chain_tip,
                 read_only_state_service.has_incomplete_spentness_hints(),
+                read_only_state_service.incomplete_spentness_commitment(),
             )
         });
 
@@ -1183,8 +1184,9 @@ impl StartCmd {
                     Ok(())
                 }
 
-                // Acquisition ends with or without hints. It fails only when hints
-                // are required, which stops Zebra.
+                // Acquisition ends with or without hints. It fails when hints are
+                // required, or when an interrupted hinted sync uses an artifact this
+                // release does not pin, which stops Zebra.
                 spentness_hints_result = &mut spentness_hints_task_handle_fused => {
                     exit_when_task_finishes = false;
                     spentness_hints_result

@@ -1211,6 +1211,14 @@ impl ReadStateService {
         finalized_state::has_incomplete_spentness_hints(&self.db)
     }
 
+    /// Returns the SHA-256 of the spentness artifact that the state's
+    /// incomplete hinted sync was started with, or `None` if there is no
+    /// incomplete hinted sync, or its record cannot be read. Only that artifact
+    /// resumes it, even after a release pins a different one.
+    pub fn incomplete_spentness_commitment(&self) -> Option<[u8; 32]> {
+        finalized_state::incomplete_spentness_commitment(&self.db)
+    }
+
     /// Logs rocksdb metrics using the read only state service.
     pub fn log_db_metrics(&self) {
         self.db.print_db_metrics();

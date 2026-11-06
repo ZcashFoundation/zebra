@@ -150,6 +150,16 @@ cargo install --locked --features spentness-hints --path zebra-utils --bin spent
    nothing on that network: every node syncs without them, whatever its
    mode.
 
+   When the release replaces an earlier pin, move the old `MaxCheckpoint`
+   into the network's retired list (`RETIRED_MAINNET_MAX_CHECKPOINTS` or
+   `RETIRED_TESTNET_MAX_CHECKPOINTS`) in the same file, unless it is being
+   revoked. A node that a restart interrupted part way through a hinted sync
+   resumes it with the artifact it started with, which it finds among the
+   current and retired pins. A revoked pin is left out: its artifact is never
+   loaded again, and a node part way through a hinted sync with it stops at
+   startup, and must finish the sync with the earlier release or delete its
+   state.
+
 6. Seed a few version 2 nodes with the artifact, so that new nodes can
    download it. On each node, which must run the release that pins it and set
    `v2_listen_addr`, install the file as
