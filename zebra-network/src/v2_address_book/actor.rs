@@ -305,8 +305,8 @@ impl V2Book {
     /// # Security
     ///
     /// The cache is loaded as trusted entries, so it only holds addresses this node connected
-    /// to itself (draft, "Address Book": keep independently trusted addresses apart from relayed
-    /// ones). A relayed entry that was never answered is never cached, whatever `time` its
+    /// to itself, and whose own init advertised `NODE_NETWORK` (draft, "Address Book": keep
+    /// independently trusted addresses apart from relayed ones). A relayed entry that was never answered is never cached, whatever `time` its
     /// relaying peer claimed, so relay cannot become trusted across a restart.
     pub(super) fn cacheable(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         let mut cacheable: Vec<MetaAddr> = self
@@ -314,6 +314,8 @@ impl V2Book {
             .cacheable(now)
             .into_iter()
             .filter(|peer| peer.last_response().is_some())
+            // Not redialled while this node runs, so not after a restart either.
+            .filter(|peer| peer.last_known_info_is_valid_for_outbound(&self.network))
             .collect();
         cacheable.sort_by_key(|peer| std::cmp::Reverse(peer.last_response()));
         cacheable.truncate(MAX_PEER_DISK_CACHE_SIZE);

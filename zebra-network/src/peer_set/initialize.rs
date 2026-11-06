@@ -1201,9 +1201,11 @@ where
                             //
                             // The peer set would drop this connection, because the address is
                             // connected over the other protocol, or its IP is at the per-IP
-                            // limit, so it's skipped like a failed dial. The address book
-                            // marks it failed, so the crawler only retries it after the
-                            // failed-peer reconnection delay, not while it is connected.
+                            // limit, so it's skipped. That isn't a failure of the peer, so the
+                            // address book isn't told: a failed entry without a recent last-seen
+                            // time, like an initial peer, would never be a candidate again. It
+                            // stays attempt pending, so the crawler only offers it again after
+                            // the reconnection delay, not while it is connected.
                             if let Some(reason) = connected_peers.blocks_dial(candidate.addr) {
                                 debug!(?candidate.addr, reason, "skipping outbound connection");
                                 metrics::counter!(
@@ -1213,7 +1215,6 @@ where
                                 )
                                 .increment(1);
                                 std::mem::drop(outbound_connection_tracker);
-                                report_failed(address_book_updater, candidate).await;
 
                                 // Like a failed dial, the demand didn't become a connection.
                                 if let Err(send_error) = demand_tx.try_send(MorePeers) {
