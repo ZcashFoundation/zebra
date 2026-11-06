@@ -1,4 +1,4 @@
 project: zebra-state
 kind: Changed
-body: 'Non-finalized commits and block proposal checks replay a retired copy of the best chain instead of cloning the shared published chain, so their cost no longer grows with the length of the non-finalized chain. Committing a solved block that matches a validated proposal rebinds the chain prepared by that proposal check instead of pushing the block again. The state keeps one extra copy of the best chain''s indexes, and two on nodes that validate proposals.'
+body: 'Non-finalized commits and block proposal checks replay a retired copy of the best chain instead of cloning the shared published chain, so their cost no longer grows with the length of the non-finalized chain. Committing a solved block that matches a validated proposal rebinds the chain prepared by that proposal check instead of pushing the block again, including when root blocks have finalized since proposal validation. The state keeps one extra copy of the best chain''s indexes, and two on nodes that validate proposals.'
 time: 2026-11-03T00:00:00Z
