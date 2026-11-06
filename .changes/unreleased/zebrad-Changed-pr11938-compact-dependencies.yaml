@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Added `sha2` and `siphasher` to network dependencies for compact-block transaction identifiers ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).
+time: 2026-11-06T07:42:31.343291727+01:00
