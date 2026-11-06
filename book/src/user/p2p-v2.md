@@ -313,7 +313,7 @@ Its settings are in the `[sync]` section:
 | --- | --- | --- |
 | `v2_checkpoint_sync` | `false` | Turns the engine on. |
 | `v2_lookahead_bytes` | `536870912` (512 MiB) | The most block data the engine requests ahead of the committed tip. More keeps more peers busy and uses more memory. Values below `2000000`, one maximum-size block, are raised to it. |
-| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. |
+| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
 | `v2_target_peers` | `8` | The number of peers the engine downloads from at once. `0` is raised to `1`. |
 | `v2_known_hash_pins` | unset | A known-hash list for Regtest or a custom testnet (see [Known-hash anchors](#known-hash-anchors)). |
 
