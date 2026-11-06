@@ -65,17 +65,20 @@ use crate::components::checkpoint_sync::{
 ///
 /// This bounds only the known-hash fetch that runs right after the network starts.
 /// The artifact download that follows has its own retry and timeout policy
-/// (`hints::AUTO_TIMEOUT` and `hints::AUTO_ROUNDS`), in [`acquire_spentness_hints`].
+/// (`hints::AUTO_TIMEOUT`, longer for a large artifact up to
+/// [`hints::MAX_AUTO_TIMEOUT`], and `hints::AUTO_ROUNDS`), in [`acquire_spentness_hints`].
 pub(super) const KNOWN_HASH_SUM_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// How long the legacy syncer waits after genesis for the hints task with `auto`,
 /// before it syncs without hints.
 ///
-/// The hints task bounds `auto` itself, with [`KNOWN_HASH_SUM_TIMEOUT`] and
-/// `hints::AUTO_TIMEOUT`, so this fires only if that task is stuck. With
-/// `require`, the legacy syncer waits as long as acquisition takes.
-pub(super) const LEGACY_SYNC_HINTS_TIMEOUT: Duration =
-    Duration::from_secs(KNOWN_HASH_SUM_TIMEOUT.as_secs() + hints::AUTO_TIMEOUT.as_secs() + 5 * 60);
+/// The hints task bounds `auto` itself, with [`KNOWN_HASH_SUM_TIMEOUT`] and the
+/// download timeout, which is at most [`hints::MAX_AUTO_TIMEOUT`], so this fires only
+/// if that task is stuck: about 45 minutes. With `require`, the legacy syncer waits
+/// as long as acquisition takes.
+pub(super) const LEGACY_SYNC_HINTS_TIMEOUT: Duration = Duration::from_secs(
+    KNOWN_HASH_SUM_TIMEOUT.as_secs() + hints::MAX_AUTO_TIMEOUT.as_secs() + 5 * 60,
+);
 
 /// The directory, under the state's cache directory, that holds the verified artifact.
 const ARTIFACT_DIR: &str = "spentness-hints";

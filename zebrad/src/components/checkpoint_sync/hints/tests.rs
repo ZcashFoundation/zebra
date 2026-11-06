@@ -340,6 +340,47 @@ async fn slow_peers_auto_times_out() {
     assert_eq!(started.elapsed(), AUTO_TIMEOUT);
 }
 
+/// `Auto` lets one honest peer that keeps up `MIN_RATE` finish an artifact,
+/// even when that takes longer than `AUTO_TIMEOUT` (F-346).
+#[tokio::test(start_paused = true)]
+async fn auto_waits_for_a_large_artifact_at_the_minimum_rate() {
+    let _init_guard = zebra_test::init();
+
+    // 12 full pieces (96 MiB): 384 s at MIN_RATE.
+    let len = 12 * u64::from(PIECE_LENGTH);
+    let object = vec![0x5a_u8; usize::try_from(len).expect("96 MiB fits usize")];
+    let hash = ObjectHash::of(&object);
+    // One 8 MiB piece every 29 s is about 282 KiB/s: above MIN_RATE, and within PIECE_TIMEOUT.
+    let delay = Duration::from_secs(29);
+    let peer = FakePeer::new(
+        "slow but honest",
+        Behavior::Slow {
+            delay,
+            piece: usize::MAX,
+        },
+        &object,
+    );
+    drop(object);
+    let started = Instant::now();
+
+    let result = fetch_from_peers(Mode::Auto, hash, len, peers(std::slice::from_ref(&peer))).await;
+
+    let bytes = result.expect("an honest peer above MIN_RATE delivers the artifact");
+    assert_eq!(ObjectHash::of(&bytes), hash);
+    assert_eq!(started.elapsed(), delay * 12);
+    assert!(started.elapsed() > AUTO_TIMEOUT);
+    assert_eq!(peer.penalty(), 0);
+}
+
+/// Small artifacts keep `AUTO_TIMEOUT`, and no artifact waits longer than
+/// `MAX_AUTO_TIMEOUT`.
+#[test]
+fn auto_timeout_follows_the_length() {
+    assert_eq!(auto_timeout(OBJECT_LEN), AUTO_TIMEOUT);
+    assert_eq!(auto_timeout(MAX_ARTIFACT_LEN), MAX_AUTO_TIMEOUT);
+    assert!(auto_timeout(12 * u64::from(PIECE_LENGTH)) > AUTO_TIMEOUT);
+}
+
 /// Peers that connect after acquisition started are used.
 #[tokio::test(start_paused = true)]
 async fn peers_that_connect_later_are_used() {

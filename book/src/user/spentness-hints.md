@@ -178,9 +178,12 @@ the first pinning release:
   (`MIN_RATE` in `zebrad/src/components/checkpoint_sync/hints.rs`);
 - with `"auto"`, Zebra gives up on hints if the known-hash lists have not
   counted the outputs within five minutes (`KNOWN_HASH_SUM_TIMEOUT`), or if
-  the artifact download takes more than five minutes (`AUTO_TIMEOUT`); the
-  legacy syncer waits five minutes more than both before it syncs without
-  hints (`LEGACY_SYNC_HINTS_TIMEOUT`);
+  the artifact download takes more than five minutes (`AUTO_TIMEOUT`), or,
+  for an artifact too large to download in five minutes at 256 KiB/s, longer
+  than one peer at that rate needs plus 30 seconds: at most about 35 minutes
+  for the largest allowed artifact (`MAX_AUTO_TIMEOUT`); the legacy syncer
+  waits five minutes more than the longest of both before it syncs without
+  hints, about 45 minutes (`LEGACY_SYNC_HINTS_TIMEOUT`);
 - after a restart that interrupted a hinted sync, the state's writer waits
   up to ten minutes for the artifact before it stops Zebra
   (`RESUME_ARTIFACT_TIMEOUT` in

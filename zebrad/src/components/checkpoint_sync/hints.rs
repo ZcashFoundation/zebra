@@ -15,7 +15,7 @@
 //! genesis, and the same gate to `ChainSync::with_hints_gate`, so the legacy
 //! syncer starts no sync round after genesis before the claim. So nothing
 //! commits height 1 before acquisition finishes. With `Auto`, a failed or
-//! slow acquisition (5 min) leaves the state's receiver at `None`, opens the
+//! slow acquisition ([`auto_timeout`]) leaves the state's receiver at `None`, opens the
 //! gate, and syncs unhinted.
 //!
 //! # Blame
@@ -31,9 +31,10 @@
 //!
 //! # Retry policy
 //!
-//! - `Auto` gives up after [`AUTO_TIMEOUT`], or after [`AUTO_ROUNDS`] rounds
+//! - `Auto` gives up after [`auto_timeout`], or after [`AUTO_ROUNDS`] rounds
 //!   in which every candidate peer failed, so an unavailable artifact delays
-//!   unhinted sync by at most a few minutes.
+//!   unhinted sync by at most a few minutes, or by the time one honest peer
+//!   at [`MIN_RATE`] needs for a large artifact.
 //! - `Require` retries until it gets the artifact, or until a local or pin
 //!   defect makes success impossible.
 //! - Each peer must deliver the whole object within a deadline set by
@@ -59,7 +60,9 @@ use tracing::{debug, info, warn};
 
 use zebra_chain::{
     parameters::{
-        spentness_hints::{artifact_len, MaxCheckpoint, Mode, ParsedArtifact, VerifiedArtifact},
+        spentness_hints::{
+            artifact_len, MaxCheckpoint, Mode, ParsedArtifact, VerifiedArtifact, MAX_ARTIFACT_LEN,
+        },
         Network,
     },
     state_snapshot::ObjectHash,
@@ -74,8 +77,25 @@ use zebra_network::{
 mod tests;
 
 /// How long `Mode::Auto` waits for a verified artifact before syncing
-/// unhinted.
+/// unhinted, unless the artifact is too large for one honest peer at
+/// [`MIN_RATE`] to deliver in that time; see [`auto_timeout`].
 pub const AUTO_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The longest [`auto_timeout`], for a [`MAX_ARTIFACT_LEN`] artifact: about
+/// 35 minutes.
+pub const MAX_AUTO_TIMEOUT: Duration =
+    Duration::from_secs(MAX_ARTIFACT_LEN.div_ceil(MIN_RATE) + PIECE_TIMEOUT.as_secs());
+
+// Every `auto_timeout` is at least `AUTO_TIMEOUT`, so the longest one is too.
+const _: () = assert!(MAX_AUTO_TIMEOUT.as_secs() >= AUTO_TIMEOUT.as_secs());
+
+/// How long `Mode::Auto` waits for an artifact of `expected_len` bytes:
+/// [`AUTO_TIMEOUT`], or long enough for one peer that never answers
+/// ([`PIECE_TIMEOUT`]) and then one honest peer at [`MIN_RATE`], whichever is
+/// longer. At most [`MAX_AUTO_TIMEOUT`] for any artifact.
+fn auto_timeout(expected_len: u64) -> Duration {
+    AUTO_TIMEOUT.max(whole_object_timeout(expected_len) + PIECE_TIMEOUT)
+}
 
 /// How many rounds in which every candidate peer failed `Mode::Auto` makes
 /// before syncing unhinted.
@@ -340,7 +360,8 @@ async fn load_or_fetch<P: ArtifactPeer>(
 /// `mode`'s retry policy.
 ///
 /// With `Mode::Auto`, the whole acquisition, downloads included, ends at
-/// [`AUTO_TIMEOUT`].
+/// [`auto_timeout`] for `expected_len`, so a peer that keeps up the accepted
+/// [`MIN_RATE`] is never cancelled part way.
 async fn fetch_from_peers<P: ArtifactPeer>(
     mode: Mode,
     hash: ObjectHash,
@@ -351,7 +372,7 @@ async fn fetch_from_peers<P: ArtifactPeer>(
 
     if mode == Mode::Auto {
         let rounds = fetch_rounds(mode, hash, expected_len, peers, &mut mismatches);
-        match tokio::time::timeout(AUTO_TIMEOUT, rounds).await {
+        match tokio::time::timeout(auto_timeout(expected_len), rounds).await {
             Ok(result) => result,
             Err(_elapsed) => Err(give_up(mismatches)),
         }
