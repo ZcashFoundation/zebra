@@ -23,7 +23,6 @@ use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
-use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::{SigHash, UnminedTxId};
 
@@ -34,20 +33,16 @@ use super::cache::{CacheKey, Cached, CachedItem, ShieldedPool, CACHE_CAPACITY};
 #[cfg(test)]
 mod tests;
 
-/// Sapling prover containing spend and output params for the Sapling circuit.
-///
-/// Used to:
-///
-/// - construct Sapling outputs in coinbase txs, and
-/// - verify Sapling shielded data in the tx verifier.
-static SAPLING: Lazy<LocalTxProver> = Lazy::new(LocalTxProver::bundled);
+mod params;
+pub use params::CoinbaseProver;
+pub(crate) use params::VERIFYING_KEYS;
 
-/// Returns the shared Sapling prover.
+/// Returns the shared, output-only Sapling coinbase prover.
 ///
-/// Parsing the bundled Sapling parameters takes time, so callers that build Sapling
-/// outputs share this prover instead of parsing the parameters again.
-pub fn prover() -> &'static LocalTxProver {
-    &SAPLING
+/// Proving parameters are loaded only when an output proof is requested, not when this
+/// accessor is called. Sapling spend proving is unsupported because coinbases cannot spend.
+pub fn prover() -> &'static CoinbaseProver {
+    &CoinbaseProver
 }
 
 /// A Sapling verification item, used as the request type of the service.
@@ -156,10 +151,10 @@ fn validate(items: Vec<Item>) -> BatchResult {
         .into_iter()
         .map(|item| batch.check_bundle(item.bundle, item.sighash.into()))
         .collect();
-    let (spend_vk, output_vk) = SAPLING.verifying_keys();
+    let (spend_vk, output_vk) = &*VERIFYING_KEYS;
     // A failed check can leave proofs or signatures in the batch. Finish that work before
     // returning any item, but do not send unrelated successful checks through fallback.
-    let valid = batch.validate(&spend_vk, &output_vk, rand::rng());
+    let valid = batch.validate(spend_vk, output_vk, rand::rng());
     BatchResult { checks, valid }
 }
 
@@ -264,8 +259,8 @@ pub fn verify_single(
             if !batch.check_bundle(item.bundle, item.sighash.into()) {
                 return false;
             }
-            let (spend_vk, output_vk) = SAPLING.verifying_keys();
-            batch.validate(&spend_vk, &output_vk, rand::rng())
+            let (spend_vk, output_vk) = &*VERIFYING_KEYS;
+            batch.validate(spend_vk, output_vk, rand::rng())
         })
         .await?;
 

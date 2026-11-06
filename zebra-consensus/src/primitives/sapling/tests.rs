@@ -32,6 +32,10 @@ use crate::{error::TransactionError, BoxError};
 
 use super::{batch_fallback_verifier, BatchFallbackService, CacheKey, Cached, CachedItem, Item};
 
+/// Records proving-parameter initialization in the isolated startup regression test.
+pub(super) static OUTPUT_PARAMETERS_LOADED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// The `verifier` label the test caches report their metrics under.
 ///
 /// Test caches use their own label so their counts never land in the series the production
@@ -498,4 +502,101 @@ fn shards_respect_configured_cpu_budget() {
         let max_batches = (parallelism / shards).max(1);
         assert!(shards * max_batches <= parallelism);
     }
+}
+
+/// Pinned keys must remain byte-for-byte equal to the authenticated official parameters.
+#[test]
+fn pinned_verifying_keys_match_official_parameters() {
+    let (spend, output) = wagyu_zcash_parameters::load_sapling_parameters();
+    // This parses the complete official files and checks their upstream BLAKE2b-512 digests.
+    let _ = zcash_proofs::parse_parameters(&spend[..], &output[..], None);
+    for (bytes, pinned) in [
+        (&spend[..], super::params::SPEND_VK),
+        (&output[..], super::params::OUTPUT_VK),
+    ] {
+        let key = groth16::VerifyingKey::<bls12_381::Bls12>::read(bytes)
+            .expect("authenticated official verifying key must deserialize");
+        let mut encoded = Vec::new();
+        key.write(&mut encoded)
+            .expect("writing a verifying key to a Vec must succeed");
+        assert_eq!(encoded, pinned);
+    }
+}
+
+/// The output-only prover must still create a coinbase whose Sapling proof and signature verify.
+#[test]
+fn sapling_coinbase_output_proves_and_verifies() {
+    use rand::{rand_core::UnwrapErr, rngs::SysRng};
+    use zcash_primitives::transaction::{
+        builder::{BuildConfig, Builder},
+        fees::fixed::FeeRule,
+    };
+    use zcash_protocol::value::Zatoshis;
+
+    let network = Network::Mainnet;
+    let height = Height(1_687_106);
+    let address = sapling_crypto::zip32::ExtendedSpendingKey::master(&[0; 32])
+        .expect("fixed test seed must generate a valid Sapling spending key")
+        .default_address()
+        .1;
+    let mut builder = Builder::new(
+        &network,
+        height.into(),
+        BuildConfig::Coinbase { miner_data: None },
+    );
+    builder
+        .add_sapling_output::<std::convert::Infallible>(
+            Some(sapling_crypto::keys::OutgoingViewingKey([0; 32])),
+            address,
+            Zatoshis::from_u64(1).expect("one zatoshi is in range"),
+            zcash_protocol::memo::MemoBytes::empty(),
+        )
+        .expect("coinbase Sapling output must be accepted");
+    let result = builder
+        .build(
+            &Default::default(),
+            &[],
+            &[],
+            UnwrapErr(SysRng),
+            super::prover(),
+            super::prover(),
+            &FeeRule::non_standard(Zatoshis::ZERO),
+        )
+        .expect("Sapling coinbase must build with the output-only prover");
+    let mut bytes = Vec::new();
+    result.transaction().write(&mut bytes).unwrap();
+    let tx: Transaction = bytes.zcash_deserialize_into().unwrap();
+    assert_eq!(tx.sapling_spends_count(), 0);
+    assert_eq!(tx.sapling_outputs().count(), 1);
+    let item = item(&tx, NetworkUpgrade::Nu5).expect("coinbase must contain a Sapling bundle");
+    let result = super::validate(vec![item]);
+    assert_eq!(result.checks, [true]);
+    assert!(
+        result.valid,
+        "coinbase proof and binding signature must verify"
+    );
+}
+
+/// Startup verification and obtaining the coinbase prover must not initialize proving parameters.
+#[test]
+fn sapling_verification_does_not_load_proving_parameters() {
+    const CHILD: &str = "ZEBRA_TEST_SAPLING_LAZY_PARAMETERS";
+    if std::env::var_os(CHILD).is_some() {
+        std::sync::LazyLock::force(&super::VERIFYING_KEYS);
+        let _ = super::prover();
+        assert!(!OUTPUT_PARAMETERS_LOADED.load(Ordering::Relaxed));
+        return;
+    }
+
+    // Other tests can legitimately create output proofs. Use a fresh process, not mutable
+    // global environment or test ordering, to check the uninitialized production static.
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "primitives::sapling::tests::sapling_verification_does_not_load_proving_parameters",
+        ])
+        .env(CHILD, "1")
+        .status()
+        .expect("the isolated parameter test must start");
+    assert!(status.success());
 }

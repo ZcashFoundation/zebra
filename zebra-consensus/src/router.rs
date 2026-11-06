@@ -551,8 +551,8 @@ pub struct BackgroundTaskHandles {
     /// This ongoing task must be polled to propagate state invariant panics.
     pub checkpoint_commit_handle: JoinHandle<()>,
 
-    /// A handle to background construction of Halo2 verifying keys and Sapling parameters.
-    /// Finishes after initializing the NU6.3 key, both historical keys, and the Sapling prover.
+    /// A handle to background construction of Halo2 and Sapling verifying keys.
+    /// Finishes after initializing all three Halo2 eras and the pinned Sapling verifying keys.
     /// Once started, this blocking task cannot be aborted.
     pub halo2_key_preload_handle: JoinHandle<()>,
 }

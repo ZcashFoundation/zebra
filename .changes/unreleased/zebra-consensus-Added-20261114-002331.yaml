@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `SaplingCoinbaseProver` for output-only Sapling coinbase proving, using `jubjub` and lazily loaded `wagyu-zcash-parameters-6 0.2` output parameters ([#12319](https://github.com/ZcashFoundation/zebra/pull/12319)).
+time: 2026-11-14T00:23:31.376052845+01:00

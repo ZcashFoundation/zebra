@@ -149,14 +149,14 @@ fn build_verifying_key(version: OrchardCircuitVersion) -> ItemVerifyingKey {
     key
 }
 
-/// Initializes Halo2 era keys and Sapling parameters off the async workers.
+/// Initializes Halo2 era keys and Sapling verifying keys off the async workers.
 pub(crate) fn spawn_key_preload() -> JoinHandle<()> {
     tokio::task::spawn_blocking(|| {
         lazy_static::initialize(&VERIFYING_KEY_NU6_3_ONWARD);
         lazy_static::initialize(&VERIFYING_KEY_NU6_2);
         lazy_static::initialize(&VERIFYING_KEY_PRE_NU6_2);
-        // Share the verifier's lazy prover, including parameter parsing and key preparation.
-        let _ = super::sapling::prover();
+        // Verification never needs the Sapling proving parameters.
+        std::sync::LazyLock::force(&super::sapling::VERIFYING_KEYS);
     })
 }
 
