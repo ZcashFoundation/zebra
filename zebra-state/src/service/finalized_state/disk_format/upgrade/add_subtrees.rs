@@ -23,6 +23,9 @@ use crate::service::finalized_state::{
 };
 
 #[cfg(test)]
+mod tests;
+
+#[cfg(test)]
 thread_local! {
     /// Commits the first Sapling subtree after its initial lookup finds nothing.
     pub(in crate::service::finalized_state) static AFTER_MISSING_SAPLING_SUBTREE:
