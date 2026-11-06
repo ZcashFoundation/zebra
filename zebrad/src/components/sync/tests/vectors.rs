@@ -3367,3 +3367,58 @@ async fn singleton_discovery_downloads_once(ignore_first_round: bool) {
     .await
     .expect("singleton discovery and recovery must complete promptly");
 }
+
+/// A state that already has a tip, like one imported from a state snapshot, is
+/// not asked whether it knows the genesis block, and genesis is not downloaded
+/// below its tip.
+#[tokio::test]
+async fn request_genesis_is_skipped_when_the_state_has_a_tip() {
+    let _init_guard = zebra_test::init();
+
+    let config = ZebradConfig {
+        consensus: ConsensusConfig::default(),
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+
+    let mut peer_set: MockService<zn::Request, zn::Response, PanicAssertion> = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
+    let block_verifier_router: MockService<zebra_consensus::Request, block::Hash, PanicAssertion> =
+        MockService::build()
+            .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+            .for_unit_tests();
+    let mut state_service: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build()
+            .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+            .for_unit_tests();
+    let read_state_service: MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion> =
+        MockService::build()
+            .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+            .for_unit_tests();
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(Height(1_000));
+
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut chain_sync, _sync_status) = ChainSync::new(
+        &config,
+        Height(0),
+        peer_set.clone(),
+        block_verifier_router,
+        state_service.clone(),
+        read_state_service,
+        mock_chain_tip,
+        misbehavior_tx,
+    );
+
+    // Without the skip, the syncer asks the state whether it knows genesis and waits for the
+    // answer, which this mock never gives.
+    tokio::time::timeout(Duration::from_secs(5), chain_sync.request_genesis())
+        .await
+        .expect("a state with a tip skips the genesis request at once")
+        .expect("skipping the genesis request succeeds");
+
+    state_service.expect_no_requests().await;
+    peer_set.expect_no_requests().await;
+}

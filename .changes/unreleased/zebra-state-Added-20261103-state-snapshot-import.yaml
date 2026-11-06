@@ -1,0 +1,12 @@
+project: zebra-state
+kind: Added
+body: >-
+  Added `state_snapshot::import`, which builds SST files from verified state snapshot pieces with
+  `build_piece_sst` and imports a snapshot into a new finalized database with
+  `import_state_snapshot`. The database is renamed into place only after it passes every check
+  against its commitment, the import preconditions, the checkpoint at its height, its history
+  tree, its window blocks, its own indexes and value pools, and the database format checks; a
+  refused snapshot returns `SnapshotError::Refused` with the `ImportCheck` that failed. Re-exported
+  `restorable_db_versions` from the crate root so callers can check whether the running database
+  format can restore the previous major version before bootstrapping.
+time: 2026-11-03T12:00:00.000000000-05:00

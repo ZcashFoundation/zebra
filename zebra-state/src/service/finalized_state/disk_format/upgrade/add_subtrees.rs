@@ -18,9 +18,19 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::{
-    disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade},
+    disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade, FormatCheckError},
     DiskWriteBatch, ZebraDb,
 };
+
+#[cfg(test)]
+thread_local! {
+    /// Commits the first Sapling subtree after its initial lookup finds nothing.
+    pub(in crate::service::finalized_state) static AFTER_MISSING_SAPLING_SUBTREE:
+        std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    /// Commits the first Orchard subtree after its initial lookup finds nothing.
+    pub(in crate::service::finalized_state) static AFTER_MISSING_ORCHARD_SUBTREE:
+        std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
 
 /// Implements [`DiskFormatUpgrade`] for populating Sapling and Orchard note commitment subtrees.
 pub struct AddSubtrees;
@@ -201,17 +211,28 @@ pub fn reset(
 /// This allows us to fail the upgrade quickly in tests and during development,
 /// rather than waiting ~20 minutes to see if it failed.
 ///
-/// This check runs the first subtree calculation, but it doesn't read the subtree data in the
-/// database. So it can be run before the upgrade is started.
+/// Before pruning, this calculates the first subtree without requiring stored subtree data, so
+/// it can run before the upgrade. Once pruning may run, or after pruning, it checks the stored
+/// subtree against the vector, because pruning can delete the completing block's body at any time.
 pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
+    subtree_format_calculation_pre_checks_typed(db).map_err(|error| error.to_string())
+}
+
+/// The typed form used by snapshot import error attribution.
+pub fn subtree_format_calculation_pre_checks_typed(db: &ZebraDb) -> Result<(), FormatCheckError> {
+    if db.network() != Mainnet {
+        return Ok(());
+    }
+    let history = db.history_capabilities()?;
+
     // Check the entire format before returning any errors.
-    let sapling_result = quick_check_sapling_subtrees(db);
-    let orchard_result = quick_check_orchard_subtrees(db);
+    let sapling_result = quick_check_sapling_subtrees(db, history);
+    let orchard_result = quick_check_orchard_subtrees(db, history);
 
     if sapling_result.is_err() || orchard_result.is_err() {
-        let err = Err(format!(
+        let err = Err(FormatCheckError::Invalid(format!(
             "missing or bad first subtree: sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        ));
+        )));
         warn!(?err);
         return err;
     }
@@ -257,11 +278,34 @@ fn first_orchard_mainnet_subtree() -> NoteCommitmentSubtree<orchard::tree::Node>
 /// rather than waiting ~20 minutes to see if it failed.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first sapling subtree on mainnet, so skip this check if it isn't available.
-    if db.network() != Mainnet {
-        return Ok(());
+fn quick_check_sapling_subtrees(
+    db: &ZebraDb,
+    history: crate::HistoryCapabilities,
+) -> Result<(), &'static str> {
+    let expected_subtree = first_sapling_mainnet_subtree();
+    // Pruning can delete the completing block's body between any availability check and the
+    // body read, so once it may run, only the stored subtree is checked.
+    let pruning_may_run = db.ready_for_pruning() && db.config().prune_blocks_older_than.is_some();
+    let body_retained = history.has_block_body(expected_subtree.end_height);
+    if pruning_may_run || !body_retained {
+        if let Some(stored_subtree) = db.sapling_subtree_by_index(0) {
+            return if stored_subtree == expected_subtree {
+                Ok(())
+            } else {
+                Err("first stored sapling subtree did not match expected test vector")
+            };
+        }
+        if !body_retained {
+            return Err("first stored sapling subtree did not match expected test vector");
+        }
     }
+
+    #[cfg(test)]
+    AFTER_MISSING_SAPLING_SUBTREE.with(|hook| {
+        if let Some(commit) = hook.borrow_mut().take() {
+            commit();
+        }
+    });
 
     let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
         db.sapling_tree_for_tip().subtree_index()
@@ -271,6 +315,16 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
     if tip_subtree_index == 0 && !db.sapling_tree_for_tip().is_complete_subtree() {
         return Ok(());
+    }
+
+    if pruning_may_run {
+        // The completing tree and subtree are committed atomically. Once completion is visible,
+        // a later lookup must see the subtree, even if the first lookup raced that commit.
+        return match db.sapling_subtree_by_index(0) {
+            Some(stored_subtree) if stored_subtree == expected_subtree => Ok(()),
+            Some(_) => Err("first stored sapling subtree did not match expected test vector"),
+            None => Err("first sapling subtree is missing"),
+        };
     }
 
     // Find the first complete subtree: previous and current trees, and their end heights.
@@ -291,9 +345,6 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         return result;
     };
 
-    // Creating this test vector involves a cryptographic check, so only do it once.
-    let expected_subtree = first_sapling_mainnet_subtree();
-
     let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
     if db_subtree != expected_subtree {
@@ -311,11 +362,34 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 /// rather than waiting ~20 minutes to see if it failed.
 ///
 /// Returns an error if a note commitment subtree is missing or incorrect.
-fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
-    // We check the first orchard subtree on mainnet, so skip this check if it isn't available.
-    if db.network() != Mainnet {
-        return Ok(());
+fn quick_check_orchard_subtrees(
+    db: &ZebraDb,
+    history: crate::HistoryCapabilities,
+) -> Result<(), &'static str> {
+    let expected_subtree = first_orchard_mainnet_subtree();
+    // Pruning can delete the completing block's body between any availability check and the
+    // body read, so once it may run, only the stored subtree is checked.
+    let pruning_may_run = db.ready_for_pruning() && db.config().prune_blocks_older_than.is_some();
+    let body_retained = history.has_block_body(expected_subtree.end_height);
+    if pruning_may_run || !body_retained {
+        if let Some(stored_subtree) = db.orchard_subtree_by_index(0) {
+            return if stored_subtree == expected_subtree {
+                Ok(())
+            } else {
+                Err("first stored orchard subtree did not match expected test vector")
+            };
+        }
+        if !body_retained {
+            return Err("first stored orchard subtree did not match expected test vector");
+        }
     }
+
+    #[cfg(test)]
+    AFTER_MISSING_ORCHARD_SUBTREE.with(|hook| {
+        if let Some(commit) = hook.borrow_mut().take() {
+            commit();
+        }
+    });
 
     let Some(NoteCommitmentSubtreeIndex(tip_subtree_index)) =
         db.orchard_tree_for_tip().subtree_index()
@@ -325,6 +399,16 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 
     if tip_subtree_index == 0 && !db.orchard_tree_for_tip().is_complete_subtree() {
         return Ok(());
+    }
+
+    if pruning_may_run {
+        // The completing tree and subtree are committed atomically. Once completion is visible,
+        // a later lookup must see the subtree, even if the first lookup raced that commit.
+        return match db.orchard_subtree_by_index(0) {
+            Some(stored_subtree) if stored_subtree == expected_subtree => Ok(()),
+            Some(_) => Err("first stored orchard subtree did not match expected test vector"),
+            None => Err("first orchard subtree is missing"),
+        };
     }
 
     // Find the first complete subtree: previous and current trees, and their end heights.
@@ -344,9 +428,6 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
         error!(?result);
         return result;
     };
-
-    // Creating this test vector involves a cryptographic check, so only do it once.
-    let expected_subtree = first_orchard_mainnet_subtree();
 
     let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
 
@@ -705,6 +786,7 @@ fn calculate_sapling_subtree(
         //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
+            .expect("subtree reconstruction requires complete stored block bodies")
             .expect("height with note commitment tree should have block");
         let sapling_note_commitments = block
             .sapling_note_commitments()
@@ -829,6 +911,7 @@ fn calculate_orchard_subtree(
         //       because we don't use the block header data at all.
         let block = read_db
             .block(end_height.into())
+            .expect("subtree reconstruction requires complete stored block bodies")
             .expect("height with note commitment tree should have block");
         let orchard_note_commitments = block
             .orchard_note_commitments()

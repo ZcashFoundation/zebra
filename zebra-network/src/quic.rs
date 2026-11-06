@@ -35,12 +35,15 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     constants::HANDSHAKE_TIMEOUT,
-    protocol::v2::{
-        constants::{
-            alpn_protocol_id, MAX_RECORD_PAYLOAD_LEN, MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT,
-            MIN_UNIDIRECTIONAL_STREAMS,
+    protocol::{
+        external::types::PeerServices,
+        v2::{
+            constants::{
+                alpn_protocol_id, MAX_RECORD_PAYLOAD_LEN, MIN_BIDIRECTIONAL_STREAMS,
+                MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
+            },
+            types::ErrorCode,
         },
-        types::ErrorCode,
     },
 };
 
@@ -64,42 +67,107 @@ const MAX_CONCURRENT_UNI_STREAMS: u32 = 2 * MIN_UNIDIRECTIONAL_STREAMS;
 /// drop a healthy connection.
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// The per-stream receive window, in bytes: two maximum-size records, so a
-/// block announcement or a `get-blocks` entry never stalls on flow control
-/// alone; the draft's 16 MiB bulk recommendation waits for the bulk stream types.
-// `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the product fits in a `u32`; checked below.
-const STREAM_RECEIVE_WINDOW: u32 = (2 * MAX_RECORD_PAYLOAD_LEN) as u32;
+/// The flow-control windows of a connection: how much the peer may send
+/// before this node reads it, and how much this node keeps buffered for
+/// sending.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Windows {
+    /// The per-stream receive window, in bytes.
+    pub stream_receive: u32,
 
-/// The per-connection receive window, in bytes: two streams, so at most 8 MiB
-/// buffered per peer, or about 790 MiB if every one of the default 99 version 2
-/// connections filled its window; the draft's 64 MiB bulk recommendation waits
-/// for the bulk stream types.
-const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
+    /// The per-connection receive window, in bytes.
+    pub connection_receive: u32,
 
-/// The most bytes this node keeps buffered for sending on one connection,
-/// across all its streams, until the peer acknowledges them: 6 MiB, about
-/// two of the largest responses this node sends (a `get-blocks` response is
-/// at most a 1 MB byte budget plus one 2 MiB block), or two maximum-size
-/// announcement records with room to spare.
-///
-/// # Security
-///
-/// A peer that grants flow-control credit but acknowledges or reads slowly
-/// keeps what this node wrote buffered here. With quinn's 10 MB default, the
-/// requests a peer can repeat cheaply every request deadline could keep
-/// that much pinned per connection; the request deadline bounds how long
-/// one response holds its objects, and this bounds the bytes it has
-/// written. A connection's response memory is at most this window plus
-/// the objects of the requests being served.
-// `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
-const SEND_WINDOW: u64 = 3 * MAX_RECORD_PAYLOAD_LEN as u64;
+    /// The most bytes this node keeps buffered for sending on one connection,
+    /// across all its streams, until the peer acknowledges them.
+    pub send: u64,
+}
+
+impl Windows {
+    /// The windows of this node's connections.
+    ///
+    /// The per-stream receive window is two maximum-size records, so a block
+    /// announcement or a `get-blocks` entry never stalls on flow control
+    /// alone; the draft's 16 MiB bulk recommendation waits for the bulk stream
+    /// types.
+    ///
+    /// The per-connection receive window is two streams, so at most 8 MiB
+    /// buffered per peer, or about 790 MiB if every one of the default 99
+    /// version 2 connections filled its window; the draft's 64 MiB bulk
+    /// recommendation waits for the bulk stream types.
+    ///
+    /// The send window is 6 MiB, about two of the largest responses this node
+    /// sends (a `get-blocks` response is at most a 1 MB byte budget plus one
+    /// 2 MiB block), or two maximum-size announcement records with room to
+    /// spare.
+    ///
+    /// # Security
+    ///
+    /// A peer that grants flow-control credit but acknowledges or reads slowly
+    /// keeps what this node wrote buffered in the send window. With quinn's
+    /// 10 MB default, the requests a peer can repeat cheaply every request
+    /// deadline could keep that much pinned per connection; the request
+    /// deadline bounds how long one response holds its objects, and this
+    /// bounds the bytes it has written. A connection's response memory is at
+    /// most this window plus the objects of the requests being served.
+    pub const DEFAULT: Windows = Windows {
+        // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the product fits in a `u32`; checked below.
+        stream_receive: (2 * MAX_RECORD_PAYLOAD_LEN) as u32,
+        // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the 8 MiB product fits in a `u32`; checked below.
+        connection_receive: (4 * MAX_RECORD_PAYLOAD_LEN) as u32,
+        // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
+        send: 3 * MAX_RECORD_PAYLOAD_LEN as u64,
+    };
+
+    /// The windows of a node that serves synchronization artifacts through
+    /// `get-object`: the default receive windows, and a send window of 8 MiB,
+    /// so that the node's eight concurrent object streams can each have a
+    /// 1 MiB chunk in flight beside its other responses.
+    ///
+    /// # Security
+    ///
+    /// The send window still bounds what slow peers keep pinned per
+    /// connection, as [`Windows::DEFAULT`] describes; a serving node accepts
+    /// 2 MiB more of it.
+    pub const SERVING: Windows = Windows {
+        send: 8 << 20,
+        ..Windows::DEFAULT
+    };
+
+    /// The windows of a state-snapshot bootstrap's client-only endpoint:
+    /// 8 MiB per stream and 16 MiB per connection of receive window, so that
+    /// an object download from a distant peer is not capped by flow control,
+    /// and the default send window, since the bootstrap only sends small requests.
+    ///
+    /// The transport draft recommends at least 16 MiB per stream and 64 MiB
+    /// per connection for bulk synchronization ("Bulk Transfer Performance");
+    /// these windows keep the bootstrap's eight peers within a few hundred MiB
+    /// of buffers instead, and downloads proceed from several peers at once.
+    pub const BOOTSTRAP: Windows = Windows {
+        stream_receive: 8 << 20,
+        connection_receive: 16 << 20,
+        ..Windows::DEFAULT
+    };
+
+    /// The windows of a node advertising `services`: [`Windows::SERVING`]
+    /// when they include `NODE_SYNC_ARTIFACTS`, [`Windows::DEFAULT`]
+    /// otherwise.
+    pub fn for_services(services: PeerServices) -> Windows {
+        if services.contains(PeerServices::NODE_SYNC_ARTIFACTS) {
+            Windows::SERVING
+        } else {
+            Windows::DEFAULT
+        }
+    }
+}
 
 // The parameters above meet the draft's minimums; checked at compile time.
 const _: () = {
     assert!(KEEP_ALIVE_INTERVAL.as_millis() * 2 <= MIN_IDLE_TIMEOUT.as_millis());
-    // Guards the truncating `as u32` cast in `STREAM_RECEIVE_WINDOW`'s definition.
-    // `STREAM_RECEIVE_WINDOW` is a `u32`, which always fits in a `usize` on supported targets.
-    assert!(STREAM_RECEIVE_WINDOW as usize >= MAX_RECORD_PAYLOAD_LEN);
+    // Guards the truncating `as u32` casts in `Windows::DEFAULT`'s definition.
+    // The windows are `u32`s, which always fit in a `usize` on supported targets.
+    assert!(Windows::DEFAULT.stream_receive as usize == 2 * MAX_RECORD_PAYLOAD_LEN);
+    assert!(Windows::DEFAULT.connection_receive as usize == 4 * MAX_RECORD_PAYLOAD_LEN);
 };
 
 /// An error building or binding a QUIC endpoint.
@@ -146,8 +214,9 @@ pub enum ConnectError {
     Timeout,
 }
 
-/// The transport parameters this node uses for every connection.
-fn transport_config() -> TransportConfig {
+/// The transport parameters this node uses for every connection, with
+/// `windows` as its flow-control windows.
+fn transport_config(windows: Windows) -> TransportConfig {
     let mut config = TransportConfig::default();
     config
         .max_concurrent_bidi_streams(VarInt::from_u32(MAX_CONCURRENT_BIDI_STREAMS))
@@ -157,9 +226,9 @@ fn transport_config() -> TransportConfig {
                 .expect("the idle timeout is far below the VarInt limit"),
         ))
         .keep_alive_interval(Some(KEEP_ALIVE_INTERVAL))
-        .stream_receive_window(VarInt::from_u32(STREAM_RECEIVE_WINDOW))
-        .receive_window(VarInt::from_u32(CONNECTION_RECEIVE_WINDOW))
-        .send_window(SEND_WINDOW)
+        .stream_receive_window(VarInt::from_u32(windows.stream_receive))
+        .receive_window(VarInt::from_u32(windows.connection_receive))
+        .send_window(windows.send)
         // The draft does not use datagrams: do not advertise them, and buffer none.
         .datagram_receive_buffer_size(None)
         .datagram_send_buffer_size(0)
@@ -169,26 +238,29 @@ fn transport_config() -> TransportConfig {
 }
 
 /// A server configuration offering `alpn`, presenting a fresh self-signed
-/// certificate for an `algorithm` key.
+/// certificate for an `algorithm` key, with `windows` as its connections'
+/// flow-control windows.
 fn server_config(
     alpn: &'static [u8],
     algorithm: &'static rcgen::SignatureAlgorithm,
+    windows: Windows,
 ) -> Result<ServerConfig, EndpointError> {
     let crypto = tls::server_config(alpn, algorithm)?;
     let crypto = QuicServerConfig::try_from(crypto)?;
 
     let mut config = ServerConfig::with_crypto(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()));
+    config.transport_config(Arc::new(transport_config(windows)));
     Ok(config)
 }
 
-/// A client configuration offering `alpn`, accepting any peer certificate.
-fn client_config(alpn: &'static [u8]) -> Result<ClientConfig, EndpointError> {
+/// A client configuration offering `alpn`, accepting any peer certificate,
+/// with `windows` as its connections' flow-control windows.
+fn client_config(alpn: &'static [u8], windows: Windows) -> Result<ClientConfig, EndpointError> {
     let crypto = tls::client_config(alpn)?;
     let crypto = QuicClientConfig::try_from(crypto)?;
 
     let mut config = ClientConfig::new(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()));
+    config.transport_config(Arc::new(transport_config(windows)));
     Ok(config)
 }
 
@@ -202,18 +274,26 @@ pub(crate) fn client_config_with_receive_windows(
     connection_window: u32,
 ) -> ClientConfig {
     let alpn = alpn_protocol_id(network).expect("the test network has an ALPN identifier");
-    let mut config = client_config(alpn).expect("the client configuration builds");
-    let mut transport = transport_config();
-    transport
-        .stream_receive_window(VarInt::from_u32(stream_window))
-        .receive_window(VarInt::from_u32(connection_window));
-    config.transport_config(Arc::new(transport));
-    config
+    let windows = Windows {
+        stream_receive: stream_window,
+        connection_receive: connection_window,
+        ..Windows::DEFAULT
+    };
+    client_config(alpn, windows).expect("the client configuration builds")
 }
 
-/// Binds an endpoint for `network` on `addr`; must be called inside a Tokio
-/// runtime, which drives the socket. The server identity is generated here
-/// and lives as long as the endpoint.
+/// Binds an endpoint for `network` on `addr`, with [`Windows::DEFAULT`] as
+/// its connections' flow-control windows; see [`bind_with_windows`], which
+/// the node uses, with the windows for its services.
+#[cfg(test)]
+pub fn bind(network: &Network, addr: SocketAddr) -> Result<Endpoint, EndpointError> {
+    bind_with_windows(network, addr, Windows::DEFAULT)
+}
+
+/// Binds an endpoint for `network` on `addr`, with `windows` as its
+/// connections' flow-control windows; must be called inside a Tokio runtime,
+/// which drives the socket. The server identity is generated here and lives
+/// as long as the endpoint.
 ///
 /// The network is fixed when the endpoint is bound, so every connection it
 /// opens or accepts negotiates the same ALPN identifier, and rustls refuses
@@ -226,24 +306,58 @@ pub(crate) fn client_config_with_receive_windows(
 ///
 /// If called outside a Tokio runtime: tokio panics when the socket is
 /// registered with the runtime.
-pub fn bind(network: &Network, addr: SocketAddr) -> Result<Endpoint, EndpointError> {
+pub fn bind_with_windows(
+    network: &Network,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
     let alpn = alpn_protocol_id(network).ok_or_else(|| EndpointError::NoAlpnIdentifier {
         network: network.clone(),
     })?;
-    let server = server_config(alpn, &rcgen::PKCS_ED25519)?;
-    let client = client_config(alpn)?;
+    let server = server_config(alpn, &rcgen::PKCS_ED25519, windows)?;
+    new_endpoint(alpn, Some(server), addr, windows)
+}
+
+/// Binds a client-only endpoint for `network` on `addr`, with `windows` as
+/// its connections' flow-control windows: it dials peers like one from
+/// [`bind_with_windows`], but has no server configuration, so it accepts no
+/// connections and presents no certificate. Must be called inside a Tokio
+/// runtime, which drives the socket.
+///
+/// A state-snapshot bootstrap dials its peers from one, before the node's
+/// own endpoint exists.
+///
+/// # Panics
+///
+/// If called outside a Tokio runtime: tokio panics when the socket is
+/// registered with the runtime.
+pub fn client_endpoint(
+    network: &Network,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
+    let alpn = alpn_protocol_id(network).ok_or_else(|| EndpointError::NoAlpnIdentifier {
+        network: network.clone(),
+    })?;
+    new_endpoint(alpn, None, addr, windows)
+}
+
+/// Binds an endpoint on `addr` that dials with `windows` and offers `alpn`,
+/// and accepts connections with `server` if it is given.
+fn new_endpoint(
+    alpn: &'static [u8],
+    server: Option<ServerConfig>,
+    addr: SocketAddr,
+    windows: Windows,
+) -> Result<Endpoint, EndpointError> {
+    let client = client_config(alpn, windows)?;
 
     let socket = std::net::UdpSocket::bind(addr).map_err(EndpointError::Bind)?;
     let mut endpoint_config = EndpointConfig::default();
     // QUIC version 1 only (RFC 9000); quinn's default also accepts the pre-standard draft versions.
     endpoint_config.supported_versions(vec![0x0000_0001]);
-    let mut endpoint = Endpoint::new(
-        endpoint_config,
-        Some(server),
-        socket,
-        Arc::new(TokioRuntime),
-    )
-    .map_err(EndpointError::Bind)?;
+    let mut endpoint = Endpoint::new(endpoint_config, server, socket, Arc::new(TokioRuntime))
+        .map_err(EndpointError::Bind)?;
     endpoint.set_default_client_config(client);
     Ok(endpoint)
 }

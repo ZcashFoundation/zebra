@@ -18,6 +18,10 @@ pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 /// `zebra-checkpoints`) can use it without depending on `zebra-state`.
 pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
+/// Minimum retained finalized block bodies on Mainnet and Testnet when pruning is enabled.
+/// Regtest permits `MAX_BLOCK_REORG_HEIGHT + 1` bodies instead.
+pub const MIN_PRUNING_RETENTION: u32 = 10_000;
+
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
@@ -34,7 +38,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 30;
+const DATABASE_FORMAT_VERSION: u64 = 32;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -45,6 +49,21 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 32.0.0: isolates snapshot-born databases in `state/v32`, so older 31.x readers cannot open
+///   and downgrade them. Compatible fixed-height v31 state moves to v32 without record rewrites,
+///   and v31 is the preferred reusable source directory. Snapshot-born databases must not be
+///   renamed back to v31, v30, or v29, because those readers do not enforce the snapshot history
+///   floor.
+/// - 31.1.0: added the `snapshot_base` column family, which marks a database imported from a
+///   state snapshot with its window start, snapshot height, block hash and manifest. Existing
+///   databases get the column family empty when they are opened, so the upgrade rewrites no
+///   records. The v32 directory barrier supersedes the unenforceable same-directory prohibition
+///   on 31.0.0 readers; existing 31.1.0 databases upgrade to v32 without record rewrites.
+/// - 31.0.0: isolates historical body deletion from older archive readers in a separate directory.
+///   Compatible v30 and v29 archive state is moved to `state/v31` without rewriting records. Older
+///   binaries must not open a pruned v31 directory: their minor-version downgrade path assumes
+///   archive bodies remain complete. A never-pruned v31 directory can be renamed back to v30 for
+///   rollback, because no records are rewritten; a pruned one needs a separate archive backup.
 /// - 30.0.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the

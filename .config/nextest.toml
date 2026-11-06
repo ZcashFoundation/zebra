@@ -16,8 +16,10 @@ slow-timeout = { period = "5m", terminate-after = 4 }
 # The zcashd-compat suite needs a zcashd sidecar and passes without testing anything when
 # `TEST_ZCASHD_COMPAT` is unset, so it runs only under its own profiles.
 # The v2 checkpoint sync tests each run three nodes through 3,000 Regtest blocks on released
-# loopback ports, so they only run when selected with `--ignore-default-filter`.
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+# loopback ports, and the state snapshot bootstrap and shutdown tests run two nodes through a
+# multi-minute bootstrap or 2,000 blocks, so they only run when selected with
+# `--ignore-default-filter`.
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
 
@@ -28,7 +30,7 @@ failure-output = "immediate"
 # time on the 4-CPU runners.
 test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # Record retry attempts for the unit test job summary.
 [profile.ci.junit]
@@ -88,6 +90,25 @@ serial-zcashd-compat = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
 retries = 1
+
+# Run alone because the known-port helper releases the socket before zebrad binds it.
+[[profile.default.overrides]]
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart) or test(=integration::regtest::pruning::pruned_node_never_advertises_unservable_blocks)'
+threads-required = "num-test-threads"
+
+# The snapshot bootstrap test reserves eight loopback ports the same way. The default filters
+# leave it out, because its nodes take minutes to mine, export, bootstrap, and sync.
+[[profile.default.overrides]]
+filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot)'
+threads-required = "num-test-threads"
+
+[[profile.ci.overrides]]
+filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart) or test(=integration::regtest::pruning::pruned_node_never_advertises_unservable_blocks)'
+threads-required = "num-test-threads"
+
+[[profile.ci.overrides]]
+filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot)'
+threads-required = "num-test-threads"
 
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.

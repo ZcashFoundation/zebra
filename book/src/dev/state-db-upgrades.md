@@ -11,11 +11,12 @@ For deployment, direct-reader compatibility, and rollback, follow
 ## Format versions and paths
 
 The database format version is independent of Zebra and Rust crate versions.
-Zebra implements [format **30.0.0**][constants]:
+The current code implements [format **32.0.0**][constants]; Zebra 7.0.0
+implements format 29.0.0:
 
 | Constant | Current value | Change requiring a bump |
 | --- | --- | --- |
-| `DATABASE_FORMAT_VERSION` | `30` | An incompatible encoding change or column family removal |
+| `DATABASE_FORMAT_VERSION` | `32` | An incompatible encoding change or column family removal |
 | `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
 | `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
@@ -23,7 +24,7 @@ A change that would otherwise be incompatible can use a minor bump only when
 all supported Zebra versions already contain the required compatibility code.
 The function `state_database_format_version_in_code()` returns the complete
 semantic version. Builds with the `indexer` feature return
-`30.0.0+indexer`; other builds return `30.0.0`.
+`32.0.0+indexer`; other builds return `32.0.0`.
 
 For persistent databases, the method `Config::db_path()` constructs this path:
 
@@ -39,7 +40,7 @@ this namespace. Databases for the same network with different minor or patch
 versions still use the same major-version directory.
 
 The file `version` inside the database directory records the full semantic
-version, for example `30.0.0` or `30.0.0+indexer`, without a trailing newline.
+version, for example `32.0.0` or `32.0.0+indexer`, without a trailing newline.
 The [version reader][config] also accepts the legacy `minor.patch` form and
 supplies the major version from the requested database path. If the file is
 absent but the directory exists, it reports `<major>.0.0`. If both are absent,
@@ -48,7 +49,7 @@ not requests to resynchronize.
 
 The version writer replaces the file atomically. During a reusable
 major-version upgrade, the directory can temporarily contain a version file
-with the preceding major version while the format upgrade is pending.
+with the source major version while the format upgrade is pending.
 
 The [state configuration](../user/config.md#state) sets the cache root or selects
 a temporary directory named with the database kind, major version, and network.
@@ -57,28 +58,30 @@ a temporary directory named with the database kind, major version, and network.
 
 A major version selects a different directory. It does not necessarily require
 resynchronization: a registered _reusable major upgrade_ permits the writer to
-move a compatible database from the immediately preceding major version into
-the new directory, then apply the required format changes.
+move a compatible database from a registered earlier source major into the new
+directory, then apply every intervening format change in version order.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26`, `27`, `28`, `29`, and `30`. The [reuse implementation][disk-db] considers only
-`current_major - 1`: format 30 reuses format 29, not format 28 or earlier.
+`26`, `27`, `28`, `29`, `30`, `31`, and `32`. The
+[`restorable_db_source_versions()`][upgrade] helper returns existing source
+candidates newest first: format 32 tries v31, v30, v29, v28, v27, v26, then v25.
 
 Reuse requires all of the following:
 
 - The current major version has a registered reusable upgrade.
-- RocksDB recognizes the previous network directory as a database.
+- RocksDB recognizes the selected source network directory as a database.
 - RocksDB does not recognize an existing database at the new path.
-- The canonical previous database path lies inside the canonical
+- The canonical source database path lies inside the canonical
   `[state] cache_dir`.
 - The directory move succeeds.
 
-The writer renames the previous network directory into the new major-version
-path and records its old semantic version in the relocated `version` file.
-It removes the old major-version directory if that directory is now empty.
-It does not copy the database. A symlink to a database outside the cache root
-is not reused. If reuse does not occur, Zebra opens the current path or creates
-a new database there; an empty database requires synchronization from genesis.
+The writer renames the newest reusable source network directory into the new
+major-version path and records its old semantic version in the relocated
+`version` file. It removes the old major-version directory if that directory is
+now empty. It does not copy the database. A symlink to a database outside the
+cache root is not reused. If reuse does not occur, Zebra opens the current path
+or creates a new database there; an empty database requires synchronization
+from genesis.
 
 ### The v28-to-v29 upgrade
 
@@ -115,15 +118,49 @@ A never-hinted v30 directory has the same records as v29 state, and can be
 renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
 backup instead.
 
+### The v30-to-v31 upgrade
+
+Format 31 isolates state that may have pruned block bodies from older
+archive-only readers. Its registered upgrade moves compatible v30 archives into
+`state/v31` without rewriting records; older registered sources run every
+intervening upgrade first. The directory boundary keeps older
+readers from opening state that may be missing historical bodies, even when
+pruning is disabled.
+
+Retain a separate archive backup for rollback; disabling old-database
+cleanup does not preserve the moved directory. A pruned database cannot change
+spending-index mode: writable opens reject incompatible builds before any blocks
+can be committed.
+
+Direct database readers must be upgraded with the writer. They need a
+v31-compatible `zebra-state` dependency that handles unavailable block bodies.
+Manually renaming or symlinking versioned directories bypasses the pruning
+safety boundary.
+
+### The v31-to-v32 upgrade
+
+The upgrade chain first applies format 31.1, which adds the `snapshot_base`
+column family without rewriting existing records, and then format 32. Existing
+v31 databases move to `state/v32`; older registered sources run every
+intervening migration in version order. A snapshot import writes one marker
+containing the window start, snapshot height, block hash, manifest, and deferred
+chain checks.
+
+The v32 directory boundary prevents older 31.x builds from opening and
+downgrading snapshot-born state. Operators must not move that state to v31,
+v30, v29, or any older directory, because those builds would treat its missing
+pre-window bodies as an archive. Direct readers need the same snapshot-aware
+history handling as the writer. See [Upgrading Zebra](../user/upgrading.md#zebra-710)
+for the operator rollback rules.
+
 ### Old-database cleanup
 
 When enabled, the [cleanup task][config] scans major-version directories under
 the database-kind root, such as `<state.cache_dir>/state`, and removes older
-versions except predecessors of registered reusable upgrades. It skips current
-and newer versions, paths outside the canonical cache root, and ephemeral
-databases.
+versions except registered reusable source majors. It skips current and newer
+versions, paths outside the canonical cache root, and ephemeral databases.
 
-The current registry protects `v25` through `v29`. Cleanup removes an eligible
+The current registry protects `v25` through `v31`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks
@@ -174,6 +211,41 @@ version has reached the running version. An interrupted upgrade retains the last
 completed version and resumes the remaining work on restart.
 [Periodic detailed checks](../user/config.md#state) are optional.
 Read-only secondary instances skip this upgrade/check thread.
+
+### Historical body availability
+
+Before changing the format, migrations that require historical bodies must
+reject a database with an unavailable body prefix. New migrations require full
+history by default; only migrations that use retained data may opt out through
+`DiskFormatUpgrade::requires_full_history()`. Spending-index build-mode changes
+also require archive history. Intermediate version writes preserve the stored
+spending-index build metadata until conversion finishes, so an interrupted
+upgrade cannot mislabel an unchanged index layout.
+
+The pruning startup gate is `ZebraDb::ready_for_pruning()`. It remains false
+until migrations, spending-index conversion, and detailed format checks finish
+successfully. The earlier `finished_format_upgrades()` flag only controls write
+compatibility and must not enable deletion. Read-only instances and skipped or
+cancelled checks never open the pruning gate.
+
+Restart checks still search at most 100,000 blocks for observed transaction
+branch IDs. Missing history is not evidence of a valid branch. Pruning caches a
+matching witness and checks new finalized blocks without rescanning a branchless
+suffix. Its initial search is bounded to 100,000 blocks; without a witness it
+waits without deleting bodies or rejecting the chain. Deletion preserves the
+witness even when it is older than the requested retention window.
+
+With `state.prune_blocks_older_than` set, one state-owned worker starts pruning
+after this gate opens, wakes at startup and on finalized-tip changes, and
+deletes at most 100 heights per batch. Only transaction bodies are deleted;
+genesis is retained. Ordinary pruning derives the retained floor from transaction
+rows and persists no new marker. A snapshot-imported v32 database additionally
+uses the `snapshot_base` marker to record its window start and import checks.
+Normal RocksDB compaction reclaims disk space outside the commit path.
+
+State copying inspects source availability and the target tip before opening a
+writable target. An unavailable source range requires an archive snapshot or
+resync; genesis remains copyable.
 
 <a id="design"></a>
 
@@ -299,6 +371,7 @@ this is a table abbreviation, not a Rust type.
 | `ironwood_anchors` | `orchard::tree::Root` | `()` |
 | `ironwood_note_commitment_tree` | `block::Height` | `orchard::tree::NoteCommitmentTree` |
 | `ironwood_note_commitment_subtree` | `NoteCommitmentSubtreeIndex` | `NoteCommitmentSubtreeData<orchard::tree::Node>` |
+| `snapshot_base` | `()` | `SnapshotBase` |
 | `history_tree` | `()` | `HistoryTreeParts` |
 | `tip_chain_value_pool` | `()` | `ValueBalance<NonNegative>` |
 | `block_info` | `block::Height` | `BlockInfo` |

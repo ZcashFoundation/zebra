@@ -2,6 +2,7 @@
 
 use abscissa_core::Configurable;
 use clap::Parser;
+use zebra_state::MIN_PRUNING_RETENTION;
 
 use crate::{commands::ZebradCmd, config::ZebradConfig};
 
@@ -110,4 +111,131 @@ async fn halo2_key_preload_panic_exits_zebra() {
         .await
         .expect("startup task must finish");
     super::start::StartCmd::halo2_key_preload_should_exit(result);
+}
+
+#[test]
+fn startup_rejects_pruning_sidecars_before_state_init() {
+    use futures::FutureExt;
+
+    for managed in [false, true] {
+        for retention in [0, MIN_PRUNING_RETENTION, u32::MAX] {
+            let dir = tempfile::tempdir().unwrap();
+            let state_path = dir.path().join("state");
+            let mut config = crate::config::ZebradConfig::default();
+            config.state.cache_dir = state_path.clone();
+            config.state.prune_blocks_older_than = Some(retention);
+            config.zcashd_compat.enabled = true;
+            config.zcashd_compat.manage_zcashd = managed;
+
+            // No runtime: reaching async state initialization fails this test.
+            let error = super::StartCmd::default()
+                .start(std::sync::Arc::new(config))
+                .now_or_never()
+                .expect("configuration errors must precede async initialization")
+                .expect_err("sidecars require pruning disabled");
+            assert!(!state_path.exists(), "startup must not open writable state");
+            assert!(error
+                .to_string()
+                .contains("zcashd-compat requires an archive node"));
+        }
+    }
+}
+
+#[test]
+fn pruned_network_services_clear_archive_capability() {
+    use zebra_chain::block::Height;
+    use zebra_network::types::PeerServices;
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    assert_eq!(
+        super::StartCmd::network_services(&config, HistoryCapabilities::default()).unwrap(),
+        PeerServices::NODE_NETWORK,
+    );
+    for (retention, lowest_retained_height, limited) in [
+        (None, Height(MIN_PRUNING_RETENTION), false),
+        (Some(MIN_PRUNING_RETENTION), Height(0), true),
+        (
+            Some(MIN_PRUNING_RETENTION),
+            Height(MIN_PRUNING_RETENTION),
+            true,
+        ),
+        // Fewer retained blocks than limited service promises, as on Regtest.
+        (Some(1_001), Height(1_001), false),
+    ] {
+        config.state.prune_blocks_older_than = retention;
+        let mut expected = PeerServices::empty();
+        expected.set(PeerServices::NODE_NETWORK_LIMITED, limited);
+        assert_eq!(
+            super::StartCmd::network_services(
+                &config,
+                HistoryCapabilities {
+                    lowest_retained_height,
+                    ..HistoryCapabilities::default()
+                },
+            )
+            .unwrap(),
+            expected,
+            "retention {retention:?}",
+        );
+    }
+}
+
+#[test]
+fn pruned_history_rejects_both_sidecar_modes() {
+    use zebra_chain::block::Height;
+    use zebra_state::HistoryCapabilities;
+
+    let mut config = crate::config::ZebradConfig::default();
+    config.zcashd_compat.enabled = true;
+    for managed in [false, true] {
+        config.zcashd_compat.manage_zcashd = managed;
+        config.state.prune_blocks_older_than = None;
+        super::StartCmd::network_services(&config, HistoryCapabilities::default())
+            .expect("archive nodes can serve sidecars");
+        for (retention, lowest_retained_height) in [
+            (None, Height(MIN_PRUNING_RETENTION)),
+            (Some(MIN_PRUNING_RETENTION), Height(0)),
+            (Some(MIN_PRUNING_RETENTION), Height(MIN_PRUNING_RETENTION)),
+        ] {
+            config.state.prune_blocks_older_than = retention;
+            let error = super::StartCmd::network_services(
+                &config,
+                HistoryCapabilities {
+                    lowest_retained_height,
+                    ..HistoryCapabilities::default()
+                },
+            )
+            .expect_err("sidecars require complete block history and pruning disabled");
+            assert!(error
+                .to_string()
+                .contains("zcashd-compat requires an archive node"));
+        }
+    }
+}
+
+#[test]
+fn pruning_config_defaults_and_round_trips() {
+    let config: crate::config::ZebradConfig = toml::from_str("").unwrap();
+    assert_eq!(config.state.prune_blocks_older_than, None);
+
+    for retention in [None, Some(MIN_PRUNING_RETENTION), Some(u32::MAX)] {
+        let mut config = config.clone();
+        config.state.prune_blocks_older_than = retention;
+        let value = toml::Value::try_from(&config).unwrap();
+        assert_eq!(
+            value["state"].get("prune_blocks_older_than").is_some(),
+            retention.is_some(),
+        );
+        let encoded = toml::to_string(&value).unwrap();
+        let decoded: crate::config::ZebradConfig = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    let config: crate::config::ZebradConfig =
+        toml::from_str("[state]\nprune_blocks_older_than = 10000\n").unwrap();
+    assert_eq!(
+        config.state.prune_blocks_older_than,
+        Some(MIN_PRUNING_RETENTION)
+    );
 }

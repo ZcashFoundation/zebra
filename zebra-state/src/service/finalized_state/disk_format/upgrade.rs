@@ -23,6 +23,9 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
 pub(crate) mod add_sync_metadata;
@@ -83,7 +86,14 @@ pub trait DiskFormatUpgrade {
         true
     }
 
-    /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
+    /// Returns whether running this migration requires complete historical block bodies.
+    ///
+    /// New migrations must opt out only if they can run entirely on retained data.
+    fn requires_full_history(&self) -> bool {
+        self.needs_migration()
+    }
+
+    /// Returns true if the upgrade is a major upgrade that can reuse an earlier registered cache.
     fn is_reusable_major_upgrade(&self) -> bool {
         let version = self.version();
         version.minor == 0 && version.patch == 0
@@ -110,7 +120,7 @@ fn format_upgrades(
         // the database is opened, but the genesis Ironwood tree and anchor must be backfilled so an
         // upgraded database matches a genesis-synced one (otherwise ironwood_tree_for_tip() panics
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
-        // major-version upgrade that is restorable from the previous major database format version.
+        // major-version upgrade that is restorable from an earlier registered database format.
         Box::new(add_ironwood_tree::Upgrade),
         // Legacy value pools and block info default the absent NSM balance to zero, so existing
         // records need no rewrite even though new writes use the wider v29 layout.
@@ -128,13 +138,27 @@ fn format_upgrades(
             "add spentness hint column families",
             Version::new(30, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 9])
+        // The major directory isolates body deletion from older archive readers.
+        Box::new(no_migration::NoMigration::new(
+            "isolate pruned state from archive readers",
+            Version::new(31, 0, 0),
+        )),
+        // Opening the database creates the empty snapshot base column family.
+        Box::new(no_migration::NoMigration::new(
+            "add the state snapshot base marker",
+            Version::new(31, 1, 0),
+        )),
+        // The major directory prevents older readers from opening and downgrading snapshot state.
+        Box::new(no_migration::NoMigration::new(
+            "isolate snapshot state from older readers",
+            Version::new(32, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 12])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
 
-/// Returns a list of all the major db format versions that can restored from the
-/// previous major database format.
+/// Returns the destination major versions that can reuse an earlier registered database format.
 pub fn restorable_db_versions() -> Vec<u64> {
     format_upgrades(None)
         .filter_map(|upgrade| {
@@ -143,6 +167,35 @@ pub fn restorable_db_versions() -> Vec<u64> {
                 .then_some(upgrade.version().major)
         })
         .collect()
+}
+
+/// Returns source directory majors for a reusable database upgrade, newest first.
+///
+/// Sources need not include `running_major - 1`, although with the current registry v32 prefers
+/// v31, then v30. Older registered sources remain fallbacks, and every intervening migration
+/// still runs in version order.
+pub fn restorable_db_source_versions(running_major: u64) -> Vec<u64> {
+    if !restorable_db_versions().contains(&running_major) {
+        return Vec::new();
+    }
+
+    format_upgrades(None)
+        .filter(|upgrade| {
+            upgrade.version().major < running_major && upgrade.is_reusable_major_upgrade()
+        })
+        .rev()
+        .map(|upgrade| upgrade.version().major)
+        .collect()
+}
+
+/// Whether the existing records can be read without applying any intervening migrations.
+pub(crate) fn can_read_without_migration(
+    disk_version: &Version,
+    running_version: &Version,
+) -> bool {
+    !format_upgrades(Some(disk_version.clone()))
+        .take_while(|upgrade| upgrade.version() <= *running_version)
+        .any(|upgrade| upgrade.needs_migration())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -295,7 +348,6 @@ impl DbFormatChange {
     }
 
     /// Returns true if this format change/check happens at startup.
-    #[allow(dead_code)]
     pub fn is_run_at_startup(&self) -> bool {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
@@ -413,6 +465,36 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        let history = db
+            .history_capabilities()
+            .expect("historical availability must be readable before changing the format");
+        if history.is_pruned() {
+            if let Upgrade {
+                older_disk_version, ..
+            } = self
+            {
+                if let Some(upgrade) = format_upgrades(Some(older_disk_version.clone()))
+                    .find(|upgrade| upgrade.requires_full_history())
+                {
+                    panic!(
+                        "{} requires unavailable block history; restore an archive snapshot or resync",
+                        upgrade.description()
+                    );
+                }
+            }
+
+            let disk_version = db
+                .format_version_on_disk()
+                .expect("database version must be readable before changing the format")
+                .expect("a database with pruned history has a format version");
+            assert_eq!(
+                disk_version.build.contains("indexer"),
+                cfg!(feature = "indexer"),
+                "changing spending-index mode requires unavailable block history; \
+                 restore an archive snapshot or resync"
+            );
+        }
+
         // Mark the database as having finished applying any format upgrades if there are no
         // format upgrades that need to be applied.
         if !self.is_upgrade() {
@@ -470,15 +552,20 @@ impl DbFormatChange {
         }
 
         #[cfg(feature = "indexer")]
-        if let (
-            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
-            Some(initial_tip_height),
-        ) = (self, initial_tip_height)
-        {
+        if matches!(
+            self,
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. }
+        ) {
             // Indexing transaction locations by their spent outpoints and revealed nullifiers.
             let timer = CodeTimer::start();
 
-            // Add build metadata to on-disk version file just before starting to add indexes
+            if let Some(initial_tip_height) = initial_tip_height.filter(|_| !history.is_pruned()) {
+                info!("started checking/adding indexes for spending tx ids");
+                track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                info!("finished checking/adding indexes for spending tx ids");
+            }
+
+            // Record the spending-index layout only after its conversion has completed.
             let mut version = db
                 .format_version_on_disk()
                 .expect("unable to read database format version file")
@@ -488,19 +575,14 @@ impl DbFormatChange {
             db.update_format_version_on_disk(&version)
                 .expect("unable to write database format version file to disk");
 
-            info!("started checking/adding indexes for spending tx ids");
-            track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-            info!("finished checking/adding indexes for spending tx ids");
-
             timer.finish_desc("indexing spending transaction ids");
         };
 
         #[cfg(not(feature = "indexer"))]
-        if let (
-            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
-            Some(initial_tip_height),
-        ) = (self, initial_tip_height)
-        {
+        if matches!(
+            self,
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. }
+        ) {
             let mut version = db
                 .format_version_on_disk()
                 .expect("unable to read database format version file")
@@ -510,9 +592,11 @@ impl DbFormatChange {
                 // Indexing transaction locations by their spent outpoints and revealed nullifiers.
                 let timer = CodeTimer::start();
 
-                info!("started removing indexes for spending tx ids");
-                drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-                info!("finished removing indexes for spending tx ids");
+                if let Some(initial_tip_height) = initial_tip_height {
+                    info!("started removing indexes for spending tx ids");
+                    drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                    info!("finished removing indexes for spending tx ids");
+                }
 
                 // Remove build metadata to on-disk version file after indexes have been dropped.
                 version.build = db.format_version_in_code().build;
@@ -537,6 +621,10 @@ impl DbFormatChange {
                 db.path()
             )
         });
+        // Runtime and shutdown checks do not finish cancelled spending-index conversions.
+        if self.is_run_at_startup() {
+            db.mark_ready_for_pruning();
+        }
 
         let initial_disk_version = self
             .initial_disk_version()
@@ -628,62 +716,65 @@ impl DbFormatChange {
     }
 
     /// Run quick checks that the current database format is valid.
-    #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_quick(db: &ZebraDb) -> Result<(), String> {
+        Self::format_validity_checks_quick_typed(db).map_err(|error| error.to_string())
+    }
+
+    /// Run quick checks, preserving local history-read failures for snapshot import callers.
+    #[allow(clippy::vec_init_then_push)]
+    fn format_validity_checks_quick_typed(db: &ZebraDb) -> Result<(), FormatCheckError> {
         let timer = CodeTimer::start();
         let mut results = Vec::new();
 
         // Check the entire format before returning any errors.
-        results.push(db.check_max_on_disk_tip_height());
+        results.push(db.check_max_on_disk_tip_height().map_err(Into::into));
 
         // This check can be run before the upgrade, but the upgrade code is finished, so we don't
         // run it early any more. (If future code changes accidentally make it depend on the
         // upgrade, they would accidentally break compatibility with older Zebra cached states.)
-        results.push(add_subtrees::subtree_format_calculation_pre_checks(db));
+        results.push(add_subtrees::subtree_format_calculation_pre_checks_typed(
+            db,
+        ));
 
-        results.push(cache_genesis_roots::quick_check(db));
-        results.push(fix_tree_key_type::quick_check(db));
+        results.push(cache_genesis_roots::quick_check(db).map_err(Into::into));
+        results.push(fix_tree_key_type::quick_check(db).map_err(Into::into));
 
         // The work is done in the functions we just called.
         timer.finish_desc("format_validity_checks_quick()");
-
-        if results.iter().any(Result::is_err) {
-            let err = Err(format!("invalid quick check: {results:?}"));
-            error!(?err);
-            return err;
-        }
-
-        Ok(())
+        check_results(results, "quick")
     }
 
     /// Run detailed checks that the current database format is valid.
-    #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_detailed(
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
-        let timer = CodeTimer::start();
-        let mut results = Vec::new();
+        Self::format_validity_checks_detailed_typed(db, cancel_receiver)
+            .map(|result| result.map_err(|error| error.to_string()))
+    }
 
-        // Check the entire format before returning any errors.
-        //
-        // Do the quick checks first, so we don't have to do this in every detailed check.
-        results.push(Self::format_validity_checks_quick(db));
+    /// Run detailed checks, preserving local history-read failures for snapshot import callers.
+    pub(crate) fn format_validity_checks_detailed_typed(
+        db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), FormatCheckError>, CancelFormatChange> {
+        let timer = CodeTimer::start();
+
+        // Do the quick checks first, so we don't have to do this in every detailed check. Later
+        // checks assume history is readable, so a local read failure must stop here.
+        let quick = Self::format_validity_checks_quick_typed(db);
+        if matches!(quick, Err(FormatCheckError::HistoryRead(_))) {
+            return Ok(quick);
+        }
+        let mut results = vec![quick];
 
         for upgrade in format_upgrades(None) {
-            results.push(upgrade.validate(db, cancel_receiver)?);
+            results.push(upgrade.validate(db, cancel_receiver)?.map_err(Into::into));
         }
 
         // The work is done in the functions we just called.
         timer.finish_desc("format_validity_checks_detailed()");
-
-        if results.iter().any(Result::is_err) {
-            let err = Err(format!("invalid detailed check: {results:?}"));
-            error!(?err);
-            return Ok(err);
-        }
-
-        Ok(Ok(()))
+        Ok(check_results(results, "detailed"))
     }
 
     /// Mark a newly created database with the current format version.
@@ -778,7 +869,11 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
-        db.update_format_version_on_disk(format_upgrade_version)
+        // Format changes do not change the spending-index layout. Keep its metadata until the
+        // separate conversion finishes, including across interruptions between upgrade steps.
+        let mut format_upgrade_version = format_upgrade_version.clone();
+        format_upgrade_version.build = disk_version.build.clone();
+        db.update_format_version_on_disk(&format_upgrade_version)
             .expect("unable to write database format version file to disk");
 
         info!(
@@ -807,7 +902,7 @@ impl DbFormatChange {
     ///
     /// Multiple downgrades are allowed, because they all downgrade to the same running version.
     fn mark_as_downgraded(db: &ZebraDb) {
-        let running_version = db.format_version_in_code();
+        let mut running_version = db.format_version_in_code();
         let disk_version = db
             .format_version_on_disk()
             .expect("unable to read database format version file")
@@ -820,6 +915,9 @@ impl DbFormatChange {
              running: {running_version}"
         );
 
+        // A downgrade also leaves the existing index layout intact until its conversion completes.
+        running_version.build = disk_version.build.clone();
+
         db.update_format_version_on_disk(&running_version)
             .expect("unable to write database format version file to disk");
 
@@ -829,6 +927,57 @@ impl DbFormatChange {
             "marked database format as downgraded"
         );
     }
+}
+
+/// A format validation failure, distinguishing local history reads from invalid database contents.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FormatCheckError {
+    /// The database does not satisfy its format invariants.
+    #[error("{0}")]
+    Invalid(String),
+
+    /// Historical body availability could not be read from the local database.
+    #[error("{0}")]
+    HistoryRead(#[from] crate::StateInitError),
+}
+
+impl From<String> for FormatCheckError {
+    fn from(error: String) -> Self {
+        Self::Invalid(error)
+    }
+}
+
+impl From<&str> for FormatCheckError {
+    fn from(error: &str) -> Self {
+        Self::Invalid(error.to_string())
+    }
+}
+
+/// Aggregates invalid format checks, but preserves a local history-read failure as its own type.
+fn check_results(
+    mut results: Vec<Result<(), FormatCheckError>>,
+    kind: &str,
+) -> Result<(), FormatCheckError> {
+    if results.iter().all(Result::is_ok) {
+        return Ok(());
+    }
+    if let Some(local) = results
+        .iter()
+        .position(|result| matches!(result, Err(FormatCheckError::HistoryRead(_))))
+    {
+        let error = results.swap_remove(local);
+        error!(
+            ?error,
+            "local database history read failed during format checks"
+        );
+        return error;
+    }
+
+    let error = Err(FormatCheckError::Invalid(format!(
+        "invalid {kind} check: {results:?}"
+    )));
+    error!(?error);
+    error
 }
 
 impl DbFormatChangeThreadHandle {
@@ -906,4 +1055,17 @@ fn format_upgrades_are_in_version_order() {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
     }
+}
+
+#[test]
+fn reusable_source_follows_the_registered_upgrade_chain() {
+    assert_eq!(restorable_db_source_versions(30).first(), Some(&29));
+    assert_eq!(restorable_db_source_versions(31).first(), Some(&30));
+    let sources = restorable_db_source_versions(32);
+    assert_eq!(sources.first(), Some(&31));
+    assert!(
+        sources.contains(&30),
+        "the spentness format remains reusable"
+    );
+    assert!(sources.contains(&29), "older caches remain reusable");
 }

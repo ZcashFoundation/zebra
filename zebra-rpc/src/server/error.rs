@@ -1,5 +1,7 @@
 //! RPC error codes & their handling.
 use jsonrpsee_types::{ErrorCode, ErrorObject, ErrorObjectOwned};
+use zebra_node_services::BoxError;
+use zebra_state::BlockReadError;
 
 /// Bitcoin RPC error codes
 ///
@@ -65,7 +67,7 @@ impl From<LegacyCode> for i32 {
 }
 
 /// A trait for mapping errors to [`jsonrpsee_types::ErrorObjectOwned`].
-pub(crate) trait MapError<T>: Sized {
+pub(crate) trait MapError<T, E>: Sized {
     /// Maps errors to [`jsonrpsee_types::ErrorObjectOwned`] with a specific error code.
     fn map_error(self, code: impl Into<ErrorCode>) -> std::result::Result<T, ErrorObjectOwned>;
 
@@ -73,6 +75,17 @@ pub(crate) trait MapError<T>: Sized {
     fn map_misc_error(self) -> std::result::Result<T, ErrorObjectOwned> {
         self.map_error(LegacyCode::Misc)
     }
+
+    /// Maps local failures to an internal error without exposing their details to RPC clients.
+    fn map_internal_error(self) -> std::result::Result<T, ErrorObjectOwned>;
+
+    /// Maps unavailable bodies to an internal error with `pruned_message`, preserving other errors.
+    fn map_body_read_error(
+        self,
+        pruned_message: &'static str,
+    ) -> std::result::Result<T, ErrorObjectOwned>
+    where
+        E: Into<BoxError>;
 }
 
 /// A trait for conditionally converting a value into a `Result<T, jsonrpc_core::Error>`.
@@ -91,12 +104,33 @@ pub(crate) trait OkOrError<T>: Sized {
     }
 }
 
-impl<T, E> MapError<T> for Result<T, E>
+impl<T, E> MapError<T, E> for Result<T, E>
 where
     E: ToString,
 {
     fn map_error(self, code: impl Into<ErrorCode>) -> Result<T, ErrorObjectOwned> {
         self.map_err(|error| ErrorObject::owned(code.into().code(), error.to_string(), None::<()>))
+    }
+
+    fn map_internal_error(self) -> Result<T, ErrorObjectOwned> {
+        self.map_err(|_| ErrorObject::from(ErrorCode::InternalError))
+    }
+
+    fn map_body_read_error(self, pruned_message: &'static str) -> Result<T, ErrorObjectOwned>
+    where
+        E: Into<BoxError>,
+    {
+        self.map_err(|error| {
+            let error: BoxError = error.into();
+            if matches!(
+                error.downcast_ref::<BlockReadError>(),
+                Some(BlockReadError::BlockBodyUnavailable { .. })
+            ) {
+                ErrorObject::owned(ErrorCode::InternalError.code(), pruned_message, None::<()>)
+            } else {
+                ErrorObject::owned(i32::from(LegacyCode::Misc), error.to_string(), None::<()>)
+            }
+        })
     }
 }
 

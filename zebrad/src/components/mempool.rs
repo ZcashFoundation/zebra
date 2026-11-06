@@ -100,6 +100,16 @@ type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, Re
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
 
+/// Returns a bounded transaction ID snapshot, without iterating over or allocating the IDs that
+/// exceed the peer protocol's response limit.
+fn transaction_ids_snapshot(ids: impl IntoIterator<Item = UnminedTxId>) -> HashSet<UnminedTxId> {
+    let max_ids: usize = zn::MAX_TX_INV_IN_SENT_MESSAGE
+        .try_into()
+        .expect("the transaction ID response limit fits in usize");
+
+    ids.into_iter().take(max_ids).collect()
+}
+
 /// Returns the mempool peer score after applying branch ID activation policy.
 fn adjusted_mempool_misbehavior_score(
     error: &TransactionError,
@@ -925,7 +935,7 @@ impl Service<Request> for Mempool {
                 Request::TransactionIds => {
                     trace!(?req, "got mempool request");
 
-                    let res: HashSet<_> = storage.tx_ids().collect();
+                    let res = transaction_ids_snapshot(storage.tx_ids());
 
                     trace!(?req, res_count = ?res.len(), "answered mempool request");
 

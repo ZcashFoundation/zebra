@@ -20,7 +20,7 @@ use crate::{
         finalized_state::ZebraDb,
         non_finalized_state::NonFinalizedState,
     },
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, SemanticallyVerifiedBlock, SnapshotBase, ValidateContextError,
 };
 
 use zebra_chain::{
@@ -329,24 +329,40 @@ pub(crate) fn difficulty_threshold_and_time_are_valid(
     Ok(())
 }
 
-/// Check if zebra is following a legacy chain and return an error if so.
+/// Checks the cached chain and returns the first block with observed transaction branch IDs.
 ///
 /// `nu5_activation_height` should be `NetworkUpgrade::Nu5.activation_height(network)`, and
 /// `max_legacy_chain_blocks` should be [`MAX_LEGACY_CHAIN_BLOCKS`](crate::constants::MAX_LEGACY_CHAIN_BLOCKS).
 /// They are only changed from the defaults for testing.
+///
+/// `snapshot_base` is the marker of a database imported from a state snapshot. Its window start
+/// is the first block the database knows, and the snapshot commitment pins the chain there, so
+/// an iterator that ends exactly at the window start returns the window start as the witness.
+///
+/// Returns `None` only after reaching a pre-NU5 block. Missing bodies or an iterator exhausted
+/// anywhere else cannot establish branch consistency and fail closed.
 pub(crate) fn legacy_chain<I>(
     nu5_activation_height: block::Height,
     ancestors: I,
     network: &Network,
     max_legacy_chain_blocks: usize,
-) -> Result<(), BoxError>
+    snapshot_base: Option<SnapshotBase>,
+) -> Result<Option<block::Height>, BoxError>
 where
-    I: Iterator<Item = Arc<Block>>,
+    I: Iterator<Item = Result<Arc<Block>, crate::BlockReadError>>,
 {
-    let mut ancestors = ancestors.peekable();
-    let tip_height = ancestors.peek().and_then(|block| block.coinbase_height());
+    let mut tip_height = None;
+    let mut last_height = None;
 
     for (index, block) in ancestors.enumerate() {
+        let block = block.map_err(|error| {
+            format!(
+                "cannot prove the cached chain follows the configured network upgrade: {error}; \
+                 restore an archive snapshot or resync"
+            )
+        })?;
+        tip_height = tip_height.or_else(|| block.coinbase_height());
+        last_height = block.coinbase_height();
         // Stop checking if the chain reaches Canopy. We won't find any more V5 transactions,
         // so the rest of our checks are useless.
         //
@@ -357,7 +373,7 @@ where
             .expect("valid blocks have coinbase heights")
             < nu5_activation_height
         {
-            return Ok(());
+            return Ok(None);
         }
 
         // If we are past our NU5 activation height, but there are no V5 transactions in recent blocks,
@@ -388,11 +404,26 @@ where
             .find_map(|trans| trans.network_upgrade())
             .is_some();
         if has_network_upgrade {
-            return Ok(());
+            return Ok(block.coinbase_height());
         }
     }
 
-    Ok(())
+    // A snapshot-imported database knows no blocks below its window, so the iterator ends at the
+    // window start. The snapshot commitment pins the chain there, which the branch check would
+    // otherwise have to prove (DESIGN §7).
+    if let Some(window_start) = snapshot_base
+        .map(|base| base.window_start)
+        .filter(|window_start| last_height == Some(*window_start))
+    {
+        return Ok(Some(window_start));
+    }
+
+    Err(
+        "cannot prove the cached chain follows the configured network upgrade: \
+         ancestor history ended before finding a transaction branch ID or a pre-NU5 block; \
+         restore an archive snapshot or resync"
+            .into(),
+    )
 }
 
 /// Perform initial contextual validity checks for the configured network,

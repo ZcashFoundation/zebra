@@ -15,6 +15,7 @@ mod tests;
 pub struct MinimumPeerVersion<C> {
     network: Network,
     chain_tip: C,
+    protocol_epoch_height: Option<zebra_chain::block::Height>,
     current_minimum: Version,
 }
 
@@ -38,15 +39,32 @@ where
         MinimumPeerVersion {
             network: network.clone(),
             chain_tip,
+            protocol_epoch_height: None,
             current_minimum: Version::min_remote_for_height(network, None),
         }
     }
 
+    /// Uses a fixed height for protocol-version negotiation, independently of
+    /// the chain tip advertised to peers.
+    pub(crate) fn with_protocol_epoch_height(mut self, height: zebra_chain::block::Height) -> Self {
+        self.protocol_epoch_height = Some(height);
+        self.current_minimum = Version::min_remote_for_height(&self.network, Some(height));
+        self
+    }
+
     /// Retrieve the current minimum supported peer protocol version.
     pub fn current(&mut self) -> Version {
-        self.current_minimum =
-            Version::min_remote_for_height(&self.network, self.chain_tip.best_tip_height());
+        self.current_minimum = Version::min_remote_for_height(
+            &self.network,
+            self.protocol_epoch_height
+                .or_else(|| self.chain_tip.best_tip_height()),
+        );
         self.current_minimum
+    }
+
+    /// Returns the network whose minimum peer version is tracked.
+    pub(crate) fn network(&self) -> &Network {
+        &self.network
     }
 
     /// Returns a reference to the underlying chain tip.

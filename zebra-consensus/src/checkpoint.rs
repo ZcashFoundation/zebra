@@ -49,7 +49,7 @@ use zebra_chain::{
     work::equihash,
 };
 use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
-use zebra_state::{self as zs, CheckpointVerifiedBlock};
+use zebra_state::{self as zs, CheckpointVerifiedBlock, SnapshotBase};
 
 use crate::{
     block::VerifyBlockError,
@@ -198,6 +198,13 @@ where
     /// The hash of the initial tip, if any.
     initial_tip_hash: Option<block::Hash>,
 
+    /// The marker of the state snapshot the state was imported from, if any.
+    ///
+    /// While the marker defers the check of the snapshot's block hash and the initial tip is
+    /// the snapshot height, the chain from the next checkpoint anchors to a hash the chain has
+    /// never confirmed, so a mismatch is an invalid snapshot rather than an invariant violation.
+    snapshot_base: Option<SnapshotBase>,
+
     /// The underlying state service, possibly wrapped in other services.
     state_service: S,
 
@@ -264,6 +271,7 @@ where
             .field("checkpoint_list", &self.checkpoint_list)
             .field("network", &self.network)
             .field("initial_tip_hash", &self.initial_tip_hash)
+            .field("snapshot_base", &self.snapshot_base)
             .field("queued", &self.queued)
             .field("verifier_progress", &self.verifier_progress)
             .finish()
@@ -380,6 +388,7 @@ where
             checkpoint_list,
             network: network.clone(),
             initial_tip_hash,
+            snapshot_base: None,
             state_service,
             queued: BTreeMap::new(),
             retained_blocks: Arc::new(AtomicUsize::new(0)),
@@ -459,6 +468,25 @@ where
                 .set_pos(u64::try_from(checkpoint_index).expect("fits in u64"))
                 .set_len(u64::try_from(checkpoint_count).expect("fits in u64"));
         }
+    }
+
+    /// Records the state snapshot marker the state was imported from, so that a chain from the
+    /// next checkpoint that does not reach the snapshot's unchecked block hash fails the blocks
+    /// with [`VerifyCheckpointError::SnapshotBaseMismatch`] instead of panicking.
+    pub(crate) fn with_snapshot_base(mut self, snapshot_base: Option<SnapshotBase>) -> Self {
+        self.snapshot_base = snapshot_base;
+        self
+    }
+
+    /// Returns the snapshot marker when the initial tip is the snapshot height and the chain has
+    /// not yet confirmed the snapshot's block hash.
+    fn unchecked_snapshot_tip(&self) -> Option<SnapshotBase> {
+        let InitialTip(height) = self.previous_checkpoint_height() else {
+            return None;
+        };
+        self.snapshot_base
+            .filter(|base| base.height == height)
+            .filter(|base| base.has_deferred(SnapshotBase::DEFERRED_BLOCK_HASH))
     }
 
     /// Finish checkpoint verifier diagnostics.
@@ -1210,9 +1238,11 @@ where
 
         // An initial tip between checkpoints is not in the checkpoint list, so a range that does
         // not chain to it is rejected rather than treated as a bad list. The state committed that
-        // tip, so it would reject these blocks too.
+        // tip, so it would reject these blocks too. A state snapshot's tip whose block hash is
+        // still unchecked is the exception: the mismatch means the snapshot is wrong, which the
+        // check below reports.
         if let InitialTip(initial_tip_hash) = self.previous_checkpoint_hash() {
-            if expected_hash != initial_tip_hash {
+            if expected_hash != initial_tip_hash && self.unchecked_snapshot_tip().is_none() {
                 tracing::warn!(
                     ?current_range,
                     expected = ?initial_tip_hash,
@@ -1233,10 +1263,43 @@ where
 
         // The checkpoint and the parent hash must match.
         // See the detailed checkpoint comparison comment above.
-        assert_eq!(
-            expected_hash, previous_checkpoint_hash,
-            "the previous checkpoint should match: bad checkpoint list, zebra bug, or bad chain"
-        );
+        if expected_hash != previous_checkpoint_hash {
+            // The chain has never confirmed a state snapshot's block hash that the import had to
+            // defer, so a chain from the next checkpoint that reaches a different parent means
+            // the snapshot is wrong, not the checkpoint list. Fail the range and stall, with a
+            // specific log, instead of panicking (DESIGN §2).
+            let Some(base) = self.unchecked_snapshot_tip() else {
+                panic!(
+                    "the previous checkpoint should match: bad checkpoint list, zebra bug, or \
+                     bad chain: expected {previous_checkpoint_hash:?}, found {expected_hash:?}"
+                );
+            };
+            tracing::error!(
+                snapshot_height = ?base.height,
+                snapshot_hash = ?base.block_hash,
+                chain_hash = ?expected_hash,
+                checkpoint_height = ?target_checkpoint_height,
+                "state snapshot: the block chain from the next checkpoint does not reach the \
+                 snapshot's block hash, so the snapshot is invalid and syncing cannot continue \
+                 from it. Delete the state cache directory to start again"
+            );
+            for qblock in rev_valid_blocks.drain(..) {
+                let _ = qblock
+                    .tx
+                    .send(Err(VerifyCheckpointError::SnapshotBaseMismatch {
+                        checkpoint_height: target_checkpoint_height,
+                        snapshot_height: base.height,
+                        snapshot_hash: base.block_hash,
+                        chain_hash: expected_hash,
+                    }));
+            }
+            assert_eq!(
+                self.previous_checkpoint_height(),
+                old_prev_check_height,
+                "we must not change the previous checkpoint on failure"
+            );
+            return;
+        }
 
         let block_count = rev_valid_blocks.len();
         tracing::info!(?block_count, ?current_range, "verified checkpoint range");
@@ -1372,6 +1435,17 @@ pub enum VerifyCheckpointError {
     UnexpectedSideChain {
         expected: block::Hash,
         found: block::Hash,
+    },
+    #[error(
+        "the block chain from checkpoint {checkpoint_height:?} reaches {chain_hash:?} at the state \
+         snapshot height {snapshot_height:?}, not the snapshot's block hash {snapshot_hash:?}: \
+         the state snapshot is invalid"
+    )]
+    SnapshotBaseMismatch {
+        checkpoint_height: block::Height,
+        snapshot_height: block::Height,
+        snapshot_hash: block::Hash,
+        chain_hash: block::Hash,
     },
     #[error("zebra is shutting down")]
     ShuttingDown,

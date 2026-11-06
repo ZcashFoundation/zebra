@@ -30,7 +30,7 @@ use crate::{
     arbitrary::Prepare,
     init_test,
     service::{
-        arbitrary::{populated_state, PreparedChain},
+        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
         chain_tip::TipAction,
         StateService,
     },
@@ -42,7 +42,305 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
+mod header;
+
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_propagates_incomplete_block_body_errors() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        // Exercise the size fallback used before block-info backfilling has finished.
+        batch.zs_delete(&db.cf_handle("block_info").unwrap(), height);
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::CorruptBlock { height };
+        for query in [height.into(), block.hash().into()] {
+            for request in [
+                ReadRequest::Block(query),
+                ReadRequest::AnyChainBlock(query),
+                ReadRequest::BlockAndSize(query),
+                ReadRequest::SpentOutputs(query),
+                ReadRequest::TipBlockSize,
+            ] {
+                let error = read_state.clone().oneshot(request).await.unwrap_err();
+                assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            }
+            let error = state
+                .clone()
+                .oneshot(Request::Block(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        let tx_hash = block.transactions[0].hash();
+        for request in [
+            ReadRequest::Transaction(tx_hash),
+            ReadRequest::AnyChainTransaction(tx_hash),
+        ] {
+            let error = read_state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+
+        let ancestors = super::block_iter::any_ancestor_blocks(
+            &read_state.latest_non_finalized_state(),
+            db,
+            block.hash(),
+        );
+        let error = super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10, None)
+            .unwrap_err();
+        assert!(error.to_string().contains("cannot prove"));
+        assert!(error
+            .to_string()
+            .contains("restore an archive snapshot or resync"));
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn header_reads_distinguish_unknown_blocks_from_missing_known_headers() {
+    use crate::{BlockReadError, DiskWriteBatch, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks[1].clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let header = crate::BlockHeader {
+            header: block.header.clone(),
+            hash: block.hash(),
+            height,
+            next_block_hash: None,
+        };
+        for query in [height.into(), block.hash().into()] {
+            assert_eq!(
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                ReadResponse::BlockHeader(Some(header.clone()))
+            );
+            assert_eq!(
+                state
+                    .clone()
+                    .oneshot(Request::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                Response::BlockHeader(Some(header.clone()))
+            );
+        }
+        for query in [Height(2).into(), block::Hash([0xff; 32]).into()] {
+            assert_eq!(
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                ReadResponse::BlockHeader(None)
+            );
+            assert_eq!(
+                state
+                    .clone()
+                    .oneshot(Request::BlockHeader(query))
+                    .await
+                    .unwrap(),
+                Response::BlockHeader(None)
+            );
+        }
+
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete(&db.cf_handle("block_header_by_height").unwrap(), height);
+        db.write_batch(batch).unwrap();
+        let expected = BlockReadError::CorruptBlock { height };
+        for query in [height.into(), block.hash().into()] {
+            let error = read_state
+                .clone()
+                .oneshot(ReadRequest::BlockHeader(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            let error = state
+                .clone()
+                .oneshot(Request::BlockHeader(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_distinguishes_known_pruned_transactions_from_unknown_hashes() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let pruned_hash = blocks[1].transactions[0].hash();
+        let retained_hash = blocks[2].transactions[0].hash();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(Height(1)),
+            TransactionLocation::min_for_height(Height(2)),
+        );
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::BlockBodyUnavailable { height: Height(1) };
+        for request in [
+            ReadRequest::Transaction(pruned_hash),
+            ReadRequest::AnyChainTransaction(pruned_hash),
+        ] {
+            let error = read_state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        for request in [
+            Request::Transaction(pruned_hash),
+            Request::AnyChainTransaction(pruned_hash),
+        ] {
+            let error = state.clone().oneshot(request).await.unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+        let unknown = transaction::Hash([0xff; 32]);
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::Transaction(unknown))
+                .await
+                .unwrap(),
+            ReadResponse::Transaction(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::AnyChainTransaction(unknown))
+                .await
+                .unwrap(),
+            ReadResponse::AnyChainTransaction(None)
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::Transaction(retained_hash))
+                .await
+                .unwrap(),
+            ReadResponse::Transaction(Some(_))
+        ));
+        assert!(matches!(
+            read_state
+                .clone()
+                .oneshot(ReadRequest::AnyChainTransaction(retained_hash))
+                .await
+                .unwrap(),
+            ReadResponse::AnyChainTransaction(Some(_))
+        ));
+        assert!(matches!(
+            read_state
+                .oneshot(ReadRequest::KnownTransaction(pruned_hash))
+                .await
+                .unwrap(),
+            ReadResponse::KnownTransaction(true)
+        ));
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn legacy_chain_rejects_exhausted_history() {
+    let block = zebra_test::vectors::MAINNET_BLOCKS[&1]
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let error = super::check::legacy_chain(
+        Height(0),
+        std::iter::once(Ok(block)),
+        &Network::Mainnet,
+        100_000,
+        None,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("cannot prove"));
+}
+
+/// The ancestors of a snapshot-imported database end at its window start, which the snapshot
+/// commitment pins; ending anywhere else still fails closed.
+#[test]
+fn legacy_chain_accepts_reaching_the_snapshot_base() {
+    use crate::SnapshotBase;
+
+    let blocks: Vec<Arc<Block>> = (1..=10)
+        .map(|height| {
+            zebra_test::vectors::MAINNET_BLOCKS[&height]
+                .zcash_deserialize_into()
+                .unwrap()
+        })
+        .collect();
+    assert!(blocks
+        .iter()
+        .all(|block| block.transactions[0].network_upgrade().is_none()));
+    let ancestors = || blocks.iter().rev().cloned().map(Ok);
+    let base = |window_start| SnapshotBase {
+        window_start: Height(window_start),
+        height: Height(10),
+        block_hash: blocks[9].hash(),
+        manifest: zebra_chain::state_snapshot::ObjectHash([0; 32]),
+        deferred_checks: 0,
+    };
+
+    assert_eq!(
+        super::check::legacy_chain(
+            Height(0),
+            ancestors(),
+            &Network::Mainnet,
+            100,
+            Some(base(1))
+        )
+        .unwrap(),
+        Some(Height(1))
+    );
+    for base in [None, Some(base(2)), Some(base(10))] {
+        let error =
+            super::check::legacy_chain(Height(0), ancestors(), &Network::Mainnet, 100, base)
+                .unwrap_err();
+        assert!(error.to_string().contains("ancestor history ended"));
+    }
+}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -590,12 +888,15 @@ proptest! {
     /// Test blocks that are less than the NU5 activation height.
     #[test]
     fn some_block_less_than_network_upgrade(
-        (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
+        (network, _, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let nu_activation_height = NetworkUpgrade::Nu5
+            .activation_height(&network)
+            .expect("test networks activate NU5 after Canopy");
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
             .map_err(|error| error.to_string());
 
-        prop_assert_eq!(response, Ok(()));
+        prop_assert_eq!(response, Ok(None));
     }
 
     /// Test the maximum amount of blocks to check before chain is declared to be legacy.
@@ -609,7 +910,8 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -647,10 +949,11 @@ proptest! {
 
         let response = crate::service::check::legacy_chain(
             nu_activation_height,
-            chain.clone().into_iter().rev(),
+            chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
-        ).map_err(|error| error.to_string());
+            None,
+        ).map(|_| ()).map_err(|error| error.to_string());
 
         prop_assert_eq!(
             response,
@@ -666,7 +969,8 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT, None)
+            .map(|_| ())
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -685,9 +989,13 @@ proptest! {
             in continuous_empty_blocks_from_test_vectors(),
     ) {
         let _init_guard = zebra_test::init();
+        let max_checkpoint_height = finalized_blocks
+            .iter()
+            .map(|block| block.height)
+            .max()
+            .unwrap_or(Height::MAX);
         let (mut state_service, _, _, _) = Runtime::new().unwrap().block_on(async {
-            // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-            StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+            StateService::new(Config::ephemeral(), &network, max_checkpoint_height, 0).await
         });
 
         prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
@@ -779,10 +1087,14 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         let runtime = Runtime::new().unwrap();
+        let max_checkpoint_height = finalized_blocks
+            .iter()
+            .map(|block| block.height)
+            .max()
+            .unwrap_or(Height::MAX);
         let (mut state_service, _read_only_state_service, mut latest_chain_tip, mut chain_tip_change) =
             runtime.block_on(async {
-                // Each block is committed separately, so the maximum checkpoint height is unused.
-                StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+                StateService::new(Config::ephemeral(), &network, max_checkpoint_height, 0).await
             });
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
@@ -1157,10 +1469,868 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
     Ok(())
 }
 
+/// A failed checkpoint parent must not make its honest retry look finalized after the semantic
+/// handoff. The retry also restores the UTXO lookahead needed by its semantic children, even when
+/// the writer has not consumed the handoff marker yet.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_accepts_valid_retry_after_parent_failure() {
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        assert_eq!(invalid_parent.hash(), honest_parent.hash());
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let (handoff_sender, mut handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+        assert!(matches!(
+            handoff_receiver.try_recv(),
+            Ok(super::write::WriteMessage::Handoff)
+        ));
+
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the semantic child is processed after its failed parent");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(0))
+        );
+
+        let retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let queued_retry = match handoff_receiver.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => queued,
+            _ => panic!("the honest retry is admitted before handoff acknowledgement"),
+        };
+        assert!(
+            state
+                .non_finalized_block_write_sent_hashes
+                .contains(&honest_parent.hash()),
+            "the retry restores checkpoint UTXO lookahead before its disk write",
+        );
+        state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::WriteMessage::Finalized(queued_retry))
+            .unwrap();
+        retry
+            .await
+            .unwrap()
+            .expect("the honest same-hash checkpoint retry commits");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(1))
+        );
+
+        let semantic_child = child(
+            &honest_parent,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        state
+            .queue_and_commit_to_non_finalized_state(semantic_child.clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits after the honest parent retry");
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the failed-parent handoff regression finishes");
+}
+
+/// A semantic child queued after its parent retry is dispatched, but before that retry commits,
+/// must not depend on an unrelated request to restore dispatch after the failed-handoff reset.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_dispatches_child_while_retry_write_is_pending() {
+    use zebra_chain::primitives::zcash_history::BlockCommitmentTreeRoots;
+
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the first semantic child fails after its invalid parent");
+
+        let note_trees = state.read_service.db.note_commitment_trees_for_tip();
+        let sapling_root = note_trees.sapling.root();
+        let orchard_root = note_trees.orchard.root();
+        let ironwood_root = note_trees.ironwood.root();
+        let mut history_after_retry = state.read_service.db.history_tree();
+        Arc::make_mut(&mut history_after_retry)
+            .push(
+                &network,
+                honest_parent.clone(),
+                BlockCommitmentTreeRoots {
+                    sapling: &sapling_root,
+                    orchard: &orchard_root,
+                    ironwood: &ironwood_root,
+                },
+            )
+            .expect("the valid retry extends the test history tree");
+        let semantic_child = child(
+            &honest_parent,
+            history_after_retry
+                .hash()
+                .expect("NU5 is active at the retry height"),
+            Coinbase::Branched,
+            vec![],
+        );
+
+        let writer = state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .clone();
+        let (detached_sender, mut detached_messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(
+            state
+                .block_write_sender
+                .finalized
+                .replace(detached_sender.clone()),
+        );
+        drop(
+            state
+                .block_write_sender
+                .non_finalized
+                .replace(detached_sender),
+        );
+
+        let retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let retry_message = detached_messages
+            .try_recv()
+            .expect("the honest retry is dispatched");
+        assert!(matches!(
+            retry_message,
+            super::write::WriteMessage::Finalized(_)
+        ));
+
+        let duplicate = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        assert!(
+            duplicate.await.unwrap().is_err(),
+            "an in-flight retry does not reopen checkpoint admission"
+        );
+        assert!(detached_messages.try_recv().is_err());
+
+        let semantic_response = state.queue_and_commit_to_non_finalized_state(
+            semantic_child.clone().prepare(),
+            None,
+            None,
+        );
+        let semantic_message = detached_messages.try_recv().ok();
+        writer.send(retry_message).unwrap();
+        if let Some(semantic_message) = semantic_message {
+            writer.send(semantic_message).unwrap();
+        }
+
+        retry
+            .await
+            .unwrap()
+            .expect("the honest parent retry commits");
+        tokio::time::timeout(Duration::from_secs(1), semantic_response)
+            .await
+            .expect("the already-queued semantic child completes without another request")
+            .unwrap()
+            .expect("the semantic child commits after its parent retry");
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the pending-retry semantic dispatch regression finishes");
+}
+
+/// Once a semantic handoff is queued, a checkpoint must not slip behind its marker and commit
+/// after the semantic child at the same height, even if the writer has not consumed the marker.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_rejects_checkpoint_before_writer_acknowledgement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let checkpoint = state.queue_and_commit_to_finalized_state(blocks[1].clone().into(), None);
+        let (handoff_sender, mut handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
+        checkpoint.await.unwrap().unwrap();
+
+        let semantic_child = blocks[2].clone();
+        let semantic_response =
+            state.queue_and_commit_to_non_finalized_state(semantic_child.clone().prepare(), None, None);
+        let checkpoint_response = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(semantic_child.clone()),
+            None,
+        );
+        semantic_response
+            .await
+            .unwrap()
+            .expect("the semantic child commits while the handoff marker is detached");
+        assert!(matches!(
+            handoff_receiver.try_recv(),
+            Ok(super::write::WriteMessage::Handoff)
+        ));
+
+        let (checkpoint_admitted, checkpoint_result) = match handoff_receiver.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => {
+                state
+                    .block_write_sender
+                    .non_finalized
+                    .as_ref()
+                    .unwrap()
+                    .send(super::write::WriteMessage::Finalized(queued))
+                    .unwrap();
+                (true, checkpoint_response.await.unwrap())
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                (false, checkpoint_response.await.unwrap())
+            }
+            _ => panic!("unexpected detached handoff message"),
+        };
+        assert!(
+            !checkpoint_admitted,
+            "checkpoint committed behind Handoff with {checkpoint_result:?}, finalized tip {:?}, semantic tip {:?}",
+            state.read_service.db.finalized_tip_height(),
+            state.best_tip(),
+        );
+        assert!(checkpoint_result.is_err());
+        assert_eq!(state.read_service.db.finalized_tip_height(), Some(Height(1)));
+        assert_eq!(state.best_tip(), Some((Height(2), semantic_child.hash())));
+    })
+    .await
+    .expect("the unacknowledged handoff admission regression finishes");
+}
+
+/// An unspecified maximum checkpoint retains hash-based semantic handoff detection.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_without_configured_max_checkpoint_commits_child() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the checkpoint genesis commits");
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[1].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits without a configured maximum checkpoint");
+        assert_eq!(state.best_tip(), Some((Height(1), blocks[1].hash())));
+    })
+    .await
+    .expect("the unspecified-checkpoint handoff regression finishes");
+}
+
+/// A height-skipping semantic orphan whose parent is an intermediate checkpoint must not close
+/// ordinary checkpoint admission, including after the orphan fails contextual verification.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_orphan_above_max_checkpoint_preserves_checkpoint_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(2), 0).await;
+        for block in &blocks[..2] {
+            state
+                .queue_and_commit_to_finalized_state(block.clone().into(), None)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        let mut orphan = blocks[3].clone();
+        Arc::make_mut(&mut Arc::make_mut(&mut orphan).header).previous_block_hash =
+            blocks[1].hash();
+        let orphan_response =
+            state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None);
+        if let Ok(result) = tokio::time::timeout(Duration::from_secs(1), orphan_response).await {
+            assert!(
+                result.unwrap().is_err(),
+                "the height-skipping orphan must not commit"
+            );
+        }
+        assert!(
+            state.block_write_sender.accepts_finalized(),
+            "an orphan above the maximum checkpoint closed ordinary checkpoint admission"
+        );
+
+        state
+            .queue_and_commit_to_finalized_state(blocks[2].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the ordinary maximum checkpoint still commits after the orphan");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(2))
+        );
+    })
+    .await
+    .expect("the intermediate-parent handoff regression finishes");
+}
+
+/// A restarted state whose finalized tip is already above the maximum checkpoint starts in
+/// semantic mode even when no non-finalized blocks were restored.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_commit_after_restart_above_max_checkpoint() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            should_backup_non_finalized_state: false,
+            ..Config::default()
+        };
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let mut finalized = crate::service::finalized_state::FinalizedState::new_with_debug(
+            &config,
+            &Network::Mainnet,
+            true,
+            #[cfg(feature = "elasticsearch")]
+            false,
+            false,
+        )
+        .unwrap();
+        for block in &blocks[..3] {
+            finalized
+                .commit_finalized_direct(
+                    CheckpointVerifiedBlock::from(block.clone()).into(),
+                    None,
+                    "restart test",
+                )
+                .unwrap();
+        }
+        drop(finalized);
+
+        let (mut state, _, _, _) = StateService::new(config, &Network::Mainnet, Height(1), 0).await;
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(2))
+        );
+        assert!(
+            state.semantic_handoff_started(),
+            "a finalized tip above the maximum checkpoint must start in semantic mode"
+        );
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[3].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the semantic child commits after restart");
+        assert_eq!(state.best_tip(), Some((Height(3), blocks[3].hash())));
+    })
+    .await
+    .expect("the restarted semantic-mode regression finishes");
+}
+
+/// A semantic child must switch the writer to non-finalized commits even when its checkpoint
+/// parent is still queued for its disk write, and checkpoint UTXOs must remain available meanwhile.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_does_not_wait_for_last_checkpoint_disk_write() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Hold the last checkpoint in a detached queue so the durable tip stays at genesis. Its
+        // missing parent makes the semantic child's prompt rejection distinguish ordered dispatch
+        // from the old indefinite queueing behind a durable-tip check.
+        let (finalized_sender, finalized_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(finalized_sender));
+        let parent = CheckpointVerifiedBlock::from(blocks[1].clone());
+        state.finalized_block_write_last_sent_hash = parent.hash;
+        state.finalized_block_write_last_sent_height = Some(parent.height);
+        state
+            .non_finalized_block_write_sent_hashes
+            .add_finalized(&parent);
+        let (parent_rsp_tx, parent_rsp_rx) = tokio::sync::oneshot::channel();
+        state
+            .block_write_sender
+            .finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::WriteMessage::Finalized((
+                parent.clone(),
+                parent_rsp_tx,
+                None,
+            )))
+            .unwrap();
+        assert_eq!(state.read_service.db.finalized_tip_hash(), blocks[0].hash());
+
+        let child = blocks[2].clone();
+        let child_hash = child.hash();
+        let response = state.queue_and_commit_to_non_finalized_state(child.prepare(), None, None);
+        let result = tokio::time::timeout(Duration::from_secs(1), response)
+            .await
+            .expect("the semantic child must not remain queued behind a stale durable-tip check")
+            .unwrap();
+        assert!(result.is_err(), "the detached checkpoint parent is absent");
+        assert!(state.block_write_sender.finalized.is_some());
+        assert!(!state.non_finalized_state_queued_blocks.has(child_hash));
+        assert!(
+            state
+                .non_finalized_block_write_sent_hashes
+                .contains(&parent.hash),
+            "the undrained checkpoint parent's UTXO lookahead is retained"
+        );
+        drop((finalized_receiver, parent_rsp_rx));
+    })
+    .await
+    .expect("the semantic handoff regression finishes");
+}
+
+/// Semantic children must keep flowing after the local handoff, even before the writer
+/// acknowledges it. Checkpoint retry admission remains independent of this semantic transition.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_handoff_dispatches_children_before_writer_acknowledgement() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Commit the last checkpoint on the real writer, but detach the sender used for Handoff.
+        // The writer never acknowledges the handoff, which deterministically exercises the local
+        // admission transition and semantic dispatch interval.
+        let checkpoint = state.queue_and_commit_to_finalized_state(blocks[1].clone().into(), None);
+        let (handoff_sender, handoff_receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(handoff_sender));
+        checkpoint.await.unwrap().unwrap();
+        assert!(state.block_write_sender.accepts_finalized());
+
+        state
+            .queue_and_commit_to_non_finalized_state(blocks[2].clone().prepare(), None, None)
+            .await
+            .unwrap()
+            .expect("the first semantic child commits");
+        assert!(!state.block_write_sender.accepts_finalized());
+
+        let next =
+            state.queue_and_commit_to_non_finalized_state(blocks[3].clone().prepare(), None, None);
+        tokio::time::timeout(Duration::from_secs(1), next)
+            .await
+            .expect(
+                "the next semantic child must not wait for the writer's handoff acknowledgement",
+            )
+            .unwrap()
+            .expect("the next semantic child commits");
+        assert_eq!(state.best_tip(), Some((Height(3), blocks[3].hash())));
+        drop(handoff_receiver);
+    })
+    .await
+    .expect("the unacknowledged handoff regression finishes");
+}
+
+/// An in-flight honest retry is the only writer request for its hash. Its duplicate is rejected
+/// immediately, and successful completion is published before the retry caller is woken.
+#[tokio::test(flavor = "multi_thread")]
+async fn in_flight_handoff_retry_coalesces_duplicates_and_publishes_completion() {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::atomic::{AtomicBool, Ordering},
+        task::{Context, Wake, Waker},
+    };
+
+    use crate::tests::snapshot_db::{child, tip_history_root, Coinbase};
+
+    struct CompletionObservation {
+        sender: super::write::BlockWriteSender,
+        published: AtomicBool,
+        woken: std::sync::mpsc::Sender<()>,
+    }
+
+    impl Wake for CompletionObservation {
+        fn wake(self: Arc<Self>) {
+            self.published
+                .store(self.sender.handoff_complete(), Ordering::SeqCst);
+            self.woken
+                .send(())
+                .expect("the test observes the retry wakeup");
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = crate::tests::snapshot_db::network();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &network, Height(1), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .queue_and_commit_to_finalized_state(genesis.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let honest_parent = child(
+            &genesis,
+            tip_history_root(&state.read_service.db),
+            Coinbase::Branched,
+            vec![],
+        );
+        let invalid_parent = coinbase_authorization_twin(&honest_parent);
+        let failed_parent = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(invalid_parent),
+            None,
+        );
+        let rejected_child = state.queue_and_commit_to_non_finalized_state(
+            honest_parent.make_fake_child().prepare(),
+            None,
+            None,
+        );
+        failed_parent
+            .await
+            .unwrap()
+            .expect_err("the invalid checkpoint twin is rejected");
+        rejected_child
+            .await
+            .unwrap()
+            .expect_err("the semantic child fails after its invalid parent");
+        assert!(!state.block_write_sender.handoff_complete());
+
+        let (retry_sender, mut retry_messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(retry_sender));
+        let mut retry = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let queued_retry = match retry_messages.try_recv() {
+            Ok(super::write::WriteMessage::Finalized(queued)) => queued,
+            _ => panic!("the first honest retry is dispatched"),
+        };
+        assert!(state
+            .non_finalized_block_write_sent_hashes
+            .contains(&honest_parent.hash()));
+
+        let duplicate = state.queue_and_commit_to_finalized_state(
+            CheckpointVerifiedBlock::from(honest_parent.clone()),
+            None,
+        );
+        let duplicate_result = tokio::time::timeout(Duration::from_secs(1), duplicate)
+            .await
+            .expect("an in-flight duplicate does not remain pending")
+            .unwrap();
+        assert!(duplicate_result.is_err());
+        assert!(matches!(
+            retry_messages.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+
+        let (woken_tx, woken_rx) = std::sync::mpsc::channel();
+        let observation = Arc::new(CompletionObservation {
+            sender: state.block_write_sender.clone(),
+            published: AtomicBool::new(false),
+            woken: woken_tx,
+        });
+        let waker = Waker::from(observation.clone());
+        let mut context = Context::from_waker(&waker);
+        assert!(Pin::new(&mut retry).poll(&mut context).is_pending());
+        state
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .unwrap()
+            .send(super::write::WriteMessage::Finalized(queued_retry))
+            .unwrap();
+        tokio::task::spawn_blocking(move || woken_rx.recv_timeout(Duration::from_secs(5)))
+            .await
+            .expect("the response observer does not panic")
+            .expect("the retry response wakes its registered caller");
+        assert!(
+            observation.published.load(Ordering::SeqCst),
+            "handoff completion is visible when the retry response wakes its caller"
+        );
+        retry
+            .await
+            .unwrap()
+            .expect("the in-flight honest retry commits");
+        assert!(state.block_write_sender.handoff_complete());
+    })
+    .await
+    .expect("the in-flight retry regression finishes");
+}
+
+/// Replacing an out-of-order checkpoint promptly answers the superseded request, while the
+/// replacement remains eligible to commit when its parent arrives.
+#[tokio::test(flavor = "multi_thread")]
+async fn superseded_checkpoint_request_is_answered_before_parent_arrives() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(3)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(2), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let superseded = state.queue_and_commit_to_finalized_state(blocks[2].clone().into(), None);
+        let mut replacement =
+            state.queue_and_commit_to_finalized_state(blocks[2].clone().into(), None);
+        let superseded_result = tokio::time::timeout(Duration::from_secs(1), superseded)
+            .await
+            .expect("the superseded checkpoint is answered promptly")
+            .unwrap();
+        assert!(superseded_result.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut replacement)
+                .await
+                .is_err()
+        );
+
+        state
+            .queue_and_commit_to_finalized_state(blocks[1].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the missing parent commits");
+        replacement
+            .await
+            .unwrap()
+            .expect("the replacement checkpoint commits after its parent");
+    })
+    .await
+    .expect("the superseded checkpoint regression finishes");
+}
+
+/// A checkpoint captured before the handoff is rejected rather than forwarded by a later drain.
+#[tokio::test(flavor = "multi_thread")]
+async fn finalized_dequeue_rechecks_handoff_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+        state
+            .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+        drop(state.block_write_sender.finalized.replace(sender));
+        state.block_write_sender.start_handoff(blocks[0].hash());
+        let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+        state
+            .finalized_state_queued_blocks
+            .insert(blocks[0].hash(), (blocks[1].clone().into(), rsp_tx, None));
+        state.drain_finalized_queue_and_commit();
+
+        assert!(matches!(
+            messages.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        let result = tokio::time::timeout(Duration::from_secs(1), rsp_rx)
+            .await
+            .expect("the stale checkpoint is answered promptly")
+            .unwrap();
+        assert!(result.is_err());
+        assert_eq!(state.finalized_block_write_last_sent_hash, blocks[0].hash());
+    })
+    .await
+    .expect("the finalized dequeue regression finishes");
+}
+
+async fn assert_stale_semantic_dispatch_is_rejected(initial_handoff: bool) {
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(4)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height(1), 0).await;
+    state
+        .queue_and_commit_to_finalized_state(blocks[0].clone().into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let (handoff_parent, parent, child) = if initial_handoff {
+        (blocks[1].clone(), blocks[1].clone(), blocks[2].clone())
+    } else {
+        state
+            .queue_and_commit_to_finalized_state(blocks[1].clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        (blocks[1].clone(), blocks[2].clone(), blocks[3].clone())
+    };
+
+    let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
+    drop(state.block_write_sender.non_finalized.replace(sender));
+    state
+        .block_write_sender
+        .start_handoff(handoff_parent.hash());
+    state
+        .non_finalized_block_write_sent_hashes
+        .can_fork_chain_at_hashes = false;
+    let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
+    let queued = (child.prepare(), rsp_tx, None, None);
+    if initial_handoff {
+        state.non_finalized_state_queued_blocks.queue(queued);
+        state.send_ready_non_finalized(parent.hash(), None);
+    } else {
+        state.send_ready_non_finalized(parent.hash(), Some(queued));
+    }
+
+    assert!(matches!(
+        messages.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+    let result = tokio::time::timeout(Duration::from_secs(1), rsp_rx)
+        .await
+        .expect("the stale semantic request is answered promptly")
+        .unwrap();
+    assert!(result.is_err());
+}
+
+/// The initial handoff branch re-checks semantic dispatch admission for dequeued children.
+#[tokio::test(flavor = "multi_thread")]
+async fn initial_semantic_handoff_rechecks_dequeued_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        assert_stale_semantic_dispatch_is_rejected(true),
+    )
+    .await
+    .expect("the initial semantic dispatch regression finishes");
+}
+
+/// The post-handoff branch re-checks semantic dispatch admission for a directly ready child.
+#[tokio::test(flavor = "multi_thread")]
+async fn post_handoff_semantic_dispatch_rechecks_ready_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        assert_stale_semantic_dispatch_is_rejected(false),
+    )
+    .await
+    .expect("the post-handoff semantic dispatch regression finishes");
+}
+
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =
-        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .unwrap();
@@ -1369,14 +2539,16 @@ async fn mined_rejections_and_stale_parent_publish_no_notifications() {
             .non_finalized
             .as_ref()
             .unwrap()
-            .send(super::write::NonFinalizedWriteMessage::Commit(
-                (
-                    child.clone().prepare(),
-                    response_sender,
-                    Some(Box::new(contextual.clone())),
-                    Some(notifications.clone()),
+            .send(super::write::WriteMessage::NonFinalized(
+                super::write::NonFinalizedWriteMessage::Commit(
+                    (
+                        child.clone().prepare(),
+                        response_sender,
+                        Some(Box::new(contextual.clone())),
+                        Some(notifications.clone()),
+                    ),
+                    std::time::Instant::now(),
                 ),
-                std::time::Instant::now(),
             ))
             .unwrap_or_else(|_| panic!("the state writer is still running"));
         assert!(response.await.unwrap().is_err());

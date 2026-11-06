@@ -21,7 +21,10 @@ use crate::{
     protocol::{
         external::types::{Nonce, PeerServices, Version},
         v2::{
-            handshake::{decode_record, InitRecord},
+            handshake::{
+                decode_consensus_parameters_record, decode_record,
+                encode_consensus_parameters_record, InitRecord, CONSENSUS_PARAMETERS_RECORD_KIND,
+            },
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::WireError,
@@ -117,6 +120,14 @@ pub enum HandshakeError {
     #[error("invalid init record from peer: {0}")]
     Init(#[from] SerializationError),
 
+    /// The peer's consensus-parameters record could not be decoded.
+    #[error("invalid consensus parameters record from peer: {0}")]
+    Parameters(SerializationError),
+
+    /// The peer's consensus parameters differ from this node's.
+    #[error("peer is using different consensus parameters")]
+    ParametersMismatch,
+
     /// The peer's version is below the minimum for the protocol and the
     /// current network epoch (draft, "Handshake Validation": `OBSOLETE`).
     #[error("peer advertised obsolete version {version}, minimum is {min_version}")]
@@ -138,8 +149,10 @@ pub enum HandshakeError {
     #[error("the connection is to this node itself")]
     SelfConnection,
 
-    /// An outbound peer does not serve blocks while this node is syncing
-    /// (the legacy handshake's rule, #11061).
+    /// An outbound peer does not advertise the services this node requires
+    /// while it is syncing: block service for the peer set (the legacy
+    /// handshake's rule, #11061), or artifact service for a state-snapshot
+    /// bootstrap.
     #[error("outbound peer is missing required services, advertised: {services:?}")]
     MissingRequiredServices {
         /// The services the peer advertised.
@@ -179,7 +192,7 @@ impl HandshakeError {
     /// finished stream, a declined peer, a timeout).
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            HandshakeError::Init(_) => ErrorCode::ProtocolError,
+            HandshakeError::Init(_) | HandshakeError::Parameters(_) => ErrorCode::ProtocolError,
             HandshakeError::Obsolete { .. } => ErrorCode::Obsolete,
             HandshakeError::Record(error) => error.close_code(),
             HandshakeError::SelfConnection => ErrorCode::SelfConnection,
@@ -188,6 +201,7 @@ impl HandshakeError {
             HandshakeError::Timeout
             | HandshakeError::StreamFinished
             | HandshakeError::MissingRequiredServices { .. }
+            | HandshakeError::ParametersMismatch
             | HandshakeError::Connection(_)
             | HandshakeError::Write(_)
             | HandshakeError::Read(_) => ErrorCode::NoError,
@@ -198,6 +212,10 @@ impl HandshakeError {
 /// Runs the handshake on `connection` as `role` before `deadline`, measured
 /// from the transport connection's establishment, as the draft asks. On
 /// failure the connection is closed with the error's code.
+///
+/// While this node is syncing, an outbound peer must advertise
+/// `NODE_NETWORK`, as the legacy handshake requires (#11061):
+/// [`handshake_requiring`] takes the required services as a parameter.
 pub async fn handshake<C: ChainTip>(
     connection: &Connection,
     connected_addr: ConnectedAddr,
@@ -206,6 +224,36 @@ pub async fn handshake<C: ChainTip>(
     minimum_peer_version: &mut MinimumPeerVersion<C>,
     nonces: &NonceRegistry,
     deadline: Instant,
+) -> Result<CompletedHandshake, HandshakeError> {
+    handshake_requiring(
+        connection,
+        connected_addr,
+        role,
+        identity,
+        minimum_peer_version,
+        nonces,
+        deadline,
+        PeerServices::NODE_NETWORK,
+    )
+    .await
+}
+
+/// [`handshake`], requiring `required_services` of an outbound peer while
+/// this node is syncing, instead of `NODE_NETWORK`.
+///
+/// A state-snapshot bootstrap requires `NODE_SYNC_ARTIFACTS`: the peers it
+/// dials serve snapshot objects, and a pruned node that serves them never
+/// advertises `NODE_NETWORK`.
+#[allow(clippy::too_many_arguments)]
+pub async fn handshake_requiring<C: ChainTip>(
+    connection: &Connection,
+    connected_addr: ConnectedAddr,
+    role: Role,
+    identity: &LocalIdentity,
+    minimum_peer_version: &mut MinimumPeerVersion<C>,
+    nonces: &NonceRegistry,
+    deadline: Instant,
+    required_services: PeerServices,
 ) -> Result<CompletedHandshake, HandshakeError> {
     let result = tokio::time::timeout_at(
         deadline,
@@ -216,6 +264,7 @@ pub async fn handshake<C: ChainTip>(
             identity,
             minimum_peer_version,
             nonces,
+            required_services,
         ),
     )
     .await
@@ -236,6 +285,7 @@ async fn run<C: ChainTip>(
     identity: &LocalIdentity,
     minimum_peer_version: &mut MinimumPeerVersion<C>,
     nonces: &NonceRegistry,
+    required_services: PeerServices,
 ) -> Result<CompletedHandshake, HandshakeError> {
     let local_nonce = Nonce::default();
 
@@ -250,6 +300,9 @@ async fn run<C: ChainTip>(
         .unwrap_or(block::Height(0));
     let our_init = identity.init_record(local_nonce, start_height);
     let our_record = RecordCodec::encode_record(our_init.encode())?;
+    let parameters_hash = minimum_peer_version
+        .network()
+        .state_snapshot_parameters_hash();
 
     let (mut send, recv) = match role {
         Role::Initiator => {
@@ -265,13 +318,32 @@ async fn run<C: ChainTip>(
     // stream costs no registry slot.
     nonces.register(local_nonce).await?;
 
+    // Send the optional extension before init, so supporting peers can compare parameters and
+    // older peers can ignore its unknown kind before reading init.
+    if let Some(parameters_hash) = parameters_hash {
+        let record =
+            RecordCodec::encode_record(encode_consensus_parameters_record(parameters_hash))?;
+        send.write_all(&record).await?;
+    }
     // The responder may send its init as soon as it has seen the type byte, without waiting
     // for the initiator's record (draft, "Handshake Sequence").
     send.write_all(&our_record).await?;
 
     let mut recv = FramedRead::new(recv, RecordCodec);
+    let mut remote_parameters = None;
     let remote = loop {
         let payload = recv.next().await.ok_or(HandshakeError::StreamFinished)??;
+        if payload.first() == Some(&CONSENSUS_PARAMETERS_RECORD_KIND) {
+            if remote_parameters.is_some() {
+                return Err(HandshakeError::Parameters(SerializationError::Parse(
+                    "duplicate consensus parameters record",
+                )));
+            }
+            remote_parameters = Some(
+                decode_consensus_parameters_record(&payload).map_err(HandshakeError::Parameters)?,
+            );
+            continue;
+        }
         match decode_record(&payload)? {
             Some(init) => break init,
             None => {
@@ -283,6 +355,12 @@ async fn run<C: ChainTip>(
             }
         }
     };
+
+    // A peer that sent the extension must have the same consensus parameters. A peer that did not
+    // is a legacy peer, which the draft's unknown-record rule keeps compatible.
+    if remote_parameters.is_some() && remote_parameters != parameters_hash {
+        return Err(HandshakeError::ParametersMismatch);
+    }
 
     // The draft leaves the protocol's minimum version unassigned, so the minimum is the current
     // network epoch's, the same comparison as the legacy handshake: a peer the legacy handshake
@@ -300,13 +378,10 @@ async fn run<C: ChainTip>(
     }
 
     // # Security
-    // While syncing, require `NODE_NETWORK` from outbound peers, as the legacy handshake does
-    // (#11061): peers without it would hold outbound slots and receive block requests they
-    // cannot answer.
-    if is_syncing
-        && role == Role::Initiator
-        && !remote.services.contains(PeerServices::NODE_NETWORK)
-    {
+    // While syncing, require `required_services` from outbound peers, as the legacy handshake
+    // requires `NODE_NETWORK` (#11061): peers without them would hold outbound slots and receive
+    // requests they cannot answer.
+    if is_syncing && role == Role::Initiator && !remote.services.contains(required_services) {
         // Count rejected handshakes by advertised services, without per-peer labels, as the
         // legacy handshake does. The `init` decoder keeps unknown bits, so only known bits are
         // labelled: a peer must not be able to create new metric series.

@@ -94,7 +94,9 @@ use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::genesis::regtest_genesis_block, parameters::known_hashes::KnownHashListSpec,
+    block::{genesis::regtest_genesis_block, Height},
+    chain_tip::ChainTip,
+    parameters::known_hashes::KnownHashListSpec,
 };
 use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
@@ -106,8 +108,14 @@ use crate::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
+        state_snapshot::{
+            bootstrap,
+            decision::{self, Decision},
+            progress::{self, RuntimeStages, Stage},
+            serving,
+        },
         sync::{
-            self, record_tip_block_delay, show_block_chain_progress,
+            self, record_tip_block_delay, show_block_chain_progress, StateSnapshotFallback,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
         },
         tokio::{RuntimeRun, TokioComponent},
@@ -175,6 +183,8 @@ fn check_tcp_slow_start_after_idle() {
 #[cfg(not(target_os = "linux"))]
 fn check_tcp_slow_start_after_idle() {}
 
+// A syncing pruned node keeps at least as many recent bodies as limited service promises.
+
 impl StartCmd {
     /// Extra time Zebra waits for the zcashd-compat supervisor task beyond the
     /// child's `shutdown_grace_period`. The supervisor's `terminate_child` waits
@@ -182,6 +192,32 @@ impl StartCmd {
     /// must be strictly longer or aborting the task races the graceful path.
     const ZCASHD_COMPAT_SHUTDOWN_TIMEOUT_MARGIN: std::time::Duration =
         std::time::Duration::from_secs(30);
+
+    /// Applies the configured fallback to a snapshot rejected by an earlier process.
+    fn handle_rejected_snapshot(config: &ZebradConfig, decision: &Decision) -> Result<(), Report> {
+        if !matches!(decision, Decision::Skip(decision::SkipReason::Rejected)) {
+            return Ok(());
+        }
+
+        match config.sync.state_snapshot_fallback {
+            StateSnapshotFallback::Error => Err(eyre!(
+                "the state snapshot was rejected by an earlier bootstrap, and \
+                 sync.state_snapshot_fallback is \"error\", so Zebra exits without opening the \
+                 state or syncing from genesis. Use a different trusted commitment, or investigate \
+                 the rejection and remove its marker before retrying it. Set \
+                 sync.state_snapshot_fallback = \"genesis\" to sync from genesis without retrying \
+                 the rejected snapshot"
+            )),
+            StateSnapshotFallback::Genesis => {
+                warn!(
+                    "the state snapshot was rejected by an earlier bootstrap, and \
+                     sync.state_snapshot_fallback is \"genesis\": syncing from genesis without \
+                     retrying the rejected snapshot"
+                );
+                Ok(())
+            }
+        }
+    }
 
     /// Returns the Zebra P2P address supervised zcashd should `-connect` to.
     ///
@@ -357,10 +393,43 @@ impl StartCmd {
         )
     }
 
-    async fn start(&self) -> Result<(), Report> {
+    /// Returns base services, disabling archive service and sidecars when pruning may occur.
+    ///
+    /// A pruned node that retains at least `NODE_NETWORK_LIMITED_BLOCKS` recent blocks advertises
+    /// limited service instead, which only version 2 peers are told about. Pruning keeps at least
+    /// the configured retention of recent bodies, so the advertisement holds while the node syncs.
+    pub(super) fn network_services(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Result<zebra_network::types::PeerServices, Report> {
+        let mut services = zebra_network::types::PeerServices::NODE_NETWORK;
+        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
+            if config.zcashd_compat.enabled {
+                return Err(eyre!(
+                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
+                ));
+            }
+            services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
+            if config
+                .state
+                .prune_blocks_older_than
+                .is_some_and(|retention| {
+                    retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+                })
+            {
+                services.insert(zebra_network::types::PeerServices::NODE_NETWORK_LIMITED);
+            }
+        }
+        Ok(services)
+    }
+
+    /// Starts the node, rejecting incompatible pruning settings before opening writable state.
+    pub(super) async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
-        let config = APPLICATION.config();
+        // State initialization can prune immediately. Check the pruning config before starting
+        // services; check persisted history separately once the state is open.
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
         config.notify.validate()?;
         // Refuses configured known-hash pins that the network does not take, or that are
         // inconsistent, before anything starts.
@@ -369,6 +438,7 @@ impl StartCmd {
             config.sync.v2_known_hash_pins.as_ref(),
         )
         .map_err(|error| eyre!(error).wrap_err("invalid sync.v2_known_hash_pins"))?;
+
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
             Some(notify::zmq::bind(endpoint).await?)
@@ -450,6 +520,81 @@ impl StartCmd {
             None
         };
 
+        // An empty pruned node may bootstrap from a state snapshot before the state
+        // opens: the import renames a complete database into place, and `zebra_state::init`
+        // then opens it at the snapshot height like any other state.
+        let snapshot_store = zebra_state::state_snapshot::store::ArtifactStore::new(
+            &config.state,
+            &config.network.network,
+        );
+        let mut bootstrapped_height = None;
+        let snapshot_decision = decision::should_bootstrap(&config, &snapshot_store);
+        Self::handle_rejected_snapshot(&config, &snapshot_decision)?;
+        if let Decision::Bootstrap { commitment, peers } = snapshot_decision {
+            info!(
+                height = commitment.height.0,
+                hash = %commitment.block_hash,
+                manifest = %commitment.manifest,
+                peers = peers.len(),
+                "{}",
+                Stage::BootstrapStarted
+            );
+            match bootstrap::bootstrap(&config, commitment, peers).await {
+                Ok(()) => bootstrapped_height = Some(commitment.height),
+                Err(error) => match config.sync.state_snapshot_fallback {
+                    StateSnapshotFallback::Error => {
+                        return Err(Report::new(error).wrap_err(
+                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
+                             is \"error\", so Zebra exits instead of continuing with normal sync. \
+                             Check sync.state_snapshot_peers and the commitment. An aborted \
+                             download is retried on the next start; a rejected snapshot needs a \
+                             different trusted commitment, or investigation and removal of its \
+                             rejection marker before it is retried. Set \
+                             sync.state_snapshot_fallback = \"genesis\" to sync from genesis, or \
+                             sync.state_snapshot_sync = false to turn snapshot sync off",
+                        ));
+                    }
+                    StateSnapshotFallback::Genesis => {
+                        warn!(
+                            %error,
+                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
+                             is \"genesis\": syncing from genesis instead"
+                        );
+                    }
+                },
+            }
+        }
+
+        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
+        // index once the scan finishes. The network does not wait for it: every node with an
+        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
+        // yet as not found. The scan starts after the bootstrap, so a snapshot downloaded just
+        // now is in the index.
+        // With any hints mode, a node with version 2 enabled serves the saved
+        // spentness-hint artifact to its version 2 peers. The state snapshot store's
+        // objects are added to the same index, which the network serves `get-object`
+        // requests from.
+        let (served_objects, object_source) = spentness_hints::object_source(&config.network)
+            .or_else(|| {
+                config.sync.serve_state_snapshots.then(|| {
+                    zebra_network::ObjectSource::channel(
+                        Arc::new(zebra_network::ObjectIndex::new()),
+                    )
+                })
+            })
+            .unzip();
+        if let Some(served_objects) = served_objects
+            .clone()
+            .filter(|_| config.sync.serve_state_snapshots)
+        {
+            info!(store = %snapshot_store.root().display(), "scanning the state snapshot store to serve");
+            serving::object_index(
+                snapshot_store.clone(),
+                config.network.network.clone(),
+                served_objects,
+            );
+        }
+
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
             config.consensus.clone(),
@@ -499,6 +644,28 @@ impl StartCmd {
             )
         });
 
+        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .map_err(|error| eyre!(error))?
+        else {
+            unreachable!("state returns history capabilities for its capabilities request");
+        };
+        let snapshot_height = history
+            .snapshot_base
+            .map(|base| base.height)
+            .or(bootstrapped_height);
+        if let Some(snapshot_height) = snapshot_height {
+            info!(
+                snapshot_height = snapshot_height.0,
+                tip_height = ?latest_chain_tip.best_tip_height().map(|height| height.0),
+                "{}",
+                Stage::StateInitialized
+            );
+        }
+        let local_services = Self::network_services(&config, history)?;
+
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
 
@@ -517,7 +684,7 @@ impl StartCmd {
         };
 
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(&config))
             .service(state_service);
 
         info!("initializing network");
@@ -556,10 +723,6 @@ impl StartCmd {
         } else {
             (None, None)
         };
-        // With any hints mode, a node with version 2 enabled serves the saved
-        // spentness-hint artifact to its version 2 peers.
-        let (served_objects, object_source) =
-            spentness_hints::object_source(&config.network).unzip();
         let network_config = zebra_network::Config {
             v2_sync_peers,
             object_source,
@@ -569,6 +732,7 @@ impl StartCmd {
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
             zebra_network::init_with_block_gossip_peer_ips(
                 network_config,
+                local_services,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),
@@ -996,6 +1160,20 @@ impl StartCmd {
         }
         let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
+        // On a snapshot state, log the sync stages above the snapshot height.
+        let snapshot_stages_task_handle = if let Some(snapshot_height) = snapshot_height {
+            let stages = RuntimeStages::new(
+                snapshot_height,
+                max_checkpoint_height,
+                config.state.debug_stop_at_height.map(Height),
+            );
+            tokio::spawn(
+                progress::log_runtime_stages(stages, chain_tip_change.clone()).in_current_span(),
+            )
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
+        };
+
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
         // TODO: add a config to enable the miner rather than a feature.
@@ -1245,6 +1423,7 @@ impl StartCmd {
         end_of_support_task_handle.abort();
         miner_task_handle.abort();
         spentness_hints_task_handle.abort();
+        snapshot_stages_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {
@@ -1292,9 +1471,7 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: &ZebradConfig) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
         // Mempool reads bypass the state writer's buffer.
         //
@@ -1340,7 +1517,7 @@ impl Runnable for StartCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(APPLICATION.config()));
 
         info!("stopping zebrad");
     }
@@ -1400,8 +1577,38 @@ mod tests {
     use color_eyre::eyre::eyre;
 
     use super::StartCmd;
-    use crate::components::zcashd_compat;
+    use crate::components::{
+        state_snapshot::decision::{Decision, SkipReason},
+        sync::StateSnapshotFallback,
+        zcashd_compat,
+    };
     use crate::config::ZebradConfig;
+
+    /// A rejection marker left by an earlier process still honors the configured fallback.
+    #[test]
+    fn rejected_snapshot_restart_honors_fallback() {
+        let _init_guard = zebra_test::init();
+        let rejected = Decision::Skip(SkipReason::Rejected);
+        let mut config = ZebradConfig::default();
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Error;
+        let error = StartCmd::handle_rejected_snapshot(&config, &rejected)
+            .expect_err("fallback=error must keep rejecting startup");
+        let error = error.to_string();
+        assert!(
+            error.contains("rejected by an earlier bootstrap"),
+            "{error}"
+        );
+        assert!(error.contains("different trusted commitment"), "{error}");
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Genesis;
+        StartCmd::handle_rejected_snapshot(&config, &rejected)
+            .expect("fallback=genesis continues without the rejected snapshot");
+
+        config.sync.state_snapshot_fallback = StateSnapshotFallback::Error;
+        StartCmd::handle_rejected_snapshot(&config, &Decision::Skip(SkipReason::NoPeers))
+            .expect("other decision-rule skips keep their existing behavior");
+    }
 
     #[test]
     fn zcashd_compat_flag_enables_mode() {

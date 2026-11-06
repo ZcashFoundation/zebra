@@ -578,7 +578,14 @@ impl Service<zn::Request> for Inbound {
                         let response = if let Some(block) = cached {
                             zs::Response::Block(Some(block))
                         } else {
-                            state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
+                            match state.clone().ready().await?.call(zs::Request::Block(hash.into())).await {
+                                Ok(response) => response,
+                                Err(error) if matches!(
+                                    error.downcast_ref::<zs::BlockReadError>(),
+                                    Some(zs::BlockReadError::BlockBodyUnavailable { .. })
+                                ) => zs::Response::Block(None),
+                                Err(error) => return Err(error),
+                            }
                         };
 
                         // Add the block responses to the list, while updating the size limit.
@@ -753,8 +760,8 @@ impl Service<zn::Request> for Inbound {
                 block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            // The size of this response is limited in the network layer, by the legacy `Connection`
-            // state machine and by the version 2 `get-mempool` responder
+            // The production mempool bounds this snapshot before allocation, and both the legacy
+            // `Connection` state machine and the version 2 responder enforce the wire limit.
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),

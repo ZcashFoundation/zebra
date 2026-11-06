@@ -156,6 +156,8 @@ impl DiskWriteBatch {
             let height = Height(height);
             let (block, size) = db
                 .block_and_size(height.into())
+                // A pruned body leaves the tail without metadata.
+                .ok()?
                 .expect("blocks at or below the parent of a committing block are finalized");
 
             let metadata =

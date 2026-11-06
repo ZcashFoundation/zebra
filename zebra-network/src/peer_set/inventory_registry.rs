@@ -53,6 +53,17 @@ mod tests;
 // TODO: split this into available (25) and missing (1000 or more?)
 pub const MAX_INV_PER_MAP: usize = 1000;
 
+/// The maximum number of pending inventory changes shared by all connections.
+///
+/// Inventory tracking is an optimisation with random-peer fallback, so lagging receivers can drop
+/// old changes. Keeping this independent of the connection limit bounds queued payload memory.
+pub(crate) const INVENTORY_CHANNEL_CAPACITY: usize = 128;
+
+/// The maximum number of inventory changes registered in one peer-set poll.
+///
+/// Each change contains at most [`MAX_INV_PER_MAP`] hashes, so this also bounds per-poll work.
+pub(crate) const MAX_INVENTORY_CHANGES_PER_POLL: usize = 8;
+
 /// The maximum number of peers we will track inventory for.
 ///
 /// # Security
@@ -168,16 +179,12 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: PeerSocketAddr,
     ) -> Option<Self> {
-        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
-
         // # Security
         //
-        // Don't send more hashes than we're going to store.
-        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
-        //
-        //  This limits known memory denial of service attacks to:
-        // `1000 hashes * 200 peers/channel capacity * 32-64 bytes = up to 12 MB`
-        hashes.truncate(MAX_INV_PER_MAP);
+        // Don't iterate over or allocate more hashes than we're going to store. It doesn't matter
+        // which hashes we choose, because this is an efficiency optimisation.
+        let hashes: Vec<InventoryHash> =
+            hashes.into_iter().take(MAX_INV_PER_MAP).copied().collect();
 
         let hashes = hashes.try_into().ok();
 
@@ -189,13 +196,11 @@ impl InventoryChange {
         hashes: impl IntoIterator<Item = &'a InventoryHash>,
         peer: PeerSocketAddr,
     ) -> Option<Self> {
-        let mut hashes: Vec<InventoryHash> = hashes.into_iter().copied().collect();
-
         // # Security
         //
-        // Don't send more hashes than we're going to store.
-        // It doesn't matter which hashes we choose, because this is an efficiency optimisation.
-        hashes.truncate(MAX_INV_PER_MAP);
+        // Bound iteration and allocation in the same way as `new_available_multi()`.
+        let hashes: Vec<InventoryHash> =
+            hashes.into_iter().take(MAX_INV_PER_MAP).copied().collect();
 
         let hashes = hashes.try_into().ok();
 
@@ -414,7 +419,8 @@ impl InventoryRegistry {
     /// Drive periodic inventory tasks.
     ///
     /// Rotates the inventory HashMaps on every timer tick.
-    /// Drains the inv_stream channel and registers all advertised inventory.
+    /// Registers at most [`MAX_INVENTORY_CHANGES_PER_POLL`] changes from the channel,
+    /// scheduling another poll when the budget is exhausted.
     ///
     /// Returns an error if the inventory channel is closed.
     ///
@@ -457,12 +463,14 @@ impl InventoryRegistry {
         // failure of the peer set.
 
         // Returns Pending if all messages are processed, but the channel could get more.
-        loop {
+        let mut change_count = 0;
+        while change_count < MAX_INVENTORY_CHANGES_PER_POLL {
             let channel_result = self.inv_stream.next().poll_unpin(cx);
 
             match channel_result {
                 Poll::Ready(Some(Ok(change))) => {
                     self.register(change);
+                    change_count += 1;
                     result = Poll::Ready(Ok(()));
                 }
                 Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(count)))) => {
@@ -479,11 +487,17 @@ impl InventoryRegistry {
                     // If the channel is empty and returns None, all senders, including the one in
                     // the handshaker, have been dropped, which really is a permanent failure.
                     result = Poll::Ready(Err(broadcast::error::RecvError::Closed.into()));
+                    break;
                 }
                 Poll::Pending => {
                     break;
                 }
             }
+        }
+
+        if change_count == MAX_INVENTORY_CHANGES_PER_POLL {
+            // There can be queued changes even if no sender writes again, so schedule the rest.
+            cx.waker().wake_by_ref();
         }
 
         result

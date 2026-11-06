@@ -159,6 +159,78 @@ fn lock_time_rejections_have_no_mempool_score() {
     assert_eq!(score(TransactionError::NoInputs), 100);
 }
 
+/// Transaction ID snapshots stop consuming their source at the peer response limit.
+#[test]
+fn transaction_id_snapshots_bound_iteration_before_allocation() {
+    let _init_guard = zebra_test::init();
+    let max_ids: usize = zn::MAX_TX_INV_IN_SENT_MESSAGE
+        .try_into()
+        .expect("the transaction ID response limit fits in usize");
+    let mut visited = 0;
+
+    let ids = transaction_ids_snapshot((0..max_ids.saturating_add(1)).map(|index| {
+        visited += 1;
+        let mut hash = [0; 32];
+        let index = u64::try_from(index).expect("the test ID index fits in u64");
+        hash[..8].copy_from_slice(&index.to_le_bytes());
+        UnminedTxId::Legacy(zebra_chain::transaction::Hash(hash))
+    }));
+
+    assert_eq!(ids.len(), max_ids);
+    assert_eq!(
+        visited, max_ids,
+        "the source must be bounded before collecting the HashSet"
+    );
+}
+
+/// The production service applies the ID snapshot limit before responding to peer queries.
+#[tokio::test]
+async fn mempool_transaction_id_responses_are_bounded() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let max_ids: usize = zn::MAX_TX_INV_IN_SENT_MESSAGE
+        .try_into()
+        .expect("the transaction ID response limit fits in usize");
+    let fixture = network
+        .unmined_transactions_in_blocks(1..=1)
+        .next()
+        .expect("the genesis transaction test vector exists");
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, u64::MAX, true).await;
+    service.enable(&mut recent_syncs).await;
+
+    for index in 0..max_ids.saturating_add(1) {
+        let mut transaction = fixture.clone();
+        let mut hash = [0; 32];
+        let index = u64::try_from(index).expect("the test ID index fits in u64");
+        hash[..8].copy_from_slice(&index.to_le_bytes());
+        transaction.transaction.id = UnminedTxId::Legacy(zebra_chain::transaction::Hash(hash));
+        service.storage().insert(transaction, Vec::new(), None)?;
+    }
+    assert_eq!(service.storage().transaction_count(), max_ids + 1);
+
+    let response = service
+        .ready()
+        .await
+        .expect("the mempool service is ready")
+        .call(Request::TransactionIds)
+        .await
+        .expect("the mempool ID query succeeds");
+    let Response::TransactionIds(ids) = response else {
+        panic!("transaction ID requests return transaction IDs");
+    };
+    assert_eq!(ids.len(), max_ids);
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn mempool_service_basic() -> Result<(), Report> {
     // Test multiple times to catch intermittent bugs since eviction is randomized

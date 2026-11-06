@@ -188,6 +188,14 @@ bitflags! {
         /// used it for a different purpose.
         const NODE_SYNC_ARTIFACTS = 1 << 4;
 
+        /// The node can serve at least the most recent
+        /// [`NODE_NETWORK_LIMITED_BLOCKS`](crate::constants::NODE_NETWORK_LIMITED_BLOCKS) blocks
+        /// of its best chain, but not necessarily older ones.
+        ///
+        /// Defined by the draft version 2 protocol ("Service Flags") and sent only in its `init`
+        /// records: ZIP 204 defines no such bit for legacy `version` messages.
+        const NODE_NETWORK_LIMITED = 1 << 10;
+
         /// Opt in to authenticated next-tip block relay before full transaction validation.
         ///
         /// Both ends must advertise this bit. This is a temporary experiment, not a production

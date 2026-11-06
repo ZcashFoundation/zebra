@@ -13,12 +13,15 @@ use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
-use zebra_chain::{common::default_cache_dir, parameters::Network};
+use zebra_chain::{
+    common::default_cache_dir,
+    parameters::{Network, NetworkUpgrade},
+};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
-    service::finalized_state::restorable_db_versions,
-    state_database_format_version_in_code, BoxError,
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
+    service::finalized_state::{restorable_db_source_versions, restorable_db_versions},
+    state_database_format_version_in_code, BoxError, StateInitError, MIN_PRUNING_RETENTION,
 };
 
 #[cfg(test)]
@@ -118,6 +121,22 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// The number of recent finalized block bodies to retain, or `None` for archive operation.
+    ///
+    /// Defaults to `None`. The minimum is 10,000 on Mainnet and Testnet, or
+    /// [`MAX_BLOCK_REORG_HEIGHT`] + 1 on Regtest. Zero is invalid.
+    ///
+    /// Retention is measured from the durable finalized tip; non-finalized blocks and genesis
+    /// are always retained. Only historical transaction bodies are deleted, not validation state.
+    /// Increasing retention affects future pruning only and never restores deleted bodies.
+    ///
+    /// Pruning is irreversible. To disable it after deletion, restore an archive snapshot or
+    /// fully resync in a separate cache directory. Catch-up pruning compacts deleted bodies after
+    /// clearing the backlog; normal RocksDB compaction handles ongoing deletion.
+    ///
+    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
+    pub prune_blocks_older_than: Option<u32>,
+
     /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
     ///
     /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
@@ -193,6 +212,28 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
 }
 
 impl Config {
+    /// Rejects retention windows that cannot safely serve this network.
+    pub(crate) fn validate_pruning(&self, network: &Network) -> Result<(), StateInitError> {
+        let Some(configured) = self.prune_blocks_older_than else {
+            return Ok(());
+        };
+        let minimum = if network.is_regtest() {
+            MAX_BLOCK_REORG_HEIGHT + 1
+        } else {
+            MIN_PRUNING_RETENTION
+        };
+        if configured < minimum {
+            return Err(StateInitError::InvalidPruningRetention {
+                configured,
+                minimum,
+            });
+        }
+        if NetworkUpgrade::Nu5.activation_height(network).is_none() {
+            return Err(StateInitError::PruningRequiresNu5);
+        }
+        Ok(())
+    }
+
     /// Returns the path for the database, based on the kind, major version and network.
     /// Each incompatible database format or network gets its own unique path.
     pub fn db_path(
@@ -270,6 +311,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            prune_blocks_older_than: None,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
@@ -418,8 +460,8 @@ fn check_and_delete_database(
     // Don't delete databases that can be reused.
     if restorable_db_versions
         .iter()
-        .map(|v| v - 1)
-        .any(|v| v == dir_major_version)
+        .flat_map(|version| restorable_db_source_versions(*version))
+        .any(|version| version == dir_major_version)
     {
         return None;
     }

@@ -348,6 +348,7 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | --- | --- | --- | --- |
 | `cache_dir` | Path string | Default cache directory | Root of the state database and non-finalized-state backup. Does not relocate peer caches or RPC cookies. |
 | `ephemeral` | Boolean | `false` | Store the database in a temporary directory instead of `cache_dir`, and disable non-finalized-state backups. The temporary database is removed on successful cleanup; a crash can leave it behind. |
+| `prune_blocks_older_than` | Integer, optional | Unset (archive) | Number of recent finalized block bodies to retain; older bodies are deleted. At least 10,000 on Mainnet and Testnet, or 1,001 on Regtest. Irreversible, and stops advertising `NODE_NETWORK`. See [pruned mining nodes](pruning.md). |
 | `should_backup_non_finalized_state` | Boolean | `true` | Back up recent blocks outside the finalized database so they can be restored after a restart. Disabled by `ephemeral`; otherwise updates occur no more frequently than every five seconds. |
 | `delete_old_database` | Boolean | `true` | Check for and delete obsolete state database versions. Setting `false` disables old-version cleanup, not migration of a compatible previous database. |
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
@@ -358,8 +359,8 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `elasticsearch_password` | String; `elasticsearch` feature only | `""` | Elasticsearch HTTP Basic authentication password. Redacted from debug output, but stored in plaintext in the configuration file. Environment overrides are rejected. |
 | `elasticsearch_skip_cert_validation` | Boolean; `elasticsearch` feature only | `false` | Disable HTTPS certificate validation. Use only for trusted local clusters with self-signed certificates; credentials and indexed data can be intercepted. |
 
-Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
-7.0.0. Non-finalized backups use
+Persistent state uses `<cache_dir>/state/v32/<network-directory>`; Zebra 7.0.0
+used `state/v29`. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.
@@ -385,6 +386,12 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | `full_verify_concurrency_limit` | `usize` | `20` | Blocks submitted concurrently to full verification. Values below `1` are raised to `1` with a warning. |
 | `parallel_cpu_threads` | `usize` | `0` | Rayon worker threads for CPU-intensive verification. Zero delegates thread-count selection to Rayon; a positive value overrides its automatic selection. |
 | `v2_known_hash_pins` | table | unset | Known-hash list pins for Regtest or a custom testnet, used by version 2 checkpoint sync to anchor downloads at every listed height: `max_height` (the highest height the list covers, at most the final checkpoint) and `chunk_hashes` (the SHA-256 of each 50,000-height chunk of `get-hashes` entries, as 64 hex digits, in chunk order, as printed by `zebra-utils`' `known-hashes` tool). Mainnet and the default Testnet use the pins compiled into Zebra and refuse this field: Zebra does not start if it is set for them, or if the pins do not cover exactly `0..=max_height`. |
+| `state_snapshot_sync` | Boolean | `false` | Experimental: let an empty pruned node download a state snapshot over the version 2 protocol and sync only the blocks above it. The snapshot's UTXO set, nullifiers, Sprout tree, and value pools are trusted on the pinned or configured commitment, and the history below it is never downloaded. Requires `state.prune_blocks_older_than`, a non-ephemeral state with no database yet, `consensus.checkpoint_sync`, a commitment, peers, and zcashd-compat off; otherwise Zebra logs why and syncs normally. |
+| `state_snapshot` | Optional table `{ height, hash, manifest }` | Absent | The snapshot commitment to trust: the snapshot height, the hex hash of the block at that height, and the hex hash of the snapshot manifest. Absent uses the commitment this build pins for the network, if any. On Mainnet and the default Testnet it must equal the pinned one unless `unsafe_trust_state_snapshot` is set. |
+| `unsafe_trust_state_snapshot` | Boolean | `false` | Accept a configured `state_snapshot` on Mainnet or the default Testnet that differs from the pinned commitment, trusting its producer with the chain state. Logs a warning at every start. |
+| `state_snapshot_peers` | Array of `host:port` strings | `[]` | The version 2 peers the snapshot is downloaded from. Empty uses `network.initial_v2_peers`. |
+| `state_snapshot_fallback` | `"error"` or `"genesis"` | `"error"` | What to do when the snapshot cannot be downloaded or is rejected. `"error"` exits with an actionable message: an aborted download is retried on the next start, while a rejected snapshot requires a different commitment or removal of its rejection marker after investigation. `"genesis"` continues with a normal sync and does not retry a rejected snapshot. |
+| `serve_state_snapshots` | Boolean | `false` | Serve the state snapshots this node holds to version 2 peers. Every node with `v2_listen_addr` set advertises `NODE_SYNC_ARTIFACTS`, with or without this setting. A node that downloaded a snapshot keeps its pieces only when this is set; `zebrad export-state-snapshot` adds snapshots to serve. |
 
 Do not supply both an alias and its current key: they deserialize as duplicate
 fields.

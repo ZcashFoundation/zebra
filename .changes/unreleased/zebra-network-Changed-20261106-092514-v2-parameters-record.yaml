@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Changed version 2 handshakes on Regtest to send a Zebra-only record of kind `0x01` before `init`, holding a hash of the node's consensus parameters, and to close a connection whose peer sends a different hash. The draft protocol does not define this record kind, so peers that do not know it ignore it.
+time: 2026-11-06T09:25:14.017823532Z

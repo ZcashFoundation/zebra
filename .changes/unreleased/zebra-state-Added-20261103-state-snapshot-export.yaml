@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `state_snapshot::export::export_state_snapshot`, which exports a read-only finalized state at its tip as a deterministic state snapshot, the `state_snapshot::store::ArtifactStore` that holds snapshot objects by hash with verified reads and rejection marks, and `state_snapshot::format::{canonical_value, window_start}` for the canonical encodings and the window of complete blocks a snapshot ships.
+time: 2026-11-03T03:49:02.385510976-05:00

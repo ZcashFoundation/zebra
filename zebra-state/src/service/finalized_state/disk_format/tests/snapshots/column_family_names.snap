@@ -23,6 +23,7 @@ expression: cf_names
   "sapling_note_commitment_subtree",
   "sapling_note_commitment_tree",
   "sapling_nullifiers",
+  "snapshot_base",
   "spentness_artifact",
   "spentness_journal",
   "sprout_anchors",

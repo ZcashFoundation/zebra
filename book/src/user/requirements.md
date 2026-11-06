@@ -43,6 +43,13 @@ The `zebra.state.rocksdb.total_disk_size_bytes` metric measures the RocksDB
 table files, not all files on the filesystem. Check filesystem free space as
 well.
 
+Mining and pool backends can reduce historical body storage with
+[pruning](pruning.md). This does not set a fixed disk-size ceiling or lower the
+RAM requirements: validation state and retained indexes keep growing. Keep free
+space for startup, extraction, and compaction; deleted bodies do not
+immediately disappear from disk. Plan archive conversion for the existing
+database size, not just the desired retained window.
+
 A [state snapshot](snapshots.md) needs space for the downloaded archive and
 the extracted database at the same time. Retaining an existing database during
 replacement needs additional space. Do not use the compressed archive size as

@@ -23,13 +23,12 @@ use zebra_chain::{
 };
 
 use crate::{
-    response::{AnyTx, MinedTx},
+    response::{AnyTx, MinedTx, OutputWithMetadata},
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
-        read::tip,
     },
-    HashOrHeight,
+    BlockReadError, BoxError, HashOrHeight,
 };
 
 #[cfg(feature = "indexer")]
@@ -37,11 +36,14 @@ use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chains` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn any_block<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<Arc<Block>> {
+) -> Result<Option<Arc<Block>>, BlockReadError> {
     // # Correctness
     //
     // Since blocks are the same in the finalized and non-finalized state, we
@@ -50,12 +52,19 @@ pub fn any_block<'a, C: AsRef<Chain> + 'a>(
     chains
         .find_map(|c| c.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.clone())
-        .or_else(|| db.block(hash_or_height))
+        .map_or_else(|| db.block(hash_or_height), |block| Ok(Some(block)))
 }
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
-pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
+pub fn block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<Option<Arc<Block>>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -64,11 +73,14 @@ where
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 pub fn block_and_size<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<(Arc<Block>, usize)>
+) -> Result<Option<(Arc<Block>, usize)>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -84,7 +96,10 @@ where
             let size = contextual.block.zcash_serialize_to_vec().unwrap().len();
             (contextual.block.clone(), size)
         })
-        .or_else(|| db.block_and_size(hash_or_height))
+        .map_or_else(
+            || db.block_and_size(hash_or_height),
+            |block| Ok(Some(block)),
+        )
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or
@@ -111,11 +126,14 @@ where
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the
 /// non-finalized `chain` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`.
 fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)>
+) -> Result<Option<(Arc<Transaction>, Height, DateTime<Utc>)>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -131,30 +149,94 @@ where
                 .transaction(hash)
                 .map(|(tx, height, time)| (tx.clone(), height, time))
         })
-        .or_else(|| db.transaction(hash))
+        .map_or_else(|| db.transaction(hash), |tx| Ok(Some(tx)))
+}
+
+/// Checks that a cached best chain and the captured finalized tip describe the same chain view.
+fn check_chain_overlap<C>(
+    chain: Option<C>,
+    finalized_tip: Option<(Height, block::Hash)>,
+) -> Result<(), BoxError>
+where
+    C: AsRef<Chain>,
+{
+    if let (Some(chain), Some((height, hash))) = (chain, finalized_tip) {
+        let chain = chain.as_ref();
+        let root = chain.non_finalized_root_height();
+        let matches = if height < root {
+            height.next().ok() == Some(root)
+                && chain.blocks[&root].block.header.previous_block_hash == hash
+        } else {
+            chain.hash_by_height(height) == Some(hash)
+        };
+        if !matches {
+            return Err("finalized and non-finalized chains disagree".into());
+        }
+    }
+    Ok(())
+}
+
+/// Returns whether the transaction is in the best chain, even if its body is unavailable.
+pub fn known_transaction<C>(chain: Option<C>, db: &ZebraDb, hash: transaction::Hash) -> bool
+where
+    C: AsRef<Chain>,
+{
+    chain.is_some_and(|chain| chain.as_ref().tx_loc_by_hash.contains_key(&hash))
+        || db.transaction_location(hash).is_some()
 }
 
 /// Returns a [`MinedTx`] for a [`Transaction`] with [`transaction::Hash`],
 /// if one exists in the non-finalized `chain` or finalized `db`.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`. Finalized tip changes invalidate the read and are retried.
 pub fn mined_transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<MinedTx>
+) -> Result<Option<MinedTx>, BoxError>
 where
     C: AsRef<Chain>,
 {
-    // # Correctness
-    //
-    // It is ok to do this lookup in two different calls. Finalized state updates
-    // can only add overlapping blocks, and hashes are unique.
     let chain = chain.as_ref();
-
-    let (tx, height, time) = transaction(chain, db, hash)?;
-    let (tip_height, tip_hash) = tip(chain, db)?;
-    let confirmations = 1 + tip_height.0 - height.0;
-
-    Some(MinedTx::new(tx, height, confirmations, time, tip_hash))
+    for _ in 0..=super::FINALIZED_STATE_QUERY_RETRIES {
+        let finalized_tip = db.tip();
+        #[cfg(test)]
+        super::tests::transactions::AFTER_TIP_CAPTURE.with(|hook| {
+            if let Some(commit) = hook.borrow_mut().take() {
+                commit();
+            }
+        });
+        let chain = chain.filter(|chain| {
+            finalized_tip
+                .is_none_or(|(height, _)| height < chain.as_ref().non_finalized_tip_height())
+        });
+        check_chain_overlap(chain, finalized_tip)?;
+        let tip = chain
+            .map(|chain| chain.as_ref().non_finalized_tip())
+            .or(finalized_tip);
+        let found = transaction(chain, db, hash)?;
+        let result = match (found, tip) {
+            (Some((tx, height, time)), Some((tip_height, tip_hash))) => {
+                let Some(confirmations) = tip_height
+                    .0
+                    .checked_sub(height.0)
+                    .and_then(|depth| depth.checked_add(1))
+                else {
+                    if finalized_tip != db.tip() {
+                        continue;
+                    }
+                    return Err("transaction is above the captured best-chain tip".into());
+                };
+                Some(MinedTx::new(tx, height, confirmations, time, tip_hash))
+            }
+            _ => None,
+        };
+        if finalized_tip == db.tip() {
+            return Ok(result);
+        }
+    }
+    Err("unable to get transaction: finalized tip changed during the query".into())
 }
 
 /// Returns the transparent outputs spent by the non-coinbase inputs of the block with
@@ -164,14 +246,16 @@ where
 /// Used by the `getblock` RPC at verbosity 3 to fill in each input's prevout and the
 /// transaction fee.
 ///
+/// Returns an error if the block or a known parent transaction is pruned or corrupt.
+/// A torn secondary view returns `None`.
+///
 /// # Correctness
 ///
 /// The block and all of its spent outputs are read from the same `chain`/`db` snapshot, so the
 /// prevouts are consistent with the block.
 ///
-/// A spent output that cannot be found (for example, an input of a side-chain block that spends
-/// an output not in the best chain) is omitted from the map. Callers must treat a missing
-/// outpoint as "prevout unknown", not as an error.
+/// An unknown parent or outpoint is omitted from the map. Callers must treat a missing outpoint
+/// as "prevout unknown", not as an error. Known parents with unavailable bodies are never omitted.
 ///
 /// Coinbase transactions spend no outputs, so they contribute nothing to the map.
 ///
@@ -190,12 +274,14 @@ pub fn spent_outputs_for_block<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<HashMap<transparent::OutPoint, Utxo>>
+) -> Result<Option<HashMap<transparent::OutPoint, Utxo>>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
     let chain = chain.as_ref();
-    let block = block(chain, db, hash_or_height)?;
+    let Some(block) = block(chain, db, hash_or_height)? else {
+        return Ok(None);
+    };
 
     // The finalized tip can only advance between these reads, which can only turn a UTXO hit
     // into a parent read, never the reverse.
@@ -226,7 +312,19 @@ where
     }
 
     for (parent_hash, outpoints) in by_parent {
-        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash) else {
+        let Some((parent_tx, height, _)) = transaction(chain, db, parent_hash)? else {
+            if known_transaction(chain, db, parent_hash) {
+                return Ok(None);
+            }
+            // A database imported from a state snapshot indexes only the transactions below
+            // its window that still have unspent outputs, so a fully spent parent is history
+            // the snapshot never carried, not a reorg (DESIGN §7).
+            if let Some(height) = block
+                .coinbase_height()
+                .filter(|_| db.snapshot_base().is_some())
+            {
+                return Err(BlockReadError::BlockBodyUnavailable { height });
+            }
             continue;
         };
         let from_coinbase = parent_tx.is_coinbase();
@@ -238,58 +336,94 @@ where
         }
     }
 
-    Some(spent_outputs)
+    Ok(Some(spent_outputs))
 }
 
 /// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],
 /// if one exists in any chain in `chains` or finalized `db`.
 /// The first chain in `chains` must be the best chain.
+///
+/// Returns an error for pruned bodies or incomplete primary data.
+/// A torn secondary view returns `None`. Finalized tip changes invalidate the read and are retried.
 pub fn any_transaction<'a>(
     chains: impl Iterator<Item = &'a Arc<Chain>>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<AnyTx> {
-    // # Correctness
-    //
-    // It is ok to do this lookup in multiple different calls. Finalized state updates
-    // can only add overlapping blocks, and hashes are unique.
-    //
-    // Capture the best chain tip before searching, not inside the search closure.
-    // The closure only runs when the tx is found in a non-finalized chain; if the tx
-    // is only in the finalized DB, the closure never fires and best_chain would stay
-    // None, causing tip_height to undercount confirmations by ~MAX_BLOCK_REORG_HEIGHT.
-    // See <https://github.com/ZcashFoundation/zebra/issues/10470>.
-    // peekable() reads the first element without consuming it, so the iterator can
-    // still be used in find_map below.
-    let mut chains = chains.peekable();
-    let best_chain = chains.peek().copied();
-    let (tx, height, time, in_best_chain, containing_chain) = chains
-        .enumerate()
-        .find_map(|(i, chain)| {
-            chain
-                .as_ref()
-                .transaction(hash)
-                .map(|(tx, height, time)| (tx.clone(), height, time, i == 0, Some(chain)))
-        })
-        .or_else(|| {
-            db.transaction(hash)
-                .map(|(tx, height, time)| (tx.clone(), height, time, true, None))
-        })?;
-
-    if in_best_chain {
-        let (tip_height, tip_hash) = tip(best_chain, db)?;
-        let confirmations = 1 + tip_height.0 - height.0;
-        Some(AnyTx::Mined(MinedTx::new(
-            tx,
-            height,
-            confirmations,
-            time,
-            tip_hash,
-        )))
-    } else {
-        let block_hash = containing_chain?.block(height.into())?.hash;
-        Some(AnyTx::Side((tx, block_hash)))
+) -> Result<Option<AnyTx>, BoxError> {
+    let chains: Vec<_> = chains.collect();
+    for _ in 0..=super::FINALIZED_STATE_QUERY_RETRIES {
+        let finalized_tip = db.tip();
+        #[cfg(test)]
+        super::tests::transactions::AFTER_TIP_CAPTURE.with(|hook| {
+            if let Some(commit) = hook.borrow_mut().take() {
+                commit();
+            }
+        });
+        let chains: Vec<_> = chains
+            .iter()
+            .copied()
+            .filter(|chain| {
+                finalized_tip
+                    .is_none_or(|(height, _)| height < chain.as_ref().non_finalized_tip_height())
+            })
+            .collect();
+        check_chain_overlap(chains.first().copied(), finalized_tip)?;
+        let tip = chains
+            .first()
+            .map(|chain| chain.non_finalized_tip())
+            .or(finalized_tip);
+        let found = chains
+            .into_iter()
+            .enumerate()
+            .find_map(|(i, chain)| {
+                chain
+                    .as_ref()
+                    .transaction(hash)
+                    .map(|(tx, height, time)| (tx.clone(), height, time, i == 0, Some(chain)))
+            })
+            .map_or_else(
+                || {
+                    db.transaction(hash)
+                        .map(|tx| tx.map(|(tx, height, time)| (tx, height, time, true, None)))
+                },
+                |tx| Ok(Some(tx)),
+            )?;
+        let result = match found {
+            Some((tx, height, time, true, _)) => {
+                let Some((tip_height, tip_hash)) = tip else {
+                    if finalized_tip != db.tip() {
+                        continue;
+                    }
+                    return Ok(None);
+                };
+                let Some(confirmations) = tip_height
+                    .0
+                    .checked_sub(height.0)
+                    .and_then(|depth| depth.checked_add(1))
+                else {
+                    if finalized_tip != db.tip() {
+                        continue;
+                    }
+                    return Err("transaction is above the captured best-chain tip".into());
+                };
+                Some(AnyTx::Mined(MinedTx::new(
+                    tx,
+                    height,
+                    confirmations,
+                    time,
+                    tip_hash,
+                )))
+            }
+            Some((tx, height, _, false, containing_chain)) => containing_chain
+                .and_then(|chain| chain.block(height.into()))
+                .map(|block| AnyTx::Side((tx, block.hash))),
+            None => None,
+        };
+        if finalized_tip == db.tip() {
+            return Ok(result);
+        }
     }
+    Err("unable to get transaction: finalized tip changed during the query".into())
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,
@@ -385,6 +519,96 @@ where
         Some(chain) if chain.as_ref().spent_utxos.contains_key(&outpoint) => None,
         chain => utxo(chain, db, outpoint),
     }
+}
+
+/// Returns an unspent output and metadata from one best-chain view.
+///
+/// Finalized tip changes invalidate the read. A cached chain must agree with the finalized
+/// overlap; otherwise a spend on another fork could be combined with the cached tip.
+pub fn unspent_output<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    outpoint: transparent::OutPoint,
+) -> Result<Option<OutputWithMetadata>, BoxError>
+where
+    C: AsRef<Chain>,
+{
+    let chain = chain.as_ref();
+    for _ in 0..=super::FINALIZED_STATE_QUERY_RETRIES {
+        let finalized_tip = db.tip();
+        let chain = chain.filter(|chain| {
+            finalized_tip
+                .is_none_or(|(height, _)| height < chain.as_ref().non_finalized_tip_height())
+        });
+        if let (Some(chain), Some((height, hash))) = (chain, finalized_tip) {
+            let chain = chain.as_ref();
+            let root = chain.non_finalized_root_height();
+            let matches = if height < root {
+                height.next().ok() == Some(root)
+                    && chain.blocks[&root].block.header.previous_block_hash == hash
+            } else {
+                chain.hash_by_height(height) == Some(hash)
+            };
+            if !matches {
+                return Err(
+                    "unable to get output: finalized and non-finalized chains disagree".into(),
+                );
+            }
+        }
+
+        let tip = chain
+            .map(|chain| chain.as_ref().non_finalized_tip())
+            .or(finalized_tip);
+        #[cfg(test)]
+        super::tests::unspent_output::AFTER_TIP_CAPTURE.with(|hook| {
+            if let Some(commit) = hook.borrow_mut().take() {
+                commit();
+            }
+        });
+        let output = unspent_utxo(chain, db, outpoint);
+        let result = match (output, tip) {
+            (Some(utxo), Some((height, best_chain_tip_hash))) => {
+                let Some(confirmations) = height
+                    .0
+                    .checked_sub(utxo.height.0)
+                    .and_then(|depth| depth.checked_add(1))
+                else {
+                    // A newly committed output can be above the tip captured before its lookup.
+                    if finalized_tip != db.tip() {
+                        continue;
+                    }
+                    return Err("output is above the captured best-chain tip".into());
+                };
+                let transaction_version = chain
+                    .and_then(|chain| {
+                        chain
+                            .as_ref()
+                            .transaction(outpoint.hash)
+                            .map(|(tx, ..)| tx.version())
+                    })
+                    .or_else(|| db.transaction_version(outpoint.hash));
+                if transaction_version.is_none()
+                    && utxo.height >= db.history_capabilities()?.lowest_retained_height
+                {
+                    return Err(BlockReadError::CorruptBlock {
+                        height: utxo.height,
+                    }
+                    .into());
+                }
+                Some(OutputWithMetadata {
+                    utxo,
+                    transaction_version,
+                    confirmations,
+                    best_chain_tip_hash,
+                })
+            }
+            _ => None,
+        };
+        if finalized_tip == db.tip() {
+            return Ok(result);
+        }
+    }
+    Err("unable to get output: finalized tip changed during the query".into())
 }
 
 /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at

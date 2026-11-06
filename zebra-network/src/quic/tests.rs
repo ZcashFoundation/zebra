@@ -12,7 +12,11 @@ use rustls::{
 
 use zebra_chain::parameters::{testnet, Network};
 
-use super::{bind, connect, tls, transport_config, ConnectError, EndpointError, SEND_WINDOW};
+use crate::protocol::external::types::PeerServices;
+
+use super::{
+    bind, client_endpoint, connect, tls, transport_config, ConnectError, EndpointError, Windows,
+};
 
 /// Every loopback exchange finishes in well under this.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -42,15 +46,101 @@ async fn accept_one(endpoint: &Endpoint) -> Result<Connection, quinn::Connection
 
 /// Neither configuration permits 0-RTT. These are the rustls defaults; the
 /// draft makes them a MUST, so this test pins them.
-/// Each connection's send buffer is capped at [`SEND_WINDOW`], not quinn's
-/// larger default.
+/// Each connection's send buffer is capped at the [`Windows`] send window,
+/// not quinn's larger default.
 #[test]
 fn transport_config_caps_the_send_window() {
-    let config = format!("{:?}", transport_config());
+    let config = format!("{:?}", transport_config(Windows::DEFAULT));
+    let send_window = Windows::DEFAULT.send;
     assert!(
-        config.contains(&format!("send_window: {SEND_WINDOW},")),
+        config.contains(&format!("send_window: {send_window},")),
         "got {config}"
     );
+}
+
+/// A node that advertises `NODE_SYNC_ARTIFACTS` gets the serving windows: an
+/// 8 MiB send window and the default receive windows. Any other node gets
+/// the defaults.
+#[test]
+fn serving_nodes_get_a_larger_send_window() {
+    let serving = Windows::for_services(
+        PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS,
+    );
+    assert_eq!(serving, Windows::SERVING);
+    assert_eq!(serving.send, 8 << 20);
+    assert_eq!(serving.stream_receive, Windows::DEFAULT.stream_receive);
+    assert_eq!(
+        serving.connection_receive,
+        Windows::DEFAULT.connection_receive
+    );
+    assert_ne!(serving.send, Windows::DEFAULT.send);
+
+    assert_eq!(
+        Windows::for_services(PeerServices::NODE_NETWORK),
+        Windows::DEFAULT
+    );
+    assert_eq!(
+        Windows::for_services(PeerServices::empty()),
+        Windows::DEFAULT
+    );
+
+    // The window reaches the transport configuration.
+    let config = format!("{:?}", transport_config(Windows::SERVING));
+    assert!(
+        config.contains(&format!("send_window: {},", Windows::SERVING.send)),
+        "got {config}"
+    );
+}
+
+/// The bootstrap's windows widen only the receive side, and reach the
+/// transport configuration.
+#[test]
+fn bootstrap_windows_widen_the_receive_side() {
+    assert_eq!(Windows::BOOTSTRAP.stream_receive, 8 << 20);
+    assert_eq!(Windows::BOOTSTRAP.connection_receive, 16 << 20);
+    assert_eq!(Windows::BOOTSTRAP.send, Windows::DEFAULT.send);
+
+    let config = format!("{:?}", transport_config(Windows::BOOTSTRAP));
+    assert!(
+        config.contains(&format!(
+            "stream_receive_window: {},",
+            Windows::BOOTSTRAP.stream_receive
+        )) && config.contains(&format!(
+            "receive_window: {},",
+            Windows::BOOTSTRAP.connection_receive
+        )),
+        "got {config}"
+    );
+}
+
+/// A client-only endpoint dials peers like a bound one, but accepts no
+/// connections: a peer that dials it gets no handshake and times out.
+#[tokio::test]
+async fn client_endpoints_dial_but_do_not_accept() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let server = bind_loopback(&network);
+        let server_addr = server.local_addr().expect("bound");
+        let client = client_endpoint(&network, loopback(), Windows::BOOTSTRAP)
+            .expect("client-only loopback endpoints bind");
+        let client_addr = client.local_addr().expect("bound");
+
+        let (outbound, inbound) = tokio::join!(connect(&client, server_addr), accept_one(&server));
+        outbound.expect("a client-only endpoint connects");
+        inbound.expect("the server accepts");
+
+        let error = connect(&server, client_addr)
+            .await
+            .expect_err("a client-only endpoint accepts no connections");
+        assert!(
+            matches!(error, ConnectError::Timeout | ConnectError::Handshake(_)),
+            "got {error:?}"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
 }
 
 #[test]
@@ -113,7 +203,12 @@ async fn ecdsa_p256_peer_certificates_are_accepted() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let server = Endpoint::server(
-            super::server_config(b"zcash/regtest", &rcgen::PKCS_ECDSA_P256_SHA256).expect("valid"),
+            super::server_config(
+                b"zcash/regtest",
+                &rcgen::PKCS_ECDSA_P256_SHA256,
+                Windows::DEFAULT,
+            )
+            .expect("valid"),
             loopback(),
         )
         .expect("binds");
@@ -139,7 +234,12 @@ async fn other_signature_schemes_are_rejected() {
 
     tokio::time::timeout(TEST_TIMEOUT, async {
         let server = Endpoint::server(
-            super::server_config(b"zcash/regtest", &rcgen::PKCS_ECDSA_P384_SHA384).expect("valid"),
+            super::server_config(
+                b"zcash/regtest",
+                &rcgen::PKCS_ECDSA_P384_SHA384,
+                Windows::DEFAULT,
+            )
+            .expect("valid"),
             loopback(),
         )
         .expect("binds");

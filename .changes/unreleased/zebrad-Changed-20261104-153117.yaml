@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Non-verbose `getrawmempool` responses now contain at most 25,000 transaction IDs, bounding the
+  response snapshot before allocation. ([#12189](https://github.com/ZcashFoundation/zebra/pull/12189))
+time: 2026-11-04T15:31:17Z
