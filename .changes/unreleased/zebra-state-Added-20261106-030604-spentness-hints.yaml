@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Added
-body: 'Added spentness-hint construction of the finalized state (database format 29.2.0, with the new `spentness_journal` and `spentness_artifact` column families): `init_with_spentness` takes a `SpentnessHintsReceiver` for a verified artifact, below whose pinned terminal checkpoint the finalized writer writes UTXO rows only for the outputs the artifact retains, while address balances, address indexes, value pools and block info stay exact. Also added `SpentnessError`, `ValidateContextError::Spentness`, `CommitCheckpointVerifiedError::spentness_failure`, and `ReadStateService::has_incomplete_spentness_hints`, which reports a hinted sync that a restart interrupted.'
-time: 2026-11-06T03:06:04.906219610Z
