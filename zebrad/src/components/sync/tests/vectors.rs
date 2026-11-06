@@ -3337,7 +3337,9 @@ async fn singleton_discovery_downloads_once(gossip: SingletonGossip) {
             network,
             verifier.clone(),
             state,
-            MockService::build().for_unit_tests(),
+            tower::service_fn(|_: zs::ReadRequest| {
+                std::future::ready(Ok::<_, zs::BoxError>(zs::ReadResponse::BlockInfo(None)))
+            }),
             tip.clone(),
             misbehavior,
         );

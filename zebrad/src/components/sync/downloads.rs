@@ -3,6 +3,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     convert,
+    future::Future,
     pin::Pin,
     sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
@@ -41,6 +42,48 @@ mod tests;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// Bound waiting for inbound commitment without depending on the gossip task's lifetime.
+pub(crate) const INBOUND_COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Wait for committed presence using owned handles and an explicit `Send` future.
+// Expose the `Send` guarantee in the signature, not through auto-trait leakage.
+#[allow(clippy::manual_async_fn)]
+fn committed_block_height<ZS, ZSTip>(
+    read_state: ZS,
+    mut tip: ZSTip,
+    hash: block::Hash,
+) -> impl Future<Output = Result<Height, BoxError>> + Send
+where
+    ZS: zs::ReadState,
+    ZSTip: ChainTip + Send + 'static,
+{
+    async move {
+        loop {
+            // Subscribe before reading state, so a commit during the read cannot be lost.
+            tip.mark_best_tip_seen();
+            // Avoid calculating depth across concurrent finalized-state updates.
+            match read_state
+                .clone()
+                .oneshot(zs::ReadRequest::BlockInfo(hash.into()))
+                .await?
+            {
+                zs::ReadResponse::BlockInfo(Some(_)) => {
+                    let response = read_state
+                        .clone()
+                        .oneshot(zs::ReadRequest::BlockHeader(hash.into()))
+                        .await?;
+                    let zs::ReadResponse::BlockHeader { height, .. } = response else {
+                        unreachable!("a block header request returns a block header");
+                    };
+                    return Ok(height);
+                }
+                zs::ReadResponse::BlockInfo(None) => tip.best_tip_changed().await?,
+                _ => unreachable!("a block info request returns block info"),
+            }
+        }
+    }
+}
+
 /// Blocks being downloaded or verified by sync and inbound gossip.
 ///
 /// Gossip only claims unclaimed hashes. Sync always holds its hashes, because an advertisement
@@ -68,7 +111,6 @@ impl DownloadOwners {
 
 impl InFlightDownloads {
     /// Return whether a live download task currently holds this hash.
-    #[cfg(test)]
     pub(crate) fn contains(&self, hash: &block::Hash) -> bool {
         self.0
             .lock()
@@ -545,8 +587,8 @@ where
 
     /// Queue a block for download and verification.
     ///
-    /// This method waits for the network to become ready, returning an error if readiness fails
-    /// or the download deadline expires. It returns immediately after queuing the request.
+    /// This method briefly waits for an existing inbound owner to commit, otherwise waits for
+    /// network readiness within the download deadline. It returns after queuing the result or request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
@@ -557,11 +599,26 @@ where
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
 
-        // Hold the hash while waiting for readiness, so gossip and parent recovery skip it. The
-        // guard is released if readiness fails or this future is dropped. A gossip claim doesn't
-        // stop the syncer, because an advertisement alone can claim a hash that its advertiser
-        // never serves.
+        let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+        let inbound_owns_hash = self.in_flight_hashes.contains(&hash);
+        // Keep gossip from reclaiming the hash if the current owner fails or is cancelled.
+        // Dropping this future releases our hold, just like a cancelled readiness wait.
         let ownership = self.in_flight_hashes.hold(hash);
+        let committed_height = if inbound_owns_hash {
+            let committed = committed_block_height(
+                self.read_state.clone(),
+                self.latest_chain_tip.clone(),
+                hash,
+            );
+            // Only committed best-chain presence is shared. Errors, shutdown, and stalled or
+            // forged gossip all fall back to an independent download within the original deadline.
+            timeout(INBOUND_COMMIT_TIMEOUT, committed)
+                .await
+                .ok()
+                .and_then(Result::ok)
+        } else {
+            None
+        };
 
         // We construct the block requests sequentially, waiting for the peer
         // set to be ready to process each request. This ensures that we start
@@ -570,12 +627,14 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
-        self.awaiting_network_capacity = true;
-        let ready = timeout_at(deadline, self.network.ready()).await;
-        self.awaiting_network_capacity = false;
-        let network =
-            ready?.map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?;
+        let network = if committed_height.is_none() {
+            self.awaiting_network_capacity = true;
+            let ready = timeout_at(deadline, self.network.ready()).await;
+            self.awaiting_network_capacity = false;
+            Some(ready?.map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?)
+        } else {
+            None
+        };
 
         // Register cancellation before dispatch, so every request on the wire can be cancelled.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -586,9 +645,11 @@ where
                 .is_none(),
             "blocks are only queued once"
         );
-        let block_req = network.call(zn::Request::BlockDownload {
-            hash,
-            advertiser: None,
+        let block_req = network.map(|network| {
+            network.call(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
         });
 
         let mut verifier = self.verifier.clone();
@@ -604,6 +665,10 @@ where
         let task = tokio::spawn(
             async move {
                 let mut ownership = ownership;
+                if let Some(height) = committed_height {
+                    return Ok((height, hash));
+                }
+                let block_req = block_req.expect("uncommitted blocks have a download request");
                 // Download the block.
                 // Prefer the cancel handle if both are ready.
                 let download_start = std::time::Instant::now();

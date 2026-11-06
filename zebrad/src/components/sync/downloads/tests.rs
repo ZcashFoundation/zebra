@@ -531,7 +531,7 @@ async fn gossip_and_sync_share_download_ownership() {
     use zebra_chain::parameters::Network;
 
     let _init_guard = zebra_test::init();
-    let (mut sync, mut network, verifier, _) = mock_downloads(Height(0));
+    let (mut sync, mut network, verifier, mut read_state) = mock_downloads(Height(0));
     let hash = block_1().hash();
     let state = tower::service_fn(move |request| {
         assert_eq!(request, zs::Request::KnownBlock(hash));
@@ -579,8 +579,15 @@ async fn gossip_and_sync_share_download_ownership() {
         ownership.contains(&hash),
         "sync cancellation must not cancel gossip"
     );
-    // Sync still downloads a hash that gossip claimed first.
-    sync.download_and_verify(hash).await.unwrap();
+    // An absent state entry and a closed tip notifier must fall back to an independent download.
+    let (queued, ()) = tokio::join!(sync.download_and_verify(hash), async {
+        read_state
+            .try_next_request()
+            .await
+            .expect("sync queries committed presence")
+            .respond(zs::ReadResponse::BlockInfo(None));
+    });
+    queued.unwrap();
     let sync_response = network
         .expect_request(zn::Request::BlockDownload {
             hash,
@@ -606,6 +613,124 @@ async fn gossip_and_sync_share_download_ownership() {
     .expect("the last holder releases the hash");
     drop(sync_response);
     network.expect_no_requests().await;
+}
+
+/// A failed or stalled state read never extends the normal independent download deadline.
+#[tokio::test(start_paused = true)]
+async fn inbound_commit_wait_errors_keep_download_deadline() {
+    use tokio::time::Instant;
+
+    #[derive(Clone, Copy)]
+    enum ReadOutcome {
+        Error,
+        Timeout,
+        ClosedTip,
+    }
+
+    let _init_guard = zebra_test::init();
+    for outcome in [
+        ReadOutcome::Error,
+        ReadOutcome::Timeout,
+        ReadOutcome::ClosedTip,
+    ] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(Height(0));
+        downloads.latest_chain_tip = tip;
+        let _tip_sender = if matches!(outcome, ReadOutcome::ClosedTip) {
+            drop(tip_sender);
+            None
+        } else {
+            Some(tip_sender)
+        };
+        let hash = block_1().hash();
+        let ownership = downloads.in_flight_hashes();
+        let inbound = ownership.claim(hash).unwrap();
+        let started = Instant::now();
+        let pending_read = {
+            let enqueue = downloads.download_and_verify(hash);
+            tokio::pin!(enqueue);
+            assert!(futures::poll!(&mut enqueue).is_pending());
+            let read = state
+                .try_next_request()
+                .await
+                .expect("sync queries committed presence");
+            let pending_read = match outcome {
+                ReadOutcome::Error => {
+                    read.respond_error("state lookup failed".into());
+                    None
+                }
+                ReadOutcome::ClosedTip => {
+                    read.respond(zs::ReadResponse::BlockInfo(None));
+                    None
+                }
+                ReadOutcome::Timeout => Some(read),
+            };
+            enqueue.await.unwrap();
+            pending_read
+        };
+        let expected_wait = if matches!(outcome, ReadOutcome::Timeout) {
+            super::INBOUND_COMMIT_TIMEOUT
+        } else {
+            Duration::ZERO
+        };
+        assert_eq!(Instant::now() - started, expected_wait);
+        let response = network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            })
+            .await;
+        assert!(matches!(
+            downloads.next().await.unwrap(),
+            Err(BlockDownloadVerifyError::DownloadTimedOut { hash: timed_out }) if timed_out == hash
+        ));
+        assert_eq!(
+            Instant::now() - started,
+            super::BLOCK_DOWNLOAD_ROUND_TIMEOUT
+        );
+        response.respond_error("independent download timed out".into());
+        if let Some(read) = pending_read {
+            read.respond(zs::ReadResponse::BlockInfo(None));
+        }
+        drop(inbound);
+        assert!(!ownership.contains(&hash));
+        verifier.expect_no_requests().await;
+        state.expect_no_requests().await;
+    }
+}
+
+/// Cancelling the pre-download wait releases only sync's hold and never dispatches delayed work.
+#[tokio::test(start_paused = true)]
+async fn cancelled_inbound_commit_wait_releases_ownership() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let (tip, _tip_sender) = MockChainTip::new();
+    downloads.latest_chain_tip = tip;
+    let hash = block_1().hash();
+    let ownership = downloads.in_flight_hashes();
+    let inbound = ownership.claim(hash).unwrap();
+    {
+        let enqueue = downloads.download_and_verify(hash);
+        tokio::pin!(enqueue);
+        assert!(futures::poll!(&mut enqueue).is_pending());
+        state
+            .try_next_request()
+            .await
+            .expect("sync queries committed presence")
+            .respond(zs::ReadResponse::BlockInfo(None));
+        assert!(futures::poll!(&mut enqueue).is_pending());
+    }
+    assert!(
+        ownership.contains(&hash),
+        "sync cancellation must not cancel inbound"
+    );
+    drop(inbound);
+    assert!(!ownership.contains(&hash));
+    assert!(downloads.cancel_handles.is_empty());
+    network.expect_no_requests().await;
+    verifier.expect_no_requests().await;
+    state.expect_no_requests().await;
 }
 
 /// A rejected body releases its hash before a slow parent lookup can outlive cancellation.
