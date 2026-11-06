@@ -1101,9 +1101,13 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // inconsistency in the definition of the founders reward, which should occur only before
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
-        scheduled_block_subsidy(height, net)
-            .map(|subsidy| subsidy.div_exact(5))
-            .expect("block subsidy must be valid for founders rewards")
+        let subsidy = scheduled_block_subsidy(height, net)
+            .expect("block subsidy must be valid for founders rewards");
+
+        // Use truncating integer division to match zcashd's
+        // `GetBlockSubsidy(nHeight) / 5`. On configured Testnets the slow-start
+        // subsidy is not always a multiple of 5, so exact division would panic.
+        (subsidy / 5).expect("dividing by a non-zero constant cannot fail")
     } else {
         Amount::zero()
     }

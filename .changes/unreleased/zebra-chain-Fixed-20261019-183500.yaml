@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: '`founders_reward` no longer panics on a configured Testnet whose slow-start subsidy is not a multiple of 5. It now uses truncating integer division, matching zcashd (`GetBlockSubsidy(nHeight) / 5`). Mainnet and the public Testnet are unchanged. Fixes [#11792](https://github.com/ZcashFoundation/zebra/issues/11792).'
+time: 2026-10-19T18:35:00.000000+00:00
