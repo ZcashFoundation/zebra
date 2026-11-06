@@ -1,8 +1,11 @@
 //! Startup wiring for spentness hints (`[sync] v2_spentness_hints`).
 //!
-//! Hints need the checkpoint sync engine: only its gate holds back block 1
-//! until acquisition finishes, so [`effective_mode`] turns them off, or stops
-//! Zebra with `require`, when `sync.v2_checkpoint_sync` is off.
+//! Hints need the checkpoint sync engine: its gate holds back the syncers'
+//! block downloads until acquisition finishes, so [`effective_mode`] turns them
+//! off, or stops Zebra with `require`, when `sync.v2_checkpoint_sync` is off.
+//! The state's writer also holds back block 1 itself until the hints task sends
+//! the artifact or drops the state's sender, so blocks submitted by RPC or
+//! gossip cannot commit it without hints first.
 //!
 //! When hints are on, `start`:
 //!
@@ -56,7 +59,7 @@ use zebra_chain::{
 use zebra_network::sync_peer::{ObjectIndex, ObjectSource};
 
 use crate::components::checkpoint_sync::{
-    hints::{self, acquire_spentness_hints, serve_spentness_hints},
+    hints::{self, acquire_pinned_spentness_hints, serve_spentness_hints},
     known_hashes::KnownHashes,
 };
 
@@ -65,17 +68,21 @@ use crate::components::checkpoint_sync::{
 ///
 /// This bounds only the known-hash fetch that runs right after the network starts.
 /// The artifact download that follows has its own retry and timeout policy
-/// (`hints::AUTO_TIMEOUT` and `hints::AUTO_ROUNDS`), in [`acquire_spentness_hints`].
+/// (`hints::AUTO_TIMEOUT`, longer for a large artifact up to
+/// [`hints::MAX_AUTO_TIMEOUT`], and `hints::AUTO_ROUNDS`), in [`acquire_spentness_hints`].
 pub(super) const KNOWN_HASH_SUM_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// How long the legacy syncer waits after genesis for the hints task with `auto`,
 /// before it syncs without hints.
 ///
-/// The hints task bounds `auto` itself, with [`KNOWN_HASH_SUM_TIMEOUT`] and
-/// `hints::AUTO_TIMEOUT`, so this fires only if that task is stuck. With
-/// `require`, the legacy syncer waits as long as acquisition takes.
-pub(super) const LEGACY_SYNC_HINTS_TIMEOUT: Duration =
-    Duration::from_secs(KNOWN_HASH_SUM_TIMEOUT.as_secs() + hints::AUTO_TIMEOUT.as_secs() + 5 * 60);
+/// The hints task bounds `auto` itself, with [`KNOWN_HASH_SUM_TIMEOUT`] and the
+/// download timeout, which is at most [`hints::MAX_AUTO_TIMEOUT`], so this fires only
+/// if that task is stuck: about 45 minutes. Even then, block 1 still waits in the
+/// state's writer for the hints task's decision. With `require`, the legacy syncer
+/// waits as long as acquisition takes.
+pub(super) const LEGACY_SYNC_HINTS_TIMEOUT: Duration = Duration::from_secs(
+    KNOWN_HASH_SUM_TIMEOUT.as_secs() + hints::MAX_AUTO_TIMEOUT.as_secs() + 5 * 60,
+);
 
 /// The directory, under the state's cache directory, that holds the verified artifact.
 const ARTIFACT_DIR: &str = "spentness-hints";
@@ -125,10 +132,16 @@ impl StateHints {
     /// when `incomplete`: a restart interrupted its hinted sync
     /// (`ReadStateService::has_incomplete_spentness_hints`). Any other state
     /// syncs without hints, whatever the mode (S:386), so its sender is dropped.
+    ///
+    /// `resume` is the artifact hash of that interrupted sync
+    /// (`ReadStateService::incomplete_spentness_commitment`), if its record is
+    /// readable: only that artifact resumes it, even if this release pins
+    /// another one.
     pub(super) fn for_state(
         self,
         latest_chain_tip: &impl ChainTip,
         incomplete: bool,
+        resume: Option<[u8; 32]>,
     ) -> Option<NodeHints> {
         let tip = latest_chain_tip.best_tip_height();
         let empty_state = tip.is_none_or(|tip| tip <= Height(0));
@@ -143,6 +156,7 @@ impl StateHints {
         let (gate, gate_receiver) = watch::channel(false);
         Some(NodeHints {
             mode: self.mode,
+            resume: resume.filter(|_| incomplete),
             artifact: self.artifact,
             gate,
             gate_receiver,
@@ -153,6 +167,8 @@ impl StateHints {
 /// Spentness hints for a node whose state can use them.
 pub(super) struct NodeHints {
     mode: Mode,
+    /// The artifact hash of the state's interrupted hinted sync, if any.
+    resume: Option<[u8; 32]>,
     artifact: watch::Sender<Option<Arc<VerifiedArtifact>>>,
     /// Opened when the hints task finishes, with or without an artifact.
     gate: watch::Sender<bool>,
@@ -182,7 +198,9 @@ impl NodeHints {
     /// registered for serving through `objects`, or after Zebra falls back to syncing
     /// without hints.
     ///
-    /// The task's error is fatal: it only fails with `require`.
+    /// The task's error is fatal: it fails with `require`, and with any mode
+    /// when the state's interrupted hinted sync uses an artifact that this
+    /// release does not pin.
     pub(super) fn spawn(
         self,
         network: Network,
@@ -193,7 +211,7 @@ impl NodeHints {
         tokio::spawn(
             self.run(
                 network,
-                MaxCheckpoint::for_network,
+                pin_for_state,
                 peers,
                 state_cache_dir.join(ARTIFACT_DIR),
                 objects,
@@ -202,18 +220,30 @@ impl NodeHints {
         )
     }
 
-    /// Runs the hints task, with `pin_for` giving the pin of the saved artifact.
+    /// Runs the hints task, with `pin_for` giving the pin of the artifact to use for
+    /// the state's interrupted hinted sync, or for a new one (see [`pin_for_state`]).
     async fn run(
         self,
         network: Network,
-        pin_for: fn(&Network) -> Option<MaxCheckpoint>,
+        pin_for: fn(&Network, Option<[u8; 32]>) -> Option<MaxCheckpoint>,
         peers: zebra_network::SyncPeers,
         artifact_dir: PathBuf,
         objects: Option<watch::Sender<Arc<ObjectIndex>>>,
     ) -> Result<(), Report> {
         let mode = self.mode;
 
-        let saved = load_saved(&network, pin_for, &artifact_dir)
+        // Resolved once, before the saved files are loaded, because loading deletes
+        // the files of every other pin.
+        let pin = pin_for(&network, self.resume);
+        if let (Some(commitment), None) = (self.resume, pin) {
+            return Err(eyre!(
+                "this state has an incomplete hinted sync for spentness artifact {}, which this \
+                 release does not pin; finish the sync with the earlier release, or delete the state",
+                hex::encode(commitment),
+            ));
+        }
+
+        let saved = load_saved(&network, pin, &artifact_dir)
             .await
             .unwrap_or_else(|error| {
                 warn!(?error, "not using the saved spentness-hint artifact");
@@ -223,7 +253,7 @@ impl NodeHints {
         let artifact = match saved {
             Some(artifact) => Some(artifact),
             None => match (
-                acquire(&network, mode, peers, artifact_dir.clone()).await,
+                acquire(&network, mode, pin, peers, artifact_dir.clone()).await,
                 mode,
             ) {
                 (Ok(artifact), _) => artifact,
@@ -294,7 +324,13 @@ pub(super) fn spawn_serving(
     let artifact_dir = state_cache_dir.join(ARTIFACT_DIR);
     tokio::spawn(
         async move {
-            match load_saved(&network, MaxCheckpoint::for_network, &artifact_dir).await {
+            match load_saved(
+                &network,
+                MaxCheckpoint::for_network(&network),
+                &artifact_dir,
+            )
+            .await
+            {
                 Ok(Some(artifact)) => serve(artifact, artifact_dir, objects).await,
                 Ok(None) => {}
                 Err(error) => warn!(?error, "not serving the saved spentness-hint artifact"),
@@ -322,15 +358,25 @@ async fn serve(
     }
 }
 
-/// Loads and verifies the artifact for the current pin from `artifact_dir`, if an
-/// earlier run saved it there, with [`hints::load_saved_artifact`], which also
-/// deletes the files of earlier pins and a file that does not hash to the pin.
+/// The pin of the artifact for a state: the pin of `resume`, the artifact hash of
+/// its interrupted hinted sync, among this release's current and retired pins, or
+/// the network's current pin for a new hinted sync.
+fn pin_for_state(network: &Network, resume: Option<[u8; 32]>) -> Option<MaxCheckpoint> {
+    match resume {
+        Some(commitment) => MaxCheckpoint::for_commitment(network, commitment),
+        None => MaxCheckpoint::for_network(network),
+    }
+}
+
+/// Loads and verifies the artifact for `pin` from `artifact_dir`, if an earlier
+/// run saved it there, with [`hints::load_saved_artifact`], which also deletes
+/// the files of other pins and a file that does not hash to the pin.
 ///
-/// Returns `None` without looking up the pin when the directory is missing or
-/// empty, and `None` when the network has no pin or the pin's file is missing.
+/// Returns `None` when the directory is missing or empty, and `None` when there
+/// is no pin or the pin's file is missing.
 async fn load_saved(
     network: &Network,
-    pin_for: fn(&Network) -> Option<MaxCheckpoint>,
+    pin: Option<MaxCheckpoint>,
     artifact_dir: &Path,
 ) -> Result<Option<VerifiedArtifact>, Report> {
     let network = network.clone();
@@ -347,7 +393,7 @@ async fn load_saved(
             return Ok(None);
         }
 
-        let Some(pin) = pin_for(&network) else {
+        let Some(pin) = pin else {
             return Ok(None);
         };
 
@@ -369,15 +415,15 @@ async fn load_saved(
     .expect("loading the artifact does not panic")
 }
 
-/// Acquires and verifies the network's pinned artifact.
+/// Acquires and verifies the artifact of `pin`.
 async fn acquire(
     network: &Network,
     mode: Mode,
+    pin: Option<MaxCheckpoint>,
     peers: zebra_network::SyncPeers,
     artifact_dir: PathBuf,
 ) -> Result<Option<VerifiedArtifact>, Report> {
-    let pin = MaxCheckpoint::for_network(network)
-        .ok_or_else(|| eyre!("this release pins no spentness hints for {network}"))?;
+    let pin = pin.ok_or_else(|| eyre!("this release pins no spentness hints for {network}"))?;
     let spec = KnownHashListSpec::for_network(network)
         .ok_or_else(|| eyre!("this release pins no known-hash list for {network}"))?;
 
@@ -391,9 +437,10 @@ async fn acquire(
     }
     .map_err(|error| eyre!(error).wrap_err("summing known-hash output counts"))?;
 
-    Ok(acquire_spentness_hints(
+    Ok(acquire_pinned_spentness_hints(
         network.clone(),
         mode,
+        pin,
         peers,
         expected_output_count,
         artifact_dir,

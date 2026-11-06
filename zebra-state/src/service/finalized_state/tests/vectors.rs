@@ -265,7 +265,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "body deletion requires database format v30 or newer"
+        "body deletion requires database format v31 or newer"
     );
     assert_eq!(batch, crate::DiskWriteBatch::new());
     drop(state);

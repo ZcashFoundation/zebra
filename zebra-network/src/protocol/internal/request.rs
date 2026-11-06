@@ -373,7 +373,9 @@ pub enum Request {
     /// most `length` bytes. And the connection checks each answer's form, size and length, but
     /// not the object's hash: a caller that finds an object that fails its hash has no way to
     /// close the connection with `MISBEHAVIOR`. Dropping the peer's `Client` closes the
-    /// connection with `NO_ERROR`, and adds nothing to the peer's misbehavior score.
+    /// connection with `NO_ERROR`, and adds nothing to the peer's misbehavior score. A caller
+    /// that needs to score a peer for a hash mismatch should fetch through
+    /// [`SyncPeer`](crate::SyncPeer), which exposes [`penalize`](crate::SyncPeer::penalize).
     ///
     /// # Returns
     ///

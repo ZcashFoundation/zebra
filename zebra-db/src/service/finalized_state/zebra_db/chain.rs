@@ -103,7 +103,7 @@ impl ZebraDb {
 
     /// Returns the marker of the state snapshot this database was imported from, if any.
     ///
-    /// A read-only database from before 30.1.0 has no snapshot base column family, and no marker.
+    /// A read-only database from before 31.1.0 has no snapshot base column family, and no marker.
     pub fn snapshot_base(&self) -> Option<SnapshotBase> {
         SnapshotBaseCf::new(&self.db, SNAPSHOT_BASE)?.zs_get(&())
     }
