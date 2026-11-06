@@ -17,7 +17,7 @@ set -eo pipefail
 
 # Extract local state version
 echo "Extracting local state version..."
-LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
+LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-db/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
 echo "STATE_VERSION: ${LOCAL_STATE_VERSION}"
 
 # Function to find a cached disk image based on the git pattern (branch, main, or any branch)

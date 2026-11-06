@@ -153,7 +153,7 @@ a fork workflow does not provide these repository secrets.
 
 The [cached-disk workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-find-cached-disks.yml)
 searches Compute Engine images using the database major version from
-`zebra-state/src/constants.rs` and the lowercased network. It reports Zebra
+`zebra-db/src/constants.rs` and the lowercased network. It reports Zebra
 checkpoint, Zebra tip, and combined lightwalletd/Zebra tip availability.
 Tests create private disks from the selected image.
 

@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::{service::finalized_state::FinalizedState, Config};
-use zebra_chain::parameters::Network;
+use crossbeam_channel::bounded;
+use semver::Version;
+use zebra_chain::{block::Height, parameters::Network};
 
 fn state() -> (tempfile::TempDir, FinalizedState) {
     // Version-file checks need a stable path; ephemeral configs generate a path on each call.

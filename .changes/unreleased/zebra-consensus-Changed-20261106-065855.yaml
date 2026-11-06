@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Adapted to the finalized-state storage crate split without changing the public API.
+time: 2026-11-06T06:58:55.320643498Z

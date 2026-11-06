@@ -177,6 +177,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
     --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-db,target=zebra-db \
     --mount=type=bind,source=zebra-network,target=zebra-network \
     --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
     --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
@@ -193,7 +194,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     # Keep this list in sync with the workspace crates bind-mounted above.
     cargo clean --release \
         --package tower-batch-control --package tower-fallback --package zebra-chain \
-        --package zebra-consensus --package zebra-network --package zebra-node-services \
+        --package zebra-consensus --package zebra-db --package zebra-network --package zebra-node-services \
         --package zebra-rpc --package zebra-script --package zebra-state \
         --package zebra-test --package zebra-utils --package zebrad && \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \

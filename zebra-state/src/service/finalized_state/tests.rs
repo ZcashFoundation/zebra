@@ -2,8 +2,11 @@
 
 #![allow(clippy::unwrap_in_result)]
 
+mod compatibility;
 mod history;
 mod prop;
 mod snapshot;
+mod spentness;
+mod sync_meta;
 mod transparent;
 mod vectors;

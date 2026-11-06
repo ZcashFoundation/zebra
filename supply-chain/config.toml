@@ -40,6 +40,9 @@ audit-as-crates-io = true
 [policy.zebra-consensus]
 audit-as-crates-io = true
 
+[policy.zebra-db]
+audit-as-crates-io = true
+
 [policy.zebra-network]
 audit-as-crates-io = true
 

@@ -24,14 +24,15 @@ use crate::{
         format::{ComponentId, PieceManifest, PieceWriter},
         import::{
             build_piece_sst, decode_history_tree, import_dir, import_state_snapshot, is_singleton,
-            records::{self, RawHistoryTree},
-            sst_path, window_start, ImportCheck, SstMetadata,
+            records, sst_path, window_start, ImportCheck, SstMetadata,
         },
         SnapshotBase, SnapshotError,
     },
     CheckpointVerifiedBlock, Config, FromDisk, HistoryCapabilities, IntoDisk,
     MAX_BLOCK_REORG_HEIGHT,
 };
+
+use zebra_db::service::finalized_state::disk_format::chain::RawHistoryTree;
 
 use super::fixture::{self, Records, HEIGHT};
 

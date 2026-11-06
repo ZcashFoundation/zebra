@@ -1,333 +1,28 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fmt,
-    fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
-    io::ErrorKind,
+    fs::{canonicalize, remove_dir_all, DirEntry, ReadDir},
     path::{Path, PathBuf},
-    time::Duration,
 };
 
 use semver::Version;
-use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
-use zebra_chain::{
-    common::default_cache_dir,
-    parameters::{Network, NetworkUpgrade},
-};
+use zebra_chain::parameters::Network;
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, MAX_BLOCK_REORG_HEIGHT, STATE_DATABASE_KIND},
+    constants::STATE_DATABASE_KIND,
     service::finalized_state::{restorable_db_source_versions, restorable_db_versions},
-    state_database_format_version_in_code, BoxError, StateInitError, MIN_PRUNING_RETENTION,
+    state_database_format_version_in_code, BoxError,
+};
+
+pub use zebra_db::config::{
+    database_format_version_at_path, database_format_version_on_disk, Config, RedactedString,
 };
 
 #[cfg(test)]
 mod tests;
-
-/// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
-/// are not written to logs by types that derive `Debug`.
-///
-/// Serialization is unaffected, so the value still round-trips through the config file. Use
-/// [`RedactedString::as_str()`] to reach the contents deliberately.
-#[derive(Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct RedactedString(String);
-
-impl fmt::Debug for RedactedString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("[REDACTED]")
-    }
-}
-
-impl RedactedString {
-    /// Return the wrapped string, which exposes its sensitive contents.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<S> From<S> for RedactedString
-where
-    S: Into<String>,
-{
-    fn from(value: S) -> Self {
-        Self(value.into())
-    }
-}
-
-/// Configuration for the state service.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
-pub struct Config {
-    /// The root directory for storing cached block data.
-    ///
-    /// If you change this directory, you might also want to change `network.cache_dir`.
-    ///
-    /// This cache stores permanent blockchain state that can be replicated from
-    /// the network, including the best chain, blocks, the UTXO set, and other indexes.
-    /// Non-finalized state is held in memory and, by default, backed up to disk for restart.
-    ///
-    /// The `zebra-state` cache does *not* include any private data, such as wallet data.
-    ///
-    /// You can delete the entire cached state directory, but it will impact your node's
-    /// readiness and network usage. If you do, Zebra will re-sync from genesis the next
-    /// time it is launched.
-    ///
-    /// The default directory is platform dependent, based on
-    /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
-    ///
-    /// |Platform | Value                                           | Example                              |
-    /// | ------- | ----------------------------------------------- | ------------------------------------ |
-    /// | Linux   | `$XDG_CACHE_HOME/zebra` or `$HOME/.cache/zebra` | `/home/alice/.cache/zebra`           |
-    /// | macOS   | `$HOME/Library/Caches/zebra`                    | `/Users/Alice/Library/Caches/zebra`  |
-    /// | Windows | `{FOLDERID_LocalAppData}\zebra`                 | `C:\Users\Alice\AppData\Local\zebra` |
-    /// | Other   | `std::env::current_dir()/cache/zebra`           | `/cache/zebra`                       |
-    ///
-    /// # Security
-    ///
-    /// If you are running Zebra with elevated permissions ("root"), create the
-    /// directory for this file before running Zebra, and make sure the Zebra user
-    /// account has exclusive access to that directory, and other users can't modify
-    /// its parent directories.
-    ///
-    /// # Implementation Details
-    ///
-    /// Each state format version and network has a separate state.
-    /// These states are stored in `state/vN/mainnet` and `state/vN/testnet` subdirectories,
-    /// underneath the `cache_dir` path, where `N` is the state format version.
-    ///
-    /// Compatible state formats can be upgraded in place or reused from the preceding major
-    /// version. Without a reusable database, Zebra creates a new state directory and re-syncs from
-    /// genesis.
-    ///
-    /// Old state versions are deleted at startup when [`Self::delete_old_database`] is enabled.
-    /// You can also manually delete old state versions.
-    pub cache_dir: PathBuf,
-
-    /// Whether to use an ephemeral database.
-    ///
-    /// Ephemeral databases are stored in a temporary directory created using [`tempfile::tempdir()`].
-    /// They are deleted when Zebra exits successfully.
-    /// (If Zebra panics or crashes, the ephemeral database won't be deleted.)
-    ///
-    /// Set to `false` by default. If this is set to `true`, [`cache_dir`] is ignored.
-    ///
-    /// Ephemeral directories are created in the [`std::env::temp_dir()`].
-    /// Zebra names each directory after the state version and network, for example: `zebra-state-v21-mainnet-XnyGnE`.
-    ///
-    /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
-    pub ephemeral: bool,
-
-    /// The number of recent finalized block bodies to retain, or `None` for archive operation.
-    ///
-    /// Defaults to `None`. The minimum is 10,000 on Mainnet and Testnet, or
-    /// [`MAX_BLOCK_REORG_HEIGHT`] + 1 on Regtest. Zero is invalid.
-    ///
-    /// Retention is measured from the durable finalized tip; non-finalized blocks and genesis
-    /// are always retained. Only historical transaction bodies are deleted, not validation state.
-    /// Increasing retention affects future pruning only and never restores deleted bodies.
-    ///
-    /// Pruning is irreversible. To disable it after deletion, restore an archive snapshot or
-    /// fully resync in a separate cache directory. Catch-up pruning compacts deleted bodies after
-    /// clearing the backlog; normal RocksDB compaction handles ongoing deletion.
-    ///
-    /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
-    pub prune_blocks_older_than: Option<u32>,
-
-    /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
-    ///
-    /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
-    /// non-finalized blocks when the process exits and will have to re-download them from
-    /// the network when it restarts, if those blocks are still available in the network.
-    ///
-    /// Note: The non-finalized state will be written to a backup cache once per 5 seconds at most.
-    ///       If blocks are added to the non-finalized state more frequently, the backup may not reflect
-    ///       Zebra's last non-finalized state before it shut down.
-    pub should_backup_non_finalized_state: bool,
-
-    /// Whether to delete the old database directories when present.
-    ///
-    /// Set to `true` by default. If this is set to `false`,
-    /// no check for old database versions will be made and nothing will be
-    /// deleted.
-    pub delete_old_database: bool,
-
-    // Debug configs
-    //
-    /// Commit blocks to the finalized state up to this height, then exit Zebra.
-    ///
-    /// Set to `None` by default: Zebra continues syncing indefinitely.
-    pub debug_stop_at_height: Option<u32>,
-
-    /// While Zebra is running, check state validity this often.
-    ///
-    /// Set to `None` by default: Zebra only checks state format validity on startup and shutdown.
-    #[serde(with = "humantime_serde")]
-    pub debug_validity_check_interval: Option<Duration>,
-
-    /// If true, skip spawning the non-finalized state backup task and instead write
-    /// the non-finalized state to the backup directory synchronously before each update
-    /// to the latest chain tip or non-finalized state channels.
-    ///
-    /// Set to `false` by default. When `true`, the non-finalized state is still restored
-    /// from the backup directory on startup, but updates are written synchronously on every
-    /// block commit rather than asynchronously every 5 seconds.
-    ///
-    /// This is intended for testing scenarios where blocks are committed rapidly and the
-    /// async backup task may not flush all blocks before shutdown.
-    pub debug_skip_non_finalized_state_backup_task: bool,
-
-    // Elasticsearch configs
-    //
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database url.
-    pub elasticsearch_url: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database username.
-    pub elasticsearch_username: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database password.
-    pub elasticsearch_password: RedactedString,
-
-    #[cfg(feature = "elasticsearch")]
-    /// Skip TLS certificate validation when connecting to Elasticsearch.
-    ///
-    /// Defaults to `false`, so the server certificate is validated. Set to `true` only for a
-    /// trusted local cluster with a self-signed certificate: it exposes the connection, including
-    /// authentication credentials, to interception.
-    pub elasticsearch_skip_cert_validation: bool,
-}
-
-fn gen_temp_path(prefix: &str) -> PathBuf {
-    tempfile::Builder::new()
-        .prefix(prefix)
-        .tempdir()
-        .expect("temporary directory is created successfully")
-        .keep()
-}
-
-impl Config {
-    /// Rejects retention windows that cannot safely serve this network.
-    pub(crate) fn validate_pruning(&self, network: &Network) -> Result<(), StateInitError> {
-        let Some(configured) = self.prune_blocks_older_than else {
-            return Ok(());
-        };
-        let minimum = if network.is_regtest() {
-            MAX_BLOCK_REORG_HEIGHT + 1
-        } else {
-            MIN_PRUNING_RETENTION
-        };
-        if configured < minimum {
-            return Err(StateInitError::InvalidPruningRetention {
-                configured,
-                minimum,
-            });
-        }
-        if NetworkUpgrade::Nu5.activation_height(network).is_none() {
-            return Err(StateInitError::PruningRequiresNu5);
-        }
-        Ok(())
-    }
-
-    /// Returns the path for the database, based on the kind, major version and network.
-    /// Each incompatible database format or network gets its own unique path.
-    pub fn db_path(
-        &self,
-        db_kind: impl AsRef<str>,
-        major_version: u64,
-        network: &Network,
-    ) -> PathBuf {
-        let db_kind = db_kind.as_ref();
-        let major_version = format!("v{major_version}");
-        let net_dir = network.directory_name();
-
-        if self.ephemeral {
-            gen_temp_path(&format!("zebra-{db_kind}-{major_version}-{net_dir}-"))
-        } else {
-            self.cache_dir
-                .join(db_kind)
-                .join(major_version)
-                .join(net_dir)
-        }
-    }
-
-    /// Returns the path for the non-finalized state backup directory, based on the network.
-    /// Non-finalized state backup files are encoded in the network protocol format and remain
-    /// valid across db format upgrades.
-    pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
-        if self.ephemeral || !self.should_backup_non_finalized_state {
-            // Ephemeral databases are intended to be irrecoverable across restarts and don't
-            // require a backup for the non-finalized state.
-            return None;
-        }
-
-        let net_dir = network.directory_name();
-        Some(self.cache_dir.join("non_finalized_state").join(net_dir))
-    }
-
-    /// Returns the path for the database format minor/patch version file,
-    /// based on the kind, major version and network.
-    pub fn version_file_path(
-        &self,
-        db_kind: impl AsRef<str>,
-        major_version: u64,
-        network: &Network,
-    ) -> PathBuf {
-        let mut version_path = self.db_path(db_kind, major_version, network);
-
-        version_path.push(DATABASE_FORMAT_VERSION_FILE_NAME);
-
-        version_path
-    }
-
-    /// Returns a config for a temporary database that is deleted when it is dropped.
-    pub fn ephemeral() -> Config {
-        Config {
-            ephemeral: true,
-            ..Config::default()
-        }
-    }
-
-    /// Returns how the Elasticsearch server certificate is validated.
-    #[cfg(feature = "elasticsearch")]
-    pub(crate) fn elasticsearch_cert_validation(
-        &self,
-    ) -> elasticsearch::cert::CertificateValidation {
-        if self.elasticsearch_skip_cert_validation {
-            elasticsearch::cert::CertificateValidation::None
-        } else {
-            elasticsearch::cert::CertificateValidation::Default
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            cache_dir: default_cache_dir(),
-            ephemeral: false,
-            prune_blocks_older_than: None,
-            should_backup_non_finalized_state: true,
-            delete_old_database: true,
-            debug_stop_at_height: None,
-            debug_validity_check_interval: None,
-            debug_skip_non_finalized_state_backup_task: false,
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_url: "https://localhost:9200".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_username: "elastic".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_password: RedactedString::default(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_skip_cert_validation: false,
-        }
-    }
-}
 
 // Cleaning up old database versions
 // TODO: put this in a different module?
@@ -473,9 +168,8 @@ fn check_and_delete_database(
     // Check that the path we're about to delete is inside the cache directory.
     // If the user has symlinked the outdated state directory to a non-cache directory,
     // we don't want to delete it, because it might contain other files.
-    //
     // We don't attempt to guard against malicious symlinks created by attackers
-    // (TOCTOU attacks). Zebra should not be run with elevated privileges.
+    // (TOCTOU attacks). Zebra should not be run with elevated permissions.
     let cache_path = canonicalize(&config.cache_dir).ok()?;
     let outdated_path = canonicalize(outdated_path).ok()?;
 
@@ -531,83 +225,6 @@ pub fn state_database_format_version_on_disk(
     )
 }
 
-/// Returns the full semantic version of the on-disk database, based on its config, kind, major version,
-/// and network.
-///
-/// Typically, the version is read from a version text file.
-///
-/// If there is an existing on-disk database, but no version file,
-/// returns `Ok(Some(major_version.0.0))`.
-/// (This happens even if the database directory was just newly created.)
-///
-/// If there is no existing on-disk database, or `config` is ephemeral, returns `Ok(None)`.
-///
-/// This is the format of the data on disk, the version
-/// implemented by the running Zebra code can be different.
-pub fn database_format_version_on_disk(
-    config: &Config,
-    db_kind: impl AsRef<str>,
-    major_version: u64,
-    network: &Network,
-) -> Result<Option<Version>, BoxError> {
-    // Each ephemeral database is created in a new temporary directory when it is opened.
-    if config.ephemeral {
-        return Ok(None);
-    }
-
-    let version_path = config.version_file_path(&db_kind, major_version, network);
-    let db_path = config.db_path(db_kind, major_version, network);
-
-    database_format_version_at_path(&version_path, &db_path, major_version)
-}
-
-/// Returns the full semantic version of the on-disk database at `version_path`.
-///
-/// See [`database_format_version_on_disk()`] for details.
-pub(crate) fn database_format_version_at_path(
-    version_path: &Path,
-    db_path: &Path,
-    major_version: u64,
-) -> Result<Option<Version>, BoxError> {
-    let disk_version_file = match fs::read_to_string(version_path) {
-        Ok(version) => Some(version),
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            // If the version file doesn't exist, don't guess the version yet.
-            None
-        }
-        Err(e) => Err(e)?,
-    };
-
-    // The database has a version file on disk
-    if let Some(version) = disk_version_file {
-        return Ok(Some(
-            version
-                .parse()
-                // Try to parse the previous format of the disk version file if it cannot be parsed as a `Version` directly.
-                .or_else(|err| {
-                    format!("{major_version}.{version}")
-                        .parse()
-                        .map_err(|err2| format!("failed to parse format version: {err}, {err2}"))
-                })?,
-        ));
-    }
-
-    // There's no version file on disk, so we need to guess the version
-    // based on the database content
-    match fs::metadata(db_path) {
-        // But there is a database on disk, so it has the current major version with no upgrades.
-        // If the database directory was just newly created, we also return this version.
-        Ok(_metadata) => Ok(Some(Version::new(major_version, 0, 0))),
-
-        // There's no version file and no database on disk, so it's a new database.
-        // It will be created with the current version,
-        // but temporarily return the default version above until the version file is written.
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-
-        Err(e) => Err(e)?,
-    }
-}
-
 // Hide this destructive method from the public API, except in tests.
 #[allow(unused_imports)]
 pub(crate) use hidden::{
@@ -618,7 +235,9 @@ pub(crate) use hidden::{
 pub(crate) mod hidden {
     #![allow(dead_code)]
 
-    use zebra_chain::common::atomic_write;
+    pub use zebra_db::config::hidden::{
+        write_database_format_version_at_path, write_database_format_version_to_disk,
+    };
 
     use super::*;
 
@@ -638,49 +257,5 @@ pub(crate) mod hidden {
             changed_version,
             network,
         )
-    }
-
-    /// Writes `changed_version` to the on-disk database after the format is changed.
-    /// (Or a new database is created.)
-    ///
-    /// The database path is based on its kind, `major_version_in_code`, and network.
-    ///
-    /// # Correctness
-    ///
-    /// This should only be called:
-    /// - after each format upgrade is complete,
-    /// - when creating a new database, or
-    /// - when an older Zebra version opens a newer database.
-    ///
-    /// # Concurrency
-    ///
-    /// This must only be called while RocksDB has an open database for `config`.
-    /// Otherwise, multiple Zebra processes could write the version at the same time,
-    /// corrupting the file.
-    pub fn write_database_format_version_to_disk(
-        config: &Config,
-        db_kind: impl AsRef<str>,
-        major_version_in_code: u64,
-        changed_version: &Version,
-        network: &Network,
-    ) -> Result<(), BoxError> {
-        write_database_format_version_at_path(
-            config.version_file_path(db_kind, major_version_in_code, network),
-            changed_version,
-        )
-    }
-
-    /// Writes `changed_version` to the version file at `version_path`.
-    ///
-    /// See [`write_database_format_version_to_disk()`] for details.
-    pub(crate) fn write_database_format_version_at_path(
-        version_path: PathBuf,
-        changed_version: &Version,
-    ) -> Result<(), BoxError> {
-        // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
-        // crashes.
-        atomic_write(version_path, changed_version.to_string().as_bytes())??;
-
-        Ok(())
     }
 }

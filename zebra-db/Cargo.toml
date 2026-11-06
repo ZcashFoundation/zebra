@@ -1,0 +1,79 @@
+[package]
+name = "zebra-db"
+version = "0.1.0"
+authors.workspace = true
+description = "Finalized-state storage and state snapshots for Zebra"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+readme = "../README.md"
+homepage.workspace = true
+# crates.io is limited to 5 keywords and categories
+keywords.workspace = true
+# Must be one of <https://crates.io/category_slugs>
+categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
+
+[features]
+default = []
+
+# Indexes spending transaction ids by spent outpoints and revealed nullifiers
+indexer = []
+
+# Test-only features
+proptest-impl = [
+    "proptest",
+    "proptest-derive",
+    "zebra-test",
+    "zebra-chain/proptest-impl",
+]
+
+# Experimental elasticsearch support
+elasticsearch = ["dep:elasticsearch"]
+
+[dependencies]
+bincode = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+crossbeam-channel = { workspace = true }
+derive-new = { workspace = true }
+dirs = { workspace = true }
+hex = { workspace = true }
+hex-literal = { workspace = true }
+humantime-serde = { workspace = true }
+human_bytes = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+metrics = { workspace = true }
+rayon = { workspace = true }
+regex = { workspace = true }
+rlimit = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4"] }
+semver = { workspace = true }
+serde = { workspace = true, features = ["serde_derive"] }
+serde-big-array = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
+tracing = { workspace = true }
+
+sapling-crypto = { workspace = true }
+zcash_history = { workspace = true }
+
+elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
+
+zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
+
+zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+proptest-derive = { workspace = true }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/" }
+
+[lints]
+workspace = true

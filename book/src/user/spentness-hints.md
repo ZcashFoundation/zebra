@@ -200,4 +200,4 @@ the first pinning release:
   RPC or gossip). It has no timeout of its own: with `"auto"` the limits
   above bound the wait, and with `"require"` it waits as long as acquisition
   takes. A restarted node whose hints task gives up stops Zebra
-  (`zebra-state/src/service/finalized_state/zebra_db/spentness.rs`).
+  (`zebra-db/src/service/finalized_state/zebra_db/spentness.rs`).
