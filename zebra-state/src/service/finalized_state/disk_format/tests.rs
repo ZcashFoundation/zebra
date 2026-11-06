@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
+mod height;
+#[cfg(test)]
 mod prop;
 #[cfg(test)]
 mod snapshot;

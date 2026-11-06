@@ -149,35 +149,29 @@ cannot verify without the history. The feature is experimental, off by default, 
 [Starting a pruned node from a state snapshot](state-snapshot-sync.md), including what is verified,
 what is trusted, and how to export and serve a snapshot from a stopped node.
 
-## Format 32, recovery, and copies
+## Format 33, recovery, and copies
 
-This release uses database format 32.0.0 for both archive and pruned nodes. When no v32 database
-exists, startup moves the newest reusable source inside the cache directory, preferring v31,
-then v30, then v29, to `state/v32/<network>/`. This is a move, not a backup, and happens even with pruning
-disabled. An older binary looking in the source directory will not find the moved state and may
-start syncing again.
+This release uses database format 33.0.0 for both archive and pruned nodes. When no v33 database
+exists, startup moves the newest reusable source inside the cache directory, preferring v32, then
+v31, then v30, then v29, to `state/v33/<network>/`. This is a move, not a backup, and happens even
+with pruning disabled. An older binary looking in the source directory will not find the moved state
+and may start syncing again.
 
-For fixed-height v29, v30 and v31 sources, the upgrades through format 32 rewrite no existing
-records, so an archive that has **never** been pruned, snapshot-imported, or built with [spentness
-hints](spentness-hints.md) can be rolled back to Zebra 7.0.0 by moving the directory back:
+Every earlier format stores fixed three-byte heights, so startup rewrites the moved records to the
+variable-width height encoding before it serves reads or commits blocks. The rewrite is one-way:
+v32 and older builds, including Zebra 7.0.0, cannot decode the migrated records, and moving the
+directory back is not a rollback. To roll back, stop Zebra, then restore a stopped-node backup of
+the source directory taken before the upgrade, with the same `indexer` feature setting.
 
-1. With this release still running, confirm `getblockchaininfo` reports `pruned: false`, and that
-   the config does not set `prune_blocks_older_than`.
-2. Stop Zebra and every process that opens its database directly.
-3. Move `state/v32/<network>/` back to `state/v29/<network>/`. The `state/v29/<network>/` path must
-   not already exist.
-4. Start Zebra 7.0.0, built with the same `indexer` feature setting. It logs that it is opening a
-   newer database format and continues from the existing tip.
+A pruned node, even a partially pruned one, can only return to Zebra 7.0.0 from a separate archive
+backup: Zebra 7.0.0 cannot detect missing block bodies, and would serve incomplete blocks to peers
+and RPC clients.
 
-Never do this with a database that has been pruned, even partially: Zebra 7.0.0 cannot detect
-missing block bodies, and would serve incomplete blocks to peers and RPC clients. A pruned node can
-only return to 7.0.0 from a separate archive backup.
-
-A database built from a [state snapshot](state-snapshot-sync.md) uses format 32.0.0 and records
-where its history starts. Never open it with an older Zebra build, and never move it to `v31`,
-`v30`, `v29`, or any older directory: those builds cannot tell that the history below the snapshot's
-window is missing, and would treat the database as a complete archive. See the canonical
-[format 32 upgrade and rollback rules](upgrading.md#zebra-710).
+A database built from a [state snapshot](state-snapshot-sync.md) uses format 33.0.0 and records
+where its history starts. Never open it with an older Zebra build, and never move it to `v32`,
+`v31`, `v30`, `v29`, or any older directory: those builds cannot decode its records, and older
+builds cannot tell that the history below the snapshot's window is missing. See the canonical
+[format 33 upgrade and rollback rules](upgrading.md#zebra-710).
 
 Before upgrading or pruning, stop Zebra and keep any required archive backup outside the managed
 cache directory. After deletion, simply removing the option makes writable startup fail. To regain

@@ -36,7 +36,7 @@ use crate::{
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
             transparent::AddressLocation,
-            upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
+            upgrade::{variable_height, DbFormatChange, DbFormatChangeThreadHandle},
         },
         STATE_COLUMN_FAMILIES_IN_CODE,
     },
@@ -101,6 +101,9 @@ pub struct ZebraDb {
     //
     // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
+
+    /// Whether this instance created a new database instead of opening an existing one.
+    newly_created: bool,
 
     /// All history-dependent startup work and initial format checks have completed.
     ready_for_pruning: Arc<AtomicBool>,
@@ -207,6 +210,37 @@ impl ZebraDb {
             let db_path = config.db_path(&db_kind, format_version_in_code.major, network);
             return Err(StateInitError::ReadOnlyDatabaseNotFound { path: db_path });
         }
+        let variable_height_required = variable_height::is_required(&format_change);
+        // Current-format records with an unfinished rewrite are only the families it already
+        // converted, so the rewrite resumes from its checkpoint.
+        let rewrite_in_progress = variable_height_required
+            && variable_height::rewrite_in_progress(&config.db_path(
+                &db_kind,
+                format_version_in_code.major,
+                network,
+            ));
+        let current_markers = if variable_height_required {
+            DiskDb::current_height_markers_exist(
+                config,
+                &db_kind,
+                format_version_in_code,
+                network,
+                STATE_COLUMN_FAMILIES_IN_CODE
+                    .iter()
+                    .map(ToString::to_string),
+            )?
+        } else {
+            false
+        };
+        let records_need_rewrite =
+            variable_height_required && (!current_markers || rewrite_in_progress);
+        if read_only && records_need_rewrite {
+            // Unlike compatible migrations, this rewrite must not expose mixed old/new records to
+            // current-directory secondaries either.
+            return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade {
+                path: config.db_path(&db_kind, format_version_in_code.major, network),
+            });
+        }
 
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
@@ -214,6 +248,11 @@ impl ZebraDb {
         // We also allow skipping them in unit tests and dependent crates' test fixtures.
         let debug_skip_format_upgrades =
             read_only || (cfg!(any(test, feature = "proptest-impl")) && debug_skip_format_upgrades);
+        // A pending v33 rewrite runs synchronously with every other pending upgrade, see below.
+        let synchronous_variable_height_upgrade =
+            !debug_skip_format_upgrades && variable_height_required;
+        let synchronous_variable_height_rewrite =
+            synchronous_variable_height_upgrade && records_need_rewrite;
 
         // Open the low-level database and do initial checks.
         //
@@ -227,22 +266,99 @@ impl ZebraDb {
                 older_disk_version, ..
             } if read_previous_version => older_disk_version,
             _ => format_version_in_code,
+        }
+        .clone();
+        let column_families_in_code: Vec<String> = column_families_in_code.into_iter().collect();
+        let disk_db = if synchronous_variable_height_rewrite {
+            DiskDb::new_for_variable_height_upgrade(
+                config,
+                &db_kind,
+                &format_version_for_open,
+                network,
+                column_families_in_code.clone(),
+                read_only,
+            )?
+        } else {
+            DiskDb::new(
+                config,
+                &db_kind,
+                &format_version_for_open,
+                network,
+                column_families_in_code.clone(),
+                read_only,
+            )?
         };
-        let disk_db = DiskDb::new(
-            config,
-            db_kind,
-            format_version_for_open,
-            network,
-            column_families_in_code,
-            read_only,
-        )?;
+        let format_change = if current_markers && !synchronous_variable_height_upgrade {
+            DbFormatChange::CheckOpenCurrent {
+                running_version: format_version_in_code.clone(),
+            }
+        } else {
+            format_change
+        };
 
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
+            newly_created: format_change.is_newly_created(),
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db: disk_db,
+        };
+
+        let format_change = if synchronous_variable_height_upgrade {
+            // Old and new key bytes can be ambiguous, so no new-codec read or block commit is
+            // allowed until the checkpoint-backed rewrite and its version update are complete.
+            //
+            // The rewrite runs before the other pending upgrades, so that older migrations, such
+            // as the 29.1 synchronization metadata backfill, read the records with the current
+            // codec. The version file still advances in version order, and the v33 entry finds
+            // nothing left to rewrite. A restart after the rewrite and before the last version
+            // update finds current-format records and no checkpoint, and resumes the remaining
+            // upgrades without rewriting again.
+            let initial_tip_height = if synchronous_variable_height_rewrite {
+                let initial_tip_height = variable_height::prepare(&db)?;
+                variable_height::rewrite(&db);
+
+                // The rewrite opened the address balances with the fixed-width merge operator,
+                // so reopen them with the current one before other upgrades can merge into them.
+                drop(db);
+                db = ZebraDb {
+                    config: Arc::new(config.clone()),
+                    debug_skip_format_upgrades,
+                    format_change_handle: None,
+                    newly_created: false,
+                    ready_for_pruning: Arc::new(AtomicBool::new(false)),
+                    db: DiskDb::new(
+                        config,
+                        &db_kind,
+                        &format_version_for_open,
+                        network,
+                        column_families_in_code,
+                        read_only,
+                    )?,
+                };
+
+                initial_tip_height
+            } else {
+                // Leftovers of an interrupted checkpoint removal.
+                variable_height::finish(&db);
+                db.finalized_tip_height()
+            };
+            let (_never_cancel_sender, cancel_receiver) = bounded(1);
+            format_change
+                .apply_format_upgrade(&db, initial_tip_height, &cancel_receiver)
+                .expect("the synchronous variable-height upgrade cannot be cancelled");
+            db.mark_finished_format_upgrades();
+
+            DbFormatChange::CheckOpenCurrent {
+                running_version: format_version_in_code.clone(),
+            }
+        } else {
+            if !read_only && !variable_height::is_required(&format_change) {
+                // Once v33 is recorded, later upgrades and restarts need no legacy checkpoint.
+                variable_height::finish(&db);
+            }
+            format_change
         };
 
         // One entry is enough to detect the corruption, and the height range has to start at
@@ -290,6 +406,7 @@ impl ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades: true,
             format_change_handle: None,
+            newly_created: false,
             ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db,
         })
@@ -368,6 +485,9 @@ impl ZebraDb {
     ///
     /// See `database_format_version_on_disk()` for details.
     pub fn format_version_on_disk(&self) -> Result<Option<Version>, BoxError> {
+        if self.newly_created && !self.version_file_path().exists() {
+            return Ok(Some(Version::new(self.major_version(), 0, 0)));
+        }
         database_format_version_at_path(
             &self.version_file_path(),
             self.path(),
@@ -401,6 +521,11 @@ impl ZebraDb {
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
         self.db.path()
+    }
+
+    /// Returns the low-level database for record-format migrations.
+    pub(crate) fn disk_db(&self) -> &DiskDb {
+        &self.db
     }
 
     /// Check for panics in code running in spawned threads.
@@ -518,7 +643,7 @@ impl ZebraDb {
 
     /// Check that the on-disk height is well below the maximum supported database height.
     ///
-    /// Zebra only supports on-disk heights up to 3 bytes.
+    /// The variable-width encoding supports every `u32`; verified blocks never exceed `Height::MAX`.
     ///
     /// # Logs an Error
     ///

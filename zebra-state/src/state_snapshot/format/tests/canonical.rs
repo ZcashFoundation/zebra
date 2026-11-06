@@ -21,7 +21,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::{HistoryTreeParts, IntoDisk},
+    service::finalized_state::{HistoryTreeParts, IntoDisk, OutputLocation},
     state_snapshot::format::{canonical_value, window_start, ComponentId, FormatError, WINDOW_LEN},
 };
 
@@ -184,7 +184,7 @@ fn address_balances_gain_a_received_total() {
 
     // The balance, the address location (height 1, transaction 0, output 1), and the total.
     let mut current = 50_000_i64.to_le_bytes().to_vec();
-    current.extend_from_slice(&[0, 0, 1, 0, 0, 0, 0, 1]);
+    current.extend_from_slice(&OutputLocation::from_usize(Height(1), 0, 1).as_bytes());
     current.extend_from_slice(&70_000_u64.to_le_bytes());
     assert_eq!(
         canonical_value(ComponentId::AddressBalances, &[], &current).expect("valid"),
@@ -192,15 +192,20 @@ fn address_balances_gain_a_received_total() {
     );
 
     // Before the `received` total, it reads as zero.
-    let mut expected = current[..16].to_vec();
+    let legacy_len = current.len() - 8;
+    let mut expected = current[..legacy_len].to_vec();
     expected.extend_from_slice(&0_u64.to_le_bytes());
     assert_eq!(
-        canonical_value(ComponentId::AddressBalances, &[], &current[..16]).expect("valid"),
+        canonical_value(ComponentId::AddressBalances, &[], &current[..legacy_len]).expect("valid"),
         expected,
     );
 
     assert_err!(
-        canonical_value(ComponentId::AddressBalances, &[], &current[..15]),
+        canonical_value(
+            ComponentId::AddressBalances,
+            &[],
+            &current[..legacy_len - 1]
+        ),
         FormatError::InvalidValue {
             component: ComponentId::AddressBalances,
             ..

@@ -433,22 +433,22 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     );
     assert!(state
         .db
-        .get_pinned_cf(&tx_cf, first_deleted)
+        .get_pinned_cf(&tx_cf, &first_deleted)
         .unwrap()
         .is_some());
     state.db.write(batch).unwrap();
 
     assert!(before
-        .get_pinned_cf(&tx_cf, first_deleted)
+        .get_pinned_cf(&tx_cf, &first_deleted)
         .unwrap()
         .is_some());
     let after = state.db.snapshot();
     assert!(after
-        .get_pinned_cf(&tx_cf, first_deleted)
+        .get_pinned_cf(&tx_cf, &first_deleted)
         .unwrap()
         .is_none());
     let mut retained = after.raw_iterator_cf(&tx_cf);
-    retained.seek(first_deleted);
+    retained.seek(&first_deleted);
     assert_eq!(
         retained.key(),
         Some(
@@ -1030,7 +1030,7 @@ fn shutdown_checks_cannot_enable_pruning_after_cancelled_index_conversion() {
 }
 
 #[test]
-fn pruning_readiness_waits_for_migrations_and_uncancelled_checks() {
+fn pruning_readiness_waits_for_uncancelled_checks() {
     use super::super::disk_format::upgrade::{CancelFormatChange, DbFormatChange};
 
     let _init_guard = zebra_test::init();
@@ -1042,13 +1042,12 @@ fn pruning_readiness_waits_for_migrations_and_uncancelled_checks() {
     state.db.mark_finished_format_upgrades();
     assert!(!state.db.ready_for_pruning());
 
-    let old_version = semver::Version::new(26, 0, 0);
+    let current_version = state_database_format_version_in_code();
     state
         .db
-        .update_format_version_on_disk(&old_version)
+        .update_format_version_on_disk(&current_version)
         .unwrap();
-    let change =
-        DbFormatChange::open_database(&state_database_format_version_in_code(), Some(old_version));
+    let change = DbFormatChange::open_database(&current_version, Some(current_version.clone()));
     let (sender, receiver) = crossbeam_channel::bounded(1);
     sender.send(CancelFormatChange).unwrap();
     assert_eq!(

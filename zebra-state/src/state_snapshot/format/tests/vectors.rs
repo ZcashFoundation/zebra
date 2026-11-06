@@ -277,8 +277,8 @@ fn manifest_decode_rejects_every_header_violation() {
     assert_err!(decode(&bad_magic), FormatError::BadMagic);
 
     let mut unsupported = valid.clone();
-    unsupported[20..22].copy_from_slice(&2_u16.to_le_bytes());
-    assert_err!(decode(&unsupported), FormatError::UnsupportedFormat(2));
+    unsupported[20..22].copy_from_slice(&1_u16.to_le_bytes());
+    assert_err!(decode(&unsupported), FormatError::UnsupportedFormat(1));
 
     let mut index_mode = valid.clone();
     index_mode[96] = 1;

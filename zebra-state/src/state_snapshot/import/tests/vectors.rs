@@ -18,7 +18,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
-    service::finalized_state::{FinalizedState, FormatCheckError, TransactionLocation, ZebraDb},
+    service::finalized_state::{
+        FinalizedState, FormatCheckError, OutputLocation, TransactionLocation, ZebraDb,
+    },
     state_database_format_version_in_code,
     state_snapshot::{
         format::{ComponentId, PieceManifest, PieceWriter},
@@ -430,7 +432,9 @@ fn tampered_address_balance_is_refused() {
             zebra_chain::parameters::NetworkKind::Regtest,
             [0xee; 20],
         );
-        let mut value = vec![0; 24];
+        let mut value = vec![0; 8];
+        value.extend_from_slice(&OutputLocation::from_usize(Height(0), 0, 0).as_bytes());
+        value.extend_from_slice(&0_u64.to_le_bytes());
         add_to_balance(&mut value, 5);
         records
             .get_mut(&ComponentId::AddressBalances)
@@ -650,7 +654,7 @@ fn tampered_indexes_are_refused() {
     let spent = TransactionLocation::from_usize(Height(9), 0).as_bytes();
     let row = fixture::rows(&chain.state, ComponentId::AddressTxs)
         .into_iter()
-        .find(|(key, _)| key[8..] == spent)
+        .find(|(key, _)| OutputLocation::from_bytes_prefix(key).unwrap().1 == spent)
         .expect("the coinbase at height 9 pays an address");
     let result = import_tampered(&chain, |records| {
         records.get_mut(&ComponentId::AddressTxs).unwrap().push(row);

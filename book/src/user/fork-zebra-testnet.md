@@ -97,14 +97,14 @@ The command commits copied blocks as checkpoint-verified blocks, rebuilding
 state under the source network. It is not a replacement for verifying the
 source chain.
 
-The prefix is stored at `/srv/zebra-fork-prefix/state/v32/testnet`. Copy it
+The prefix is stored at `/srv/zebra-fork-prefix/state/v33/testnet`. Copy it
 into an empty private namespace:
 
 ```sh
-mkdir -p /srv/zebra-nu7-private/state/v32
-test ! -e /srv/zebra-nu7-private/state/v32/nu7private-00010007 && \
-  cp -a /srv/zebra-fork-prefix/state/v32/testnet \
-    /srv/zebra-nu7-private/state/v32/nu7private-00010007
+mkdir -p /srv/zebra-nu7-private/state/v33
+test ! -e /srv/zebra-nu7-private/state/v33/nu7private-00010007 && \
+  cp -a /srv/zebra-fork-prefix/state/v33/testnet \
+    /srv/zebra-nu7-private/state/v33/nu7private-00010007
 ```
 
 This bounded copy finalizes every copied block, so it does not need a public
@@ -120,7 +120,7 @@ with the private namespace:
 
 | Source below the public cache root | Destination below the private cache root |
 | --- | --- |
-| `state/v32/testnet` | `state/v32/nu7private-00010007` |
+| `state/v33/testnet` | `state/v33/nu7private-00010007` |
 | `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
 
 A non-finalized backup preserves recent blocks that are not yet in the

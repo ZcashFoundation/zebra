@@ -11,43 +11,25 @@ use zebra_chain::{
     transaction::{self, Transaction},
 };
 
-use crate::service::finalized_state::disk_format::{
-    expand_zero_be_bytes, truncate_zero_be_bytes, FromDisk, IntoDisk,
-};
+use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 use serde::{Deserialize, Serialize};
 
-/// The maximum value of an on-disk serialized [`Height`].
+/// The maximum valid block height supported by the on-disk encoding.
 ///
-/// This allows us to store [`OutputLocation`](crate::OutputLocation)s in
-/// 8 bytes, which makes database searches more efficient.
-///
-/// # Consensus
-///
-/// This maximum height supports on-disk storage of blocks until around 2050.
-///
-/// Since Zebra only stores fully verified blocks on disk, blocks with heights
-/// larger than this height are rejected before reaching the database.
-/// (It would take decades to generate a valid chain this high.)
-pub const MAX_ON_DISK_HEIGHT: Height = Height((1 << (HEIGHT_DISK_BYTES * 8)) - 1);
+/// The encoding can represent every `u32`, but verified blocks never exceed [`Height::MAX`].
+pub const MAX_ON_DISK_HEIGHT: Height = Height::MAX;
 
-/// [`Height`]s are stored as 3 bytes on disk.
-///
-/// This reduces database size and increases lookup performance.
-pub const HEIGHT_DISK_BYTES: usize = 3;
+/// The number of bytes in the variable-width [`Height`] length prefix.
+pub const HEIGHT_LENGTH_PREFIX_DISK_BYTES: usize = 1;
 
 /// [`TransactionIndex`]es are stored as 2 bytes on disk.
 ///
 /// This reduces database size and increases lookup performance.
 pub const TX_INDEX_DISK_BYTES: usize = 2;
-
-/// [`TransactionLocation`]s are stored as a 3 byte height and a 2 byte transaction index.
-///
-/// This reduces database size and increases lookup performance.
-pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_DISK_BYTES;
 
 // Block and transaction types
 
@@ -223,42 +205,64 @@ impl FromDisk for block::Header {
     }
 }
 
+/// Decodes one canonical height from the start of `disk_bytes`, returning the remaining bytes.
+///
+/// Zero has a zero length prefix and no payload. Every other height has a 1–4 byte length
+/// prefix followed by its minimal big-endian representation. The length prefix makes the
+/// encoding self-delimiting and preserves numeric ordering in RocksDB's lexicographic key order.
+pub(crate) fn height_from_bytes_prefix(disk_bytes: &[u8]) -> Option<(Height, &[u8])> {
+    let (&byte_len, rest) = disk_bytes.split_first()?;
+    let byte_len = usize::from(byte_len);
+
+    if byte_len == 0 {
+        return Some((Height::MIN, rest));
+    }
+    if byte_len > size_of::<u32>() || rest.len() < byte_len {
+        return None;
+    }
+
+    let (height_bytes, remaining) = rest.split_at(byte_len);
+    if height_bytes[0] == 0 {
+        return None;
+    }
+
+    let mut mem_bytes = [0; size_of::<u32>()];
+    mem_bytes[size_of::<u32>() - byte_len..].copy_from_slice(height_bytes);
+
+    Some((Height(u32::from_be_bytes(mem_bytes)), remaining))
+}
+
 impl IntoDisk for Height {
-    /// Consensus: see the note at [`MAX_ON_DISK_HEIGHT`].
-    type Bytes = [u8; HEIGHT_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
         let mem_bytes = self.0.to_be_bytes();
-
-        let disk_bytes = truncate_zero_be_bytes(&mem_bytes, HEIGHT_DISK_BYTES);
-
-        match disk_bytes {
-            Some(b) => b.try_into().unwrap(),
-
-            // # Security
-            //
-            // The RPC method or state query was given a block height that is ridiculously high.
-            // But to save space in database indexes, we don't support heights 2^24 and above.
-            //
-            // Instead we return the biggest valid database Height to the lookup code.
-            // So RPC methods and queued block checks will return an error or None.
-            //
-            // At the current block production rate, these heights can't be inserted into the
-            // database until at least 2050. (Blocks are verified in strict height order.)
-            None => truncate_zero_be_bytes(&MAX_ON_DISK_HEIGHT.0.to_be_bytes(), HEIGHT_DISK_BYTES)
-                .expect("max on disk height is valid")
+        let Some(first_nonzero) = mem_bytes.iter().position(|&byte| byte != 0) else {
+            return vec![0];
+        };
+        let height_bytes = &mem_bytes[first_nonzero..];
+        let mut disk_bytes =
+            Vec::with_capacity(HEIGHT_LENGTH_PREFIX_DISK_BYTES + height_bytes.len());
+        disk_bytes.push(
+            height_bytes
+                .len()
                 .try_into()
-                .unwrap(),
-        }
+                .expect("a u32 has at most four significant bytes"),
+        );
+        disk_bytes.extend_from_slice(height_bytes);
+        disk_bytes
     }
 }
 
 impl FromDisk for Height {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        const MEM_LEN: usize = size_of::<u32>();
-
-        let mem_bytes = expand_zero_be_bytes::<MEM_LEN>(disk_bytes.as_ref());
-        Height(u32::from_be_bytes(mem_bytes))
+        let (height, remaining) = height_from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored heights must use their canonical variable-width encoding");
+        assert!(
+            remaining.is_empty(),
+            "stored standalone heights must not have trailing bytes"
+        );
+        height
     }
 }
 
@@ -318,35 +322,41 @@ impl FromDisk for TransactionIndex {
     }
 }
 
+impl TransactionLocation {
+    /// Decodes a transaction location from the start of `disk_bytes`, returning the remaining bytes.
+    pub(crate) fn from_bytes_prefix(disk_bytes: &[u8]) -> Option<(Self, &[u8])> {
+        let (height, rest) = height_from_bytes_prefix(disk_bytes)?;
+        let (index_bytes, remaining) = rest.split_at_checked(TX_INDEX_DISK_BYTES)?;
+        let index = TransactionIndex::from_bytes(index_bytes);
+
+        Some((TransactionLocation { height, index }, remaining))
+    }
+}
+
 impl IntoDisk for TransactionLocation {
-    type Bytes = [u8; TRANSACTION_LOCATION_DISK_BYTES];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes().to_vec();
-        let index_bytes = self.index.as_bytes().to_vec();
-
-        [height_bytes, index_bytes].concat().try_into().unwrap()
+        [self.height.as_bytes(), self.index.as_bytes().to_vec()].concat()
     }
 }
 
 impl FromDisk for Option<TransactionLocation> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        if disk_bytes.as_ref().len() == TRANSACTION_LOCATION_DISK_BYTES {
-            Some(TransactionLocation::from_bytes(disk_bytes))
-        } else {
-            None
-        }
+        let (location, remaining) = TransactionLocation::from_bytes_prefix(disk_bytes.as_ref())?;
+        remaining.is_empty().then_some(location)
     }
 }
 
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
-
-        let height = Height::from_bytes(height_bytes);
-        let index = TransactionIndex::from_bytes(index_bytes);
-
-        TransactionLocation { height, index }
+        let (location, remaining) = TransactionLocation::from_bytes_prefix(disk_bytes.as_ref())
+            .expect("stored transaction locations must use their canonical encoding");
+        assert!(
+            remaining.is_empty(),
+            "stored standalone transaction locations must not have trailing bytes"
+        );
+        location
     }
 }
 

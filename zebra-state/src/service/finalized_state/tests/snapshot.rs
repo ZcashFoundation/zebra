@@ -148,8 +148,10 @@ fn snapshot_databases_are_isolated_from_31_0_readers() {
     assert_eq!(current.snapshot_base(), Some(base));
 }
 
+/// A v32 directory whose records already use the current encoding, as a finished height rewrite
+/// leaves them, moves to v33 without another rewrite and keeps its snapshot marker.
 #[test]
-fn snapshot_31_1_database_moves_to_v32_without_record_changes() {
+fn snapshot_v32_database_with_current_records_moves_to_v33_without_record_changes() {
     use std::time::{Duration, Instant};
 
     use crate::{
@@ -174,15 +176,15 @@ fn snapshot_31_1_database_moves_to_v32_without_record_changes() {
 
     let network = network();
     let config = config(cache.path().to_path_buf(), Some(RETENTION));
-    let legacy_path = config.db_path(STATE_DATABASE_KIND, 31, &network);
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 32, &network);
     std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
     std::fs::rename(current_path, &legacy_path).unwrap();
-    let mut legacy_version = semver::Version::new(31, 1, 0);
+    let mut legacy_version = semver::Version::new(32, 0, 0);
     legacy_version.build = state_database_format_version_in_code().build;
     write_database_format_version_to_disk(
         &config,
         STATE_DATABASE_KIND,
-        31,
+        32,
         &legacy_version,
         &network,
     )
@@ -204,11 +206,14 @@ fn snapshot_31_1_database_moves_to_v32_without_record_changes() {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !db.ready_for_pruning() {
         db.check_for_panics();
-        assert!(Instant::now() < deadline, "the v32 upgrade did not finish");
+        assert!(
+            Instant::now() < deadline,
+            "the snapshot base upgrade did not finish"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    assert_eq!(db.path(), config.db_path(STATE_DATABASE_KIND, 32, &network));
+    assert_eq!(db.path(), config.db_path(STATE_DATABASE_KIND, 33, &network));
     assert!(!legacy_path.exists());
     assert_eq!(db.tip(), snapshot_tip);
     assert_eq!(db.snapshot_base(), Some(base));

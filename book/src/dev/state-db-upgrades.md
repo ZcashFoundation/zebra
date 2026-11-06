@@ -62,9 +62,10 @@ move a compatible database from a registered earlier source major into the new
 directory, then apply every intervening format change in version order.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26`, `27`, `28`, `29`, `30`, `31`, and `32`. The
+`26` through `33`. The
 [`restorable_db_source_versions()`][upgrade] helper returns existing source
-candidates newest first: format 32 tries v31, v30, v29, v28, v27, v26, then v25.
+candidates newest first: format 33 tries v32, v31, v30, v29, v28, v27, v26,
+then v25. Every selected source runs all intervening migrations in version order.
 
 Reuse requires all of the following:
 
@@ -153,6 +154,61 @@ pre-window bodies as an archive. Direct readers need the same snapshot-aware
 history handling as the writer. See [Upgrading Zebra](../user/upgrading.md#zebra-710)
 for the operator rollback rules.
 
+### The v32-to-v33 variable-height migration
+
+Format 33 replaces every fixed three-byte block height in 27 column families with
+a canonical variable-width encoding, including the `snapshot_base` marker and the
+checkpoint sync families `sync_meta_by_height` (height keys) and
+`spentness_journal` (output location keys). The `spentness_artifact` record keeps
+its fixed four-byte height and is not rewritten. Every earlier format, including
+snapshot-born v32 state, stores fixed-width heights, so the migration sits above
+the v32 snapshot barrier. Format 33 prefers a v32 source, then v31, then older
+registered sources. The upgrade chain applies every intervening format change in
+version order, and the height rewrite runs whenever the source predates v33.
+
+The migration creates a persistent RocksDB checkpoint of the fixed-width records
+and rewrites every affected key and value before serving reads or accepting block
+commits. Directory reuse moves the source to `state/v33`, but the version file
+reaches v33 only after this rewrite finishes. The checkpoint provides an
+unambiguous legacy source even where old and new key bytes collide. Three passes
+insert converted records, delete legacy keys, then restore converted records whose
+keys collided with those deletions. Migration handles use the fixed-width
+address-balance merge operator, so pending legacy operands are never decoded by
+the current merge callback. Converted puts hide those older operands, and normal
+v33-or-newer block writes use puts.
+
+The rewrite runs before every other pending upgrade, including older ones such as
+the 29.1 synchronization metadata backfill, so that those migrations read and write
+records with the current codec. The version file still advances in version order.
+
+An interrupted rewrite keeps its checkpoint and pre-v33 version marker, so the
+next start can safely repeat it, even if some column families already hold
+converted records. The checkpoint is removed once the rewrite is checked, before
+the remaining upgrades run. A start that finds converted records and no
+checkpoint runs the remaining upgrades without rewriting again.
+RocksDB hard-links existing SST files into the checkpoint, but operators must
+still allow working space for new records, tombstones, and compaction during the
+rewrite. Live and checkpoint RocksDB identities and migration-operation metadata
+must match, so a stale checkpoint from a replaced or restored database is
+rejected before any mutation. Sources that already contain variable-height
+sentinel keys are also rejected instead of being migrated again. A versionless
+directory left by a major-version move is recovered as the newest registered
+source that needs a migration, not as the destination's current format. Pruned
+and snapshot-born databases migrate their retained records, including the
+`snapshot_base` marker, without reconstructing missing bodies. Spending-index
+mode restrictions remain unchanged.
+
+This rewrite is a **one-way door**. Keep a stopped-node source backup for
+rollback; v32 and older readers cannot decode v33 records. Direct readers must
+use v33-or-newer compatible `zebra-state`. Read-only secondaries reject any
+database that still needs the rewrite, and they never delete migration
+checkpoints. Snapshot-born v33 state must not be moved to v32 or any older
+directory.
+
+State snapshots carry the database records, so the migration also changes the
+snapshot format from 1 to 2. A format 33 node only imports format 2 snapshots
+with database format major 33.
+
 ### Old-database cleanup
 
 When enabled, the [cleanup task][config] scans major-version directories under
@@ -160,7 +216,7 @@ the database-kind root, such as `<state.cache_dir>/state`, and removes older
 versions except registered reusable source majors. It skips current and newer
 versions, paths outside the canonical cache root, and ephemeral databases.
 
-The current registry protects `v25` through `v31`. Cleanup removes an eligible
+The current registry protects `v25` through `v32`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks
@@ -181,10 +237,13 @@ major version, recording the lower version makes a later newer writer repeat
 the required upgrades over data that the older writer could have changed.
 Compatibility remains the responsibility of the new format's implementation.
 
-The [upgrade framework][upgrade] runs on a separate thread. It captures the
-finalized tip at startup so migrations can process existing records while
-normal block commits write the current format above that tip. For each
-registered upgrade newer than the initial disk version, it:
+The [upgrade framework][upgrade] normally runs on a separate thread. It captures
+the finalized tip at startup so migrations can process existing records while
+normal block commits write the current format above that tip. The v33 height
+rewrite is the exception: its old and new key spaces can overlap, so it runs
+synchronously before any new-codec read or block commit. Later format checks and
+spending-index conversion use the normal background path. For each registered
+upgrade newer than the initial disk version, the framework:
 
 1. Calls `prepare()`, `run()`, and `validate()` if `needs_migration()` is true.
 2. Atomically records the completed upgrade's version.
@@ -208,7 +267,8 @@ startup. See [Checkpoint and full verification](overview.md#checkpoint-and-full-
 
 Writer shutdown cancels the upgrade thread and checks the format if the recorded
 version has reached the running version. An interrupted upgrade retains the last
-completed version and resumes the remaining work on restart.
+completed version and resumes the remaining work on restart. The synchronous
+v33 rewrite instead repeats its idempotent passes from the persistent checkpoint.
 [Periodic detailed checks](../user/config.md#state) are optional.
 Read-only secondary instances skip this upgrade/check thread.
 
@@ -239,7 +299,7 @@ With `state.prune_blocks_older_than` set, one state-owned worker starts pruning
 after this gate opens, wakes at startup and on finalized-tip changes, and
 deletes at most 100 heights per batch. Only transaction bodies are deleted;
 genesis is retained. Ordinary pruning derives the retained floor from transaction
-rows and persists no new marker. A snapshot-imported v32 database additionally
+rows and persists no new marker. A snapshot-imported database additionally
 uses the `snapshot_base` marker to record its window start and import checks.
 Normal RocksDB compaction reclaims disk space outside the commit path.
 
@@ -251,9 +311,11 @@ resync; genesis remains copyable.
 
 ### Design constraints
 
-Format upgrades run concurrently with block commits and state queries. A
-migration must preserve readable, correct data at every committed batch
-boundary, including cancellation and restart boundaries.
+Format upgrades normally run concurrently with block commits and state queries.
+A migration must preserve readable, correct data at every committed batch
+boundary, including cancellation and restart boundaries. If old and new records
+cannot be distinguished safely, as with v33 heights, the migration must instead
+finish before those reads and writes begin.
 
 - Make readers accept the old, partial, and new states that the migration can
   expose. Return an explicit unavailable result when appropriate; do not
@@ -330,8 +392,8 @@ non-finalized updates if they need them.
 ## Current state database format
 
 RocksDB orders keys lexicographically by bytes. Zebra encodes numeric index
-components in big-endian order so byte ordering matches chain ordering.
-Composite keys concatenate fixed-width components, allowing one-to-many
+components so byte ordering matches chain ordering. Composite keys concatenate
+fixed-width or self-delimiting variable-width components, allowing one-to-many
 indexes without storing a growing list in a single value.
 
 The array [`STATE_COLUMN_FAMILIES_IN_CODE`][families] registers all 29 families
@@ -389,7 +451,8 @@ existing blocks. A non-indexer writer opening a database marked `+indexer`
 removes the transparent spending-location entries, rewrites nullifier values
 as empty, and removes the build metadata after completion. During conversion,
 nullifier values can contain either encoding. The reader for
-`Option<TransactionLocation>` returns a location only for a five-byte value.
+`Option<TransactionLocation>` returns a location only for a complete canonical
+variable-width value, and returns `None` for an empty or malformed value.
 This [feature conversion][upgrade] runs separately from numbered migrations.
 
 ### Data formats
@@ -400,22 +463,28 @@ concatenation; lengths are uncompressed byte counts, not RocksDB disk usage.
 
 | Type | Encoding | Bytes |
 | --- | --- | --- |
-| `block::Height` | Unsigned 24-bit big-endian integer | 3 |
+| `block::Height` | Zero is `00`; otherwise a one-byte significant length (`01`–`04`) ‖ minimal big-endian magnitude | 1 for zero; 2–5 otherwise |
 | `TransactionIndex` | Unsigned 16-bit big-endian integer | 2 |
-| `TransactionLocation` | `Height` ‖ `TransactionIndex` | 5 |
+| `TransactionLocation` | `Height` ‖ `TransactionIndex` | 3–7 |
 | `OutputIndex` | Unsigned 24-bit big-endian integer | 3 |
-| `OutputLocation` | `TransactionLocation` ‖ `OutputIndex` | 8 |
-| `AddressLocation` | The first output location associated with the address | 8 |
-| `AddressTransaction` | `AddressLocation` ‖ `TransactionLocation` | 13 |
-| `AddressUnspentOutput` | `AddressLocation` ‖ `OutputLocation` | 16 |
+| `OutputLocation` | `TransactionLocation` ‖ `OutputIndex` | 6–10 |
+| `AddressLocation` | The first output location associated with the address | 6–10 |
+| `AddressTransaction` | `AddressLocation` ‖ `TransactionLocation` | 9–17 |
+| `AddressUnspentOutput` | `AddressLocation` ‖ `OutputLocation` | 12–20 |
 | `transparent::Address` | One-byte variant tag followed by its 20-byte hash | 21 |
 | `Amount` | Signed 64-bit little-endian integer | 8 |
-| `AddressBalanceLocation` | `Amount` ‖ `AddressLocation` ‖ `received`, with `received` an unsigned 64-bit little-endian integer | 24 |
+| `AddressBalanceLocation` | `Amount` ‖ `AddressLocation` ‖ `received`, with `received` an unsigned 64-bit little-endian integer | 22–26 |
 | `block::Hash`, `transaction::Hash` | Their raw internal bytes, not the displayed hexadecimal string | 32 |
 | Shielded nullifiers and anchor roots | Their pool-specific byte representation | 32 |
 | `NoteCommitmentSubtreeIndex` | Unsigned 16-bit big-endian integer | 2 |
-| `NoteCommitmentSubtreeData<Node>` | `end_height` ‖ `root`, using a three-byte height and 32-byte node | 35 |
+| `NoteCommitmentSubtreeData<Node>` | `end_height` ‖ `root`, using a variable-width height and 32-byte node | 33–37 |
 | `()` | Empty byte string | 0 |
+
+Height zero has no payload. Every nonzero height uses the shortest payload that
+represents it, with no leading zero bytes. The length prefix orders different
+widths numerically, and the big-endian payload orders values within each width.
+Composite decoders consume that prefix and then the exact fixed-width suffix,
+so every location is unambiguous and non-canonical encodings are rejected.
 
 The [transparent address encoder][transparent-format] assigns tags `0` and `1`
 to Mainnet public-key-hash and script-hash addresses, `2` and `3` to their
@@ -479,19 +548,20 @@ Address-transaction keys index transactions that send or receive funds;
 spending an output does not remove that history.
 
 For example, an address with first output at height 100, transaction 2, output
-3 has this eight-byte location:
+3 has this seven-byte location. The height is one payload byte after a one-byte
+length prefix:
 
 ```text
-00 00 64 | 00 02 | 00 00 03
-height    tx      output
+01 64 | 00 02 | 00 00 03
+height   tx      output
 ```
 
 A transaction at height 101, index 4 that affects the same address has this
-13-byte `AddressTransaction` key:
+11-byte `AddressTransaction` key:
 
 ```text
-00 00 64 00 02 00 00 03 | 00 00 65 00 04
-address location         transaction location
+01 64 00 02 00 00 03 | 01 65 00 04
+address location       transaction location
 ```
 
 Prefix-range reads over that address location retrieve its transaction or
@@ -507,16 +577,16 @@ dotted arrows show address-location prefix lookups.
 
 ```mermaid
 flowchart TD
-    address["transparent::Address (21 bytes)"] -->|balance_by_transparent_addr| balance["AddressBalanceLocation (24 bytes)"]
+    address["transparent::Address (21 bytes)"] -->|balance_by_transparent_addr| balance["AddressBalanceLocation (22–26 bytes)"]
     balance ==>|balance| amount["Amount (8 bytes)"]
-    balance ==>|address_location| location["AddressLocation (8 bytes)"]
+    balance ==>|address_location| location["AddressLocation (6–10 bytes)"]
     balance ==>|received| received["u64 (8 bytes)"]
-    location -.->|"tx_loc_by_transparent_addr_loc: AddressTransaction (13 bytes)"| transaction["TransactionLocation (5 bytes)"]
-    location -.->|"utxo_loc_by_transparent_addr_loc: AddressUnspentOutput (16 bytes)"| output_location["OutputLocation (8 bytes)"]
+    location -.->|"tx_loc_by_transparent_addr_loc: AddressTransaction (9–17 bytes)"| transaction["TransactionLocation (3–7 bytes)"]
+    location -.->|"utxo_loc_by_transparent_addr_loc: AddressUnspentOutput (12–20 bytes)"| output_location["OutputLocation (6–10 bytes)"]
     output_location -->|utxo_by_out_loc| output["transparent::Output"]
     output_location ==> transaction
     output_location ==> output_index["OutputIndex (3 bytes)"]
-    transaction ==> height["block::Height (3 bytes)"]
+    transaction ==> height["block::Height (1–5 bytes)"]
     transaction ==> transaction_index["TransactionIndex (2 bytes)"]
 ```
 
@@ -625,10 +695,12 @@ already-correct database can hide skipped records.
 - Test both `indexer` configurations when spend indexes or feature metadata
   are affected. Test read-only startup and refresh when reader behavior changes.
 
-The existing
-[`v29_cache_is_reused_with_legacy_value_pools` test][upgrade-tests] covers cleanup
-protection, directory reuse even with cleanup disabled, unchanged legacy bytes,
-and wider writes for subsequent blocks. The
+The
+[`old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts` test][upgrade-tests]
+covers cleanup protection, directory reuse, unchanged legacy value-pool bytes,
+canonical height migration, normal block reads, wider writes for subsequent
+blocks, and restart. The raw migration tests also cover every affected family,
+old/new key collisions, and an interrupted rewrite. The
 [`block_info_reads_every_record_layout` test][format-tests] checks old layouts
 and the NSM offset. The [raw column-family snapshot tests][snapshot-tests] cover
 family names and bytes for empty databases and the first three blocks; they do
@@ -668,7 +740,7 @@ those cases; never use version-file edits as an operator recovery procedure.
 [typed-family]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/column_family.rs
 [block-info-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/block_info_and_address_received.rs
 [ironwood-upgrade]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/add_ironwood_tree.rs
-[upgrade-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/tests/vectors.rs
+[upgrade-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/upgrade/variable_height/tests.rs
 [format-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/prop.rs
 [snapshot-tests]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
 [balance-query]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/read/address/balance.rs

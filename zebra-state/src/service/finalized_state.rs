@@ -79,9 +79,9 @@ pub use zebra_db::{
 #[cfg(test)]
 pub(crate) use disk_format::chain::RawHistoryTree;
 pub(crate) use disk_format::{
-    block::{HEIGHT_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES},
+    block::height_from_bytes_prefix,
     chain::{check_history_tree_peaks, HistoryTreeParts},
-    transparent::OUTPUT_LOCATION_DISK_BYTES,
+    transparent::OUTPUT_INDEX_DISK_BYTES,
     upgrade::{CancelFormatChange, DbFormatChange, FormatCheckError},
 };
 pub(crate) use zebra_db::chain::SNAPSHOT_BASE;

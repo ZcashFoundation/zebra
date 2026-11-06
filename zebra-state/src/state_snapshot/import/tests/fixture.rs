@@ -30,7 +30,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::{DiskWriteBatch, FinalizedState, RawBytes, WriteDisk},
+    service::finalized_state::{
+        height_from_bytes_prefix, DiskWriteBatch, FinalizedState, OutputLocation, RawBytes,
+        WriteDisk,
+    },
     state_database_format_version_in_code,
     state_snapshot::{
         format::{
@@ -41,7 +44,7 @@ use crate::{
         SnapshotBase, SnapshotError,
     },
     tests::FakeChainHelper,
-    CheckpointVerifiedBlock, Config, FromDisk, MAX_BLOCK_REORG_HEIGHT,
+    CheckpointVerifiedBlock, Config, FromDisk, IntoDisk, MAX_BLOCK_REORG_HEIGHT,
 };
 
 /// The snapshot height: high enough that the window starts above height one.
@@ -343,7 +346,7 @@ pub(super) fn singleton(state: &FinalizedState, component: ComponentId) -> Vec<u
 }
 
 fn height_of(bytes: &[u8]) -> Height {
-    Height::from_bytes(&bytes[..3])
+    height_from_bytes_prefix(bytes).unwrap().0
 }
 
 /// Selects the rows a snapshot at the tip of `state` ships, by the design's
@@ -359,7 +362,11 @@ pub(super) fn select(state: &FinalizedState) -> Records {
     let stored = |height: Height| height.is_min() || height >= start;
     let utxo_transactions: BTreeSet<Vec<u8>> = rows(state, Utxos)
         .into_iter()
-        .map(|(key, _)| key[..5].to_vec())
+        .map(|(key, _)| {
+            OutputLocation::from_bytes(key)
+                .transaction_location()
+                .as_bytes()
+        })
         .collect();
 
     let mut records = Records::new();
@@ -391,7 +398,10 @@ pub(super) fn select(state: &FinalizedState) -> Records {
                 .collect(),
             AddressTxs => all
                 .into_iter()
-                .filter(|(key, _)| stored(height_of(&key[8..])))
+                .filter(|(key, _)| {
+                    let (_, transaction) = OutputLocation::from_bytes_prefix(key).unwrap();
+                    stored(height_of(transaction))
+                })
                 .collect(),
             SaplingTree | OrchardTree | IronwoodTree => {
                 let subtrees = match component {

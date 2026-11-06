@@ -45,7 +45,7 @@ fn interrupted_upgrade_preserves_spending_index_layout() {
             )
             .unwrap();
     }
-    let disk_version = Version::parse("28.0.0+indexer").unwrap();
+    let disk_version = Version::parse("32.0.0+indexer").unwrap();
     state
         .db
         .update_format_version_on_disk(&disk_version)
@@ -127,7 +127,7 @@ fn empty_upgrade_records_the_running_spending_index_layout() {
 }
 
 /// A non-empty database in the previous format is marked with the snapshot format once it is
-/// opened, because the format change registers the 31.1.0 and 32.0.0 upgrades.
+/// opened, because the format change registers the 31.1.0, 32.0.0 and 33.0.0 upgrades.
 #[test]
 fn existing_database_is_marked_with_the_snapshot_base_format() {
     use std::sync::Arc;
@@ -155,7 +155,7 @@ fn existing_database_is_marked_with_the_snapshot_base_format() {
             running_version.minor,
             running_version.patch
         ),
-        (32, 0, 0)
+        (33, 0, 0)
     );
     let mut disk_version = Version::new(31, 0, 0);
     disk_version.build = running_version.build.clone();
