@@ -7863,7 +7863,9 @@ dependencies = [
  "itertools 0.14.0",
  "regex",
  "reqwest 0.12.28",
+ "rocksdb",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -7874,6 +7876,7 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
+ "zebra-state",
  "zebra-test",
 ]
 
