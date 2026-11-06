@@ -184,7 +184,10 @@ the first pinning release:
   for the largest allowed artifact (`MAX_AUTO_TIMEOUT`); the legacy syncer
   waits five minutes more than the longest of both before it syncs without
   hints, about 45 minutes (`LEGACY_SYNC_HINTS_TIMEOUT`);
-- after a restart that interrupted a hinted sync, the state's writer waits
-  up to ten minutes for the artifact before it stops Zebra
-  (`RESUME_ARTIFACT_TIMEOUT` in
-  `zebra-state/src/service/finalized_state/zebra_db/spentness.rs`).
+- the state's writer holds back block 1 of an empty state, and the first
+  block after a restart that interrupted a hinted sync, until the hints task
+  sends the artifact or gives up, whichever path submitted the block (sync,
+  RPC or gossip). It has no timeout of its own: with `"auto"` the limits
+  above bound the wait, and with `"require"` it waits as long as acquisition
+  takes. A restarted node whose hints task gives up stops Zebra
+  (`zebra-state/src/service/finalized_state/zebra_db/spentness.rs`).

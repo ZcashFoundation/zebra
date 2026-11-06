@@ -32,12 +32,17 @@
 //! and journal rows are only deleted at `H`. A block whose batch was not
 //! written can be committed again, and a restart resumes from the record,
 //! resolving spends of outputs created before the restart from the journal.
+//! The first resumed block waits until the node delivers the record's
+//! artifact, or drops the hints sender, which fails the block.
+//!
+//! # The hints decision
+//!
+//! Block 1 of an empty state waits in the writer until the node sends the
+//! artifact or drops the hints sender, so a block that bypasses the node's
+//! sync gates (for example, from `submit_block`) cannot commit it without
+//! hints before the node decides.
 
-use std::{
-    collections::BTreeMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use tokio::sync::watch;
 
@@ -72,22 +77,22 @@ pub const SPENTNESS_JOURNAL: &str = "spentness_journal";
 /// registered in the network's `ObjectIndex` by `zebrad`.
 pub const SPENTNESS_ARTIFACT: &str = "spentness_artifact";
 
-/// How long a resumed writer waits for its artifact before failing.
-///
-/// After a restart, the state is opened before the network, and `zebrad`
-/// loads the artifact file, or fetches it from peers, after network init. The
-/// first block committed after the restart can arrive before that.
-pub const RESUME_ARTIFACT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-
-/// How often a resumed writer checks the receiver while it waits.
-const RESUME_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// How often a waiting writer checks the receiver.
+const HINTS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The receiver `init_with_spentness` takes: `Some` once `zebrad` has a
-/// verified artifact. The writer adopts it only while the finalized tip is
-/// at most genesis (the state started empty), and only if its terminal
-/// height is at most the max checkpoint height; after the first non-genesis
-/// commit without hints, later values are ignored. After a restart with an
-/// incomplete hinted sync, the writer waits for the same artifact; see
+/// verified artifact, and a dropped sender once `zebrad` has decided to sync
+/// without one.
+///
+/// Until the sender sends an artifact or is dropped, the hints decision is
+/// open: the writer holds back block 1 of an empty state, and the first block
+/// of an incomplete hinted sync, however they were submitted (sync, RPC or
+/// gossip). It adopts an artifact only while the finalized tip is at most
+/// genesis (the state started empty), and only if its terminal height is at
+/// most the max checkpoint height; after the first non-genesis commit without
+/// hints, later values are ignored. A sender dropped without sending gives
+/// `init`'s behaviour. After a restart with an incomplete hinted sync, the
+/// writer waits for the same artifact; see
 /// [`ReadStateService::has_incomplete_spentness_hints`](crate::ReadStateService::has_incomplete_spentness_hints).
 pub type SpentnessHintsReceiver = watch::Receiver<Option<Arc<VerifiedArtifact>>>;
 
@@ -97,7 +102,6 @@ pub struct SpentnessWriter {
     hints: SpentnessHintsReceiver,
     state: WriterState,
     live: LiveOutputs,
-    resume_timeout: Duration,
     /// Every hinted block must be checkpoint-verified: the semantic verifier
     /// reads spent outputs from the UTXO set, which omits hinted outputs.
     max_checkpoint_height: block::Height,
@@ -106,12 +110,13 @@ pub struct SpentnessWriter {
 /// Where the writer is in its lifecycle.
 enum WriterState {
     /// The state is empty or holds only genesis, and nothing was hinted yet:
-    /// adopt the first artifact sent before block 1 is committed.
+    /// block 1 waits for the hints decision, and adopts the artifact if one
+    /// is sent.
     Waiting,
 
     /// An earlier run left an `Applying` record for the artifact with this
-    /// SHA-256: the receiver must deliver that same artifact, within
-    /// [`RESUME_ARTIFACT_TIMEOUT`] of the first resumed block.
+    /// SHA-256: the first resumed block waits until the receiver delivers that
+    /// same artifact, or its sender is dropped.
     Resuming { commitment: [u8; 32] },
 
     /// The record could not be read: every hinted commit fails with this error.
@@ -189,9 +194,8 @@ pub enum SpentnessError {
     },
 
     /// The database has an incomplete hinted construction, but the hints
-    /// receiver did not deliver its artifact: its sender was dropped, it sent
-    /// a different artifact, or nothing arrived within
-    /// `RESUME_ARTIFACT_TIMEOUT`.
+    /// receiver did not deliver its artifact: its sender was dropped without
+    /// sending one, or it sent a different artifact.
     #[error(
         "spentness hints: the state has an incomplete hinted sync, but its artifact is not \
          available; restart with spentness hints enabled, or delete the state"
@@ -236,42 +240,41 @@ impl SpentnessWriter {
             hints,
             state,
             live: LiveOutputs::new(live::LIVE_OUTPUT_BYTES),
-            resume_timeout: RESUME_ARTIFACT_TIMEOUT,
             max_checkpoint_height,
         })
-    }
-
-    /// Sets how long a resumed writer waits for its artifact.
-    #[cfg(test)]
-    pub(crate) fn with_resume_timeout(mut self, timeout: Duration) -> Self {
-        self.resume_timeout = timeout;
-        self
     }
 
     /// Whether `height` is hinted: at or below the artifact's `H`, and not
     /// yet `Complete`.
     ///
     /// An unadopted artifact applies only to genesis and block 1, and never
-    /// when its `H` is above the max checkpoint height. A resumed or broken
-    /// record applies to every height, so its block fails with the reason
-    /// instead of being written without hints.
+    /// when its `H` is above the max checkpoint height. Block 1 decides
+    /// whether an empty state is hinted, so it blocks this write thread until
+    /// the node sends the artifact or drops its sender, whichever path
+    /// submitted the block. A resumed or broken record applies to every
+    /// height, so its block fails with the reason instead of being written
+    /// without hints.
     pub fn applies_to(&self, height: block::Height) -> bool {
         match &self.state {
             WriterState::Waiting => {
-                height <= block::Height(1)
-                    && self.hints.borrow().as_ref().is_some_and(|artifact| {
-                        let terminal_height = artifact.header().terminal_height;
-                        if terminal_height > self.max_checkpoint_height {
-                            tracing::warn!(
-                                ?terminal_height,
-                                max_checkpoint_height = ?self.max_checkpoint_height,
-                                "ignoring spentness hints above the max checkpoint height: \
-                                 syncing without hints",
-                            );
-                            return false;
-                        }
-                        height <= terminal_height
-                    })
+                let artifact = match height {
+                    block::Height(0) => self.hints.borrow().clone(),
+                    block::Height(1) => self.wait_for_artifact(),
+                    _ => None,
+                };
+                artifact.is_some_and(|artifact| {
+                    let terminal_height = artifact.header().terminal_height;
+                    if terminal_height > self.max_checkpoint_height {
+                        tracing::warn!(
+                            ?terminal_height,
+                            max_checkpoint_height = ?self.max_checkpoint_height,
+                            "ignoring spentness hints above the max checkpoint height: \
+                             syncing without hints",
+                        );
+                        return false;
+                    }
+                    height <= terminal_height
+                })
             }
             WriterState::Resuming { .. } | WriterState::Broken(_) => true,
             WriterState::Applying(artifact) => height <= artifact.header().terminal_height,
@@ -313,7 +316,7 @@ impl SpentnessWriter {
             }
             WriterState::Resuming { commitment } => {
                 let commitment = *commitment;
-                self.wait_for_resumed_artifact()
+                self.wait_for_artifact()
                     .filter(|artifact| artifact.pin().spentness_hash == commitment)
                     .ok_or(SpentnessError::MissingArtifact)?
             }
@@ -339,31 +342,35 @@ impl SpentnessWriter {
         Ok(artifact)
     }
 
-    /// Waits on this blocking write thread until the receiver delivers an
-    /// artifact, its sender is dropped, or the resume timeout expires.
+    /// Waits on this blocking write thread for the node's hints decision:
+    /// returns the artifact once the receiver delivers one, or `None` once its
+    /// sender is dropped without sending one.
+    ///
+    /// There is no timeout of its own: `zebrad` drops the sender when its
+    /// hints task decides, which `auto` bounds with its own timeouts, and
+    /// `require` does not, like the sync gates.
     ///
     /// Polls, because the write task is a plain thread without a runtime, and
     /// `watch` has no blocking receive.
-    fn wait_for_resumed_artifact(&self) -> Option<Arc<VerifiedArtifact>> {
-        let deadline = Instant::now() + self.resume_timeout;
+    fn wait_for_artifact(&self) -> Option<Arc<VerifiedArtifact>> {
         let mut logged = false;
 
         loop {
             if let Some(artifact) = self.hints.borrow().clone() {
                 return Some(artifact);
             }
-            // A dropped sender can never deliver the artifact.
-            if self.hints.has_changed().is_err() || Instant::now() >= deadline {
+            // A dropped sender has decided: it can never deliver the artifact.
+            if self.hints.has_changed().is_err() {
                 return None;
             }
             if !logged {
                 tracing::info!(
-                    timeout = ?self.resume_timeout,
-                    "waiting for the spentness hint artifact to resume an incomplete hinted sync",
+                    "waiting for the node's spentness hints decision before committing \
+                     the first block above genesis, or resuming an incomplete hinted sync",
                 );
                 logged = true;
             }
-            std::thread::sleep(RESUME_POLL_INTERVAL);
+            std::thread::sleep(HINTS_POLL_INTERVAL);
         }
     }
 }
