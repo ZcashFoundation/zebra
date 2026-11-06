@@ -1,4 +1,5 @@
-//! The record checks of each snapshot component (design, §3 and §4), run on
+//! The record checks of each snapshot component (design, "Snapshot
+//! contents" and "Formats"), run on
 //! every record before it is written to an SST file.
 //!
 //! A record must have the key and value encoding of the current database

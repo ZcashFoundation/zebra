@@ -1,4 +1,4 @@
-//! The state snapshot format (design, §4): the manifest that names a
+//! The state snapshot format (design, "Formats"): the manifest that names a
 //! snapshot's components and pieces, and the piece records that carry the
 //! column family rows.
 //!
@@ -50,7 +50,7 @@ pub const MAGIC: &[u8; 20] = b"ZEBRA-STATE-SNAPSHOT";
 
 /// The number of complete blocks a snapshot ships, ending at its height: the
 /// `NODE_NETWORK_LIMITED` window, so the importing node serves the recent
-/// blocks from the start (design, §3).
+/// blocks from the start (design, "Snapshot contents").
 pub const WINDOW_LEN: u32 = 2304;
 
 /// Returns the first height of the window of complete blocks that a snapshot
@@ -228,7 +228,8 @@ impl ComponentId {
         }
     }
 
-    /// Whether the component's values are canonicalized (design, §3): decoded
+    /// Whether the component's values are canonicalized (design, "Snapshot
+    /// contents"): decoded
     /// with `FromDisk` and re-encoded with the current `IntoDisk`, with cached
     /// roots recomputed, by the exporter and again by the importer. Every
     /// other component is copied raw, because it has a single encoding.

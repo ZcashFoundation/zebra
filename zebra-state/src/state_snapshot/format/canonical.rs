@@ -1,5 +1,5 @@
 //! The canonical values of the components whose rows have more than one
-//! on-disk encoding (design, §3 "Canonical values").
+//! on-disk encoding (design, "Snapshot contents").
 //!
 //! A database keeps the encoding each row was written in: value pools and
 //! block info written before newer pools were added are narrower, history

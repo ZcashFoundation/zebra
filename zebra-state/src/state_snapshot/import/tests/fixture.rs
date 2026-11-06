@@ -347,8 +347,8 @@ fn height_of(bytes: &[u8]) -> Height {
 }
 
 /// Selects the rows a snapshot at the tip of `state` ships, by the design's
-/// row-selection rules (§3): genesis and the window `L..=H` in full, with the
-/// block info of `L - 1`; the transaction index rows of the stored blocks and
+/// row-selection rules ("Snapshot contents"): genesis and the window `L..=H`
+/// in full, with the block info of `L - 1`; the transaction index rows of the stored blocks and
 /// of every transaction with an unspent output; the trees at genesis, at each
 /// subtree end, as of `L`, and above `L`; and every other component whole.
 pub(super) fn select(state: &FinalizedState) -> Records {

@@ -5,6 +5,9 @@
 //! - [`store`] keeps the verified objects on disk, by hash;
 //! - [`export`] writes a snapshot from a finalized database;
 //! - [`import`] builds a finalized database from verified pieces.
+//!
+//! References like `(design, "Formats")` name the sections of the design page,
+//! `book/src/dev/state-snapshot-sync.md`.
 
 use std::{io, path::PathBuf};
 

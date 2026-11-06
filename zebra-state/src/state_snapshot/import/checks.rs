@@ -1,4 +1,5 @@
-//! The checks of an imported state snapshot (design, §2): against the chain,
+//! The checks of an imported state snapshot (design, "Trust model and
+//! verification"): against the chain,
 //! through the history tree, the checkpoints and the window blocks, and
 //! against itself, through its indexes and value pools.
 //!
@@ -39,7 +40,7 @@ use super::{
 
 /// Decodes and checks the history tree at the snapshot height: it is for this
 /// network, its last block is the snapshot block, and its rightmost peak ends
-/// there (design, §2.2).
+/// there (design, "Trust model and verification").
 pub(super) fn history_tree(
     bytes: &[u8],
     base: &SnapshotBase,
@@ -174,7 +175,8 @@ fn block_count(base: &SnapshotBase) -> u64 {
     u64::from(base.height.0 - base.window_start.0) + 2
 }
 
-/// Checks the genesis and window blocks (design, §2.4): hashes and heights
+/// Checks the genesis and window blocks (design, "Trust model and
+/// verification"): hashes and heights
 /// index exactly those blocks, the window headers chain to the snapshot block,
 /// the genesis block is the network's, every body's transactions match their
 /// index rows and their header's merkle root, and the block info covers the
@@ -430,7 +432,8 @@ fn tree_at(raw: &Raw, component: ComponentId, height: Height) -> Result<Vec<u8>,
     tree.ok_or_else(|| fail(format!("{component} has no tree at the snapshot height")))
 }
 
-/// Checks the note commitment trees at the snapshot height (design, §2.2):
+/// Checks the note commitment trees at the snapshot height (design, "Trust
+/// model and verification"):
 /// their roots, recomputed from their frontiers, are the roots the history
 /// tree's rightmost peak commits to, and anchors, like the empty genesis
 /// roots; the Ironwood state is empty before NU6.3.
@@ -585,7 +588,7 @@ fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), Snapsho
 }
 
 /// Checks the UTXO set against the transaction and address indexes (design,
-/// §2, "Self-consistency checks"), and returns the total value of the UTXO set.
+/// "Trust model and verification"), and returns the total value of the UTXO set.
 ///
 /// Every UTXO's transaction has a hash index row; every address UTXO row
 /// points at a UTXO with an address whose balance names the row's first

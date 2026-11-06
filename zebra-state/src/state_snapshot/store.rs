@@ -1,4 +1,4 @@
-//! The artifact store (design, §4 "Artifact store"): the verified snapshot
+//! The artifact store (design, "Formats"): the verified snapshot
 //! objects this node holds, as one file per object named by its hash, and the
 //! manifests it has rejected.
 //!
