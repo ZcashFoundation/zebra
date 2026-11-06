@@ -13,6 +13,12 @@ use tokio::time::Instant;
 
 use super::*;
 
+thread_local! {
+    /// How many whole-artifact download buffers `fetch_whole` allocated on this thread.
+    /// Thread-local, so tests on other threads do not interfere, and no lock is needed.
+    pub(super) static BUFFER_ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// What a scripted peer does with every `get-object` request.
 #[derive(Clone, Debug)]
 enum Behavior {
@@ -458,6 +464,37 @@ async fn stalled_and_dribbling_peers_are_dropped() {
     );
 
     assert_eq!(stalled.penalty() + dribbling.penalty(), 0);
+}
+
+/// A peer that claims the object's size but sends no data never makes the node
+/// allocate the artifact buffer, and is dropped after the usual bounded number of
+/// requests. A peer that serves the object makes exactly one allocation (F-343).
+#[tokio::test]
+async fn empty_answers_allocate_no_buffer() {
+    let _init_guard = zebra_test::init();
+
+    let object = pinned_object();
+    let hash = ObjectHash::of(&object);
+
+    BUFFER_ALLOCATIONS.with(|count| count.set(0));
+    let dribbling = FakePeer::new("dribbling", Behavior::Dribble, &object);
+    let result = fetch_whole(&dribbling, hash, OBJECT_LEN).await;
+    assert!(
+        matches!(result, Err(PeerFailure::Unavailable(_))),
+        "{result:?}"
+    );
+    assert_eq!(
+        u64::try_from(dribbling.requests()).expect("few requests"),
+        1 + EXTRA_REQUESTS
+    );
+    assert_eq!(BUFFER_ALLOCATIONS.with(|count| count.get()), 0);
+
+    let serving = FakePeer::new("serving", Behavior::Serve { piece: 1000 }, &object);
+    let bytes = fetch_whole(&serving, hash, OBJECT_LEN)
+        .await
+        .expect("the object assembles");
+    assert_eq!(&*bytes, &object[..]);
+    assert_eq!(BUFFER_ALLOCATIONS.with(|count| count.get()), 1);
 }
 
 /// A peer that answers every request with one byte just inside the
