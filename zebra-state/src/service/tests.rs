@@ -329,9 +329,11 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
             guard.0.send_modify(|_| {});
             guard.0.closed().await;
             drop(guard);
+            // The queued closure holds the block and its tree slot guard, and the slot marks the
+            // block's trees as computing.
             assert_eq!(
                 Arc::strong_count(&block),
-                2,
+                4,
                 "the cancelled candidate's blocking closure must still be queued"
             );
 

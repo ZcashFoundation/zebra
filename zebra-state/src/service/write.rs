@@ -159,6 +159,8 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    /// Note commitment trees a mining candidate computed, which a commit of the same block reuses.
+    precomputed_trees: watch::Sender<crate::service::precomputed_trees::TreeSlot>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -214,6 +216,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        precomputed_trees: watch::Sender<crate::service::precomputed_trees::TreeSlot>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -244,6 +247,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    precomputed_trees,
                 }
                 .run()
             })
@@ -284,6 +288,7 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            precomputed_trees,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -470,6 +475,15 @@ impl WriteBlockWorkerTask {
             let result = if let Some(parent_error) = parent_error {
                 Err(parent_error.for_descendant(parent_hash))
             } else {
+                // Wait for a mining candidate that is computing this block's trees, rather than
+                // computing them again at the same time. The wait isn't part of the commit phase.
+                let precomputed = contextual.is_none().then(|| {
+                    crate::service::precomputed_trees::take_trees(
+                        precomputed_trees,
+                        &queued_child.block,
+                    )
+                });
+
                 // Measure only commits here, not proposals or restored backup blocks.
                 let phase_start = Instant::now();
                 let result = if let Some(contextual) = contextual {
@@ -480,11 +494,14 @@ impl WriteBlockWorkerTask {
                     )
                 } else {
                     tracing::trace!(?child_hash, "validating queued child");
-                    validate_and_commit_non_finalized(
+                    non_finalized_state.precomputed_trees = precomputed.flatten();
+                    let result = validate_and_commit_non_finalized(
                         &finalized_state.db,
                         non_finalized_state,
                         queued_child,
-                    )
+                    );
+                    non_finalized_state.precomputed_trees = None;
+                    result
                 };
                 metrics::histogram!(
                     "state.block_writer.phase.duration_seconds",

@@ -38,6 +38,9 @@ use crate::{
 mod address_transfers;
 mod backup;
 mod chain;
+
+#[cfg(test)]
+pub(crate) use chain::REUSED_TREES;
 mod created_utxos;
 
 #[cfg(test)]
@@ -147,6 +150,11 @@ pub struct NonFinalizedState {
     /// commit swaps the two copies instead of cloning. Snapshots never carry it.
     spare: Option<Arc<Chain>>,
 
+    /// Note commitment trees a mining candidate computed for the block being committed.
+    ///
+    /// The writer sets this for one commit. Snapshots never carry it.
+    pub(crate) precomputed_trees: Option<Arc<crate::service::precomputed_trees::PrecomputedTrees>>,
+
     /// A private copy of the best chain with the latest validated block proposal on top, shared
     /// by the proposal checks on snapshots and the writer.
     ///
@@ -207,6 +215,7 @@ impl Clone for NonFinalizedState {
             rejected_blocks: self.rejected_blocks.clone(),
             // The spare is private to the writer: a clone would share it with readers.
             spare: None,
+            precomputed_trees: None,
             prepared: self.prepared.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
@@ -228,6 +237,7 @@ impl NonFinalizedState {
             invalidated_blocks: Default::default(),
             rejected_blocks: Default::default(),
             spare: None,
+            precomputed_trees: None,
             prepared: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
@@ -1216,7 +1226,12 @@ impl NonFinalizedState {
             )?;
         }
 
-        Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
+        Self::validate_and_update_parallel(
+            new_chain,
+            contextual,
+            sprout_final_treestates,
+            self.precomputed_trees.clone(),
+        )
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
@@ -1229,6 +1244,7 @@ impl NonFinalizedState {
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,
         sprout_final_treestates: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>>,
+        precomputed_trees: Option<Arc<crate::service::precomputed_trees::PrecomputedTrees>>,
     ) -> Result<Arc<Chain>, ValidateContextError> {
         let mut block_commitment_result = None;
         let mut sprout_anchor_result = None;
@@ -1273,7 +1289,11 @@ impl NonFinalizedState {
                 // https://github.com/rust-lang/rust/issues/93610
                 let new_chain = Arc::try_unwrap(new_chain)
                     .unwrap_or_else(|shared_chain| (*shared_chain).clone());
-                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+                chain_push_result = Some(
+                    new_chain
+                        .push_with_trees(contextual, precomputed_trees.as_deref())
+                        .map(Arc::new),
+                );
             });
         });
 
