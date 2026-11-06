@@ -18,12 +18,13 @@ use zebra_chain::{block, chain_tip::NoChainTip, parameters::Network};
 
 use crate::{
     config::CacheDir,
-    constants::HANDSHAKE_TIMEOUT,
+    constants::{HANDSHAKE_TIMEOUT, MAX_PEER_MISBEHAVIOR_SCORE},
+    peer::v2::misbehavior::MisbehaviorScores,
     peer_set::{
         initialize::{
             v2::{
                 self,
-                bootstrap::{select_peers, MAX_BOOTSTRAP_PEERS},
+                bootstrap::{select_peers, spawn_report_log, MAX_BOOTSTRAP_PEERS},
                 v2_bootstrap_clients,
             },
             DiscoveredPeer,
@@ -101,6 +102,35 @@ fn bootstrap_peers_are_deduplicated_by_ip_and_capped() {
     );
 
     assert!(select_peers(&[]).is_empty());
+}
+
+/// The bootstrap drains the misbehavior reports of its peers in place of the
+/// address book, without a dropped-receiver warning. The reported score is
+/// retained, so a later penalty still closes the connection at the threshold.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn bootstrap_misbehavior_reports_are_received() {
+    let scores = MisbehaviorScores::spawn(spawn_report_log(1), 1);
+    let addr = test_addr(Ipv4Addr::new(203, 0, 113, 9), 8233);
+    assert!(
+        scores
+            .penalize(addr, MAX_PEER_MISBEHAVIOR_SCORE, "a test penalty")
+            .await,
+        "the threshold is reached"
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !logs_contain("state snapshot bootstrap peer misbehaved") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the bootstrap's report drain logs the report");
+    assert!(!logs_contain("could not report a misbehaving v2 peer"));
+    assert!(
+        scores.penalize(addr, 1, "a later penalty").await,
+        "the reported score is retained at the threshold"
+    );
+    assert!(!logs_contain("could not report a misbehaving v2 peer"));
 }
 
 /// The bootstrap connects to a pruned node that serves snapshot objects,
