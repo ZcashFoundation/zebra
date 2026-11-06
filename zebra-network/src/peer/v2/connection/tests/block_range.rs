@@ -217,6 +217,9 @@ fn spawn_server(
                         MAX_OBJECT_STREAMS_PER_PEER,
                     )),
                     global_permits: global_object_permits(),
+                    stall_backoff: Arc::new(
+                        crate::peer::v2::connection::inbound::hashes::StallBackoff::new(),
+                    ),
                 },
             ));
         }

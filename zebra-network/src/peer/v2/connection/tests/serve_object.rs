@@ -29,10 +29,10 @@ use crate::{
     peer::v2::{
         connection::{
             inbound::{
-                record_sent_object_bytes, request_permit, serve_object, spawn_object_disk,
-                unreadable, ObjectServing, Outcome, ResponseSend, MAX_OBJECT_STREAMS_GLOBAL,
-                MAX_OBJECT_STREAMS_PER_PEER, OBJECT_EARLY_FIN_MARGIN, OBJECT_READ_CHUNK,
-                OBJECT_WRITE_STALL,
+                hashes::StallBackoff, record_sent_object_bytes, request_permit, serve_object,
+                spawn_object_disk, unreadable, ObjectServing, Outcome, ResponseSend,
+                MAX_OBJECT_STREAMS_GLOBAL, MAX_OBJECT_STREAMS_PER_PEER, OBJECT_EARLY_FIN_MARGIN,
+                OBJECT_READ_CHUNK, OBJECT_WRITE_STALL,
             },
             refuse_stream,
         },
@@ -190,6 +190,7 @@ fn serving(
         advertised,
         peer_permits: Arc::new(Semaphore::new(MAX_OBJECT_STREAMS_PER_PEER)),
         global_permits: Arc::new(Semaphore::new(MAX_OBJECT_STREAMS_GLOBAL)),
+        stall_backoff: Arc::new(StallBackoff::new()),
     };
     (sender, objects)
 }
@@ -786,6 +787,99 @@ async fn object_responses_finish_early_when_a_write_stalls() {
             "the node waited for the peer: {timing:?}"
         );
         assert_permits_free(&objects);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// After a data response stalls, the same connection's data requests are refused
+/// for the backoff, so it cannot take the freed permits straight back. Its probes
+/// are still answered, and another connection is still served (F-344).
+#[tokio::test]
+async fn object_data_requests_are_refused_after_a_write_stall() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let window = 64 * 1024;
+        let client_config =
+            crate::quic::client_config_with_receive_windows(&network, window, 2 * window);
+        let (peer, node, _client_ep, _server_ep) =
+            connected_pair_with(&network, Some(client_config)).await;
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let len = 4 * OBJECT_READ_CHUNK;
+        let (hash, entry, data) = write_object(dir.path(), len);
+        let size = size_of(&data);
+        let (_index_tx, objects) = serving([(hash, entry)].into_iter().collect(), true);
+
+        // A full-length response stalls, as in `object_responses_finish_early_when_a_write_stalls`.
+        let deadline = Instant::now() + OBJECT_EARLY_FIN_MARGIN + 4 * OBJECT_WRITE_STALL;
+        let (served, _) = serve(
+            &peer,
+            &node,
+            request(
+                hash,
+                0,
+                u32::try_from(len).expect("the test object is small"),
+            ),
+            &objects,
+            deadline,
+            OBJECT_WRITE_STALL + Duration::from_secs(2),
+        )
+        .await;
+        let Served::Found { data: prefix, .. } = served else {
+            panic!("a started response is finished, not reset: got {served:?}");
+        };
+        assert!(prefix.len() < len, "a short answer");
+        assert_permits_free(&objects);
+
+        // The same connection's next data request is refused, although the permits are free.
+        let ample = || Instant::now() + AMPLE;
+        let (served, _) = serve(
+            &peer,
+            &node,
+            request(hash, 0, 1024),
+            &objects,
+            ample(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(served, Served::REFUSED);
+
+        // Its probes take no permit, and are still answered.
+        let (served, _) = serve(
+            &peer,
+            &node,
+            request(hash, 0, 0),
+            &objects,
+            ample(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(served, Served::probe(size));
+
+        // Another connection, with its own backoff and the same global permits, is served.
+        let other_connection = ObjectServing {
+            peer_permits: Arc::new(Semaphore::new(MAX_OBJECT_STREAMS_PER_PEER)),
+            stall_backoff: Arc::new(StallBackoff::new()),
+            ..objects.clone()
+        };
+        let (served, _) = serve(
+            &peer,
+            &node,
+            request(hash, 0, 1024),
+            &other_connection,
+            ample(),
+            Duration::ZERO,
+        )
+        .await;
+        assert_eq!(
+            served,
+            Served::Found {
+                size,
+                data: data[..1024].to_vec(),
+            }
+        );
     })
     .await
     .expect("the test completes well within the timeout");

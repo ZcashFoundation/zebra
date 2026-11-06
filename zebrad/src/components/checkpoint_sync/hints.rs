@@ -15,7 +15,7 @@
 //! genesis, and the same gate to `ChainSync::with_hints_gate`, so the legacy
 //! syncer starts no sync round after genesis before the claim. So nothing
 //! commits height 1 before acquisition finishes. With `Auto`, a failed or
-//! slow acquisition (5 min) leaves the state's receiver at `None`, opens the
+//! slow acquisition ([`auto_timeout`]) leaves the state's receiver at `None`, opens the
 //! gate, and syncs unhinted.
 //!
 //! # Blame
@@ -31,9 +31,10 @@
 //!
 //! # Retry policy
 //!
-//! - `Auto` gives up after [`AUTO_TIMEOUT`], or after [`AUTO_ROUNDS`] rounds
+//! - `Auto` gives up after [`auto_timeout`], or after [`AUTO_ROUNDS`] rounds
 //!   in which every candidate peer failed, so an unavailable artifact delays
-//!   unhinted sync by at most a few minutes.
+//!   unhinted sync by at most a few minutes, or by the time one honest peer
+//!   at [`MIN_RATE`] needs for a large artifact.
 //! - `Require` retries until it gets the artifact, or until a local or pin
 //!   defect makes success impossible.
 //! - Each peer must deliver the whole object within a deadline set by
@@ -59,7 +60,9 @@ use tracing::{debug, info, warn};
 
 use zebra_chain::{
     parameters::{
-        spentness_hints::{artifact_len, MaxCheckpoint, Mode, ParsedArtifact, VerifiedArtifact},
+        spentness_hints::{
+            artifact_len, MaxCheckpoint, Mode, ParsedArtifact, VerifiedArtifact, MAX_ARTIFACT_LEN,
+        },
         Network,
     },
     state_snapshot::ObjectHash,
@@ -74,8 +77,25 @@ use zebra_network::{
 mod tests;
 
 /// How long `Mode::Auto` waits for a verified artifact before syncing
-/// unhinted.
+/// unhinted, unless the artifact is too large for one honest peer at
+/// [`MIN_RATE`] to deliver in that time; see [`auto_timeout`].
 pub const AUTO_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// The longest [`auto_timeout`], for a [`MAX_ARTIFACT_LEN`] artifact: about
+/// 35 minutes.
+pub const MAX_AUTO_TIMEOUT: Duration =
+    Duration::from_secs(MAX_ARTIFACT_LEN.div_ceil(MIN_RATE) + PIECE_TIMEOUT.as_secs());
+
+// Every `auto_timeout` is at least `AUTO_TIMEOUT`, so the longest one is too.
+const _: () = assert!(MAX_AUTO_TIMEOUT.as_secs() >= AUTO_TIMEOUT.as_secs());
+
+/// How long `Mode::Auto` waits for an artifact of `expected_len` bytes:
+/// [`AUTO_TIMEOUT`], or long enough for one peer that never answers
+/// ([`PIECE_TIMEOUT`]) and then one honest peer at [`MIN_RATE`], whichever is
+/// longer. At most [`MAX_AUTO_TIMEOUT`] for any artifact.
+fn auto_timeout(expected_len: u64) -> Duration {
+    AUTO_TIMEOUT.max(whole_object_timeout(expected_len) + PIECE_TIMEOUT)
+}
 
 /// How many rounds in which every candidate peer failed `Mode::Auto` makes
 /// before syncing unhinted.
@@ -173,6 +193,35 @@ pub async fn acquire_spentness_hints(
     }
 
     let pin = MaxCheckpoint::for_network(&network).ok_or(HintsError::NotPinned)?;
+    acquire_pinned_spentness_hints(
+        network,
+        mode,
+        pin,
+        peers,
+        expected_output_count,
+        artifact_dir,
+    )
+    .await
+}
+
+/// Like [`acquire_spentness_hints`], for the artifact of `pin` rather than the
+/// network's current pin: a hinted sync started by an earlier release resumes
+/// with the artifact of a retired pin.
+///
+/// Only the file named by `pin` is loaded, and the files of every other pin
+/// are deleted.
+pub async fn acquire_pinned_spentness_hints(
+    network: Network,
+    mode: Mode,
+    pin: MaxCheckpoint,
+    peers: zebra_network::SyncPeers,
+    expected_output_count: u64,
+    artifact_dir: PathBuf,
+) -> Result<Option<VerifiedArtifact>, HintsError> {
+    if mode == Mode::Off {
+        return Ok(None);
+    }
+
     let hash = pin.object_hash();
 
     // The pinned artifact's exact length follows from the known-hash output
@@ -212,11 +261,12 @@ pub async fn acquire_spentness_hints(
 /// Registers the saved artifact for `get-object` serving: inserts its
 /// `ObjectEntry` (file path and size) into the index `objects` publishes
 /// (the sender of `zebra_network::Config::object_source`). Never registers
-/// an artifact that does not match the current pin.
+/// an artifact that does not match a pin of this release.
 ///
-/// The current pin is `artifact.pin()`: a [`VerifiedArtifact`] exists only
-/// once it has been authenticated against the network's `MaxCheckpoint`,
-/// and it is served under that pin's hash. The file is written first if it
+/// The pin is `artifact.pin()`: a [`VerifiedArtifact`] exists only once it
+/// has been authenticated against one of the network's `MaxCheckpoint`s (the
+/// current one, or a retired one that a resumed hinted sync uses), and it is
+/// served under that pin's hash. The file is written first if it
 /// is missing or has the wrong size (blocking I/O), so a `get-object` never
 /// finds a registered object it cannot read.
 pub fn serve_spentness_hints(
@@ -340,7 +390,8 @@ async fn load_or_fetch<P: ArtifactPeer>(
 /// `mode`'s retry policy.
 ///
 /// With `Mode::Auto`, the whole acquisition, downloads included, ends at
-/// [`AUTO_TIMEOUT`].
+/// [`auto_timeout`] for `expected_len`, so a peer that keeps up the accepted
+/// [`MIN_RATE`] is never cancelled part way.
 async fn fetch_from_peers<P: ArtifactPeer>(
     mode: Mode,
     hash: ObjectHash,
@@ -351,7 +402,7 @@ async fn fetch_from_peers<P: ArtifactPeer>(
 
     if mode == Mode::Auto {
         let rounds = fetch_rounds(mode, hash, expected_len, peers, &mut mismatches);
-        match tokio::time::timeout(AUTO_TIMEOUT, rounds).await {
+        match tokio::time::timeout(auto_timeout(expected_len), rounds).await {
             Ok(result) => result,
             Err(_elapsed) => Err(give_up(mismatches)),
         }
@@ -467,8 +518,9 @@ enum PeerFailure {
 /// `expected_len` drops the peer before any data is kept, and a `size` that
 /// changes or falls below the delivered bytes is a protocol violation
 /// (zips#1344, "`get-object`"). The buffer is allocated once, at exactly
-/// `expected_len`, after the first answer claims that size, and is never
-/// copied.
+/// `expected_len`, after the first non-empty answer that claims that size,
+/// and is never copied: a peer that claims the size but sends no data makes
+/// the node allocate nothing.
 ///
 /// The download, not the hash check, must finish within
 /// [`whole_object_timeout`], so a slow peer is dropped however it paces its
@@ -546,18 +598,26 @@ async fn fetch_whole<P: ArtifactPeer>(
             return Err(PeerFailure::Violation(reason));
         }
 
-        let buffer = bytes.get_or_insert_with(|| {
-            let len = usize::try_from(expected_len)
-                .expect("artifact_len bounds the length by MAX_ARTIFACT_LEN, which fits usize");
-            // `RepeatN` has a trusted length, so this allocates the `Arc`
-            // once, at its final size.
-            std::iter::repeat_n(0, len).collect()
-        });
-        let buffer = Arc::get_mut(buffer).expect("the buffer is not shared until it is complete");
-        // `end <= size == expected_len`, which fits usize (checked at allocation).
-        let end_index = filled + data.len();
-        buffer[filled..end_index].copy_from_slice(&data);
-        filled = end_index;
+        // An empty answer is legal (a short answer cut off right after its size), but it must
+        // not make the node allocate the whole artifact for no data.
+        if !data.is_empty() {
+            let buffer = bytes.get_or_insert_with(|| {
+                #[cfg(test)]
+                tests::BUFFER_ALLOCATIONS.with(|count| count.set(count.get() + 1));
+
+                let len = usize::try_from(expected_len)
+                    .expect("artifact_len bounds the length by MAX_ARTIFACT_LEN, which fits usize");
+                // `RepeatN` has a trusted length, so this allocates the `Arc`
+                // once, at its final size.
+                std::iter::repeat_n(0, len).collect()
+            });
+            let buffer =
+                Arc::get_mut(buffer).expect("the buffer is not shared until it is complete");
+            // `end <= size == expected_len`, which fits usize (checked at allocation).
+            let end_index = filled + data.len();
+            buffer[filled..end_index].copy_from_slice(&data);
+            filled = end_index;
+        }
 
         if end == size {
             break;
@@ -571,7 +631,8 @@ async fn fetch_whole<P: ArtifactPeer>(
         }
     }
 
-    let bytes = bytes.expect("the loop ends only after storing an answer");
+    // Only a zero-length object completes without data, and its bytes are empty.
+    let bytes = bytes.unwrap_or_else(|| Arc::from([]));
     let hashed = bytes.clone();
     let actual = tokio::task::spawn_blocking(move || ObjectHash::of(&hashed))
         .await

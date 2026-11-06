@@ -508,32 +508,69 @@ fn no_artifact_gives_an_ordinary_sync() {
     assert!(writer.is_none());
 }
 
-/// An artifact that arrives after genesis is adopted for block 1, but not later.
+/// An artifact that arrives after genesis is adopted for block 1. (A state that
+/// committed block 1 without hints never adopts them: see
+/// [`no_artifact_gives_an_ordinary_sync`].)
 #[test]
 fn artifact_is_adopted_only_while_the_tip_is_at_most_genesis() {
     let _init_guard = zebra_test::init();
 
-    for unhinted_blocks in [1, 2] {
-        let fixture = Fixture::generated(None);
-        let (sender, receiver) = watch::channel(None);
-        let (mut state, mut writer) = fixture.open_with(receiver);
-        fixture.commit(&mut state, &mut writer, 0..=unhinted_blocks - 1);
+    let fixture = Fixture::generated(None);
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
 
-        sender.send_replace(Some(fixture.artifact.clone()));
-        fixture.commit(
-            &mut state,
-            &mut writer,
-            unhinted_blocks..=GENERATED_TIP as usize,
-        );
+    sender.send_replace(Some(fixture.artifact.clone()));
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
 
-        let progress = progress(&state);
-        if unhinted_blocks == 1 {
-            assert_eq!(progress.unwrap().phase, Phase::Complete);
-        } else {
-            assert_eq!(progress, None);
-        }
-        assert_matches_ordinary(&state, &fixture.ordinary);
-    }
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_matches_ordinary(&state, &fixture.ordinary);
+}
+
+/// Block 1 waits for the node's hints decision, whichever path submits it (F-345).
+#[test]
+fn block_one_waits_for_the_hints_decision() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
+
+    let artifact = fixture.artifact.clone();
+    let delivery = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        sender.send_replace(Some(artifact));
+        sender
+    });
+    // Block 1 arrives before the artifact, as from `submit_block` or gossip.
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
+    let _sender = delivery.join().unwrap();
+
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_matches_ordinary(&state, &fixture.ordinary);
+}
+
+/// Once the node decides on no hints by dropping its sender, block 1 commits without hints.
+#[test]
+fn block_one_commits_without_hints_after_the_sender_drops() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
+
+    let dropper = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        drop(sender);
+    });
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
+    dropper.join().unwrap();
+
+    assert_eq!(progress(&state), None);
+    assert!(entries(&state, SPENTNESS_JOURNAL).is_empty());
+    assert_matches_ordinary(&state, &fixture.ordinary);
 }
 
 /// An incomplete hinted state refuses to continue without its artifact.
@@ -556,6 +593,37 @@ fn resume_requires_the_same_artifact() {
         );
         assert_eq!(state.db.finalized_tip_height(), Some(Height(10)));
     }
+}
+
+/// The record's artifact hash is reported while a hinted sync is incomplete, and not
+/// after it completes (F-348).
+#[test]
+fn incomplete_commitment_is_the_record_artifact() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (mut state, mut writer) = fixture.open();
+    assert_eq!(
+        crate::service::finalized_state::zebra_db::spentness::incomplete_spentness_commitment(
+            &state.db
+        ),
+        None
+    );
+    fixture.commit(&mut state, &mut writer, 0..=10);
+    assert_eq!(
+        crate::service::finalized_state::zebra_db::spentness::incomplete_spentness_commitment(
+            &state.db
+        ),
+        Some(fixture.artifact.pin().spentness_hash)
+    );
+    fixture.commit(&mut state, &mut writer, 11..=GENERATED_TIP as usize);
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_eq!(
+        crate::service::finalized_state::zebra_db::spentness::incomplete_spentness_commitment(
+            &state.db
+        ),
+        None
+    );
 }
 
 /// A resumed writer waits for an artifact that arrives after its first block is queued.
@@ -583,9 +651,9 @@ fn resume_waits_for_a_late_artifact() {
     assert_matches_ordinary(&state, &fixture.ordinary);
 }
 
-/// A resumed writer fails once the artifact does not arrive in time.
+/// A resumed writer waits until the node gives up on the artifact, then fails.
 #[test]
-fn resume_times_out_without_the_artifact() {
+fn resume_fails_once_the_sender_drops_without_the_artifact() {
     let _init_guard = zebra_test::init();
     let fixture = Fixture::generated(None);
 
@@ -593,12 +661,15 @@ fn resume_times_out_without_the_artifact() {
     fixture.commit(&mut state, &mut writer, 0..=10);
     drop((state, writer));
 
-    let (_sender, receiver) = watch::channel(None);
-    let (mut state, writer) = fixture.open_with(receiver);
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
     assert!(has_incomplete_hints(&state));
-    let mut writer =
-        writer.map(|writer| writer.with_resume_timeout(std::time::Duration::from_millis(100)));
+    let dropper = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        drop(sender);
+    });
     let error = commit(&mut state, &mut writer, &fixture.blocks[11]).unwrap_err();
+    dropper.join().unwrap();
     assert_eq!(
         error.spentness_failure(),
         Some(&SpentnessError::MissingArtifact)
@@ -1011,4 +1082,81 @@ async fn state_service_ignores_an_artifact_above_the_max_checkpoint() {
     }
     assert_eq!(read_progress(read_state.db()).unwrap(), None);
     assert!(!read_state.has_incomplete_spentness_hints());
+}
+
+/// The spentness hint format is a reusable major upgrade, so no 29.x binary can
+/// open a database that might hold a partial hinted state through its
+/// minor-version downgrade path (F-342).
+#[test]
+fn spentness_format_is_a_reusable_major_upgrade() {
+    use semver::Version;
+
+    use crate::{
+        config::database_format_version_on_disk,
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{restorable_db_versions, ZebraDb},
+    };
+
+    let _init_guard = zebra_test::init();
+    let running_major = state_database_format_version_in_code().major;
+
+    assert!(
+        running_major > 29,
+        "29.x readers must not share a directory with hinted state"
+    );
+    assert!(
+        restorable_db_versions().contains(&running_major),
+        "v29 state is reused without a resync"
+    );
+
+    // A 29.1.0 database (the format before spentness hints) moves out of `state/v29`.
+    let fixture = Fixture::generated(None);
+    let network = &fixture.network;
+    let old_version = Version::new(29, 1, 0);
+    let old_db = ZebraDb::new(
+        &fixture.config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    old_db.update_format_version_on_disk(&old_version).unwrap();
+    old_db.mark_finished_format_upgrades();
+    drop(old_db);
+    assert_eq!(
+        database_format_version_on_disk(&fixture.config, STATE_DATABASE_KIND, 29, network).unwrap(),
+        Some(old_version),
+    );
+
+    let (mut state, mut writer) = fixture.open();
+    assert_eq!(
+        database_format_version_on_disk(&fixture.config, STATE_DATABASE_KIND, 29, network).unwrap(),
+        None,
+        "no 29.x binary can open the moved database"
+    );
+    assert!(database_format_version_on_disk(
+        &fixture.config,
+        STATE_DATABASE_KIND,
+        running_major,
+        network
+    )
+    .unwrap()
+    .is_some());
+
+    // Hinted construction on the (empty) moved database only ever exists in the new directory.
+    fixture.commit(&mut state, &mut writer, 0..=10);
+    assert!(has_incomplete_hints(&state));
+    assert!(!fixture
+        .config
+        .db_path(STATE_DATABASE_KIND, 29, network)
+        .exists());
+    assert!(fixture
+        .config
+        .db_path(STATE_DATABASE_KIND, running_major, network)
+        .exists());
 }

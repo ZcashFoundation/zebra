@@ -401,3 +401,38 @@ fn mode_config_names() {
         );
     }
 }
+
+/// A pin is found by its artifact hash among the current and retired pins, and
+/// no network pins anything yet (F-348).
+#[test]
+fn pins_are_found_by_their_artifact_hash() {
+    let _init_guard = zebra_test::init();
+
+    let pin = |byte: u8| MaxCheckpoint {
+        height: Height(u32::from(byte) * 1000),
+        hash: block::Hash([byte; 32]),
+        spentness_hash: [byte; 32],
+    };
+    let (current, retired, revoked) = (pin(3), [pin(1), pin(2)], pin(9));
+
+    assert_eq!(
+        super::super::find_pin(Some(current), &retired, [3; 32]),
+        Some(current)
+    );
+    assert_eq!(
+        super::super::find_pin(Some(current), &retired, [2; 32]),
+        Some(retired[1])
+    );
+    assert_eq!(
+        super::super::find_pin(None, &retired, [1; 32]),
+        Some(retired[0])
+    );
+    assert_eq!(
+        super::super::find_pin(Some(current), &retired, revoked.spentness_hash),
+        None
+    );
+
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        assert_eq!(MaxCheckpoint::for_commitment(&network, [3; 32]), None);
+    }
+}

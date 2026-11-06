@@ -528,9 +528,8 @@ pub enum SpentnessError {
     },
 
     /// The database has an incomplete hinted construction, but the hints
-    /// receiver did not deliver its artifact: its sender was dropped, it sent
-    /// a different artifact, or nothing arrived within
-    /// `RESUME_ARTIFACT_TIMEOUT`.
+    /// receiver did not deliver its artifact: its sender was dropped without
+    /// sending one, or it sent a different artifact.
     #[error(
         "spentness hints: the state has an incomplete hinted sync, but its artifact is not \
          available; restart with spentness hints enabled, or delete the state"
