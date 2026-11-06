@@ -105,7 +105,7 @@ provides four methods:
 | `GetBlock` | Returns a best-chain block by hash or height. |
 
 Indexers use these streams alongside read-only access to Zebra's finalized
-state database. Build with the [`indexer` feature](install.md)
+state database. Build with the [`indexer` feature](install.md#cargo-features)
 for consumers that require the spending-transaction index, including
 [Zallet's Zebra backend](zallet.md). The listener does not require this feature:
 successful startup does not establish that the index exists.
