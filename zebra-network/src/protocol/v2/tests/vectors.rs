@@ -34,16 +34,19 @@ use crate::{
                 decode_tx_record, encode_addr_record, encode_tx_record,
             },
             constants::{
-                alpn_protocol_id, MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST,
-                MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
+                alpn_protocol_id, GET_OBJECT_REQUEST_LEN, MAX_ADDRS_PER_RESPONSE,
+                MAX_BLOCKS_PER_REQUEST, MAX_HEADERS_PER_RESPONSE, MAX_OBJECT_OFFSET,
+                MAX_OBJECT_REQUEST_LEN, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
                 MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
             },
             handshake::{decode_record, InitRecord},
+            object::ObjectHash,
             record::RecordCodec,
-            request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request},
+            request::{max_body_len, GetBlocks, GetHeaders, GetObject, GetTx, Request},
             response::{
-                decode_addr_response, encode_addr_response, read_headers, read_objects,
-                write_headers_response, ObjectResult,
+                decode_addr_response, encode_addr_response, encode_object_header, read_headers,
+                read_object_data, read_object_header, read_objects, write_headers_response,
+                ObjectAnswer, ObjectResult,
             },
             txref::{ShortTxId, TxRef},
             types::{ErrorCode, StreamType},
@@ -811,6 +814,7 @@ fn empty_requests_and_stream_type_handling() {
                 | StreamType::GetMempool
                 | StreamType::GetBlockRange
                 | StreamType::GetHashes
+                | StreamType::GetObject
         );
         if served {
             assert!(max_body_len(stream_type).is_some());
@@ -1965,4 +1969,346 @@ mod get_block_range {
             Violation::Close(ErrorCode::InternalError)
         );
     }
+}
+
+/// The `get-object` request bounds match the draft, and the type is served:
+/// its body is read up to exactly its fixed length.
+#[test]
+fn get_object_limits_match_the_draft() {
+    assert_eq!(GET_OBJECT_REQUEST_LEN, 44, "hash, offset, and length");
+    assert_eq!(MAX_OBJECT_REQUEST_LEN, 33_554_432, "32 MiB");
+    assert_eq!(MAX_OBJECT_OFFSET, (1 << 48) - 1);
+    assert_eq!(
+        max_body_len(StreamType::GetObject),
+        Some(GET_OBJECT_REQUEST_LEN)
+    );
+}
+
+/// A `get-object` request body: the hash, the offset, and the length.
+fn get_object_body(hash: [u8; 32], offset: u64, length: u32) -> Vec<u8> {
+    let mut body = hash.to_vec();
+    body.extend_from_slice(&offset.to_le_bytes());
+    body.extend_from_slice(&length.to_le_bytes());
+    body
+}
+
+/// A `get-object` request is the hash, then the offset and the length as
+/// little-endian integers (draft, "`get-object`"). An offset above 2^48 − 1
+/// or a length above 32 MiB is a `PROTOCOL_ERROR` from a peer, and a local
+/// error this node never sends.
+#[test]
+fn get_object_request_pins_layout_and_limits() {
+    let request = GetObject {
+        hash: ObjectHash([0xA5; 32]),
+        offset: 0x0000_0A0B_0C0D_0E0F,
+        length: 0x0102_0304,
+    };
+    let wire = Request::Object(request).encode().expect("valid request");
+
+    let mut expected = vec![0xA5; 32];
+    expected.extend_from_slice(&[0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x00, 0x00]);
+    expected.extend_from_slice(&[0x04, 0x03, 0x02, 0x01]);
+    assert_eq!(wire.as_ref(), expected.as_slice());
+    assert_eq!(
+        Some(wire.len()),
+        max_body_len(StreamType::GetObject),
+        "every request fills the bound exactly",
+    );
+    assert_eq!(
+        Request::decode(StreamType::GetObject, &wire).expect("valid"),
+        Request::Object(request)
+    );
+
+    // At the bounds, and an empty range at the start: valid both ways.
+    for (offset, length) in [(MAX_OBJECT_OFFSET, MAX_OBJECT_REQUEST_LEN), (0, 0)] {
+        let at_bound = GetObject {
+            offset,
+            length,
+            ..request
+        };
+        at_bound.check().expect("within the bounds");
+        let body = Request::Object(at_bound)
+            .encode()
+            .expect("within the bounds");
+        assert_eq!(body.as_ref(), get_object_body([0xA5; 32], offset, length));
+        assert_eq!(
+            Request::decode(StreamType::GetObject, &body).expect("valid"),
+            Request::Object(at_bound)
+        );
+    }
+
+    // Over the bounds, this node's own request is a local error and is not encoded.
+    let offset_over = GetObject {
+        offset: MAX_OBJECT_OFFSET + 1,
+        ..request
+    };
+    assert_err!(
+        offset_over.check(),
+        WireError::LocalUnencodable {
+            what: "get-object request",
+            ..
+        },
+        Violation::Close(ErrorCode::InternalError)
+    );
+    assert_err!(
+        Request::Object(offset_over).encode(),
+        WireError::LocalUnencodable { .. }
+    );
+    let length_over = GetObject {
+        length: MAX_OBJECT_REQUEST_LEN + 1,
+        ..request
+    };
+    assert_err!(
+        length_over.check(),
+        WireError::LocalCountTooLarge {
+            field: "length",
+            count: 33_554_433,
+            max: 33_554_432,
+        },
+        Violation::Close(ErrorCode::InternalError)
+    );
+    assert_err!(
+        Request::Object(length_over).encode(),
+        WireError::LocalCountTooLarge { .. }
+    );
+
+    // From a peer, either is a connection error of type `PROTOCOL_ERROR`.
+    for offset in [MAX_OBJECT_OFFSET + 1, u64::MAX] {
+        assert_err!(
+            Request::decode(
+                StreamType::GetObject,
+                &get_object_body([0xA5; 32], offset, 1)
+            ),
+            WireError::Nonconforming {
+                what: "get-object request",
+                ..
+            },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+    for length in [MAX_OBJECT_REQUEST_LEN + 1, u32::MAX] {
+        assert_err!(
+            Request::decode(
+                StreamType::GetObject,
+                &get_object_body([0xA5; 32], 0, length)
+            ),
+            WireError::CountTooLarge {
+                field: "length",
+                count,
+                max: 33_554_432,
+            } if count == u64::from(length),
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+
+    // Every strict prefix is truncated, and a longer body has trailing bytes.
+    for cut in 0..wire.len() {
+        assert_err!(
+            Request::decode(StreamType::GetObject, &wire[..cut]),
+            WireError::Truncated { .. },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+    let mut long = wire.to_vec();
+    long.push(0);
+    assert_err!(
+        Request::decode(StreamType::GetObject, &long),
+        WireError::TrailingBytes {
+            what: "request",
+            count: 1
+        },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+}
+
+/// The data a found `get-object` answer may carry is bounded in the draft's
+/// order: nothing when the offset is at or past the end of the object,
+/// otherwise the request's length or the rest of the object, whichever is
+/// shorter, with no overflow for any peer-supplied size.
+#[test]
+fn get_object_data_limit_follows_the_draft() {
+    let request = |offset, length| GetObject {
+        hash: ObjectHash([0; 32]),
+        offset,
+        length,
+    };
+
+    // At or past the end of the object, including an empty object.
+    assert_eq!(request(10, 5).data_limit(10), 0);
+    assert_eq!(request(11, 5).data_limit(10), 0);
+    assert_eq!(request(MAX_OBJECT_OFFSET, 5).data_limit(0), 0);
+    assert_eq!(request(0, 5).data_limit(0), 0);
+
+    // Otherwise the length, or the rest of the object if that is shorter.
+    assert_eq!(request(0, 5).data_limit(10), 5);
+    assert_eq!(request(5, 5).data_limit(10), 5);
+    assert_eq!(request(7, 5).data_limit(10), 3);
+    assert_eq!(request(9, 5).data_limit(10), 1);
+    assert_eq!(request(0, 0).data_limit(10), 0);
+
+    // A size far beyond the offset, more than a `u32` past it, keeps the length.
+    assert_eq!(
+        request(MAX_OBJECT_OFFSET, MAX_OBJECT_REQUEST_LEN).data_limit(u64::MAX),
+        MAX_OBJECT_REQUEST_LEN
+    );
+    assert_eq!(
+        request(0, MAX_OBJECT_REQUEST_LEN).data_limit(1 << 40),
+        MAX_OBJECT_REQUEST_LEN
+    );
+}
+
+/// A `get-object` answer is a `result` byte, then, for a found object, its
+/// size as a CompactSize and its data until the stream finishes; a not-found
+/// answer is the `result` byte alone (draft, "`get-object`").
+#[tokio::test]
+async fn get_object_response_pins_layout() {
+    let not_found = encode_object_header(ObjectAnswer::NotFound).expect("valid");
+    assert_eq!(not_found, [0x02]);
+    assert_eq!(
+        read_object_header(&mut &not_found[..])
+            .await
+            .expect("valid"),
+        ObjectAnswer::NotFound
+    );
+
+    for (size, size_bytes) in [
+        (0, vec![0x00]),
+        (0xFC, vec![0xFC]),
+        (0xFD, vec![0xFD, 0xFD, 0x00]),
+        (0x1_0000, vec![0xFE, 0x00, 0x00, 0x01, 0x00]),
+        (1 << 32, vec![0xFF, 0, 0, 0, 0, 1, 0, 0, 0]),
+    ] {
+        let header = encode_object_header(ObjectAnswer::Found { size }).expect("valid");
+        assert_eq!(header[0], 0x00, "found");
+        assert_eq!(&header[1..], size_bytes.as_slice(), "size {size}");
+
+        let mut wire = header;
+        wire.extend_from_slice(b"abc");
+        let mut reader = &wire[..];
+        assert_eq!(
+            read_object_header(&mut reader).await.expect("valid"),
+            ObjectAnswer::Found { size }
+        );
+        let mut data = Vec::new();
+        read_object_data(&mut reader, 3, &mut data)
+            .await
+            .expect("within the limit");
+        assert_eq!(data, b"abc");
+    }
+
+    // The same answer read one byte at a time, ending with the FIN.
+    let mut wire = encode_object_header(ObjectAnswer::Found { size: 300 }).expect("valid");
+    let object: Vec<u8> = (0..=255).cycle().take(300).collect();
+    wire.extend_from_slice(&object);
+    let (answer, data) = read_byte_by_byte(wire, |mut reader| async move {
+        let answer = read_object_header(&mut reader).await?;
+        let mut data = Vec::new();
+        read_object_data(&mut reader, 300, &mut data).await?;
+        Ok((answer, data))
+    })
+    .await;
+    assert_eq!(answer, ObjectAnswer::Found { size: 300 });
+    assert_eq!(data, object);
+}
+
+/// A `get-object` answer that breaks its format is a `PROTOCOL_ERROR`, and
+/// data beyond the bound is a `FLOOD`, detected before it is kept; data up
+/// to the bound, or less, is read whole, after what the buffer already holds.
+#[tokio::test]
+async fn get_object_response_pins_violations() {
+    // No result byte.
+    assert_err!(
+        read_object_header(&mut &[][..]).await,
+        WireError::Truncated {
+            what: "get-object response"
+        },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+
+    // An unknown result byte.
+    for value in [0x01, 0x03, 0xFF] {
+        assert_err!(
+            read_object_header(&mut &[value][..]).await,
+            WireError::UnknownByte {
+                what: "result code",
+                value: got,
+            } if got == value,
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+
+    // A found answer that ends before or inside its size.
+    for wire in [&[0x00][..], &[0x00, 0xFD, 0x01], &[0x00, 0xFF, 0, 0, 0]] {
+        assert_err!(
+            read_object_header(&mut &wire[..]).await,
+            WireError::Truncated {
+                what: "get-object size"
+            },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+
+    // A non-canonical size.
+    assert_err!(
+        read_object_header(&mut &[0x00, 0xFD, 0x05, 0x00][..]).await,
+        WireError::Malformed {
+            what: "get-object size",
+            ..
+        },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+
+    // Anything after a not-found answer.
+    assert_err!(
+        read_object_header(&mut &[0x02, 0x00][..]).await,
+        WireError::TrailingBytes {
+            what: "get-object not-found answer",
+            count: 1
+        },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+
+    // Data beyond the bound, in the first read or a later one: a flood, and only a prefix up to
+    // the bound is kept.
+    let bytes = vec![0x5A; 200_000];
+    for limit in [0_u32, 1, 65_535, 65_536, 199_999] {
+        let mut data = Vec::new();
+        assert_err!(
+            read_object_data(&mut &bytes[..], limit, &mut data).await,
+            WireError::Flood {
+                field: "get-object data",
+                max,
+                ..
+            } if u32::try_from(max) == Ok(limit),
+            Violation::Close(ErrorCode::Flood)
+        );
+        assert!(
+            u32::try_from(data.len()).expect("at most 200,000 bytes") <= limit,
+            "{} bytes kept for a limit of {limit}",
+            data.len()
+        );
+        assert!(bytes.starts_with(&data), "the kept bytes are a prefix");
+    }
+
+    // Data up to the bound, appended after what the buffer already holds.
+    let mut data = b"kept".to_vec();
+    read_object_data(&mut &bytes[..], 200_000, &mut data)
+        .await
+        .expect("exactly the limit");
+    assert_eq!(&data[..4], b"kept");
+    assert_eq!(&data[4..], bytes.as_slice());
+
+    // Less than the bound: the responder finished early.
+    let mut data = Vec::new();
+    read_object_data(&mut &bytes[..10], 200_000, &mut data)
+        .await
+        .expect("an early finish is valid");
+    assert_eq!(data, bytes[..10]);
+
+    // No data, for a zero bound.
+    let mut data = Vec::new();
+    read_object_data(&mut &[][..], 0, &mut data)
+        .await
+        .expect("nothing to read");
+    assert!(data.is_empty());
 }

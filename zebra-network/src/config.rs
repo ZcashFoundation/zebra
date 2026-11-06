@@ -35,7 +35,10 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     peer::address_is_valid_for_outbound_connections,
-    protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    protocol::{
+        external::{canonical_peer_addr, canonical_socket_addr},
+        v2::object::ObjectSource,
+    },
     sync_peer::SyncPeersSender,
     BoxError, PeerSocketAddr,
 };
@@ -317,6 +320,17 @@ pub struct Config {
     /// files never contain it.
     #[serde(skip)]
     pub v2_sync_peers: Option<SyncPeersSender>,
+
+    /// The synchronization artifacts this node serves to version 2 peers through `get-object`
+    /// requests, by hash, or `None` to serve none.
+    ///
+    /// A version 2 node with an object source advertises `NODE_SYNC_ARTIFACTS` in its `init`
+    /// records, even while the index is empty: it answers the objects it does not hold as not
+    /// found.
+    ///
+    /// Runtime-only: `zebrad` sets it on version 2 nodes, and config files never contain it.
+    #[serde(skip)]
+    pub object_source: Option<ObjectSource>,
 }
 
 impl Config {
@@ -835,6 +849,7 @@ impl Default for Config {
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
             v2_sync_peers: None,
+            object_source: None,
         }
     }
 }
@@ -1010,6 +1025,7 @@ impl From<Config> for DConfig {
             crawl_new_peer_interval,
             max_connections_per_ip,
             v2_sync_peers: _,
+            object_source: _,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -1164,6 +1180,7 @@ impl<'de> Deserialize<'de> for Config {
             crawl_new_peer_interval,
             max_connections_per_ip,
             v2_sync_peers: None,
+            object_source: None,
         })
     }
 }

@@ -1,12 +1,14 @@
 //! Responses on the request stream types `get-headers`, `get-blocks`,
-//! `get-tx`, and `get-addr` (draft, "Request Stream Types").
+//! `get-tx`, `get-addr`, and `get-object` (draft, "Request Stream Types").
 //!
 //! Block and transaction responses are open sequences of entries the
 //! responder may cut short after any complete entry, and header responses are
 //! a counted sequence; those three are read entry by entry from the response
 //! stream, so each entry is parsed once its bytes have arrived and nothing is
 //! allocated from a peer's length prefix. Address responses are small and
-//! bounded, and are decoded from the complete body.
+//! bounded, and are decoded from the complete body. Object responses are a
+//! short header and then raw data until the stream finishes, read as it
+//! arrives up to the request's bound.
 
 use std::{io, io::Write, sync::Arc};
 
@@ -38,6 +40,112 @@ pub const RESULT_FOUND: u8 = 0x00;
 
 /// The `result` byte for an object the responder does not have.
 pub const RESULT_NOT_FOUND: u8 = 0x02;
+
+/// How many bytes of a `get-object` answer's data are read from the stream
+/// at a time.
+const OBJECT_DATA_CHUNK_LEN: usize = 64 * 1024;
+
+/// The start of a `get-object` response (draft, "`get-object`"): whether the
+/// responder has the object, and if so its total size.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectAnswer {
+    /// The responder has the object: `size` is its total length in bytes, as
+    /// the peer claims it, and the requested bytes follow until FIN.
+    Found {
+        /// The object's total size, unauthenticated until the whole object
+        /// has been hashed.
+        size: u64,
+    },
+
+    /// The responder does not have the object; nothing follows.
+    NotFound,
+}
+
+/// Encodes the start of a `get-object` response: the `result` byte, then the
+/// object's size as a CompactSize if it was found. The object bytes are
+/// written after it.
+pub fn encode_object_header(answer: ObjectAnswer) -> Result<Vec<u8>, WireError> {
+    let mut header = Vec::new();
+    match answer {
+        ObjectAnswer::Found { size } => {
+            header.push(RESULT_FOUND);
+            CompactSize64::from(size).zcash_serialize(&mut header)?;
+        }
+        ObjectAnswer::NotFound => header.push(RESULT_NOT_FOUND),
+    }
+    Ok(header)
+}
+
+/// Reads the start of a `get-object` response (draft, "`get-object`"): the
+/// `result` byte, and the object's size if the responder has it.
+///
+/// A response that ends before its `result` byte or inside `size`, an
+/// unknown `result`, and a non-canonical `size` are `PROTOCOL_ERROR`s. A
+/// not-found answer is complete in its `result` byte, so this reads on to the
+/// end of the stream, and anything after it is trailing data. A found
+/// answer's data follows; [`read_object_data`] reads it.
+pub async fn read_object_header<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<ObjectAnswer, WireError> {
+    let mut result = [0];
+    read_exact_or_truncated(reader, &mut result, "get-object response").await?;
+    match result[0] {
+        RESULT_FOUND => {
+            let size = read_compact_size_from(reader, "get-object size").await?;
+            Ok(ObjectAnswer::Found { size })
+        }
+        RESULT_NOT_FOUND => {
+            ensure_finished(reader, "get-object not-found answer").await?;
+            Ok(ObjectAnswer::NotFound)
+        }
+        value => Err(WireError::UnknownByte {
+            what: "result code",
+            value,
+        }),
+    }
+}
+
+/// Reads a found `get-object` answer's data until the responder finishes the
+/// stream, appending it to `data`.
+///
+/// `limit` is the most data the answer may carry: the request's length, and
+/// no further than the end of the object as the answer's own `size` gives it
+/// (see [`GetObject::data_limit`](super::request::GetObject::data_limit)).
+/// A byte beyond it is a connection error of type `FLOOD` (draft,
+/// "`get-object`"), detected in the read that delivers it, before the read's
+/// bytes are appended, so this never appends more than `limit` bytes. `data`
+/// grows as bytes arrive, never in advance from the peer's `size`.
+///
+/// If the read fails, or the future is dropped, `data` holds the bytes read
+/// so far: a prefix of the answer's data.
+pub async fn read_object_data<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    limit: u32,
+    data: &mut Vec<u8>,
+) -> Result<(), WireError> {
+    // A `u32` fits in a `usize` on every supported target.
+    let limit = limit as usize;
+    let start = data.len();
+    // Room for one byte past the limit, so a limit of zero still sees a flood.
+    let mut chunk = vec![0; OBJECT_DATA_CHUNK_LEN.min(limit.saturating_add(1))];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        // `data` only grows here, from `start`.
+        let received = (data.len() - start).saturating_add(read);
+        if received > limit {
+            return Err(WireError::Flood {
+                field: "get-object data",
+                // `usize` always fits in `u64` on supported targets.
+                count: received as u64,
+                max: limit,
+            });
+        }
+        data.extend_from_slice(&chunk[..read]);
+    }
+}
 
 /// One entry of a `get-blocks` or `get-tx` response.
 #[derive(Clone, Debug, Eq, PartialEq)]

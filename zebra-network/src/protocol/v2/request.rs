@@ -13,9 +13,11 @@ use zebra_chain::{
 
 use super::{
     constants::{
-        GET_BLOCK_RANGE_REQUEST_LEN, GET_HASHES_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST,
-        MAX_LOCATOR_HASHES, MAX_TXS_PER_REQUEST,
+        GET_BLOCK_RANGE_REQUEST_LEN, GET_HASHES_REQUEST_LEN, GET_OBJECT_REQUEST_LEN,
+        MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES, MAX_OBJECT_OFFSET, MAX_OBJECT_REQUEST_LEN,
+        MAX_TXS_PER_REQUEST,
     },
+    object::ObjectHash,
     txref::TxRef,
     types::StreamType,
     wire::{ensure_consumed, read_count, read_flag, write_count, WireError},
@@ -43,6 +45,8 @@ pub fn max_body_len(stream_type: StreamType) -> Option<usize> {
         StreamType::GetBlockRange => GET_BLOCK_RANGE_REQUEST_LEN,
         // A start height and a count.
         StreamType::GetHashes => GET_HASHES_REQUEST_LEN,
+        // Fixed-width fields only.
+        StreamType::GetObject => GET_OBJECT_REQUEST_LEN,
         _ => return None,
     })
 }
@@ -74,6 +78,8 @@ pub enum Request {
 
     /// A `get-hashes` request (stream type `0x06`).
     Hashes(GetHashes),
+    /// A `get-object` request (stream type `0x09`).
+    Object(GetObject),
 }
 
 impl Request {
@@ -87,6 +93,7 @@ impl Request {
             Request::Mempool => StreamType::GetMempool,
             Request::BlockRange(_) => StreamType::GetBlockRange,
             Request::Hashes(_) => StreamType::GetHashes,
+            Request::Object(_) => StreamType::GetObject,
         }
     }
 
@@ -100,6 +107,7 @@ impl Request {
             Request::Addr | Request::Mempool => {}
             Request::BlockRange(request) => request.write(&mut body)?,
             Request::Hashes(request) => request.write(&mut body)?,
+            Request::Object(request) => request.write(&mut body)?,
         }
         Ok(body.into())
     }
@@ -121,11 +129,126 @@ impl Request {
             StreamType::GetMempool => Request::Mempool,
             StreamType::GetBlockRange => Request::BlockRange(GetBlockRange::read(&mut reader)?),
             StreamType::GetHashes => Request::Hashes(GetHashes::read(&mut reader)?),
+            StreamType::GetObject => Request::Object(GetObject::read(&mut reader)?),
             stream_type => return Err(WireError::NotARequest { stream_type }),
         };
         ensure_consumed(reader, "request")?;
         Ok(request)
     }
+}
+
+/// A `get-object` request (draft, "`get-object`"): up to `length` bytes of
+/// the object `hash`, starting at `offset`.
+///
+/// The body is the three fields at fixed widths, integers little-endian:
+/// `hash` (32 bytes), `offset` (8), and `length` (4).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GetObject {
+    /// The SHA-256 hash of the requested object.
+    pub hash: ObjectHash,
+
+    /// The byte offset into the object to start at; at most
+    /// [`MAX_OBJECT_OFFSET`].
+    pub offset: u64,
+
+    /// The most bytes requested; at most [`MAX_OBJECT_REQUEST_LEN`].
+    pub length: u32,
+}
+
+/// Why a `get-object` request with an offset above [`MAX_OBJECT_OFFSET`]
+/// breaks the draft's format.
+const OFFSET_TOO_LARGE: &str = "offset is above 2^48 - 1";
+
+impl GetObject {
+    /// Checks the request against the draft's bounds, as this node does
+    /// before it sends one.
+    ///
+    /// A request outside them is this node's error, never sent, so it is a
+    /// local error, not a peer violation.
+    pub fn check(&self) -> Result<(), WireError> {
+        if self.offset > MAX_OBJECT_OFFSET {
+            return Err(WireError::LocalUnencodable {
+                what: "get-object request",
+                reason: OFFSET_TOO_LARGE,
+            });
+        }
+        if self.length > MAX_OBJECT_REQUEST_LEN {
+            // Both are `u32`s, which fit in a `usize` on every supported target.
+            return Err(WireError::LocalCountTooLarge {
+                field: "length",
+                count: self.length as usize,
+                max: MAX_OBJECT_REQUEST_LEN as usize,
+            });
+        }
+        Ok(())
+    }
+
+    /// The most data bytes a found answer to this request may carry when the
+    /// object is `size` bytes long (draft, "`get-object`"): none when `offset`
+    /// is at or past the end of the object, otherwise at most `length`, and
+    /// at most the bytes from `offset` to the end.
+    ///
+    /// `size` is the peer's claim, so the remaining length is only computed
+    /// once `size` is known to be above `offset`, which cannot underflow.
+    pub fn data_limit(&self, size: u64) -> u32 {
+        match size.checked_sub(self.offset) {
+            None | Some(0) => 0,
+            Some(remaining) => {
+                u32::try_from(remaining).map_or(self.length, |remaining| remaining.min(self.length))
+            }
+        }
+    }
+
+    /// Writes the request body, after checking it against the draft's bounds.
+    fn write<W: Write>(&self, mut writer: W) -> Result<(), WireError> {
+        self.check()?;
+        writer.write_all(&self.hash.0)?;
+        writer.write_all(&self.offset.to_le_bytes())?;
+        writer.write_all(&self.length.to_le_bytes())?;
+        Ok(())
+    }
+
+    /// Reads a request body; an offset or length above the draft's bound is a
+    /// connection error of type `PROTOCOL_ERROR` (draft, "`get-object`",
+    /// "Request Streams").
+    fn read(reader: &mut &[u8]) -> Result<Self, WireError> {
+        let hash = ObjectHash(read_array(reader, "hash")?);
+        let offset = u64::from_le_bytes(read_array(reader, "offset")?);
+        let length = u32::from_le_bytes(read_array(reader, "length")?);
+
+        if offset > MAX_OBJECT_OFFSET {
+            return Err(WireError::Nonconforming {
+                what: "get-object request",
+                reason: OFFSET_TOO_LARGE,
+            });
+        }
+        if length > MAX_OBJECT_REQUEST_LEN {
+            return Err(WireError::CountTooLarge {
+                field: "length",
+                count: u64::from(length),
+                // A `u32`, which fits in a `usize` on every supported target.
+                max: MAX_OBJECT_REQUEST_LEN as usize,
+            });
+        }
+
+        Ok(GetObject {
+            hash,
+            offset,
+            length,
+        })
+    }
+}
+
+/// Reads the `N` bytes of a fixed-width field `what` from `reader`.
+fn read_array<const N: usize>(
+    reader: &mut &[u8],
+    what: &'static str,
+) -> Result<[u8; N], WireError> {
+    let (field, rest) = reader
+        .split_first_chunk::<N>()
+        .ok_or(WireError::Truncated { what })?;
+    *reader = rest;
+    Ok(*field)
 }
 
 /// A `get-headers` request (draft, "`get-headers`").

@@ -62,6 +62,20 @@ pub const MAX_TXS_PER_REQUEST: usize = 50_000;
 /// not a connection error (draft, "`get-addr`").
 pub const MAX_ADDRS_PER_RESPONSE: usize = crate::constants::MAX_ADDRS_IN_MESSAGE;
 
+/// The length of a `get-object` request body: the object hash, the offset,
+/// and the length (draft, "`get-object`").
+pub const GET_OBJECT_REQUEST_LEN: usize = 32 + 8 + 4;
+
+/// The largest `length` a `get-object` request may carry: 32 MiB
+/// (draft, "`get-object`"); a request over it is a connection error of type
+/// `PROTOCOL_ERROR`.
+pub const MAX_OBJECT_REQUEST_LEN: u32 = 33_554_432;
+
+/// The largest `offset` a `get-object` request may carry: 2^48 − 1
+/// (draft, "`get-object`"), so that `offset + length` cannot wrap; a request
+/// over it is a connection error of type `PROTOCOL_ERROR`.
+pub const MAX_OBJECT_OFFSET: u64 = (1 << 48) - 1;
+
 /// The misbehavior penalty for a `get-headers` response with more than
 /// [`MAX_HEADERS_PER_RESPONSE`] headers or with non-contiguous headers, and
 /// for a `get-addr` response with more than [`MAX_ADDRS_PER_RESPONSE`]

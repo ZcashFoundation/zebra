@@ -48,10 +48,12 @@ use crate::{
     },
     peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
+        external::types::PeerServices,
         internal::{Request, Response},
         v2::{
             announcement::{clamp_relayed_time, encode_addr_record, encode_tx_record},
             handshake::decode_record,
+            object::ObjectSource,
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::WireError,
@@ -124,6 +126,28 @@ pub struct ConnectionParams<S> {
     /// The node-wide `get-hashes` permits, shared by every version 2
     /// connection: [`global_hashes_permits`].
     pub hashes_permits: Arc<Semaphore>,
+
+    /// The synchronization artifacts this node serves through `get-object`
+    /// requests, or `None` to refuse them all.
+    pub object_source: Option<ObjectSource>,
+
+    /// The services this node advertises in its `init` records, which decide
+    /// which of the peer's requests it serves: `get-object` requests are
+    /// refused unless they include `NODE_SYNC_ARTIFACTS`, whatever
+    /// `object_source` holds.
+    pub local_services: PeerServices,
+
+    /// The permits for the `get-object` requests this node serves at once,
+    /// over all its connections: [`global_object_permits`], shared by every
+    /// connection's params.
+    pub object_permits: Arc<Semaphore>,
+}
+
+/// Returns the permits for the `get-object` requests a node serves at once,
+/// [`inbound::MAX_OBJECT_STREAMS_GLOBAL`] of them, for the
+/// [`ConnectionParams`] of every connection the node makes.
+pub fn global_object_permits() -> Arc<Semaphore> {
+    Arc::new(Semaphore::new(inbound::MAX_OBJECT_STREAMS_GLOBAL))
 }
 
 pub(crate) use inbound::{global_block_range_permits, global_hashes_permits};
@@ -462,6 +486,14 @@ where
         params.block_range_permits.clone(),
     );
     let inbound_permits = inbound::StreamPermits::new(params.hashes_permits.clone());
+    let objects = inbound::ObjectServing {
+        source: params.object_source.clone(),
+        advertised: params
+            .local_services
+            .contains(PeerServices::NODE_SYNC_ARTIFACTS),
+        peer_permits: Arc::new(Semaphore::new(inbound::MAX_OBJECT_STREAMS_PER_PEER)),
+        global_permits: params.object_permits.clone(),
+    };
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
@@ -483,7 +515,9 @@ where
         inbound_permits,
         block_ranges,
         overloads: Arc::new(Overloads::new()),
+        objects,
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
+        object_sizes: outbound::ObjectSizes::spawn(),
         tasks: JoinSet::new(),
         events,
         fatal_rx,
@@ -564,8 +598,13 @@ struct ConnectionTask<S> {
     block_ranges: inbound::BlockRangeServing,
     /// The peer's inbound service overloads, which may close the connection.
     overloads: Arc<Overloads>,
+    /// What serving the peer's `get-object` requests needs, with the peer's
+    /// own object stream permits.
+    objects: inbound::ObjectServing,
     /// Bounds how many of this node's requests are in flight to the peer at once.
     outbound_permits: Arc<Semaphore>,
+    /// The object sizes the peer gave in its `get-object` answers to this node.
+    object_sizes: outbound::ObjectSizes,
     tasks: JoinSet<()>,
     events: Events,
     /// Connection-closing events from the stream tasks and this node's
@@ -827,6 +866,7 @@ where
             self.params.address_book.clone(),
             self.events.clone(),
             self.block_ranges.clone(),
+            self.objects.clone(),
         ));
     }
 
@@ -867,6 +907,7 @@ where
             genesis_hash: self.params.genesis_hash,
             misbehavior: self.params.misbehavior.clone(),
             events: self.events.clone(),
+            object_sizes: self.object_sizes.clone(),
         }
     }
 

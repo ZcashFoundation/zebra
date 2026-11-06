@@ -2180,3 +2180,68 @@ async fn early_relay_response_after_withdrawal(committed: bool) {
     .await
     .expect("withdrawal must fall back to committed state without closing the connection");
 }
+
+/// The legacy protocol has no `get-object`: an object request on a legacy connection fails with
+/// `V2OnlyRequest`, without a message to the peer, and an object answer from the inbound service
+/// sends the peer nothing. Neither closes the connection.
+#[tokio::test(start_paused = true)]
+async fn object_requests_and_answers_stay_off_legacy_connections() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (connection, mut client_tx, mut inbound, mut outbound, error_slot) = new_test_connection();
+    let mut task = tokio::spawn(connection.run(peer_rx));
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let (tx, rx) = oneshot::channel();
+        client_tx
+            .send(ClientRequest {
+                request: Request::Object {
+                    hash: zebra_chain::state_snapshot::ObjectHash([0xAB; 32]),
+                    offset: 0,
+                    length: 1,
+                },
+                tx,
+                inv_collector: None,
+                transient_addr: None,
+                span: Span::none(),
+            })
+            .await
+            .unwrap();
+        let error = rx.await.unwrap().expect_err("refused");
+        assert!(
+            error.inner_debug().contains("V2OnlyRequest"),
+            "got {}",
+            error.inner_debug()
+        );
+        assert!(outbound.try_recv().is_err(), "nothing is sent to the peer");
+
+        for answer in [
+            Response::Object {
+                size: 1,
+                data: vec![0],
+            },
+            Response::ObjectNotFound,
+        ] {
+            peer_tx.send(Ok(Message::GetAddr)).await.unwrap();
+            inbound
+                .expect_request(Request::Peers)
+                .await
+                .respond(answer.clone());
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            assert!(
+                outbound.try_recv().is_err(),
+                "{answer}: nothing is sent to the peer"
+            );
+        }
+
+        assert!(error_slot.try_get_error().is_none());
+    })
+    .await
+    .expect("object requests and answers must not wait for the peer");
+
+    assert!(
+        matches!(futures::poll!(&mut task), Poll::Pending),
+        "the connection keeps running"
+    );
+    task.abort();
+}

@@ -180,6 +180,14 @@ bitflags! {
         /// does not provide network services.
         const NODE_NETWORK = 1;
 
+        /// The node serves content-addressed synchronization artifacts, such as state snapshot
+        /// manifests and pieces, through `get-object` requests.
+        ///
+        /// Defined by the draft version 2 protocol ("Service Flags") and sent only in its `init`
+        /// records: ZIP 204 defines no such bit for legacy `version` messages, and Bitcoin once
+        /// used it for a different purpose.
+        const NODE_SYNC_ARTIFACTS = 1 << 4;
+
         /// Opt in to authenticated next-tip block relay before full transaction validation.
         ///
         /// Both ends must advertise this bit. This is a temporary experiment, not a production

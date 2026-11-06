@@ -22,17 +22,27 @@
 //! part of an answer to was not served at all, so the stream is reset with
 //! `CANCELLED`, the code for a request that is no longer wanted, which is the
 //! closest the draft has.
+//!
+//! A `get-object` stream is the exception to the general request permit: it
+//! is served from the object index and the disk, not the inbound service,
+//! under its own permits, which are taken without waiting.
 
 use std::{
     collections::{HashMap, HashSet},
+    fs::File,
+    io,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use quinn::{RecvStream, SendStream};
-use tokio::sync::Semaphore;
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::Instant,
+};
 use tower::Service;
 
 use zebra_chain::{
@@ -48,9 +58,15 @@ use crate::{
         v2::{
             announcement::encode_tx_record,
             constants::{MAX_ADDRS_PER_RESPONSE, MAX_HEADERS_PER_RESPONSE},
+            object::{ObjectEntry, ObjectHash, ObjectSource},
             record::RecordCodec,
-            request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request as WireRequest},
-            response::{encode_addr_response, write_headers_response, ObjectResult},
+            request::{
+                max_body_len, GetBlocks, GetHeaders, GetObject, GetTx, Request as WireRequest,
+            },
+            response::{
+                encode_addr_response, encode_object_header, write_headers_response, ObjectAnswer,
+                ObjectResult,
+            },
             types::{ErrorCode, StreamType},
             wire::{Violation, WireError},
         },
@@ -149,6 +165,64 @@ const TX_LOOKUP_CHUNK: usize = 256;
 // `MAX_TX_INV_IN_SENT_MESSAGE` is 25,000, which fits in any `usize`.
 const MAX_TX_LOOKUPS_PER_RESPONSE: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 
+/// How many of one peer's `get-object` requests are served at once; the rest
+/// are refused rather than queued.
+///
+/// A `get-object` stream holds none of the peer's
+/// [`INBOUND_REQUEST_CONCURRENCY`] request permits: those are waited for,
+/// and an object request that waited behind the peer's other requests could
+/// not be refused promptly when this limit is reached. Instead, the peer's
+/// object streams are bounded by this limit, and its probes and misses, which
+/// take no permit, by the transport's limit on concurrent streams; each of
+/// those reads at most a request and writes at most a `result` and a `size`.
+pub(super) const MAX_OBJECT_STREAMS_PER_PEER: usize = 2;
+
+/// How many `get-object` requests this node serves at once, over all its
+/// peers; the rest are refused rather than queued.
+///
+/// # Security
+///
+/// Each served request holds one [`OBJECT_READ_CHUNK`] of object data at a
+/// time, so this bounds the memory and the disk reads of object serving,
+/// whatever the number of peers.
+pub(super) const MAX_OBJECT_STREAMS_GLOBAL: usize = 8;
+
+/// The most bytes of an object read from its file at once, and written to
+/// the response stream before the next read.
+pub(super) const OBJECT_READ_CHUNK: usize = 1 << 20;
+
+/// How long before its request deadline a `get-object` response is finished
+///.
+///
+/// A request stream that misses its deadline is reset with `REFUSED` by
+/// [`serve`], but a `get-object` response must never be reset once its
+/// `result` and `size` are written: the requester keeps the prefix it
+/// received as a short answer. So the response stops writing this long
+/// before the deadline, and the stream is finished instead.
+pub(super) const OBJECT_EARLY_FIN_MARGIN: Duration = Duration::from_secs(4);
+
+// A response must have time to start before the margin; checked at compile time.
+const _: () = assert!(OBJECT_EARLY_FIN_MARGIN.as_millis() * 2 < REQUEST_TIMEOUT.as_millis());
+
+/// What serving the peer's `get-object` requests needs from the connection
+///.
+#[derive(Clone)]
+pub(super) struct ObjectServing {
+    /// The objects this node serves, by hash, or `None` if it holds none.
+    pub source: Option<ObjectSource>,
+
+    /// Whether this node advertises `NODE_SYNC_ARTIFACTS`: unless it does,
+    /// every `get-object` request is refused, whatever the index holds.
+    pub advertised: bool,
+
+    /// The peer's permits, [`MAX_OBJECT_STREAMS_PER_PEER`] of them.
+    pub peer_permits: Arc<Semaphore>,
+
+    /// The node's permits, [`MAX_OBJECT_STREAMS_GLOBAL`] of them, shared by
+    /// every connection.
+    pub global_permits: Arc<Semaphore>,
+}
+
 /// Serves one bidirectional stream the peer opened.
 ///
 /// `get_addr_allowed` is cleared by the first `get-addr` request it lets
@@ -169,6 +243,7 @@ pub(super) async fn serve<S>(
     address_book: Option<V2BookHandle>,
     events: Events,
     block_ranges: BlockRangeServing,
+    objects: ObjectServing,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -178,12 +253,9 @@ pub(super) async fn serve<S>(
     // One deadline for the whole exchange: a peer that reads its responses slowly, or asks for
     // many entries, cannot hold a request permit and the request's objects for longer than a
     // requester waits for a response. Dropping the exchange at the deadline releases both.
-    let accepted = tokio::time::Instant::now();
+    let accepted = Instant::now();
     let deadline = accepted + REQUEST_TIMEOUT;
-    let mut response = ResponseSend {
-        send,
-        written: false,
-    };
+    let mut response = ResponseSend::new(send);
     let served = tokio::time::timeout_at(
         deadline,
         serve_inner(
@@ -195,6 +267,8 @@ pub(super) async fn serve<S>(
             &get_addr_allowed,
             address_book.as_ref(),
             &block_ranges,
+            &objects,
+            deadline,
         ),
     )
     .await;
@@ -241,7 +315,7 @@ pub(super) async fn serve<S>(
 }
 
 /// Why a request stream could not be answered normally.
-enum Outcome {
+pub(super) enum Outcome {
     /// Close the connection with `code`: the peer violated the protocol, or
     /// (with `INTERNAL_ERROR`) this node could not encode the response.
     Violation { reason: String, code: ErrorCode },
@@ -271,7 +345,7 @@ impl From<WireError> for Outcome {
 
 /// Reads the request, answers it, and writes the response. The caller
 /// bounds the whole exchange, every wait here included, by the request
-/// deadline.
+/// `deadline`.
 ///
 /// A `get-block-range` request is only read here: it is returned, with the
 /// permits it was admitted with, for the caller to serve outside the request
@@ -286,6 +360,8 @@ async fn serve_inner<S>(
     get_addr_allowed: &AtomicBool,
     address_book: Option<&V2BookHandle>,
     block_ranges: &BlockRangeServing,
+    objects: &ObjectServing,
+    deadline: Instant,
 ) -> Result<Option<PendingRange>, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -331,20 +407,15 @@ where
     // starve the peer's other requests. A range stream claims its peer permit here, and the node
     // permit only once its request is decoded, and a `get-hashes` stream claims both once its
     // request is decoded, so streams that never send a request cannot hold the node's permits.
+    // Object requests hold none either: they are bounded by their own, which are never waited
+    // for.
     let mut range_permit = match stream_type {
         StreamType::GetBlockRange => Some(block_ranges.claim_peer()?),
         _ => None,
     };
     let _permit = match (&range_permit, stream_type) {
         (Some(_), _) | (None, StreamType::GetHashes) => None,
-        (None, _) => Some(
-            permits
-                .request
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|_closed| Outcome::Transport)?,
-        ),
+        (None, _) => request_permit(stream_type, permits.request.clone()).await?,
     };
 
     // The body, up to the peer finishing its direction, bounded by what the type allows.
@@ -403,6 +474,7 @@ where
             let permits = block_ranges.claim_node(peer)?;
             return Ok(Some(PendingRange { request, permits }));
         }
+        WireRequest::Object(request) => serve_object(response, request, objects, deadline).await,
     }?;
 
     metrics::counter!(
@@ -448,6 +520,27 @@ impl StreamPermits {
     }
 }
 
+/// Waits for one of the peer's request `permits` for a `stream_type` request,
+/// or returns at once with none for a `get-object` request, which is bounded
+/// by the object stream permits instead. Excess object requests are refused,
+/// never queued, so they must not wait behind the peer's other requests.
+///
+/// Fails only if the permits were closed, which the connection task never does
+/// while a stream is served.
+pub(super) async fn request_permit(
+    stream_type: StreamType,
+    permits: Arc<Semaphore>,
+) -> Result<Option<OwnedSemaphorePermit>, Outcome> {
+    if stream_type == StreamType::GetObject {
+        return Ok(None);
+    }
+    permits
+        .acquire_owned()
+        .await
+        .map(Some)
+        .map_err(|_closed| Outcome::Transport)
+}
+
 /// Calls the inbound service, mapping its failures to stream refusals, or,
 /// when the connection's overload policy drops the connection or the
 /// inbound service has shut down, to a close.
@@ -473,8 +566,8 @@ where
 
 /// This node's sending direction of a request stream, which the response is
 /// written to.
-struct ResponseSend {
-    send: SendStream,
+pub(super) struct ResponseSend {
+    pub(super) send: SendStream,
     /// Whether any of the response may have reached the stream, which decides
     /// the code the stream is reset with if the request is abandoned (see
     /// [`ResponseSend::abandon_code`]).
@@ -482,6 +575,14 @@ struct ResponseSend {
 }
 
 impl ResponseSend {
+    /// Returns a response stream with no bytes written yet.
+    pub(super) fn new(send: SendStream) -> Self {
+        Self {
+            send,
+            written: false,
+        }
+    }
+
     /// The code the stream is reset with if the request is abandoned now, at
     /// its deadline or because the connection is closing: `REFUSED` while none
     /// of the response has been written (draft, "Request Streams": a
@@ -881,6 +982,249 @@ async fn serve_addr(
     };
     let body = encode_addr_response(&addrs)?;
     response.write(&body).await
+}
+
+/// Serves a `get-object` request from this node's synchronization artifacts,
+/// as specified by the public protocol draft.
+///
+/// The request is refused with `REFUSED` unless this node advertises
+/// `NODE_SYNC_ARTIFACTS` and holds an object index, and the connection stays
+/// open. An object the index does not hold is answered as not found, and a
+/// probe (`length == 0`, or an `offset` at or past the end of the object)
+/// with the object's `size` alone, both from the index, without touching the
+/// disk. The draft's order holds: the offset is checked against the size
+/// before the length is looked at, and the bytes returned are at most
+/// `min(length, size − offset)`, never `offset + length`.
+///
+/// A request for data takes one of the peer's and one of the node's object
+/// stream permits, without waiting: when either is exhausted the request is
+/// refused and counted as busy, never as an inbound service overload, so a
+/// peer's downloads never close its connection. The object's file is opened
+/// before the response starts, so an unreadable file is refused too. The
+/// data is then read in positional [`OBJECT_READ_CHUNK`] reads on the
+/// blocking pool and written as it arrives, up to the request's `length`.
+///
+/// Once `result` and `size` are written, the stream is never reset: a read
+/// failure, a file shorter than the index says, or a peer that reads slowly
+/// finishes the response early with the bytes written so far, which the
+/// draft allows and the requester re-requests. Every wait here, the header
+/// writes of probes and misses included, stops [`OBJECT_EARLY_FIN_MARGIN`]
+/// before `deadline`, the stream's request deadline, so that the deadline's
+/// `REFUSED` reset in [`serve`] never applies to a started response; a
+/// request that arrives with less than the margin left is refused.
+pub(super) async fn serve_object(
+    response: &mut ResponseSend,
+    request: GetObject,
+    objects: &ObjectServing,
+    deadline: Instant,
+) -> Result<(), Outcome> {
+    let Some(source) = objects.source.as_ref().filter(|_| objects.advertised) else {
+        return Err(Outcome::Refuse(ErrorCode::Refused));
+    };
+
+    // Every wait below stops this long before the deadline. A request that arrives with less time
+    // than that left is refused before anything is written.
+    let now = Instant::now();
+    let Some(time_left) = deadline
+        .checked_duration_since(now)
+        .and_then(|left| left.checked_sub(OBJECT_EARLY_FIN_MARGIN))
+    else {
+        return Err(Outcome::Refuse(ErrorCode::Refused));
+    };
+    let early_deadline = now + time_left;
+
+    // The index is replaced whole by its publisher, so the entry is copied out and the borrow
+    // dropped at once, before any wait.
+    let entry = source.borrow().get(&request.hash).cloned();
+    let Some(ObjectEntry { path, size }) = entry else {
+        let header = encode_object_header(ObjectAnswer::NotFound)?;
+        return write_header(response, &header, early_deadline).await;
+    };
+    let header = encode_object_header(ObjectAnswer::Found { size })?;
+
+    // Zero when the offset is at or past the end: the size alone answers that, and a zero length.
+    let remaining = size.saturating_sub(request.offset);
+    let budget = remaining.min(u64::from(request.length));
+    if budget == 0 {
+        return write_header(response, &header, early_deadline).await;
+    }
+
+    // # Security
+    //
+    // Only a few object downloads are served at once, per peer and over all peers; the rest are
+    // refused at once, not queued, and the requester tries another peer or waits. A refusal
+    // for a busy node is not an overload: the overload policy that drops connections is for
+    // requests the inbound service could not take.
+    let Ok(peer_permit) = objects.peer_permits.clone().try_acquire_owned() else {
+        return Err(busy());
+    };
+    let Ok(global_permit) = objects.global_permits.clone().try_acquire_owned() else {
+        return Err(busy());
+    };
+    let permits = Arc::new((peer_permit, global_permit));
+
+    // Opened before the response starts, so an object the index names but the disk lacks is
+    // refused rather than finished early with no data.
+    let opened = tokio::time::timeout_at(
+        early_deadline,
+        spawn_object_disk(&permits, move || File::open(path)),
+    )
+    .await;
+    let mut file = match opened {
+        Ok(Ok(Ok(file))) => file,
+        Ok(Ok(Err(error))) => {
+            // A peer can repeat a request for an object the index names but the disk lacks, so
+            // the counter carries the signal, and the log stays quiet.
+            unreadable(&request.hash, &error, "could not open a served object");
+            return Err(Outcome::Refuse(ErrorCode::Refused));
+        }
+        // The blocking task panicked, or the margin before the deadline was reached.
+        Ok(Err(_)) | Err(_) => return Err(Outcome::Refuse(ErrorCode::Refused)),
+    };
+
+    // From here on, the response has started: it is finished, never reset.
+    write_header(response, &header, early_deadline).await?;
+
+    let mut sent: u64 = 0;
+    while sent < budget {
+        // At most `OBJECT_READ_CHUNK`, so the chunk fits in a `usize`.
+        let want = usize::try_from((budget - sent).min(OBJECT_READ_CHUNK as u64))
+            .expect("the chunk is at most OBJECT_READ_CHUNK, which is a usize");
+        // `offset` is below `size`, and `sent` is below `size - offset`, so this never wraps.
+        let Some(position) = request.offset.checked_add(sent) else {
+            break;
+        };
+
+        let read = tokio::time::timeout_at(
+            early_deadline,
+            spawn_object_disk(&permits, move || {
+                let mut chunk = vec![0; want];
+                let read = read_exact_at(&file, &mut chunk, position);
+                (file, chunk, read)
+            }),
+        )
+        .await;
+        let chunk = match read {
+            Ok(Ok((returned, mut chunk, Ok(count)))) => {
+                file = returned;
+                chunk.truncate(count);
+                chunk
+            }
+            Ok(Ok((_, _, Err(error)))) => {
+                unreadable(&request.hash, &error, "could not read a served object");
+                break;
+            }
+            // The blocking task panicked, or the margin before the deadline was reached.
+            Ok(Err(_)) | Err(_) => break,
+        };
+        // The file is shorter than the index says: the requester gets what there is.
+        if chunk.is_empty() {
+            break;
+        }
+
+        match tokio::time::timeout_at(early_deadline, response.write(&chunk)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(error),
+            // The peer reads slowly: finish with what it has, before the deadline resets.
+            Err(_elapsed) => break,
+        }
+        // `chunk.len()` is at most `want`, which fits in a `u64` as it did in a `usize`.
+        sent = sent.saturating_add(chunk.len() as u64);
+    }
+
+    record_sent_object_bytes(sent);
+    Ok(())
+}
+
+/// Writes a `get-object` response `header` (`result`, and the `size` if the object was found),
+/// stopping at `early_deadline`. A timed-out write may already have sent a prefix, so it uses the
+/// same started-response cancellation semantics as the outer request deadline.
+async fn write_header(
+    response: &mut ResponseSend,
+    header: &[u8],
+    early_deadline: Instant,
+) -> Result<(), Outcome> {
+    tokio::time::timeout_at(early_deadline, response.write(header))
+        .await
+        .unwrap_or_else(|_| Err(Outcome::Refuse(response.abandon_code())))
+}
+
+/// The per-peer and global permits bounding object disk operations.
+pub(super) type ObjectPermits = Arc<(OwnedSemaphorePermit, OwnedSemaphorePermit)>;
+
+/// Runs blocking object disk `work` while retaining a permit reference until the work actually
+/// finishes, even if its async wait times out and drops the join handle.
+pub(super) fn spawn_object_disk<T, F>(
+    permits: &ObjectPermits,
+    work: F,
+) -> tokio::task::JoinHandle<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let permits = permits.clone();
+    tokio::task::spawn_blocking(move || {
+        let _permits = permits;
+        work()
+    })
+}
+
+/// Counts object payload bytes sent by this node.
+pub(super) fn record_sent_object_bytes(sent: u64) {
+    metrics::counter!("zebra.net.out.objects.bytes").increment(sent);
+}
+
+/// The outcome of a `get-object` request this node is too busy to serve:
+/// refused, and counted as busy.
+fn busy() -> Outcome {
+    metrics::counter!("zebra.net.in.objects.busy").increment(1);
+    Outcome::Refuse(ErrorCode::Refused)
+}
+
+/// Counts an object the index names but the disk could not open or read, and
+/// logs it at debug: a peer can repeat the request as fast as its permits
+/// allow, so the counter carries the signal, and the operator's warning
+/// belongs with the index's publisher.
+pub(super) fn unreadable(hash: &ObjectHash, error: &io::Error, what: &'static str) {
+    metrics::counter!("zebra.net.in.objects.unreadable").increment(1);
+    tracing::debug!(%error, %hash, "{what}");
+}
+
+/// Fills `buf` from `file` at `position`, without moving the file's cursor,
+/// and returns how many bytes were read: fewer than `buf.len()` only at the
+/// end of the file.
+fn read_exact_at(file: &File, buf: &mut [u8], position: u64) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        // `filled` is below `buf.len()`, a `usize`, which fits in a `u64`.
+        let Some(position) = position.checked_add(filled as u64) else {
+            break;
+        };
+        match read_at(file, &mut buf[filled..], position) {
+            Ok(0) => break,
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(filled)
+}
+
+/// One positional read from `file` at `position` into `buf`.
+#[cfg(unix)]
+fn read_at(file: &File, buf: &mut [u8], position: u64) -> io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(file, buf, position)
+}
+
+/// One positional read from `file` at `position` into `buf`.
+///
+/// Seeks the file's cursor, which nothing else uses: the file is opened for
+/// this request alone.
+#[cfg(not(unix))]
+fn read_at(mut file: &File, buf: &mut [u8], position: u64) -> io::Result<usize> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(position))?;
+    file.read(buf)
 }
 
 /// Serves a `get-mempool` request with the current mempool contents, up to
