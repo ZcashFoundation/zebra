@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Use fixed-length position-weighted evaluation for Orchard MerkleCRH, relying on the existing discrete-logarithm assumption for Sinsemilla bases.
+time: 2026-10-20T05:02:25.749039154+02:00
