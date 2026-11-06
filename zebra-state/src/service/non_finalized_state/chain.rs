@@ -1779,6 +1779,19 @@ impl Chain {
             .collect()
     }
 
+    /// Returns the tip's note commitment trees and subtrees, which a new block's trees extend.
+    pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
+            ironwood: self.ironwood_note_commitment_tree_for_tip(),
+            ironwood_subtree: self.ironwood_subtree_for_tip(),
+        }
+    }
+
     /// Update the chain tip with the `contextually_valid` block,
     /// running note commitment tree updates in parallel with other updates.
     ///
@@ -1795,15 +1808,7 @@ impl Chain {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
-        let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree_for_tip(),
-            sapling: self.sapling_note_commitment_tree_for_tip(),
-            sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_note_commitment_tree_for_tip(),
-            orchard_subtree: self.orchard_subtree_for_tip(),
-            ironwood: self.ironwood_note_commitment_tree_for_tip(),
-            ironwood_subtree: self.ironwood_subtree_for_tip(),
-        };
+        let mut nct = self.note_commitment_trees_for_tip();
 
         let mut tree_result = None;
         let mut partial_result = None;
