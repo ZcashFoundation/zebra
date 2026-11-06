@@ -351,8 +351,8 @@ impl Hub {
         }
     }
 
-    /// Queues each fresh address for [`RELAY_FANOUT`] peers other than
-    /// `source`.
+    /// Queues each fresh full-node address for [`RELAY_FANOUT`] peers other
+    /// than `source`.
     fn offer(&mut self, source: PeerSocketAddr, addrs: Vec<MetaAddr>, now: Instant) {
         // The source knows what it announced, whether or not it is relayed.
         if let Some(dest) = self.peers.get_mut(&source) {
@@ -370,6 +370,10 @@ impl Hub {
             };
             if clamp_relayed_time(time, wall_now) < oldest
                 || Some(addr.addr()) == self.advertised
+                // The address book doesn't keep records that don't serve the chain.
+                || !addr
+                    .services()
+                    .is_some_and(|services| services.contains(PeerServices::NODE_NETWORK))
                 || address_is_valid_for_outbound_connections(addr.addr(), self.network.clone())
                     .is_err()
             {
@@ -386,7 +390,8 @@ impl Hub {
                     .peers
                     .get_mut(&target)
                     .expect("targets are chosen from the registered peers");
-                if !dest.learn(addr.addr()) || dest.queue.len() >= MAX_QUEUED_ADDRS {
+                // A full queue drops the address before it is learned, so it can be sent later.
+                if dest.queue.len() >= MAX_QUEUED_ADDRS || !dest.learn(addr.addr()) {
                     continue;
                 }
                 dest.queue.push(addr.clone());

@@ -93,8 +93,8 @@ version 2 peers are recorded in a separate version 2 address book.
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
   results fail to connect, which Zebra logs at the `debug` level.
-- Relaying version 2 addresses. Zebra relays each fresh address a version 2
-  peer announces to two of its other version 2 peers, and limits each peer to
+- Relaying version 2 addresses. Zebra relays each fresh full-node address a
+  version 2 peer announces to two of its other version 2 peers, and limits each peer to
   about one announced address every 10 seconds, dropping the rest. It also
   advertises its own version 2 address to each version 2 peer soon after
   connecting and then about once a day: the IP address of `external_addr` with

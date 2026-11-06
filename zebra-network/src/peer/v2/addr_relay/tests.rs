@@ -314,3 +314,98 @@ async fn deregistered_peers_get_nothing() {
     let first = drain(&mut rx, Duration::from_secs(61)).await;
     assert_eq!(first.len(), 1, "the newer registration is advertised to");
 }
+
+/// A hub's state, without its task, for checking what it keeps.
+fn bare_hub() -> super::Hub {
+    super::Hub {
+        secret: SECRET,
+        advertised: None,
+        network: Network::Mainnet,
+        timings: Timings::default(),
+        peers: Default::default(),
+    }
+}
+
+/// Records that don't claim to serve the chain are not relayed, as the
+/// address book doesn't keep them, and don't suppress a later full-node
+/// record for the same address.
+#[tokio::test(start_paused = true)]
+async fn non_node_addresses_are_not_relayed() {
+    let _init_guard = zebra_test::init();
+    let hub = hub(None);
+    let peers: Vec<_> = (1..=3).map(peer).collect();
+    let mut receivers = register(&hub, &peers);
+
+    let node = gossiped(1, DateTime32::now());
+    let non_node =
+        MetaAddr::new_gossiped_meta_addr(node.addr(), PeerServices::empty(), DateTime32::now());
+    hub.offer(peers[0], vec![non_node]);
+    for rx in &mut receivers {
+        assert_eq!(drain(rx, TRICKLE_WAIT).await, Vec::new());
+    }
+
+    hub.offer(peers[0], vec![node.clone()]);
+    for rx in &mut receivers[1..] {
+        let received = drain(rx, TRICKLE_WAIT).await;
+        assert_eq!(
+            received.iter().map(MetaAddr::addr).collect::<Vec<_>>(),
+            vec![node.addr()]
+        );
+    }
+}
+
+/// An address dropped because a peer's queue is full is not remembered as
+/// known to that peer, so it is relayed to it later.
+#[test]
+fn addresses_dropped_for_a_full_queue_are_not_marked_known() {
+    let _init_guard = zebra_test::init();
+    let mut hub = bare_hub();
+    let now = tokio::time::Instant::now();
+    let (source_tx, _source_rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    let (tx, _rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    hub.handle(
+        super::Message::Register {
+            peer: peer(1),
+            id: 1,
+            tx: source_tx,
+        },
+        now,
+    );
+    hub.handle(
+        super::Message::Register {
+            peer: peer(2),
+            id: 2,
+            tx,
+        },
+        now,
+    );
+
+    let time = DateTime32::now();
+    let addr = |index: usize| {
+        MetaAddr::new_gossiped_meta_addr(
+            format!("203.0.{}.{}:8233", index / 250 + 1, index % 250 + 1)
+                .parse::<SocketAddr>()
+                .unwrap()
+                .into(),
+            PeerServices::NODE_NETWORK,
+            time,
+        )
+    };
+    let offered: Vec<_> = (0..=super::MAX_QUEUED_ADDRS).map(addr).collect();
+    let dropped = offered.last().unwrap().clone();
+    hub.offer(peer(1), offered, now);
+
+    let dest = &hub.peers[&peer(2)];
+    assert_eq!(dest.queue.len(), super::MAX_QUEUED_ADDRS);
+    assert!(!dest.known.contains(&dropped.addr()));
+
+    // Once the queue is sent, the dropped address is relayed when offered again.
+    hub.peers.get_mut(&peer(2)).unwrap().queue.clear();
+    hub.offer(peer(1), vec![dropped.clone()], now);
+    let queued: Vec<_> = hub.peers[&peer(2)]
+        .queue
+        .iter()
+        .map(MetaAddr::addr)
+        .collect();
+    assert_eq!(queued, vec![dropped.addr()]);
+}
