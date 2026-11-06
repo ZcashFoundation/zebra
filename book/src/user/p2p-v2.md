@@ -254,9 +254,10 @@ downloads has the hash of its verified entry. Where a chunk is not verified
 yet, the engine downloads whole checkpoint intervals as before, so a slow list
 never stops it. Blocks are still committed one checkpoint interval at a time.
 
-No known-hash list is pinned for Mainnet or Testnet yet, so on those networks
-the engine uses checkpoints only. Regtest and custom testnets can configure a
-list with `v2_known_hash_pins`, for example with the pins that
+Zebra pins a known-hash list for Mainnet, up to height 3,522,060, and for
+the default Testnet, up to height 3,466,400. Regtest and custom testnets have
+no list unless they configure one with `v2_known_hash_pins`, for example with
+the pins that
 [`zebra-utils`' `known-hashes` tool](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#known-hashes)
 prints:
 
