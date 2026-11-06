@@ -4,7 +4,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     convert,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     task::{Context, Poll},
     time::Duration,
 };
@@ -46,7 +46,25 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Gossip only claims unclaimed hashes. Sync always holds its hashes, because an advertisement
 /// alone can claim a hash. Each hash counts its active holders.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct InFlightDownloads(Arc<Mutex<HashMap<block::Hash, usize>>>);
+pub(crate) struct InFlightDownloads(Arc<Mutex<HashMap<block::Hash, DownloadOwners>>>);
+
+#[derive(Debug, Default)]
+struct DownloadOwners {
+    count: usize,
+    source: Option<(Weak<block::Block>, PeerSocketAddr)>,
+    other_sources: Vec<(Weak<block::Block>, PeerSocketAddr)>,
+}
+
+impl DownloadOwners {
+    fn source(&self, block: &Arc<block::Block>) -> Option<PeerSocketAddr> {
+        self.source
+            .iter()
+            .chain(self.other_sources.iter())
+            .find_map(|(body, peer)| {
+                std::ptr::eq(body.as_ptr(), Arc::as_ptr(block)).then_some(*peer)
+            })
+    }
+}
 
 impl InFlightDownloads {
     /// Return whether a live download task currently holds this hash.
@@ -56,6 +74,35 @@ impl InFlightDownloads {
             .lock()
             .expect("download ownership lock is not poisoned")
             .contains_key(hash)
+    }
+
+    /// Return the supplier of this exact body, not another concurrent download of the same hash.
+    #[cfg(test)]
+    pub(crate) fn source(
+        &self,
+        hash: &block::Hash,
+        block: &Arc<block::Block>,
+    ) -> Option<PeerSocketAddr> {
+        self.0
+            .lock()
+            .expect("download ownership lock is not poisoned")
+            .get(hash)?
+            .source(block)
+    }
+
+    /// Return a live candidate's exact supplier, or skip fanout if provenance was withdrawn.
+    /// Local submissions use their dedicated submission relay path.
+    pub(crate) fn early_relay_source(
+        &self,
+        hash: &block::Hash,
+        cache: &zs::EarlyRelayCache,
+    ) -> Option<PeerSocketAddr> {
+        let owners = self
+            .0
+            .lock()
+            .expect("download ownership lock is not poisoned");
+        let block = cache.get(hash)?;
+        owners.get(hash)?.source(&block)
     }
 
     /// Claim an unclaimed hash until its download task completes, fails, or is cancelled.
@@ -68,7 +115,10 @@ impl InFlightDownloads {
         {
             Entry::Occupied(_) => None,
             Entry::Vacant(entry) => {
-                entry.insert(1);
+                entry.insert(DownloadOwners {
+                    count: 1,
+                    ..Default::default()
+                });
                 Some(self.guard(hash))
             }
         }
@@ -76,12 +126,12 @@ impl InFlightDownloads {
 
     /// Hold a hash even if another task already holds it.
     pub(crate) fn hold(&self, hash: block::Hash) -> InFlightDownload {
-        *self
-            .0
+        self.0
             .lock()
             .expect("download ownership lock is not poisoned")
             .entry(hash)
-            .or_default() += 1;
+            .or_default()
+            .count += 1;
         self.guard(hash)
     }
 
@@ -89,6 +139,7 @@ impl InFlightDownloads {
         InFlightDownload {
             hash,
             downloads: self.clone(),
+            source: None,
         }
     }
 }
@@ -97,6 +148,31 @@ impl InFlightDownloads {
 pub(crate) struct InFlightDownload {
     hash: block::Hash,
     downloads: InFlightDownloads,
+    source: Option<(Weak<block::Block>, PeerSocketAddr)>,
+}
+
+impl InFlightDownload {
+    /// Record the supplier before verification can publish an early-relay candidate.
+    pub(crate) fn set_source(&mut self, block: &Arc<block::Block>, source: Option<PeerSocketAddr>) {
+        let Some(source) = source else {
+            return;
+        };
+        let source = (Arc::downgrade(block), source);
+        let mut downloads = self
+            .downloads
+            .0
+            .lock()
+            .expect("download ownership lock is not poisoned");
+        let owners = downloads
+            .get_mut(&self.hash)
+            .expect("the download guard keeps its hash registered");
+        if owners.source.is_none() {
+            owners.source = Some(source.clone());
+        } else {
+            owners.other_sources.push(source.clone());
+        }
+        self.source = Some(source);
+    }
 }
 
 impl Drop for InFlightDownload {
@@ -110,9 +186,25 @@ impl Drop for InFlightDownload {
             unreachable!("each guard keeps its hash registered");
         };
         // Each live guard counts once, so the count is at least one here.
-        *entry.get_mut() -= 1;
-        if *entry.get() == 0 {
+        entry.get_mut().count -= 1;
+        if entry.get().count == 0 {
             entry.remove();
+        } else if let Some((body, peer)) = &self.source {
+            let owners = entry.get_mut();
+            if owners
+                .source
+                .as_ref()
+                .is_some_and(|(candidate, source)| Weak::ptr_eq(body, candidate) && peer == source)
+            {
+                owners.source = owners.other_sources.pop();
+            } else {
+                let index = owners
+                    .other_sources
+                    .iter()
+                    .position(|(candidate, source)| Weak::ptr_eq(body, candidate) && peer == source)
+                    .expect("every served body stays registered until its guard drops");
+                owners.other_sources.swap_remove(index);
+            }
         }
     }
 }
@@ -508,7 +600,7 @@ where
 
         let task = tokio::spawn(
             async move {
-                let _ownership = ownership;
+                let mut ownership = ownership;
                 // Download the block.
                 // Prefer the cancel handle if both are ready.
                 let download_start = std::time::Instant::now();
@@ -543,6 +635,7 @@ where
                 } else {
                     unreachable!("wrong response to block request");
                 };
+                ownership.set_source(&block, advertiser_addr);
                 metrics::counter!("sync.downloaded.block.count").increment(1);
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
                     .record(download_start.elapsed().as_secs_f64());
@@ -663,7 +756,7 @@ where
                     metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
 
                     // The body is rejected, so a slow attribution lookup must not hold up gossip.
-                    drop(_ownership);
+                    drop(ownership);
 
                     // Security: only attribute the drop to the supplying peer when the block's own
                     // parent proves the claimed height wrong.

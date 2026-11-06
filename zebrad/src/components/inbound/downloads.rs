@@ -156,9 +156,8 @@ pub enum DownloadAction {
     /// The block hash was successfully queued for download and verification.
     AddedToQueue,
 
-    /// The block hash is already queued, so this request was ignored.
-    ///
-    /// Another peer has already gossiped the same hash to us.
+    /// The block is already queued or retained locally during verification or commitment,
+    /// so this request was ignored.
     AlreadyQueued,
 
     /// The queue is at capacity, so this request was ignored.
@@ -226,6 +225,10 @@ pub struct Downloads<ZN, ZV, ZS, ZSTip> {
     pending: FuturesUnordered<DownloadHandle>,
     /// Recovery handles are bounded by admitted children; each child can spawn at most one.
     spawned_receiver: mpsc::UnboundedReceiver<DownloadHandle>,
+    /// Authenticated bodies already undergoing local verification.
+    early_blocks: Option<zs::EarlyRelayCache>,
+    /// Validated local submissions waiting for commitment.
+    submitted_blocks: zebra_rpc::SubmittedBlockCache,
 }
 
 #[pin_project::pinned_drop]
@@ -329,6 +332,8 @@ where
             },
             pending: FuturesUnordered::new(),
             spawned_receiver,
+            early_blocks: None,
+            submitted_blocks: Default::default(),
         }
     }
 
@@ -338,6 +343,17 @@ where
         sync_downloads: crate::components::sync::InFlightDownloads,
     ) -> Self {
         self.spawner.sync_downloads = sync_downloads;
+        self
+    }
+
+    /// Reuse authenticated local bodies instead of downloading their echoed advertisements.
+    pub(crate) fn with_cached_blocks(
+        mut self,
+        submitted: zebra_rpc::SubmittedBlockCache,
+        early: Option<zs::EarlyRelayCache>,
+    ) -> Self {
+        self.submitted_blocks = submitted;
+        self.early_blocks = early;
         self
     }
 
@@ -353,6 +369,15 @@ where
         hash: block::Hash,
         advertiser: Option<PeerSocketAddr>,
     ) -> DownloadAction {
+        if self.submitted_blocks.get(&hash).is_some()
+            || self
+                .early_blocks
+                .as_ref()
+                .and_then(|cache| cache.get(&hash))
+                .is_some()
+        {
+            return DownloadAction::AlreadyQueued;
+        }
         let mut admission = self.spawner.admission();
         let queue_len = admission.cancel_handles.len();
         // Queue lengths are at most MAX_INBOUND_CONCURRENCY and are exact when converted to f64.
@@ -489,6 +514,7 @@ where
 
         // The explicit boxed future breaks the recursive task-spawning type dependency.
         let fut: BoxFuture<'static, _> = async move {
+            let mut ownership = ownership;
             // Only children with valid header work fetch their parent. Invalid children are left to
             // the verifier, which retains its error attribution and scoring.
             if let Some(child_work) = child_work {
@@ -539,6 +565,7 @@ where
             } else {
                 unreachable!("wrong response to block request");
             };
+            ownership.set_source(&block, advertiser_addr);
             metrics::counter!("gossip.downloaded.block.count").increment(1);
 
             // # Security & Performance
@@ -710,7 +737,6 @@ where
 
         let task_admission = self.admission.clone();
         let task = tokio::spawn(async move {
-            let _ownership = ownership;
             // Prefer the cancel handle if both are ready.
             let result = tokio::select! {
                 biased;
