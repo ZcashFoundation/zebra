@@ -19,7 +19,7 @@ use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
-        finalized_state::{FinalizedState, ZebraDb},
+        finalized_state::{record_phase, FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
@@ -298,11 +298,13 @@ impl WriteBlockWorkerTask {
             // So if there has been a block commit error,
             // we need to drop all the descendants of that block,
             // until we receive a block at the required next height.
+            let mut phase_timer = Some(Instant::now());
             let next_valid_height = finalized_state
                 .db
                 .finalized_tip_height()
                 .map(|height| (height + 1).expect("committed heights are valid"))
                 .unwrap_or(Height(0));
+            record_phase!(phase_timer, "checkpoint_next_height");
 
             if ordered_block.0.height != next_valid_height {
                 debug!(
@@ -347,7 +349,10 @@ impl WriteBlockWorkerTask {
                 Ok((tip_block, note_commitment_trees)) => {
                     let hash = tip_block.hash;
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+
+                    phase_timer = Some(Instant::now());
                     chain_tip_sender.set_finalized_tip(tip_block);
+                    record_phase!(phase_timer, "checkpoint_tip_update");
                     Ok(hash)
                 }
                 Err(error) => {
