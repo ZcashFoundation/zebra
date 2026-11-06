@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Fixed
+body: Return success from `submitblock` when an identical block commits concurrently during verification, while preserving duplicate results for blocks already known before submission.
+time: 2026-11-06T11:38:36.727863039+01:00
