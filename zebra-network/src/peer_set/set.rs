@@ -333,7 +333,7 @@ where
     inventory_registry: InventoryRegistry,
 
     /// Block advert channels and remote versions for every connected peer, including busy peers.
-    block_advert_senders: watch::Sender<super::AdvertPeers>,
+    block_advert_senders: super::AdvertPeerRegistry,
 
     /// Coalesced discovery wakeups and bounded advert-maintenance completion requests.
     maintenance_waker: Arc<super::PeerSetWaker>,
@@ -519,7 +519,7 @@ where
             queued_find_requests: VecDeque::new(),
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
-            block_advert_senders: watch::channel(HashMap::new()).0,
+            block_advert_senders: super::AdvertPeerRegistry::default(),
             maintenance_waker: Arc::default(),
             maintenance_tx,
             maintenance_rx,
@@ -572,6 +572,7 @@ where
                 },
                 crate::constants::PEERSET_BUFFER_SIZE,
             ),
+            early_relay_recipients: self.block_advert_senders.early_relay_recipients.subscribe(),
         }
     }
 

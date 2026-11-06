@@ -135,6 +135,10 @@ peers receive a compact block when it is smaller than the full block. The receiv
 rebuilds it from its mempool, requests missing transactions once, and falls back to
 the full block if reconstruction fails or times out. It still validates the block
 fully. Other peers retain ordinary full-block relay.
+Without a connected peer that negotiated compact relay, Zebra skips optional
+pre-commit relay authentication and retention. A peer that negotiates after that
+decision can receive the block through ordinary relay once it is committed.
+Required authentication of incoming early-relay blocks is unchanged.
 No more than three peers are selected to send high-bandwidth compact announcements.
 A demoted source retains its slot until the disabling write finishes; a failed
 connection releases its slot without waiting for transport shutdown.

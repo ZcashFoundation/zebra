@@ -42,7 +42,7 @@ use crate::{
     ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
-mod mining_rejection;
+pub(super) mod mining_rejection;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 

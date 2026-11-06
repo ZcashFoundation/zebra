@@ -19,7 +19,7 @@ use crate::{
     ReadStateService, Request, Response,
 };
 
-async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
+pub(in crate::service) async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
     let network = Network::new_regtest(
         ConfiguredActivationHeights {
             canopy: Some(1),
@@ -57,7 +57,11 @@ async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
 /// Uses real Merkle and NU5 authorizing-data commitments, with an optional missing-input failure.
 ///
 /// Higher ranks select later satisfying nonces, giving siblings that differ only by nonce.
-async fn candidate(read: &ReadStateService, missing_input: bool, rank: usize) -> Arc<Block> {
+pub(in crate::service) async fn candidate(
+    read: &ReadStateService,
+    missing_input: bool,
+    rank: usize,
+) -> Arc<Block> {
     let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await.unwrap()
     else {
         panic!("state returns template context");
