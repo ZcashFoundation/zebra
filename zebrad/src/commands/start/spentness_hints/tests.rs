@@ -129,9 +129,11 @@ fn hints_apply_only_to_an_empty_or_incomplete_state() {
 fn legacy_syncer_waits_for_the_hints_task() {
     let _init_guard = zebra_test::init();
 
+    // The longest `auto` download, for the largest artifact, ends before the
+    // fallback (F-346).
     assert!(
         LEGACY_SYNC_HINTS_TIMEOUT
-            > KNOWN_HASH_SUM_TIMEOUT + crate::components::checkpoint_sync::hints::AUTO_TIMEOUT,
+            > KNOWN_HASH_SUM_TIMEOUT + crate::components::checkpoint_sync::hints::MAX_AUTO_TIMEOUT,
         "the fallback fires only if the hints task is stuck"
     );
 
