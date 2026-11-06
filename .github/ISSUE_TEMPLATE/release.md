@@ -116,8 +116,8 @@ Follow the [release process](https://github.com/ZcashFoundation/zebra/blob/main/
 - [ ] Approve the Release workflow (https://github.com/ZcashFoundation/zebra/actions/workflows/release.yml in the `release-...` branch)
 - [ ] Confirm that the Release workflow completed successfully
 - [ ] For an RC, follow the [preview release process](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/release-process.md#preview-releases):
-  keep the version-derived prerelease channel, which the release controller enforces. Production
-  handling of candidates is still open in [#11774](https://github.com/ZcashFoundation/zebra/issues/11774).
+  keep the version-derived prerelease channel, which the release controller enforces.
+  Publishing a prerelease does not deploy it to production.
 - [ ] Confirm the Release binaries workflow completed after the GitHub release or prerelease was published (https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml).
   Publication triggers the workflow for every release and prerelease; promotion does not rerun it.
 - [ ] Post in #communications that the release is done

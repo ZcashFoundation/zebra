@@ -60,9 +60,6 @@ Any other prerelease identifier also marks a release from `next`. Every
 prerelease has signed Linux binaries attached to its GitHub Release and a
 Docker Hub image tagged with its exact version.
 
-Publishing a release candidate still deploys it to production through the
-[GCP deployment workflow][deploy-workflow]; only prereleases from `next` are excluded.
-
 Use the normal Release PR and readiness process for a release candidate:
 
 1. Agree on the candidate's scope and prerelease version. Check that the final
@@ -76,6 +73,13 @@ Use the normal Release PR and readiness process for a release candidate:
    Do not turn an RC-version GitHub prerelease into a stable release by changing
    its channel. The controller derives the channel from the package's SemVer
    suffix and rejects a conflicting existing channel on recovery.
+
+Publishing a GitHub prerelease does not deploy it to production. The
+[GCP deployment workflow][deploy-workflow] handles `release: released` for
+`v`-prefixed tags: stable publication or promotion of a prerelease. The
+[binary workflow][binary-workflow] handles `release: published`, so every
+prerelease still receives Docker images and signed binaries. Manual dispatch
+can target production independently of the release channel.
 
 ### Distribution tags
 

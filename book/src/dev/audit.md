@@ -4,8 +4,8 @@ Complete [release preparation](release-process.md#release-candidate--release-pro
 then fix the audit baseline and scope:
 
 1. Select a [release candidate](release-process.md#preview-releases); record its
-   immutable tag and full commit hash. Review deployment effects before
-   publication: a GitHub prerelease does not isolate production.
+   immutable tag and full commit hash. Publishing a GitHub prerelease does not
+   deploy it to production.
 2. Declare a feature and nonessential-fix freeze for the audited scope. Defer
    unrelated changes until the audit ends. Gate new experimental features with
    [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html)
