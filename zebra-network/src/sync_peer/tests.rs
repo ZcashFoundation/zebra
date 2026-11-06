@@ -97,6 +97,9 @@ pub(super) async fn fixture() -> Fixture {
             serve_block_ranges: true,
             block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
             hashes_permits: crate::peer::v2::connection::global_hashes_permits(),
+            object_source: None,
+            local_services: crate::protocol::external::types::PeerServices::NODE_NETWORK,
+            object_permits: crate::peer::v2::connection::global_object_permits(),
         },
         None,
     );

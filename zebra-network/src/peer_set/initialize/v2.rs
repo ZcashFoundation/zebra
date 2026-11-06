@@ -42,8 +42,8 @@ use crate::{
         v2::{
             addr_relay::AddrRelay,
             connection::{
-                global_block_range_permits, global_hashes_permits, spawn_connection,
-                ConnectionParams,
+                global_block_range_permits, global_hashes_permits, global_object_permits,
+                spawn_connection, ConnectionParams,
             },
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
@@ -151,6 +151,9 @@ where
                 serve_block_ranges: config.v2_serve_block_ranges,
                 block_range_permits: global_block_range_permits(),
                 hashes_permits: global_hashes_permits(),
+                object_source: config.object_source.clone(),
+                local_services: identity.services,
+                object_permits: global_object_permits(),
             },
             endpoint,
             identity,
@@ -265,9 +268,16 @@ where
          {MAX_USER_AGENT_LENGTH} bytes.",
         user_agent.len(),
     );
+    // A node with an object index serves `get-object` requests, so it advertises them: it answers
+    // the objects its index holds, and every other object as not found (draft, "`get-object`").
+    let mut services = PeerServices::NODE_NETWORK;
+    services.set(
+        PeerServices::NODE_SYNC_ARTIFACTS,
+        config.object_source.is_some(),
+    );
     let identity = LocalIdentity {
         user_agent,
-        services: PeerServices::NODE_NETWORK,
+        services,
         relay: true,
     };
 

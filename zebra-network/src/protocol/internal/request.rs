@@ -2,6 +2,7 @@ use std::{collections::HashSet, fmt, sync::Arc};
 
 use zebra_chain::{
     block,
+    state_snapshot::ObjectHash,
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -343,6 +344,50 @@ pub enum Request {
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
 
+    /// Request up to `length` bytes of the content-addressed synchronization artifact `hash`,
+    /// starting at byte `offset`.
+    ///
+    /// This is the version 2 `get-object` request. The peer set routes it only to version 2
+    /// peers that advertise `NODE_SYNC_ARTIFACTS`, and a legacy connection refuses it with
+    /// [`PeerError::V2OnlyRequest`](crate::PeerError::V2OnlyRequest). The requester checks
+    /// `offset` (at most 2^48 − 1) and `length` (at most 32 MiB) against the protocol's bounds
+    /// before sending, and fails a request outside them with
+    /// [`PeerError::RequestOutOfBounds`](crate::PeerError::RequestOutOfBounds), without sending
+    /// it.
+    ///
+    /// A peer that resets the request with `REFUSED` before answering it, because it is busy or
+    /// serves no objects, fails it with
+    /// [`PeerError::RequestRefused`](crate::PeerError::RequestRefused). A refusal is not
+    /// misbehavior, so the caller backs off from the peer without penalty. A
+    /// [`SharedPeerError`](crate::SharedPeerError) shows its inner error only through
+    /// `inner_debug()`, which is exactly `"RequestRefused"` for a refusal: compare the whole
+    /// string, since other errors' text can carry bytes the peer chose.
+    ///
+    /// The request ends within [`REQUEST_TIMEOUT`](crate::constants::REQUEST_TIMEOUT): an answer
+    /// still arriving shortly before then, after its size, ends with the data received so far,
+    /// as a short [`Response::Object`](super::Response::Object). A caller should not wrap the
+    /// request in a shorter timeout, which would discard that data.
+    ///
+    /// The answer's `size` reaches the caller only with the whole answer, so a caller cannot stop
+    /// a range part way when the size differs from the one it expects: it discards the data, at
+    /// most `length` bytes. And the connection checks each answer's form, size and length, but
+    /// not the object's hash: a caller that finds an object that fails its hash has no way to
+    /// close the connection with `MISBEHAVIOR`. Dropping the peer's `Client` closes the
+    /// connection with `NO_ERROR`, and adds nothing to the peer's misbehavior score.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Object`](super::Response::Object), possibly with fewer bytes than
+    /// requested, or [`Response::ObjectNotFound`](super::Response::ObjectNotFound).
+    Object {
+        /// The SHA-256 hash of the object.
+        hash: ObjectHash,
+        /// The byte offset into the object to start at.
+        offset: u64,
+        /// The most bytes wanted.
+        length: u32,
+    },
+
     /// Drive local peer-set maintenance without sending a request to a remote peer.
     ///
     /// The network-owned idle poller routes queued discovery and inventory requests when peers,
@@ -399,6 +444,11 @@ impl fmt::Display for Request {
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::Object {
+                hash,
+                offset,
+                length,
+            } => format!("Object {{ hash: {hash}, offset: {offset}, length: {length} }}"),
             Request::PollPeerSet => "PollPeerSet".to_string(),
         })
     }
@@ -431,6 +481,7 @@ impl Request {
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::Object { .. } => "Object",
             Request::PollPeerSet => "PollPeerSet",
         }
     }

@@ -17,6 +17,7 @@
 pub mod announcement;
 pub mod constants;
 pub mod handshake;
+pub mod object;
 pub mod record;
 pub mod request;
 pub mod response;

@@ -26,13 +26,14 @@ use crate::{
     constants::REQUEST_TIMEOUT,
     peer::v2::{
         connection::{
+            global_object_permits,
             inbound::{
                 block_range::{
                     RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STREAMS_GLOBAL,
                     RANGE_STREAMS_PER_PEER,
                 },
                 global_block_range_permits, global_hashes_permits, serve as serve_request_stream,
-                BlockRangeServing, StreamPermits,
+                BlockRangeServing, ObjectServing, StreamPermits, MAX_OBJECT_STREAMS_PER_PEER,
             },
             Events, Overloads,
         },
@@ -209,6 +210,14 @@ fn spawn_server(
                 None,
                 events.clone(),
                 serving.clone(),
+                ObjectServing {
+                    source: None,
+                    advertised: false,
+                    peer_permits: Arc::new(tokio::sync::Semaphore::new(
+                        MAX_OBJECT_STREAMS_PER_PEER,
+                    )),
+                    global_permits: global_object_permits(),
+                },
             ));
         }
     })

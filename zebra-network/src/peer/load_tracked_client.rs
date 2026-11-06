@@ -12,6 +12,9 @@ use tower::{
     Service,
 };
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
     peer::{Client, ConnectedAddr, ConnectionInfo},
@@ -86,11 +89,21 @@ impl LoadTrackedClient {
     /// snapshot delimiter. They do not answer the legacy address book's
     /// address requests either: version 2 address records are QUIC
     /// endpoints, which the version 2 connection hands to the version 2
-    /// address segment instead. Every other request is served on both
-    /// protocols.
+    /// address segment instead. Object requests need a version 2 connection
+    /// to a peer that advertises `NODE_SYNC_ARTIFACTS`: the legacy protocol
+    /// has no `get-object`, so a legacy peer's bit 4 means something else.
+    /// Every other request is served on both protocols.
     pub fn supports(&self, request: &Request) -> bool {
-        !(matches!(request, Request::MempoolTransactionIds | Request::Peers)
-            && self.connection_info.remote.as_init_record().is_some())
+        let v2 = self.connection_info.remote.as_init_record().is_some();
+        match request {
+            Request::MempoolTransactionIds | Request::Peers => !v2,
+            Request::Object { .. } => {
+                v2 && self
+                    .remote_services()
+                    .contains(PeerServices::NODE_SYNC_ARTIFACTS)
+            }
+            _ => true,
+        }
     }
 
     /// Returns true if this peer connected directly to us from `ip`.
