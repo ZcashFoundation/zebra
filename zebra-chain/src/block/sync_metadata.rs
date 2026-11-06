@@ -4,7 +4,8 @@
 //! The values are *scheduling hints*: a synchronizing node uses them to size
 //! download units before fetching blocks, and IBD-3 uses `txouts` to locate
 //! each block's bits in the spentness-hint bitmap. They are only trusted once
-//! the chunk that carries them matches its pin in the known-hash list.
+//! the chunk that carries them matches its pin
+//! ([`KnownHashListSpec`](crate::parameters::known_hashes::KnownHashListSpec)).
 //!
 //! They are defined here, and encoded here, because the state that produces
 //! them, the network that serves them, and the known-hash pins that
