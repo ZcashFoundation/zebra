@@ -77,7 +77,7 @@ pub(crate) use hashes::global_hashes_permits;
 #[cfg(test)]
 pub(super) use object::{
     record_sent_object_bytes, spawn_object_disk, unreadable, OBJECT_EARLY_FIN_MARGIN,
-    OBJECT_READ_CHUNK,
+    OBJECT_READ_CHUNK, OBJECT_WRITE_STALL,
 };
 pub(super) use object::{
     serve_object, ObjectServing, MAX_OBJECT_STREAMS_GLOBAL, MAX_OBJECT_STREAMS_PER_PEER,

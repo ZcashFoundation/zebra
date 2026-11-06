@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Added
-body: 'Added serving of version 2 `get-object` requests from the synchronization artifacts in `Config::object_source`, for nodes whose `init` services include `NODE_SYNC_ARTIFACTS`: probes and misses are answered from the index, data is streamed in 1 MiB chunks, at most two object streams per peer and eight per node are served at once, and a response that cannot finish before its request deadline is finished early rather than reset.'
+body: 'Added serving of version 2 `get-object` requests from the synchronization artifacts in `Config::object_source`, for nodes whose `init` services include `NODE_SYNC_ARTIFACTS`: probes and misses are answered from the index, data is streamed in 1 MiB chunks, at most two object streams per peer and eight per node are served at once, and a response that cannot finish before its request deadline, or whose chunk write waits more than 5 seconds for a slow reader, is finished early rather than reset.'
 time: 2026-11-06T03:06:01.888146119Z
