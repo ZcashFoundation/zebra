@@ -255,7 +255,7 @@ penalty. `SchedulerConfig` carries these values.
   records because `create_missing_column_families` already creates it. The 32.0.0 major format
   puts snapshot-born databases in `state/v32`, enforcing the compatibility barrier instead of
   relying on operators not to open them with older 30.x builds. The current 33.0.0 format then
-  converts the marker's heights and the other 24 height-dependent column families, including those
+  converts the marker's heights and the other 26 height-dependent column families, including those
   of snapshot-born v32 databases, and places the result in `state/v33`. Startup prefers an existing
   v32 source, with v30, v29, and older registered sources as fallbacks, and runs every intervening
   upgrade. Snapshot-born databases must not be renamed to v32, v30, v29, or any older directory:

@@ -134,8 +134,11 @@ for the operator rollback rules.
 
 ### The v32-to-v33 variable-height migration
 
-Format 33 replaces every fixed three-byte block height in 25 column families with
-a canonical variable-width encoding. Every earlier format, including
+Format 33 replaces every fixed three-byte block height in 27 column families with
+a canonical variable-width encoding, including the `snapshot_base` marker and the
+checkpoint sync families `sync_meta_by_height` (height keys) and
+`spentness_journal` (output location keys). The `spentness_artifact` record keeps
+its fixed four-byte height and is not rewritten. Every earlier format, including
 snapshot-born v32 state, stores fixed-width heights, so the migration sits above
 the v32 snapshot barrier. Format 33 prefers a v32 source, then v30, then older
 registered sources. The upgrade chain applies every intervening format change in
@@ -152,9 +155,15 @@ address-balance merge operator, so pending legacy operands are never decoded by
 the current merge callback. Converted puts hide those older operands, and normal
 v33-or-newer block writes use puts.
 
+The rewrite runs before every other pending upgrade, including older ones such as
+the 29.1 synchronization metadata backfill, so that those migrations read and write
+records with the current codec. The version file still advances in version order.
+
 An interrupted rewrite keeps its checkpoint and pre-v33 version marker, so the
-next start can safely repeat it. The checkpoint is removed only after v33 is
-recorded; a crash between those steps removes it on the next start instead.
+next start can safely repeat it, even if some column families already hold
+converted records. The checkpoint is removed once the rewrite is checked, before
+the remaining upgrades run. A start that finds converted records and no
+checkpoint runs the remaining upgrades without rewriting again.
 RocksDB hard-links existing SST files into the checkpoint, but operators must
 still allow working space for new records, tombstones, and compaction during the
 rewrite. Live and checkpoint RocksDB identities and migration-operation metadata
