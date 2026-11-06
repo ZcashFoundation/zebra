@@ -6,7 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::{ConnectionInfo, PeerSocketAddr};
+use crate::{compact::CompactBlock, ConnectionInfo, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -88,6 +88,35 @@ pub enum Request {
     ///
     /// The inbound service returns [`Response::Blocks`](super::Response::Blocks).
     EarlyBlocksByHash(HashSet<block::Hash>),
+
+    /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
+    ///
+    /// Returns [`super::Response::Nil`] only when a new download was queued. Duplicate hashes,
+    /// exhausted global capacity, and the per-IP cap return errors; no compact body may be retained.
+    AdvertiseCompactBlock(block::Hash, Option<PeerSocketAddr>),
+
+    /// Screens a compact header before retaining its body, without querying the mempool.
+    ///
+    /// Returns [`super::Response::Nil`] only for a valid next-tip candidate. Errors require
+    /// ordinary full-block fallback, not peer punishment.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CheckCompactHeader(Arc<CompactBlock>),
+
+    /// Finds verified mempool candidates for a negotiated compact block.
+    ///
+    /// The inbound service screens the compact shape, proof of work, and current committed-tip
+    /// header context before consulting the mempool.
+    /// Returns [`super::Response::CompactBlockTransactions`].
+    /// Errors mean full-block fallback, not peer punishment or block rejection.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CompactBlockTransactions(Arc<CompactBlock>),
+
+    /// Authenticates a reconstructed body against the current committed tip without caching it.
+    ///
+    /// Returns [`super::Response::Nil`] on success. Errors require full-block fallback and must
+    /// not enter the block rejection cache. Success does not replace normal block verification.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CheckCompactBlock(Arc<block::Block>),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
@@ -310,6 +339,10 @@ impl fmt::Display for Request {
                 format!("EarlyBlocksByHash({})", hashes.len())
             }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
+            Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
+            Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
+            Request::CheckCompactBlock(_) => "CheckCompactBlock".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -347,6 +380,10 @@ impl Request {
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
+            Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
+            Request::CheckCompactHeader(_) => "CheckCompactHeader",
+            Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
+            Request::CheckCompactBlock(_) => "CheckCompactBlock",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",

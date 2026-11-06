@@ -2,4 +2,6 @@
 
 use super::*;
 
+mod compact;
+
 mod vectors;

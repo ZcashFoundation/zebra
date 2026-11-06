@@ -2557,7 +2557,11 @@ where
             | Request::AdvertiseEarlyBlock(_) => {
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
             }
-            Request::EarlyBlocksByHash(_) => {
+            Request::EarlyBlocksByHash(_)
+            | Request::AdvertiseCompactBlock(..)
+            | Request::CheckCompactHeader(_)
+            | Request::CompactBlockTransactions(_)
+            | Request::CheckCompactBlock(_) => {
                 future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 

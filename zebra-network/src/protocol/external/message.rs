@@ -11,7 +11,12 @@ use zebra_chain::{
 
 use crate::{meta_addr::MetaAddr, BoxError};
 
-use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
+use super::{
+    addr::AddrInVersion,
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
+    inv::InventoryHash,
+    types::*,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -199,6 +204,26 @@ pub enum Message {
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#block)
     Block(Arc<Block>),
+
+    /// Provisional compact relay opt-in; requires bilateral early-block-relay consent.
+    SendCompact {
+        /// Whether to push high-bandwidth announcements.
+        high_bandwidth: bool,
+        /// Encoding version; currently only provisional version 1 is supported.
+        version: u64,
+    },
+
+    /// An ordered compact block announcement, including its complete coinbase.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    CompactBlock(Arc<CompactBlock>),
+
+    /// One recovery request for missing transactions from an advertised block.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    GetBlockTransactions(BlockTransactionsRequest),
+
+    /// Complete transactions in the order requested by compact recovery.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    BlockTransactions(BlockTransactions),
 
     /// A `tx` message.
     ///
@@ -517,6 +542,10 @@ impl fmt::Display for Message {
                 block.hash(),
             ),
             Message::Tx(_) => "tx".to_string(),
+            Message::SendCompact { .. }
+            | Message::CompactBlock(_)
+            | Message::GetBlockTransactions(_)
+            | Message::BlockTransactions(_) => self.command().to_string(),
             Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
 
             Message::Mempool => "mempool".to_string(),
@@ -545,6 +574,10 @@ impl Message {
             Message::Headers(_) => "headers",
             Message::GetData(_) => "getdata",
             Message::Block(_) => "block",
+            Message::SendCompact { .. } => "sendcmpct",
+            Message::CompactBlock(_) => "cmpctblock",
+            Message::GetBlockTransactions(_) => "getblocktxn",
+            Message::BlockTransactions(_) => "blocktxn",
             Message::Tx(_) => "tx",
             Message::NotFound(_) => "notfound",
             Message::Mempool => "mempool",
