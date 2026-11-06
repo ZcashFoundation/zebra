@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Decode and hash large submitted blocks in parallel while preserving canonical errors and consumed sizes.
+time: 2026-11-06T15:22:09.42027596+01:00
