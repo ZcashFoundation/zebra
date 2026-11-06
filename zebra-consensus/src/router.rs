@@ -47,7 +47,7 @@ use crate::{
         PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError,
         DEFAULT_PROPOSAL_CACHE_BYTES,
     },
-    checkpoint::{CheckpointVerifier, VerifyCheckpointError},
+    checkpoint::{CheckpointVerifier, CommittedTip, VerifyCheckpointError},
     error::TransactionError,
     primitives::halo2,
     transaction, BoxError, Config,
@@ -406,7 +406,7 @@ pub async fn init_with_limits<S, ReadState, Mempool>(
         oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     >,
     proposal_cache_bytes: usize,
-    checkpoint_tip: Option<watch::Receiver<Option<(Height, block::Hash)>>>,
+    checkpoint_tip: Option<watch::Receiver<Option<CommittedTip>>>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -449,13 +449,14 @@ where
 /// that fast-forwards to blocks committed by another component.
 ///
 /// `checkpoint_tip` carries the state tip the checkpoint sync engine left
-/// when it stopped, as `(height, hash)`: usually a checkpoint, but in the
-/// middle of a checkpoint interval if a commit failed there. When it
-/// changes, the checkpoint verifier resets its progress to it if, and only
-/// if, `height` is above the verifier's current progress and, if `height` is
-/// a checkpoint, `hash` is that checkpoint's hash; any other value is
-/// ignored. The verifier then accepts blocks from `height + 1`, so the
-/// legacy syncer can continue from where the engine stopped.
+/// when it stopped: usually a checkpoint, but in the middle of a checkpoint
+/// interval if a commit failed there. When it changes, the checkpoint
+/// verifier resets its progress to it if, when `height` is a checkpoint,
+/// `hash` is that checkpoint's hash, and if it is the first tip of a new
+/// hand-back or above the verifier's current progress; any other value is
+/// ignored (see [`CommittedTip`]). The verifier then accepts blocks from
+/// `height + 1`, so the legacy syncer can continue from where the engine
+/// stopped.
 ///
 /// With a receiver whose value never changes, this behaves exactly like
 /// [`init`].
@@ -475,7 +476,7 @@ pub async fn init_with_checkpoint_tip<S, ReadState, Mempool>(
     block_mempool: Option<
         oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     >,
-    checkpoint_tip: watch::Receiver<Option<(Height, block::Hash)>>,
+    checkpoint_tip: watch::Receiver<Option<CommittedTip>>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -529,7 +530,7 @@ async fn init_with_preload_handle<S, ReadState, Mempool>(
     >,
     halo2_key_preload_handle: JoinHandle<()>,
     proposal_cache_bytes: usize,
-    checkpoint_tip: Option<watch::Receiver<Option<(Height, block::Hash)>>>,
+    checkpoint_tip: Option<watch::Receiver<Option<CommittedTip>>>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<

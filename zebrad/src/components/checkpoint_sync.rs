@@ -47,6 +47,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{known_hashes::KnownHashListSpec, Network},
 };
+use zebra_consensus::CommittedTip;
 use zebra_network::{types::PeerServices, SyncPeer};
 
 use crate::BoxError;
@@ -124,8 +125,9 @@ pub struct EngineOwnership {
 
     /// Publishes the durable state tip after an engine run, for the
     /// checkpoint verifier's fast-forward. It is a checkpoint unless a commit
-    /// failed mid-interval.
-    pub checkpoint_tip: watch::Sender<Option<(block::Height, block::Hash)>>,
+    /// failed mid-interval. Later, it also publishes commits that landed
+    /// after the hand-back.
+    pub checkpoint_tip: watch::Sender<Option<CommittedTip>>,
 }
 
 /// The fewest checkpoint intervals between the tip and the target for which
@@ -148,7 +150,7 @@ const UNIT_LENGTHS_CAPACITY: usize = 64;
 pub fn ownership_channels() -> (
     EngineOwnership,
     LegacyOwnership,
-    watch::Receiver<Option<(block::Height, block::Hash)>>,
+    watch::Receiver<Option<CommittedTip>>,
 ) {
     let (owner_tx, owner_rx) = watch::channel(SyncOwner::Legacy);
     let (ack_tx, ack_rx) = watch::channel(0);
@@ -340,6 +342,8 @@ where
                 }
             };
 
+            self.catch_up_checkpoint_tip();
+
             let Some(target) = self.claim_target(tip) else {
                 self.wait_idle().await;
                 continue;
@@ -429,10 +433,19 @@ where
             // checkpoint unless a commit failed mid-interval. The legacy
             // syncer downloads from the state tip, so the verifier must
             // resume exactly there, not at the checkpoint below, whose
-            // interval it could never complete.
+            // interval it could never complete. The legacy syncer submits
+            // nothing until it sees the hand-back, so the verifier resets to
+            // this tip even below its progress; a commit that lands later is
+            // republished by `catch_up_checkpoint_tip`.
             let durable = self.latest_chain_tip.best_tip_height_and_hash();
-            if let Some(durable) = durable.filter(|(height, _)| *height > tip) {
-                self.ownership.checkpoint_tip.send_replace(Some(durable));
+            if let Some((height, hash)) = durable.filter(|(height, _)| *height > tip) {
+                self.ownership
+                    .checkpoint_tip
+                    .send_replace(Some(CommittedTip {
+                        height,
+                        hash,
+                        hand_back: Some(generation),
+                    }));
             }
             self.ownership.owner.send_replace(SyncOwner::Legacy);
             info!(
@@ -444,7 +457,8 @@ where
             );
             // Only the last run's blame counts: a peer blamed earlier may
             // have recovered, and the cooldown already limits how often a
-            // run can fail.
+            // run can fail. Blamed peers, including those that refused
+            // ranges, do not count toward the next claim.
             self.blamed = outcome.blamed;
 
             match outcome.exit {
@@ -455,9 +469,57 @@ where
                 EngineExit::TargetReached
                 | EngineExit::TooFewPeers
                 | EngineExit::NoProgress
-                | EngineExit::CommitTimeout => time::sleep(RECLAIM_COOLDOWN).await,
+                | EngineExit::CommitTimeout => self.cool_down().await,
             }
         }
+    }
+
+    /// Waits [`RECLAIM_COOLDOWN`] after a hand-back, keeping the checkpoint
+    /// verifier caught up with the state.
+    async fn cool_down(&mut self) {
+        let until = time::Instant::now() + RECLAIM_COOLDOWN;
+        loop {
+            let now = time::Instant::now();
+            if now >= until {
+                break;
+            }
+            time::sleep((until - now).min(IDLE_POLL_INTERVAL)).await;
+            self.catch_up_checkpoint_tip();
+        }
+    }
+
+    /// Republishes the state tip to the checkpoint verifier if a commit
+    /// landed after the last published tip, while the legacy syncer owns
+    /// block download.
+    ///
+    /// A commit that an engine run timed out on was already queued in the
+    /// state, so it can land after the hand-back. The legacy syncer then
+    /// downloads from the higher state tip, and the verifier must move
+    /// there too, or it waits forever for heights already in the state. The
+    /// verifier applies these tips only above its progress, so the legacy
+    /// syncer's own commits are never rewound.
+    fn catch_up_checkpoint_tip(&self) {
+        if self.generation == 0 {
+            // No run yet: only the legacy syncer has committed.
+            return;
+        }
+        let Some((height, hash)) = self.latest_chain_tip.best_tip_height_and_hash() else {
+            return;
+        };
+        self.ownership.checkpoint_tip.send_if_modified(|published| {
+            let behind = published.is_none_or(|published| height > published.height);
+            if behind {
+                *published = Some(CommittedTip {
+                    height,
+                    hash,
+                    // A hand-back the verifier has not seen yet stays a
+                    // hand-back: the legacy syncer has submitted nothing
+                    // since it.
+                    hand_back: published.and_then(|published| published.hand_back),
+                });
+            }
+            behind
+        });
     }
 
     /// The target to claim for a state at `tip`, if the claim conditions
