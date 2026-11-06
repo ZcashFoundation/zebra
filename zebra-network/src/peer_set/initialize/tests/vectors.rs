@@ -4718,6 +4718,52 @@ async fn v2_dns_reseeds_only_when_short_and_at_most_every_interval() {
     dialer.abort();
 }
 
+/// Addresses that share the address group of a held slot can't be dialled, so they don't count
+/// against a shortage: the DNS seeders are asked, and their address is dialled.
+#[tokio::test(start_paused = true)]
+async fn v2_dns_reseeds_when_candidates_share_a_busy_group() {
+    let _init_guard = zebra_test::init();
+
+    let seed: PeerSocketAddr = "198.51.100.7:8233".parse().unwrap();
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let resolver = {
+        let lookups = lookups.clone();
+        move || {
+            let lookups = lookups.clone();
+            async move {
+                lookups.fetch_add(1, Ordering::SeqCst);
+                vec![seed]
+            }
+        }
+    };
+
+    let harness = discovery_harness(3, 3);
+    let same_group: Vec<PeerSocketAddr> = (1..=4)
+        .map(|host| SocketAddr::new(Ipv4Addr::new(203, 0, host, 1).into(), 8233).into())
+        .collect();
+    relay_to(&harness.book, &same_group);
+    let _ = harness.book.cacheable().await;
+    let (dials_tx, mut dials) = tokio::sync::mpsc::unbounded_channel();
+    let dialer = tokio::spawn(v2::keep_discovered_peers_connected(
+        harness.discovery,
+        |_| None,
+        fake_discovered_dial(dials_tx),
+        resolver,
+    ));
+
+    let held = drain_fake_dials(&mut dials).await;
+    let dialled: Vec<PeerSocketAddr> = held.iter().map(|(addr, _)| *addr).collect();
+    assert_eq!(
+        dialled.len(),
+        2,
+        "one address in the group, and the seed: {dialled:?}"
+    );
+    assert!(same_group.contains(&dialled[0]));
+    assert_eq!(dialled[1], seed);
+    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    dialer.abort();
+}
+
 /// On Regtest, node C, configured with only node B, learns node A from B's `get-addr` answer,
 /// because B dialled A, and connects to A over version 2.
 #[tokio::test]
