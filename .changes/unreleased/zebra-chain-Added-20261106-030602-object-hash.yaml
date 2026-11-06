@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'Added the `state_snapshot` module with `ObjectHash`, the SHA-256 hash of a content-addressed synchronization artifact served by version 2 `get-object` requests.'
+time: 2026-11-06T03:06:02.894103198Z
