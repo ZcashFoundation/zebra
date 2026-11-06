@@ -820,6 +820,12 @@ fn empty_requests_and_stream_type_handling() {
             "{stream_type} is not served"
         );
 
+        // `get-hashes` has a request format, so it decodes (see `tests::hashes`), but the
+        // stream's owner refuses it before reading a body while it has no body bound.
+        if stream_type == StreamType::GetHashes {
+            continue;
+        }
+
         // The handshake and announcement types never carry a request, and a request type this
         // node does not serve is refused by the stream's owner before anything is decoded.
         assert_err!(
