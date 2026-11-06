@@ -698,7 +698,7 @@ where
         let received_time = Instant::now();
 
         let mut state_service = self.state_service.clone();
-        let mut transaction_verifier = self.transaction_verifier.clone();
+        let transaction_verifier_service = self.transaction_verifier.clone();
         let network = self.network.clone();
         let proposals = self.proposals.clone();
         let blocking_checks = self.blocking_checks.clone();
@@ -720,6 +720,7 @@ where
             let mut pending_authentication = None;
             let mut rejection_candidate = None;
             let result = async {
+            let transaction_verifier = transaction_verifier_service;
             let phase_start = Instant::now();
             let hash = block.hash();
             // Check that this block is actually a new block.
@@ -1066,18 +1067,24 @@ where
                     // Adapted from zakura-core/zakura#417
                     // (https://github.com/zakura-core/zakura/pull/417).
                 }
-                let rsp = transaction_verifier
-                    .ready()
-                    .await
-                    .expect("transaction verifier is always ready")
-                    .call(tx::BlockRequest {
-                        transaction_hash,
-                        transaction: transaction.clone(),
-                        known_utxos: known_utxos.clone(),
-                        height,
-                        time: block.header.time,
-                    });
-                async_checks.push(rsp);
+                let mut transaction_verifier = transaction_verifier.clone();
+                let request = tx::BlockRequest {
+                    transaction_hash,
+                    transaction: transaction.clone(),
+                    known_utxos: known_utxos.clone(),
+                    height,
+                    time: block.header.time,
+                };
+                async_checks.push(async move {
+                    // Dispatch and poll verification together, with bounded executor occupancy.
+                    tokio::task::consume_budget().await;
+                    transaction_verifier
+                        .ready()
+                        .await
+                        .expect("transaction verifier is always ready")
+                        .call(request)
+                        .await
+                });
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 

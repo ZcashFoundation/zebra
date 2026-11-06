@@ -1,4 +1,15 @@
 project: zebra-state
 kind: Added
-body: 'Added early-relay admission with `EarlyRelayCache::{get, subscribe}`, `EarlyRelayGuard::{is_rejected, reject}`, and `ReadRequest::EarlyRelayCache` with its matching response ([#12288](https://github.com/ZcashFoundation/zebra/pull/12288)). `EarlyRelayOrigin` and `EarlyRelayCache::get_with_origin` distinguish local submissions from peer-supplied bodies ([#12301](https://github.com/ZcashFoundation/zebra/pull/12301)). `EarlyRelayCache::set_recipients` lets optional publication follow negotiated peer demand without disabling required authentication ([#12317](https://github.com/ZcashFoundation/zebra/pull/12317)).'
+body: >-
+  Added early-relay admission with `EarlyRelayCache::{get, subscribe}`,
+  `EarlyRelayGuard::{is_rejected, reject}`, and `ReadRequest::EarlyRelayCache` with its
+  matching response ([#12288](https://github.com/ZcashFoundation/zebra/pull/12288)).
+  `EarlyRelayOrigin` and `EarlyRelayCache::get_with_origin` distinguish local submissions
+  from peer-supplied bodies ([#12301](https://github.com/ZcashFoundation/zebra/pull/12301)).
+  `EarlyRelayCache::set_recipients` lets optional publication follow negotiated peer demand
+  without disabling required authentication
+  ([#12317](https://github.com/ZcashFoundation/zebra/pull/12317)).
+  Reservations follow committed-tip changes synchronously; obsolete publication or cleanup
+  cannot replace newer retained work
+  ([#12318](https://github.com/ZcashFoundation/zebra/pull/12318)).
 time: 2026-11-05T06:31:40.807737088+01:00

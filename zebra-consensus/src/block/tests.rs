@@ -28,6 +28,7 @@ use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
 mod decoded_size;
+mod dispatch;
 mod early_relay;
 mod inline_checks;
 mod nu7;

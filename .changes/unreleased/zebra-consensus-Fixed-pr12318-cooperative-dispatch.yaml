@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Dispatch block transaction checks cooperatively so verifier readiness and verification futures advance together ([#12318](https://github.com/ZcashFoundation/zebra/pull/12318)).
+time: 2026-11-06T18:01:28+01:00

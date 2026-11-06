@@ -40,6 +40,13 @@ struct Entry {
     context: WatchReceiver<NonFinalizedState>,
 }
 
+#[derive(Debug)]
+struct Reservation {
+    parent: block::Hash,
+    deadline: tokio::time::Instant,
+    alive: watch::Receiver<()>,
+}
+
 /// Internal cache ownership does not enable publication; only external subscriptions do.
 #[derive(Debug)]
 pub(super) struct EarlyRelayState {
@@ -47,7 +54,7 @@ pub(super) struct EarlyRelayState {
     /// Publication and withdrawal replace this value atomically, without a lock.
     entry: watch::Sender<Option<Entry>>,
     changes: watch::Sender<Option<block::Hash>>,
-    slot: Arc<Semaphore>,
+    reservation: watch::Sender<Option<Reservation>>,
     computation: Arc<Semaphore>,
     rejection_computation: Arc<Semaphore>,
     recipients: OnceLock<watch::Receiver<bool>>,
@@ -59,7 +66,7 @@ impl EarlyRelayState {
             snapshot,
             entry: watch::Sender::new(None),
             changes: watch::Sender::new(None),
-            slot: Arc::new(Semaphore::new(1)),
+            reservation: watch::Sender::new(None),
             computation: Arc::new(Semaphore::new(1)),
             rejection_computation: Arc::new(Semaphore::new(1)),
             recipients: OnceLock::new(),
@@ -131,6 +138,45 @@ impl EarlyRelayState {
         });
     }
 
+    /// Notify only while this publication still owns the retained body.
+    ///
+    /// The borrow excludes withdrawal until the notification is sent.
+    fn notify_published(&self, hash: block::Hash, alive: &watch::Receiver<()>) {
+        let entry = self.entry.borrow();
+        if entry.as_ref().is_some_and(|entry| {
+            entry.alive.same_channel(alive) && !entry.context.has_changed().unwrap_or(true)
+        }) {
+            self.changes.send_replace(Some(hash));
+        }
+    }
+
+    /// Store a reserved body only while its admission and authenticated context are current.
+    fn publish_reserved(&self, entry: Entry) -> bool {
+        let mut reservation = self.reservation.subscribe();
+        // Capture the token and watch version together, without holding this borrow over mutation.
+        let owns_reservation = reservation
+            .borrow_and_update()
+            .as_ref()
+            .is_some_and(|reserved| {
+                reserved.parent == entry.block.header.previous_block_hash
+                    && reserved.deadline == entry.deadline
+                    && reserved.alive.same_channel(&entry.alive)
+            });
+        if !owns_reservation {
+            return false;
+        }
+        self.entry.send_if_modified(|current| {
+            if tokio::time::Instant::now() >= entry.deadline
+                || reservation.has_changed().unwrap_or(true)
+                || entry.context.has_changed().unwrap_or(true)
+            {
+                return false;
+            }
+            *current = Some(entry);
+            true
+        })
+    }
+
     fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
         if self.changes.receiver_count() == 0
             || !self.has_recipients()
@@ -141,58 +187,67 @@ impl EarlyRelayState {
         {
             return;
         }
-        let Ok(permit) = self.slot.clone().try_acquire_owned() else {
-            return;
-        };
         let hash = block.hash();
         let parent = block.header.previous_block_hash;
         let alive = guard.alive.subscribe();
         let deadline = tokio::time::Instant::now() + LIFETIME;
+        // Admission must follow the committed snapshot synchronously, rather than wait for
+        // the old cleanup task to observe a tip change and release a semaphore permit.
         if !self.allows_early_relay(hash) {
             return;
         }
-        let stored = self.entry.send_if_modified(|entry| {
-            if entry.is_some() {
+        let reserved = self.reservation.send_if_modified(|reservation| {
+            if guard.context.has_changed().unwrap_or(true)
+                || reservation.as_ref().is_some_and(|reservation| {
+                    reservation.parent == parent
+                        && tokio::time::Instant::now() < reservation.deadline
+                })
+            {
                 return false;
             }
-            *entry = Some(Entry {
-                block,
-                origin: guard.origin,
-                hash,
-                alive: alive.clone(),
+            *reservation = Some(Reservation {
+                parent,
                 deadline,
-                context: guard.context.clone(),
+                alive: alive.clone(),
             });
             true
         });
-        if !stored {
+        if !reserved {
             return;
         }
-
+        self.publish_reserved(Entry {
+            block,
+            origin: guard.origin,
+            hash,
+            alive: alive.clone(),
+            deadline,
+            context: guard.context.clone(),
+        });
         // Recheck after storing without nesting the rejection and cache locks. Notifications
         // remain hints: serving checks rejection again, including a concurrent withdrawal.
         if !self.allows_early_relay(hash) {
             self.withdraw(Some(hash));
-            return;
         }
-        self.changes.send_replace(Some(hash));
+        self.notify_published(hash, &alive);
         let state = self.clone();
         tokio::spawn(async move {
-            let _permit = permit;
             let mut alive = alive;
             let mut snapshot = state.snapshot.clone();
             snapshot.mark_as_seen();
-            while state.best_tip_hash() == Some(parent) {
+            let withdrawn = loop {
+                if state.best_tip_hash() != Some(parent) {
+                    break false;
+                }
                 tokio::select! {
-                    _ = alive.changed() => break,
-                    _ = tokio::time::sleep_until(deadline) => break,
+                    _ = alive.changed() => break true,
+                    _ = tokio::time::sleep_until(deadline) => break false,
                     result = snapshot.changed() => {
                         if result.is_err() {
-                            break;
+                            break false;
                         }
                     }
                 }
-            }
+            };
             state.entry.send_if_modified(|entry| {
                 if entry
                     .as_ref()
@@ -204,9 +259,9 @@ impl EarlyRelayState {
                 }
                 false
             });
-            // A rejected body must not buy repeated fanout with the same proof of work.
-            // Keep the permit, but not the body, until the deadline or a new committed tip.
-            while state.best_tip_hash() == Some(parent) {
+            // Only withdrawal keeps replay admission reserved. A tip change observed above
+            // releases it even if that parent returns while entry cleanup waits for its lock.
+            while withdrawn && state.best_tip_hash() == Some(parent) {
                 tokio::select! {
                     _ = tokio::time::sleep_until(deadline) => break,
                     result = snapshot.changed() => {
@@ -216,6 +271,16 @@ impl EarlyRelayState {
                     }
                 }
             }
+            state.reservation.send_if_modified(|reservation| {
+                if reservation
+                    .as_ref()
+                    .is_some_and(|reservation| reservation.alive.same_channel(&alive))
+                {
+                    *reservation = None;
+                    return true;
+                }
+                false
+            });
         });
     }
 }
