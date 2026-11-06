@@ -78,6 +78,7 @@ fn new_test_connection<A>() -> (
         connected_addr: ConnectedAddr::Isolated,
         remote,
         negotiated_version: fake_version,
+        early_block_relay: false,
     };
 
     let connection = Connection::new(
