@@ -218,8 +218,8 @@ impl DiskFormatUpgrade for Upgrade {
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        let source =
-            open_source(db).expect("the fixed-width checkpoint must be readable during its migration");
+        let source = open_source(db)
+            .expect("the fixed-width checkpoint must be readable during its migration");
         let live = db.disk_db().inner();
 
         for family in AFFECTED_FAMILIES {
