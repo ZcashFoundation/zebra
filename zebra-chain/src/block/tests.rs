@@ -10,4 +10,6 @@ mod preallocate;
 #[cfg(test)]
 mod prop;
 #[cfg(test)]
+mod sync_metadata;
+#[cfg(test)]
 mod vectors;

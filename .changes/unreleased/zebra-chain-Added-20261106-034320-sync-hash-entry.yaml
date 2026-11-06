@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `block::SyncHashEntry`, the per-block entry of a version 2 `get-hashes` response, with `SyncHashEntry::for_block` and its canonical encoding (`sync_metadata::{write_sync_hashes_body, read_sync_hashes_body, read_sync_hash_entries}`).
+time: 2026-11-06T03:43:20.000000000Z
