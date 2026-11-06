@@ -315,7 +315,18 @@ pub struct SemanticallyVerifiedBlock {
 pub struct CheckpointVerifiedBlock {
     verified: SemanticallyVerifiedBlock,
     auth_data_root: Option<AuthDataRoot>,
+    commit_aids: Option<Arc<CommitAids>>,
 }
+
+/// Per-block data a sync engine attaches to a [`CheckpointVerifiedBlock`] so
+/// the finalized writer can skip work.
+///
+/// Always absent for now. The verified tree
+/// roots PR adds `tree_roots`, adopted per pool and per block only after the
+/// following header verifies (zips#1346 S:265-280).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CommitAids {}
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -724,6 +735,19 @@ impl CheckpointVerifiedBlock {
     pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
         self.auth_data_root
     }
+
+    /// Attaches commit aids. No caller sets them yet: the verified tree
+    /// roots change is the first.
+    pub fn with_commit_aids(mut self, aids: Arc<CommitAids>) -> Self {
+        self.commit_aids = Some(aids);
+        self
+    }
+
+    /// The attached commit aids, if any; the finalized writer ignores them
+    /// until the roots PR.
+    pub fn commit_aids(&self) -> Option<&Arc<CommitAids>> {
+        self.commit_aids.as_ref()
+    }
 }
 
 impl SemanticallyVerifiedBlock {
@@ -757,6 +781,7 @@ impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
         Self {
             verified,
             auth_data_root: None,
+            commit_aids: None,
         }
     }
 }
