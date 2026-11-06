@@ -23,7 +23,7 @@ an unmodified payout processor works with Zallet.
 ### Pruned history
 
 Archive operation remains the default. See [pruned mining nodes](pruning.md) for configuration,
-retention, format-30 upgrades, monitoring, and recovery. Enabling pruning immediately removes
+retention, format-32 upgrades, monitoring, and recovery. Enabling pruning immediately removes
 `NODE_NETWORK` from peer advertisements and rejects zcashd sidecars, even before deletion.
 
 For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`

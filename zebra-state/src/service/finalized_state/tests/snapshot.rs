@@ -70,7 +70,7 @@ fn snapshot_marker_sets_the_history_capabilities() {
 }
 
 #[test]
-fn snapshot_databases_are_isolated_from_30_0_readers() {
+fn snapshot_databases_are_isolated_from_31_0_readers() {
     use crate::{
         constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
         service::finalized_state::{
@@ -94,7 +94,7 @@ fn snapshot_databases_are_isolated_from_30_0_readers() {
     drop(state);
 
     let config = config(cache.path().to_path_buf(), Some(RETENTION));
-    let mut old_version = semver::Version::new(30, 0, 0);
+    let mut old_version = semver::Version::new(31, 0, 0);
     old_version.build = snapshot_version.build.clone();
     let old_columns = || {
         STATE_COLUMN_FAMILIES_IN_CODE
@@ -139,17 +139,17 @@ fn snapshot_databases_are_isolated_from_30_0_readers() {
         Some(snapshot_version),
         "the old open must not downgrade the snapshot version"
     );
-    assert_eq!(old_tip, None, "30.0 must not read the snapshot chain");
+    assert_eq!(old_tip, None, "31.0 must not read the snapshot chain");
     assert_ne!(
         old_path, snapshot_path,
-        "30.0 must not open the snapshot database directory"
+        "31.0 must not open the snapshot database directory"
     );
     assert_eq!(current.tip(), snapshot_tip);
     assert_eq!(current.snapshot_base(), Some(base));
 }
 
 #[test]
-fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
+fn snapshot_31_1_database_moves_to_v32_without_record_changes() {
     use std::time::{Duration, Instant};
 
     use crate::{
@@ -174,15 +174,15 @@ fn snapshot_30_1_database_moves_to_v32_without_record_changes() {
 
     let network = network();
     let config = config(cache.path().to_path_buf(), Some(RETENTION));
-    let legacy_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 31, &network);
     std::fs::create_dir_all(legacy_path.parent().unwrap()).unwrap();
     std::fs::rename(current_path, &legacy_path).unwrap();
-    let mut legacy_version = semver::Version::new(30, 1, 0);
+    let mut legacy_version = semver::Version::new(31, 1, 0);
     legacy_version.build = state_database_format_version_in_code().build;
     write_database_format_version_to_disk(
         &config,
         STATE_DATABASE_KIND,
-        30,
+        31,
         &legacy_version,
         &network,
     )

@@ -1525,7 +1525,7 @@ impl DiskDb {
             // one with a column family that is not on disk. A database without one of the
             // column families in code needs a writable start to add it, except `snapshot_base`:
             // its reader treats a missing column family as an unmarked database, which every
-            // database from before 30.1.0 is.
+            // database from before 31.1.0 is.
             if let Some(missing) = column_families_in_code
                 .iter()
                 .find(|cf| !column_families_on_disk.contains(cf) && cf.as_str() != SNAPSHOT_BASE)

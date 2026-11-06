@@ -233,7 +233,7 @@ fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
     assert!(!new_path.parent().unwrap().exists());
 }
 
-/// A read-only start reads an older-major database from before 30.1.0 in place, although that
+/// A read-only start reads an older-major database from before 31.1.0 in place, although that
 /// database has no `snapshot_base` column family and a secondary instance can not create one.
 #[test]
 fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
@@ -255,7 +255,7 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
         ..Config::default()
     };
     let network = Network::Mainnet;
-    let disk_version = Version::new(30, 0, 0);
+    let disk_version = Version::new(31, 0, 0);
     let running_version = Version::new(32, 0, 0);
     let in_code = || {
         STATE_COLUMN_FAMILIES_IN_CODE
@@ -273,7 +273,7 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
     )
     .unwrap();
     drop(db);
-    write_database_format_version_to_disk(&config, "state", 30, &disk_version, &network).unwrap();
+    write_database_format_version_to_disk(&config, "state", 31, &disk_version, &network).unwrap();
 
     let result = ZebraDb::new(
         &config,
@@ -285,7 +285,7 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
         true,
     );
     if can_read_without_migration(&disk_version, &running_version) {
-        let db = result.expect("a compatible 30.0.0 database opens read-only");
+        let db = result.expect("a compatible 31.0.0 database opens read-only");
         assert_eq!(db.snapshot_base(), None);
     } else {
         // A later record migration makes the source need a writable start first.
@@ -295,7 +295,7 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
         ));
     }
     assert!(!config.db_path("state", 32, &network).exists());
-    assert!(DiskDb::list_cf_at(&config, 30, &network)
+    assert!(DiskDb::list_cf_at(&config, 31, &network)
         .iter()
         .all(|cf| cf != SNAPSHOT_BASE));
 }

@@ -6,7 +6,7 @@ body: >-
   minimum. Invalid retention returns
   `StateInitError::InvalidPruningRetention`; opening pruned state with a different spending-index
   mode returns `StateInitError::PrunedIndexModeMismatch` before writes are allowed. State format
-  v30 reuses compatible v29 archives by moving their network directory without a resync. Keep a
+  v31 reuses compatible v30 and v29 archives by moving their network directory without a resync. Keep a
   separate archive backup for rollback:
   older binaries cannot use the new directory, and disabling old-database cleanup does not prevent
   the move. After pruning, archive writes require an archive snapshot or full resync.

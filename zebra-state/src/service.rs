@@ -1399,6 +1399,14 @@ impl ReadStateService {
         finalized_state::has_incomplete_spentness_hints(&self.db)
     }
 
+    /// Returns the SHA-256 of the spentness artifact that the state's
+    /// incomplete hinted sync was started with, or `None` if there is no
+    /// incomplete hinted sync, or its record cannot be read. Only that artifact
+    /// resumes it, even after a release pins a different one.
+    pub fn incomplete_spentness_commitment(&self) -> Option<[u8; 32]> {
+        finalized_state::incomplete_spentness_commitment(&self.db)
+    }
+
     /// Logs rocksdb metrics using the read only state service.
     pub fn log_db_metrics(&self) {
         self.db.print_db_metrics();
@@ -2633,8 +2641,11 @@ impl Service<ReadRequest> for ReadStateService {
 /// spentness hints below their terminal height.
 ///
 /// `spentness` delivers the verified artifact once `zebrad` has one; see
-/// [`SpentnessHintsReceiver`] for when the writer adopts it. A sender that
-/// never sends, or sends `None`, gives exactly [`init`]'s behaviour.
+/// [`SpentnessHintsReceiver`] for when the writer adopts it. Until the sender
+/// sends an artifact or is dropped, block 1 of an empty state, and the first
+/// block of an incomplete hinted sync, wait in the writer, whichever path
+/// submitted them. A sender dropped without sending gives [`init`]'s
+/// behaviour.
 ///
 /// The artifact cannot be a plain argument (the design's
 /// `Option<VerifiedArtifact>`): `zebrad` initializes the state before the

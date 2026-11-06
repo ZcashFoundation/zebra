@@ -131,20 +131,22 @@ fn format_upgrades(
         // Adds the `sync_meta_by_height` column family, which new blocks write at commit time,
         // and backfills it for existing blocks.
         Box::new(add_sync_metadata::Upgrade),
-        // The spentness hint column families are created empty when the database is opened.
+        // The spentness hint column families are created empty when the database is opened. This
+        // is a reusable major upgrade: v29 state moves to v30 without a resync, and 29.x readers,
+        // which cannot handle a partial hinted state's missing UTXOs, never open a v30 directory.
         Box::new(no_migration::NoMigration::new(
             "add spentness hint column families",
-            Version::new(29, 2, 0),
+            Version::new(30, 0, 0),
         )),
         // The major directory isolates body deletion from older archive readers.
         Box::new(no_migration::NoMigration::new(
             "isolate pruned state from archive readers",
-            Version::new(30, 0, 0),
+            Version::new(31, 0, 0),
         )),
         // Opening the database creates the empty snapshot base column family.
         Box::new(no_migration::NoMigration::new(
             "add the state snapshot base marker",
-            Version::new(30, 1, 0),
+            Version::new(31, 1, 0),
         )),
         // The major directory prevents older readers from opening and downgrading snapshot state.
         Box::new(no_migration::NoMigration::new(
@@ -169,9 +171,9 @@ pub fn restorable_db_versions() -> Vec<u64> {
 
 /// Returns source directory majors for a reusable database upgrade, newest first.
 ///
-/// Sources need not include `running_major - 1`. Consequently v32 prefers v30 until the
-/// independent v31 record migration is registered, then prefers v31. Older registered sources
-/// remain fallbacks, and every intervening migration still runs in version order.
+/// Sources need not include `running_major - 1`, although with the current registry v32 prefers
+/// v31, then v30. Older registered sources remain fallbacks, and every intervening migration
+/// still runs in version order.
 pub fn restorable_db_source_versions(running_major: u64) -> Vec<u64> {
     if !restorable_db_versions().contains(&running_major) {
         return Vec::new();
@@ -1058,11 +1060,12 @@ fn format_upgrades_are_in_version_order() {
 #[test]
 fn reusable_source_follows_the_registered_upgrade_chain() {
     assert_eq!(restorable_db_source_versions(30).first(), Some(&29));
+    assert_eq!(restorable_db_source_versions(31).first(), Some(&30));
     let sources = restorable_db_source_versions(32);
-    assert_eq!(sources.first(), Some(&30));
-    assert!(sources.contains(&29), "older caches remain reusable");
+    assert_eq!(sources.first(), Some(&31));
     assert!(
-        restorable_db_source_versions(31).is_empty(),
-        "v31 is registered by the independent variable-height migration"
+        sources.contains(&30),
+        "the spentness format remains reusable"
     );
+    assert!(sources.contains(&29), "older caches remain reusable");
 }
