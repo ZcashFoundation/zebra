@@ -121,7 +121,12 @@ fn format_upgrades(
         // Adds the `sync_meta_by_height` column family, which new blocks write at commit time,
         // and backfills it for existing blocks.
         Box::new(add_sync_metadata::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 8])
+        // The spentness hint column families are created empty when the database is opened.
+        Box::new(no_migration::NoMigration::new(
+            "add spentness hint column families",
+            Version::new(29, 2, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 9])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

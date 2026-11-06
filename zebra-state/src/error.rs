@@ -16,7 +16,9 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
+use crate::{
+    constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock, SpentnessError,
+};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -237,6 +239,25 @@ impl CommitCheckpointVerifiedError {
     pub fn inner(&self) -> &CommitBlockError {
         &self.0
     }
+
+    /// Returns the spentness-hint defect that failed the commit, if any.
+    ///
+    /// These failures are local and fatal: retrying the block repeats them.
+    pub fn spentness_failure(&self) -> Option<&SpentnessError> {
+        match &self.0 {
+            CommitBlockError::ValidateContextError(error) => match error.as_ref() {
+                ValidateContextError::Spentness(error) => Some(error),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+impl From<SpentnessError> for CommitCheckpointVerifiedError {
+    fn from(error: SpentnessError) -> Self {
+        ValidateContextError::Spentness(error).into()
+    }
 }
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
@@ -357,6 +378,10 @@ impl From<RecvError> for AwaitUtxoError {
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    /// Applying spentness hints found an artifact defect. Peers are not blamed.
+    #[error(transparent)]
+    Spentness(#[from] SpentnessError),
+
     #[error("block hash {block_hash} was previously invalidated")]
     #[non_exhaustive]
     BlockPreviouslyInvalidated { block_hash: block::Hash },
