@@ -32,7 +32,9 @@ use crate::{
                     serve as serve_request_stream, INBOUND_REQUEST_CONCURRENCY,
                     MAX_LOOKUP_CALLS_PER_RESPONSE, RESPONSE_BYTES_LIMIT,
                 },
-                outbound::{drive, RequestContext, RequestSend, MAX_OUTBOUND_REQUEST_STREAMS},
+                outbound::{
+                    drive, RequestContext, RequestSend, ResponseGuard, MAX_OUTBOUND_REQUEST_STREAMS,
+                },
                 spawn_connection, ConnectionParams, Event, Events, Overloads, EVENT_QUEUE,
                 MAX_UNKNOWN_HANDSHAKE_RECORDS,
             },
@@ -3454,6 +3456,62 @@ async fn connection_closing_events_are_never_crowded_out() {
     );
 }
 
+/// A request task aborted before it first runs still answers its client:
+/// the connection task wraps the sender in its guard before spawning, so
+/// dropping the unstarted task reports the connection as dropped instead of
+/// dropping an unanswered sender, which panics.
+#[tokio::test]
+async fn request_task_aborted_before_it_runs_answers_the_client() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (node_connection, _raw_connection, _e1, _e2) = connected_pair(&network).await;
+        let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(8);
+        let (events, _fatal_rx, _events_rx) = Events::channel();
+        let request = Request::Peers;
+
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let tx = MustUseClientResponseSender::new(tx, &request, None, None);
+        let permits = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = permits.clone().try_acquire_owned().expect("a free permit");
+        let context = RequestContext {
+            connection: node_connection.clone(),
+            transient_addr: None,
+            genesis_hash: network.genesis_hash(),
+            misbehavior: MisbehaviorScores::spawn(misbehavior_tx, 8),
+            events,
+        };
+
+        // The test runtime is single-threaded, so the task cannot run before it is aborted.
+        let mut tasks = JoinSet::new();
+        tasks.spawn(drive(request, ResponseGuard::new(tx), permit, context));
+        tasks.abort_all();
+        let joined = tasks.join_next().await.expect("one task was spawned");
+        assert!(
+            joined.as_ref().is_err_and(|error| error.is_cancelled()),
+            "the task is cancelled without panicking: {joined:?}"
+        );
+
+        let error = rx
+            .await
+            .expect("the client is answered")
+            .expect_err("an aborted request fails");
+        assert!(
+            error.inner_debug().contains("ConnectionDropped"),
+            "got {}",
+            error.inner_debug()
+        );
+        assert_eq!(
+            permits.available_permits(),
+            1,
+            "the aborted task releases its permit"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// A violation this node detects in a response, including the close that
 /// bans the peer at the ban threshold, reaches the connection task through
 /// the connection-closing queue however many best-effort events are waiting,
@@ -3534,7 +3592,10 @@ async fn response_violations_are_never_crowded_out() {
                 events,
             };
             let (driven, ()) = tokio::join!(
-                tokio::time::timeout(SHORT_WAIT * 4, drive(request, tx, permit, context)),
+                tokio::time::timeout(
+                    SHORT_WAIT * 4,
+                    drive(request, ResponseGuard::new(tx), permit, context)
+                ),
                 async {
                     let (_, mut send, _recv) = accept_request(&raw_connection).await;
                     let _ = send.write_all(&reply).await;

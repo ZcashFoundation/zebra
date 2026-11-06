@@ -72,9 +72,17 @@ const _: () = assert!(MAX_OUTBOUND_REQUEST_STREAMS < MIN_BIDIRECTIONAL_STREAMS a
 
 /// Answers the client exactly once, even if the driving task is cancelled
 /// before it finishes: a dropped guard reports the connection as dropped.
-struct ResponseGuard(Option<MustUseClientResponseSender>);
+///
+/// The connection task wraps the sender before it spawns [`drive`], so a task
+/// aborted before it first runs still answers the client.
+pub(super) struct ResponseGuard(Option<MustUseClientResponseSender>);
 
 impl ResponseGuard {
+    /// Returns a guard that answers the client through `tx`.
+    pub(super) fn new(tx: MustUseClientResponseSender) -> Self {
+        Self(Some(tx))
+    }
+
     /// Answers the client.
     fn send(mut self, response: Result<Response, SharedPeerError>) {
         if let Some(tx) = self.0.take() {
@@ -125,7 +133,7 @@ pub(super) struct RequestContext {
 /// Banning").
 pub(super) async fn drive(
     request: Request,
-    tx: MustUseClientResponseSender,
+    mut guard: ResponseGuard,
     permit: OwnedSemaphorePermit,
     context: RequestContext,
 ) {
@@ -136,7 +144,6 @@ pub(super) async fn drive(
         misbehavior,
         events,
     } = context;
-    let mut guard = ResponseGuard(Some(tx));
     let command = request.command();
     let work = tokio::time::timeout(
         REQUEST_TIMEOUT,
