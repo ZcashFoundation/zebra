@@ -513,6 +513,50 @@ fn cacheable_entries_are_the_ones_that_answered() {
     );
 }
 
+/// A peer this node connected to whose own init didn't advertise serving the chain is not cached,
+/// as it isn't redialled while the node runs either.
+#[test]
+fn cacheable_skips_connected_peers_without_node_network() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let (serving, not_serving) = (addr_in(1, 1), addr_in(2, 1));
+    relay(&mut book, &[serving, not_serving]);
+    make_tried(&mut book, serving);
+    book.change(MetaAddr::new_reconnect(not_serving), Instant::now());
+    book.change(
+        MetaAddr::new_connected(
+            not_serving,
+            &PeerServices::empty(),
+            false,
+            String::new(),
+            crate::protocol::external::types::Version(170_140),
+            zebra_chain::block::Height(0),
+        ),
+        Instant::now(),
+    );
+    book.change(MetaAddr::new_responded(not_serving, None), Instant::now());
+
+    assert_eq!(
+        addrs_of(book.cacheable(chrono::Utc::now())),
+        [serving].into(),
+        "a peer that doesn't serve the chain is not cached",
+    );
+
+    let after_delay = crate::constants::MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1);
+    for _ in 0..20 {
+        let candidate = book
+            .next_candidate_at(
+                &HashSet::new(),
+                &HashSet::new(),
+                Instant::now() + after_delay,
+                chrono::Utc::now() + after_delay,
+            )
+            .map(|candidate| candidate.addr);
+        assert_ne!(candidate, Some(not_serving), "it isn't redialled either");
+    }
+}
+
 #[test]
 fn get_addr_sample_serves_tried_relayed_and_own_addresses_only() {
     let _init_guard = zebra_test::init();
