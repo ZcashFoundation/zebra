@@ -2057,6 +2057,64 @@ async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
     );
 }
 
+/// Early relay wraps a negotiated body's later failure. A body failure under the wrapper must be
+/// re-requested like an unwrapped one, without cancelling the sync round.
+#[tokio::test]
+async fn early_relay_body_failure_requeues_hash_without_restart() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x2B; 32]);
+    let body_error = || Box::new(VerifyBlockError::Transaction(TransactionError::BadBalance));
+    for wrapped in [
+        VerifyBlockError::EarlyRelayUnavailable(body_error()),
+        VerifyBlockError::EarlyRelay(body_error()),
+    ] {
+        chain_sync
+            .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block {
+                    source: Box::new(wrapped),
+                },
+                height: block::Height(44),
+                hash,
+                advertiser_addr: None,
+            }))
+            .expect("an early-relay body failure must not restart the syncer");
+        assert!(
+            chain_sync.reobtain_hashes.shift_remove(&hash),
+            "a body failure doesn't invalidate the hash, so it must be re-requested"
+        );
+    }
+}
+
+/// Failed early-relay authentication and replays of rejected hashes are block failures, so a peer
+/// can't use them to cancel the sync round.
+#[tokio::test]
+async fn early_relay_admission_failure_does_not_restart_sync() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let hash = block::Hash::from([0x3C; 32]);
+    for error in [
+        VerifyBlockError::EarlyRelayAdmission(zs::ValidateContextError::InvalidBlockCommitment(
+            block::CommitmentError::InvalidChainHistoryRoot {
+                expected: [1; 32],
+                actual: [2; 32],
+            },
+        )),
+        VerifyBlockError::EarlyRelayRejected,
+    ] {
+        chain_sync
+            .handle_block_response(Err(BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block {
+                    source: Box::new(error),
+                },
+                height: block::Height(45),
+                hash,
+                advertiser_addr: None,
+            }))
+            .expect("an early-relay admission failure must not restart the syncer");
+    }
+}
+
 /// A block body that doesn't match its header must score the serving peer and re-request the
 /// hash, without cancelling the sync round, whichever component found the mismatch.
 ///

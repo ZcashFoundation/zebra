@@ -58,7 +58,7 @@ use hedge::SuccessHedge;
 
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
-pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
+pub use gossip::{gossip_best_tip_block_hashes, gossip_early_blocks, BlockGossipError};
 pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
@@ -1847,7 +1847,7 @@ where
                     | zs::ValidateContextError::HistoryTreeError(_)
             )
         };
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1865,6 +1865,12 @@ where
                 _ => return false,
             },
         };
+        // Early-relay wrappers keep the verifier's own failure.
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block {
                 source: BlockError::Other(_),
@@ -1884,7 +1890,10 @@ where
             VerifyBlockError::Block { .. }
             | VerifyBlockError::Equihash { .. }
             | VerifyBlockError::Time(_)
-            | VerifyBlockError::Subsidy(_) => true,
+            | VerifyBlockError::Subsidy(_)
+            // Failed early-relay authentication, or a hash that already failed verification.
+            | VerifyBlockError::EarlyRelayAdmission(_)
+            | VerifyBlockError::EarlyRelayRejected => true,
             VerifyBlockError::Commit(error) => invalid_commit(error),
             _ => false,
         }
@@ -1895,7 +1904,7 @@ where
         if !Self::is_block_validation_error(error) {
             return false;
         }
-        let error = match error {
+        let mut error = match error {
             RouterError::Block { source } => source.as_ref(),
             RouterError::Checkpoint { source } => match source.as_ref() {
                 VerifyCheckpointError::VerifyBlock(error) => error,
@@ -1903,6 +1912,11 @@ where
                 _ => return false,
             },
         };
+        while let VerifyBlockError::EarlyRelay(source)
+        | VerifyBlockError::EarlyRelayUnavailable(source) = error
+        {
+            error = source.as_ref();
+        }
         match error {
             VerifyBlockError::Block { source } => !matches!(
                 source,

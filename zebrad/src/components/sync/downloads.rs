@@ -458,7 +458,9 @@ where
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
+                let early_relay = matches!(rsp, zn::Response::EarlyBlocks(_));
+                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+                    | zn::Response::EarlyBlocks(blocks) = rsp {
                     assert_eq!(
                         blocks.len(),
                         1,
@@ -681,9 +683,14 @@ where
 
                 // Verify the block.
                 let verify_start = std::time::Instant::now();
+                let request = if early_relay {
+                    zebra_consensus::Request::CommitEarlyRelay(block)
+                } else {
+                    zebra_consensus::Request::Commit(block)
+                };
                 let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(zebra_consensus::Request::Commit(block)).boxed();
+                    .call(request).boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");

@@ -14,6 +14,38 @@ use proptest_derive::Arbitrary;
 
 use InventoryResponse::*;
 
+/// Revocable permission to serve a particular immutable block snapshot.
+///
+/// Check immediately before starting the local write, after waiting for sink readiness.
+#[derive(Clone)]
+pub struct BlockAuthorization(Arc<dyn Fn(&Arc<Block>) -> bool + Send + Sync>);
+
+impl BlockAuthorization {
+    /// Creates a live authorization check without transferring validation authority to the network.
+    pub fn new(check: impl Fn(&Arc<Block>) -> bool + Send + Sync + 'static) -> Self {
+        Self(Arc::new(check))
+    }
+
+    /// Returns whether this exact body may still be sent.
+    pub fn is_authorized(&self, block: &Arc<Block>) -> bool {
+        (self.0)(block)
+    }
+}
+
+impl fmt::Debug for BlockAuthorization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockAuthorization").finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for BlockAuthorization {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for BlockAuthorization {}
+
 /// A response to a network request, represented in internal format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
@@ -74,6 +106,25 @@ pub enum Response {
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
     Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// Blocks downloaded from a connection that bilaterally negotiated experimental early relay.
+    ///
+    /// All block responses on such connections carry this provenance, even for committed blocks.
+    /// The source address is unchanged. This is not evidence of validity: receivers authenticate
+    /// the header and body before exempting later validation failures from punishment.
+    /// Inbound handlers return [`Self::Blocks`] or [`Self::AuthorizedBlocks`], not this variant.
+    EarlyBlocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
+
+    /// Inbound block responses containing uncommitted bodies with revocable serving permission.
+    ///
+    /// Unlike [`Self::EarlyBlocks`], this is never returned by an outbound download.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    AuthorizedBlocks {
+        /// Found bodies and missing hashes, as in [`Self::Blocks`].
+        blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>,
+        /// Rechecked separately for each body immediately before its local write begins.
+        authorization: BlockAuthorization,
+    },
+
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
@@ -99,7 +150,11 @@ impl fmt::Display for Response {
             Response::TransactionIds(ids) => format!("TransactionIds {{ ids: {} }}", ids.len()),
 
             // Display heights for single-block responses (which Zebra requests and expects)
-            Response::Blocks(blocks) if blocks.len() == 1 => {
+            Response::Blocks(blocks)
+            | Response::EarlyBlocks(blocks)
+            | Response::AuthorizedBlocks { blocks, .. }
+                if blocks.len() == 1 =>
+            {
                 match blocks.first().expect("len is 1") {
                     Available((block, _)) => format!(
                         "Block {{ height: {}, hash: {} }}",
@@ -113,7 +168,9 @@ impl fmt::Display for Response {
                     Missing(hash) => format!("Block {{ missing: {hash} }}"),
                 }
             }
-            Response::Blocks(blocks) => format!(
+            Response::Blocks(blocks)
+            | Response::EarlyBlocks(blocks)
+            | Response::AuthorizedBlocks { blocks, .. } => format!(
                 "Blocks {{ blocks: {}, missing: {} }}",
                 blocks.iter().filter(|r| r.is_available()).count(),
                 blocks.iter().filter(|r| r.is_missing()).count()
@@ -143,13 +200,18 @@ impl Response {
             Response::TransactionIds(_) => "TransactionIds",
 
             Response::Blocks(_) => "Blocks",
+            Response::EarlyBlocks(_) => "EarlyBlocks",
+            Response::AuthorizedBlocks { .. } => "AuthorizedBlocks",
             Response::Transactions(_) => "Transactions",
         }
     }
 
     /// Returns true if the response is a block or transaction inventory download.
     pub fn is_inventory_download(&self) -> bool {
-        matches!(self, Response::Blocks(_) | Response::Transactions(_))
+        matches!(
+            self,
+            Response::Blocks(_) | Response::EarlyBlocks(_) | Response::Transactions(_)
+        )
     }
 
     /// Returns true if self is the [`Response::Nil`] variant.

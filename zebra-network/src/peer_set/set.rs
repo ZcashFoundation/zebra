@@ -1031,6 +1031,7 @@ where
                             (
                                 svc.remote_version(),
                                 is_sidecar,
+                                svc.connection_info().early_block_relay,
                                 svc.block_advert_tx.clone(),
                             ),
                         );
@@ -1790,7 +1791,7 @@ where
                     // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
                     (!missing).then_some(InvOutcome::Failed)
                 }
-                Ok(Response::Blocks(blocks))
+                Ok(Response::Blocks(blocks) | Response::EarlyBlocks(blocks))
                     if (advertised || is_repeat)
                         && blocks.iter().any(|block| block.available().is_some()) =>
                 {
@@ -2469,7 +2470,7 @@ where
                 self.block_advert_senders
                     .borrow()
                     .iter()
-                    .any(|(addr, (version, _, sender))| {
+                    .any(|(addr, (version, _, _, sender))| {
                         *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
                     })
             })
@@ -2551,8 +2552,13 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlockToAll(_) | Request::AdvertiseBlock(_, _) => {
+            Request::AdvertiseBlockToAll(_)
+            | Request::AdvertiseBlock(_, _)
+            | Request::AdvertiseEarlyBlock(_) => {
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
+            }
+            Request::EarlyBlocksByHash(_) => {
+                future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 
             // Broadcasts that must always reach the configured zcashd-compat sidecar peers

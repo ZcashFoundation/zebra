@@ -1051,6 +1051,46 @@ async fn served_block_without_advertisement_keeps_advertiser_preference() {
     finish_download(&mut handles[1], request, response, download).await;
 }
 
+/// An early-relay connection answers block downloads with early blocks, which are recorded like
+/// ordinary blocks from an advertiser.
+#[tokio::test(start_paused = true)]
+async fn early_block_response_from_advertiser_is_recorded() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK]);
+    let (_, inventory, response) = block_download();
+    let (InventoryHash::Block(hash), Response::Blocks(blocks)) = (inventory, response) else {
+        unreachable!("the helper constructs a block download");
+    };
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    peer_set.ready().await.expect("the peer is ready");
+
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peer is ready")
+        .call(request);
+    answer_request(&mut handles, Ok(Response::EarlyBlocks(blocks)))
+        .expect("the advertiser received the request");
+    download.await.expect("the advertiser returned the block");
+    peer_set.ready().await.expect("the peer is ready");
+
+    assert_eq!(
+        peer_set
+            .inventory_registry
+            .served_peers(inventory)
+            .collect::<Vec<_>>(),
+        vec![&addrs[0]],
+    );
+}
+
 /// Regression test for GHSA-g9rc-89v4-hhvf: repeat requests that are in flight at the same time
 /// take turns too, so one of them reaches an honest advertiser.
 ///
