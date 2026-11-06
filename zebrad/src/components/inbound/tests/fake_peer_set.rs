@@ -1969,6 +1969,309 @@ async fn gossiped_block_genuinely_behind_tip_does_not_score_serving_peer() -> Re
     Ok(())
 }
 
+/// Exercise compact admission and independent sync at the downloader boundary.
+///
+/// The peer set supplies `Blocks`, as a negotiated compact connection would after
+/// reconstruction. This is not a compact wire-protocol test: header screening and body
+/// authentication are covered separately by `compact_reconstruction_screening_and_authentication`.
+#[tokio::test]
+async fn compact_and_sync_share_verification_and_recover_owner() -> Result<(), BoxError> {
+    use futures::StreamExt;
+
+    use crate::components::sync::{Downloads, SHARED_VERIFY_TIMEOUT};
+
+    #[derive(Clone, Copy, Debug)]
+    enum Owner {
+        Successful,
+        Stalled,
+        Failed,
+        Cancelled,
+        Unserved,
+        DistinctBody,
+        MismatchedAuthorization,
+    }
+
+    let _init_guard = zebra_test::init();
+    for owner in [
+        Owner::Successful,
+        Owner::Stalled,
+        Owner::Failed,
+        Owner::Cancelled,
+        Owner::Unserved,
+        Owner::DistinctBody,
+        Owner::MismatchedAuthorization,
+    ] {
+        timeout(Duration::from_secs(10), async {
+            let (state, read, tip, _tip_changes) =
+                zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height::MAX, 0).await;
+            let state = Buffer::new(state, 10);
+            let prefix: [&[u8]; 2] = [
+                &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES,
+                &zebra_test::vectors::BLOCK_MAINNET_1_BYTES,
+            ];
+            for bytes in prefix {
+                let block: Arc<Block> = bytes.zcash_deserialize_into()?;
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                        block.into(),
+                    ))
+                    .await?;
+            }
+            let block: Arc<Block> =
+                zebra_test::vectors::BLOCK_MAINNET_2_BYTES.zcash_deserialize_into()?;
+            let hash = block.hash();
+            let mut peers = MockService::build().for_unit_tests();
+            let network = Buffer::new(BoxService::new(peers.clone()), 10);
+            let find_blocks = Request::FindBlocks {
+                known_blocks: vec![block.header.previous_block_hash],
+                stop: None,
+            };
+            let discovery = tokio::spawn(network.clone().oneshot(find_blocks.clone()));
+            let pending_discovery = peers.expect_request(find_blocks).await;
+            let mut verifier = MockService::build().for_unit_tests();
+            let buffered_verifier: SemanticBlockVerifierStub =
+                Buffer::new(BoxService::new(verifier.clone()), 10);
+            // The sync downloader boxes router errors, just like its production service stack.
+            let sync_verifier = buffered_verifier.clone().map_err(BoxError::from);
+            let (past_limit, _past_limit_rx) = tokio::sync::watch::channel(false);
+            let mut sync = Downloads::new(
+                network.clone(),
+                sync_verifier,
+                read,
+                tip.clone(),
+                past_limit,
+                MAX_INBOUND_CONCURRENCY,
+                Height(1),
+            );
+            let mempool: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+                MockService::build().for_unit_tests();
+            let (setup_tx, setup_rx) = oneshot::channel();
+            let (misbehavior_sender, mut misbehavior_rx) = tokio::sync::mpsc::channel(10);
+            setup_tx
+                .send(InboundSetupData {
+                    network: Mainnet,
+                    sync_downloads: sync.in_flight_hashes(),
+                    address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                        "0.0.0.0:0".parse().unwrap(),
+                        &Mainnet,
+                        DEFAULT_MAX_CONNS_PER_IP,
+                        Span::none(),
+                    ))),
+                    block_download_peer_set: network,
+                    block_verifier: buffered_verifier,
+                    mempool: Buffer::new(BoxService::new(mempool), 1),
+                    state: state.clone(),
+                    latest_chain_tip: tip,
+                    misbehavior_sender,
+                })
+                .map_err(|_| "inbound setup receiver remains open")?;
+            let mut inbound = Some(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
+            let advertiser: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
+            assert_eq!(
+                inbound
+                    .as_mut()
+                    .unwrap()
+                    .ready()
+                    .await?
+                    .call(Request::AdvertiseCompactBlock(hash, Some(advertiser)))
+                    .await?,
+                Response::Nil,
+            );
+            let mut compact_download = Some(
+                peers
+                    .expect_request(Request::BlockDownload {
+                        hash,
+                        advertiser: Some(advertiser),
+                    })
+                    .await,
+            );
+            let mut first = if matches!(owner, Owner::Unserved) {
+                None
+            } else {
+                compact_download
+                    .take()
+                    .unwrap()
+                    .respond(Response::Blocks(vec![Available((
+                        block.clone(),
+                        Some(advertiser),
+                    ))]));
+                Some(
+                    verifier
+                        .expect_request(zebra_consensus::Request::Commit(block.clone()))
+                        .await,
+                )
+            };
+
+            // A settled connection can complete its outstanding discovery with the same
+            // compact tip child already admitted through gossip.
+            pending_discovery.respond(Response::BlockHashes(vec![hash]));
+            let discovered = discovery.await??;
+            assert_eq!(discovered, Response::BlockHashes(vec![hash]));
+            // Sync must still make an independent download while compact verification owns
+            // the hash. Only the exact downloaded body, not the advertisement, permits sharing.
+            sync.download_and_verify(hash).await?;
+            let sync_body = match owner {
+                Owner::DistinctBody => Arc::new((*block).clone()),
+                Owner::MismatchedAuthorization => {
+                    // An altered body can retain the header hash. It must reach its own
+                    // verifier, never inherit the honest body's successful commitment.
+                    let donor: Block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+                        .zcash_deserialize_into()?;
+                    let mut forged = (*block).clone();
+                    forged.transactions.push(
+                        donor
+                            .transactions
+                            .iter()
+                            .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+                            .unwrap()
+                            .clone(),
+                    );
+                    assert_eq!(forged.hash(), hash);
+                    assert_ne!(forged.auth_data_root(), block.auth_data_root());
+                    Arc::new(forged)
+                }
+                _ => block.clone(),
+            };
+            peers
+                .expect_request(Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                })
+                .await
+                .respond(Response::Blocks(vec![Available((
+                    sync_body.clone(),
+                    Some(advertiser),
+                ))]));
+
+            if !matches!(
+                owner,
+                Owner::DistinctBody | Owner::Unserved | Owner::MismatchedAuthorization
+            ) {
+                // Assert one verifier invocation while the owner is still pending, not just
+                // a final count after the first verifier has already completed.
+                verifier.expect_no_requests().await;
+            }
+            match owner {
+                Owner::Successful => {
+                    state
+                        .clone()
+                        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                            block.clone().into(),
+                        ))
+                        .await?;
+                    first.take().unwrap().respond(hash);
+                }
+                Owner::Failed => first.take().unwrap().respond_error(RouterError::Block {
+                    source: Box::new(VerifyBlockError::ValidateProposal(
+                        "local owner failure must not prevent sync recovery".into(),
+                    )),
+                }),
+                Owner::Cancelled => {
+                    drop(inbound.take());
+                }
+                Owner::MismatchedAuthorization => {
+                    let independent = timeout(
+                        SHARED_VERIFY_TIMEOUT / 2,
+                        verifier
+                            .expect_request(zebra_consensus::Request::Commit(sync_body.clone())),
+                    )
+                    .await
+                    .expect("different authorizing data must never wait on the honest owner");
+                    independent.respond_error(invalid_gossiped_block_router_error());
+                    assert!(sync.next().await.unwrap().is_err());
+                    state
+                        .clone()
+                        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                            block.clone().into(),
+                        ))
+                        .await?;
+                    first.take().unwrap().respond(hash);
+                }
+                Owner::Stalled | Owner::DistinctBody | Owner::Unserved => {
+                    // Keep the original verifier invocation alive through sync commitment.
+                    // An advertisement without a body, or a different allocation, must
+                    // reach the verifier without consuming the shared-owner wait.
+                    let wait_bound = if matches!(owner, Owner::Stalled) {
+                        SHARED_VERIFY_TIMEOUT + Duration::from_secs(2)
+                    } else {
+                        SHARED_VERIFY_TIMEOUT / 2
+                    };
+                    let second = timeout(
+                        wait_bound,
+                        verifier
+                            .expect_request(zebra_consensus::Request::Commit(sync_body.clone())),
+                    )
+                    .await
+                    .expect("sync must take over a stalled or independently allocated body");
+                    state
+                        .clone()
+                        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                            block.clone().into(),
+                        ))
+                        .await?;
+                    second.respond(hash);
+                    assert_eq!(sync.next().await.unwrap()?, (Height(2), hash));
+                    if let Some(first) = first.take() {
+                        first.respond(hash);
+                    }
+                }
+            }
+            if matches!(owner, Owner::Failed | Owner::Cancelled) {
+                let second = timeout(
+                    SHARED_VERIFY_TIMEOUT / 2,
+                    verifier.expect_request(zebra_consensus::Request::Commit(sync_body)),
+                )
+                .await
+                .expect("failed or cancelled ownership must release sync promptly");
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                        block.clone().into(),
+                    ))
+                    .await?;
+                second.respond(hash);
+            }
+            if !matches!(
+                owner,
+                Owner::Stalled
+                    | Owner::DistinctBody
+                    | Owner::Unserved
+                    | Owner::MismatchedAuthorization
+            ) {
+                assert_eq!(sync.next().await.unwrap()?, (Height(2), hash));
+            }
+            // A cancelled mock request still needs its sender consumed without panicking
+            // the mock service; sending after cancellation is harmless.
+            if let Some(first) = first {
+                first.respond(hash);
+            }
+            if let Some(download) = compact_download {
+                download.respond_error("the compact advertiser never supplied its body".into());
+            }
+            assert!(matches!(
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::KnownBlock(hash))
+                    .await?,
+                zebra_state::Response::KnownBlock(Some(_))
+            ));
+            if let Some(inbound) = &mut inbound {
+                assert!(poll_for_misbehavior_report(inbound, &mut misbehavior_rx)
+                    .await
+                    .is_none());
+            }
+            // Completion must not enqueue a deferred second verification.
+            verifier.expect_no_requests().await;
+            peers.expect_no_requests().await;
+            Ok::<_, BoxError>(())
+        })
+        .await
+        .unwrap_or_else(|_| panic!("compact/sync owner scenario timed out: {owner:?}"))?;
+    }
+    Ok(())
+}
+
 /// Compact reconstruction screens before a single witnessed-ID snapshot and never publishes bodies.
 #[tokio::test(flavor = "multi_thread")]
 async fn compact_reconstruction_screening_and_authentication() -> Result<(), BoxError> {
