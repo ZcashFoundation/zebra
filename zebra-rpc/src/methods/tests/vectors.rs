@@ -3486,9 +3486,8 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     mempool.expect_no_requests().await;
 }
 
-/// Checks that `getblocktemplate` answers from the template precomputed by the block template
-/// updater task after validating the state tip, without reading the mempool, and that it never
-/// answers with a template for a stale chain tip.
+/// Checks that `getblocktemplate` answers from the updater's cache after validating the state tip,
+/// even when the bounded mempool freshness query stalls, and never answers for a stale tip.
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate_precomputed() {
     let _init_guard = zebra_test::init();
@@ -3589,12 +3588,18 @@ async fn getblocktemplate_precomputed() {
         let mempool_responder = tokio::spawn(async move {
             loop {
                 mempool
-                    .expect_request(mempool::Request::FullTransactions)
+                    .expect_request_that(|_| true)
                     .await
-                    .respond(mempool::Response::FullTransactions {
-                        transactions: vec![],
-                        transaction_dependencies: Default::default(),
-                        last_seen_tip_hash: tip_hash,
+                    .respond_with(move |request| match request {
+                        mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                            transactions: vec![],
+                            transaction_dependencies: Default::default(),
+                            last_seen_tip_hash: tip_hash,
+                        },
+                        mempool::Request::TransactionIds => {
+                            mempool::Response::TransactionIds(Default::default())
+                        }
+                        other => panic!("unexpected mempool request: {other:?}"),
                     });
             }
         });
@@ -3629,15 +3634,15 @@ async fn getblocktemplate_precomputed() {
     .await
     .expect("the updater task should precompute a template for the chain tip");
 
-    // The RPC validates the tip against the state, then must answer from the precomputed template:
-    // the mempool never responds again, so selecting transactions for a fresh template would block
-    // forever. An aborted responder can still claim a request until it stops, so wait for it.
+    // Without a mempool responder, freshness checking must time out and serve cached work.
+    // Selecting transactions for a foreground template would block indefinitely instead.
+    // An aborted responder can still claim a request until it stops, so wait for it.
     mempool_responder.abort();
     let _ = mempool_responder.await;
 
     let template = tokio::time::timeout(Duration::from_secs(1), rpc.get_block_template(None))
         .await
-        .expect("getblocktemplate should answer without reading the mempool")
+        .expect("getblocktemplate should bound its mempool freshness query")
         .expect("getblocktemplate should succeed")
         .try_into_template()
         .expect("getblocktemplate without parameters should return a template");
@@ -3683,10 +3688,7 @@ async fn getblocktemplate_precomputed() {
 /// Checks that a long polling client waits, instead of being handed a template immediately on
 /// every call.
 ///
-/// Long polling has to be decided against one source. Answering from the precomputed cache while
-/// falling through to a fresh state and mempool read derives two independent long poll IDs that
-/// never match each other, so a client alternates between them, every call returns at once, and
-/// the miner's work is cancelled each time.
+/// Publications with unchanged work must not release a parked long poll or spin its wait loop.
 #[tokio::test(flavor = "multi_thread")]
 async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     let _init_guard = zebra_test::init();
@@ -3790,58 +3792,23 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         }
     });
 
-    // A transaction the mempool only reports once the test asks it to.
-    //
-    // The precomputed template is built before that, so afterwards a fresh mempool read derives a
-    // different long poll ID than the cached template's. That disagreement is what a fall-through
-    // turns into an immediate answer, and it is the whole point of this test: with an empty
-    // mempool both sources agree and nothing is exercised.
-    let tx = Arc::new(Transaction::test_v1(
-        vec![],
-        vec![],
-        transaction::LockTime::unlocked(),
-    ));
-    let unmined_tx = UnminedTx {
-        transaction: tx.clone(),
-        id: tx.unmined_id(),
-        size: tx.zcash_serialized_size(),
-        conventional_fee: 0.try_into().unwrap(),
-    };
-    let mempool_tx = VerifiedUnminedTx {
-        conventional_actions: zip317::conventional_actions(&unmined_tx.transaction),
-        transaction: unmined_tx,
-        miner_fee: 0.try_into().unwrap(),
-        legacy_sigop_count: 0,
-        p2sh_sigop_count: 0,
-        unpaid_actions: 0,
-        fee_weight_ratio: 1.0,
-        time: None,
-        height: None,
-        spent_outputs: Arc::new(vec![]),
-    };
-
-    let mempool_has_tx = Arc::new(AtomicBool::new(false));
-
-    // A mempool that keeps answering, so a fall-through to the synchronous path would succeed and
-    // return a competing template rather than blocking this test.
     let mempool_responder = tokio::spawn({
         let mut mempool = mempool.clone();
-        let mempool_has_tx = mempool_has_tx.clone();
         async move {
             loop {
-                let transactions = if mempool_has_tx.load(Ordering::SeqCst) {
-                    vec![mempool_tx.clone()]
-                } else {
-                    vec![]
-                };
-
                 mempool
-                    .expect_request(mempool::Request::FullTransactions)
+                    .expect_request_that(|_| true)
                     .await
-                    .respond(mempool::Response::FullTransactions {
-                        transactions,
-                        transaction_dependencies: Default::default(),
-                        last_seen_tip_hash: tip_hash,
+                    .respond_with(move |request| match request {
+                        mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                            transactions: vec![],
+                            transaction_dependencies: Default::default(),
+                            last_seen_tip_hash: tip_hash,
+                        },
+                        mempool::Request::TransactionIds => {
+                            mempool::Response::TransactionIds(Default::default())
+                        }
+                        other => panic!("unexpected mempool request: {other:?}"),
                     });
             }
         }
@@ -3878,13 +3845,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         .try_into_template()
         .expect("getblocktemplate without parameters should return a template");
 
-    // From here a fresh mempool read disagrees with the cached template, while the cache keeps
-    // serving the template the client already has.
-    mempool_has_tx.store(true, Ordering::SeqCst);
-
-    // Long polling on the template this client just received: the cache still holds it, so the
-    // call has to wait. The chain tip is fixed and `max_time` is over a minute away, so returning
-    // at all within this window means it answered from a second, disagreeing ID source.
+    // Membership is unchanged, so demand refresh cannot release a poll for the current work.
     let long_poll = tokio::spawn({
         let rpc = rpc.clone();
         let long_poll_id = template.long_poll_id;
@@ -3900,8 +3861,9 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         }
     });
 
-    // A client alternating between two ID sources gets its answer in milliseconds, so these
-    // windows only have to outlast that.
+    // An unchanged publication must wake the poll without answering it.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    template_cache.publish(template.clone());
     tokio::time::sleep(Duration::from_millis(250)).await;
     let tip_reads_settled = tip_reads.load(Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(250)).await;
@@ -3927,7 +3889,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     updater.abort();
 }
 
-/// Rejections do not delay idle arrivals; a burst yields one throttled follow-up for parked miners.
+/// Demand refresh wakes ordinary and long polls, stays bounded, and preserves event-driven pacing.
 #[tokio::test(start_paused = true)]
 async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     let _init_guard = zebra_test::init();
@@ -3978,12 +3940,16 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     let full_reads = Arc::new(AtomicUsize::new(0));
     let id_reads = Arc::new(AtomicUsize::new(0));
     let ids_read = Arc::new(tokio::sync::Notify::new());
+    let stall_build = Arc::new(AtomicBool::new(false));
     let mempool = tower::service_fn({
         let full_reads = full_reads.clone();
         let id_reads = id_reads.clone();
         let ids_read = ids_read.clone();
+        let stall_build = stall_build.clone();
         move |request| {
-            std::future::ready(Ok::<_, BoxError>(match request {
+            let stall = matches!(request, mempool::Request::FullTransactions)
+                && stall_build.load(Ordering::SeqCst);
+            let response = match request {
                 mempool::Request::TransactionIds => {
                     id_reads.fetch_add(1, Ordering::SeqCst);
                     ids_read.notify_one();
@@ -4004,7 +3970,13 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
                     }
                 }
                 other => panic!("unexpected mempool request: {other:?}"),
-            }))
+            };
+            async move {
+                if stall {
+                    std::future::pending::<()>().await;
+                }
+                Ok::<_, BoxError>(response)
+            }
         }
     });
     let (tip, tip_sender) = MockChainTip::new();
@@ -4066,6 +4038,16 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         "long poll is parked"
     );
     let reads_before = full_reads.load(Ordering::SeqCst);
+    let unchanged = rpc
+        .get_block_template(None)
+        .await
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(unchanged.long_poll_id, initial.long_poll_id);
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before);
+    ids_read.notified().await;
+    let id_reads_before = id_reads.load(Ordering::SeqCst);
     events
         .send(mempool::MempoolChange::invalidated(
             [added_id].into_iter().collect(),
@@ -4086,20 +4068,19 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before);
     assert_eq!(
         id_reads.load(Ordering::SeqCst),
-        1,
+        id_reads_before + 1,
         "rejection reads are throttled"
     );
 
     let start = tokio::time::Instant::now();
     pool_tx.send_replace(transactions[..2].to_vec());
-    events
-        .send(mempool::MempoolChange::added(
-            [added_id].into_iter().collect(),
-        ))
-        .unwrap();
+    // No event is sent: an ordinary mining request must wake the same updater on demand.
+    let demand = rpc.get_block_template(None);
+    tokio::pin!(demand);
+    assert!(futures::poll!(&mut demand).is_pending());
     let updated = tokio::time::timeout(Duration::from_millis(1), waiting)
         .await
-        .expect("an isolated insertion must publish without waiting for a timer")
+        .expect("mining demand must publish without waiting for a timer or event")
         .unwrap()
         .try_into_template()
         .unwrap();
@@ -4110,6 +4091,13 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
         .any(|tx| tx.hash == added_id.mined_id()));
     assert_ne!(updated.long_poll_id, initial.long_poll_id);
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
+    let demanded = tokio::time::timeout(precompute::DEMAND_REFRESH_TIMEOUT, demand)
+        .await
+        .expect("ordinary demand returns fresh work within the bound")
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(demanded.long_poll_id, updated.long_poll_id);
 
     let follow_up = rpc.get_block_template(Some(GetBlockTemplateParameters {
         long_poll_id: Some(updated.long_poll_id),
@@ -4146,6 +4134,41 @@ async fn getblocktemplate_long_poll_returns_on_mempool_change() {
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
     tokio::time::advance(precompute::MEMPOOL_THROTTLE).await;
     assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
+
+    // A newly arriving long poll performs the same freshness check before parking.
+    pool_tx.send_replace(transactions[..121].to_vec());
+    let started = tokio::time::Instant::now();
+    let refreshed = tokio::time::timeout(
+        precompute::DEMAND_REFRESH_TIMEOUT,
+        rpc.get_block_template(Some(GetBlockTemplateParameters {
+            long_poll_id: Some(coalesced.long_poll_id),
+            ..Default::default()
+        })),
+    )
+    .await
+    .expect("arriving long-poll demand must bypass the updater pause")
+    .unwrap()
+    .try_into_template()
+    .unwrap();
+    assert_ne!(refreshed.long_poll_id, coalesced.long_poll_id);
+    assert_eq!(refreshed.transactions.len(), 121);
+    assert_eq!(started.elapsed(), Duration::ZERO);
+
+    // A changed mempool with a stalled build must still return the current usable template.
+    // Let the preceding successful check's shared 50 ms coalescing window elapse.
+    tokio::time::advance(Duration::from_millis(51)).await;
+    stall_build.store(true, Ordering::SeqCst);
+    pool_tx.send_replace(transactions[..120].to_vec());
+    let started = tokio::time::Instant::now();
+    let current = rpc
+        .get_block_template(None)
+        .await
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(started.elapsed(), precompute::DEMAND_REFRESH_TIMEOUT);
+    assert_eq!(current.long_poll_id, refreshed.long_poll_id);
+    assert_eq!(current.transactions.len(), 121);
     updater.abort();
 }
 
@@ -4786,11 +4809,16 @@ async fn getblocktemplate_reports_updater_failure_and_recovers() {
         }
     });
     let mempool = tower::service_fn(move |request| {
-        assert!(matches!(request, mempool::Request::FullTransactions));
-        std::future::ready(Ok::<_, BoxError>(mempool::Response::FullTransactions {
-            transactions: vec![],
-            transaction_dependencies: Default::default(),
-            last_seen_tip_hash: hash,
+        std::future::ready(Ok::<_, BoxError>(match request {
+            mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                last_seen_tip_hash: hash,
+            },
+            mempool::Request::TransactionIds => {
+                mempool::Response::TransactionIds(Default::default())
+            }
+            other => panic!("unexpected mempool request: {other:?}"),
         }))
     });
     let (tip, tip_sender) = MockChainTip::new();
@@ -5051,10 +5079,13 @@ async fn getblocktemplate_ignores_previous_tip_error() {
         let mempool = tower::service_fn({
             let release = release.clone();
             move |request| {
-                assert!(matches!(request, mempool::Request::FullTransactions));
                 let tip = *tip_rx.borrow();
                 let release = release.clone();
                 async move {
+                    if matches!(request, mempool::Request::TransactionIds) {
+                        return Ok(mempool::Response::TransactionIds(Default::default()));
+                    }
+                    assert!(matches!(request, mempool::Request::FullTransactions));
                     if tip == old_tip {
                         return Err::<_, BoxError>("previous tip mempool unavailable".into());
                     }
@@ -5751,14 +5782,18 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
 
         let mempool_responder = tokio::spawn(async move {
             loop {
-                let request = mempool
-                    .expect_request(mempool::Request::FullTransactions)
-                    .await;
+                let request = mempool.expect_request_that(|_| true).await;
                 let (_, tip_hash) = *mempool_tip.borrow();
-                request.respond(mempool::Response::FullTransactions {
-                    transactions: vec![],
-                    transaction_dependencies: Default::default(),
-                    last_seen_tip_hash: tip_hash,
+                request.respond_with(move |request| match request {
+                    mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                        transactions: vec![],
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: tip_hash,
+                    },
+                    mempool::Request::TransactionIds => {
+                        mempool::Response::TransactionIds(Default::default())
+                    }
+                    other => panic!("unexpected mempool request: {other:?}"),
                 });
             }
         });
