@@ -51,7 +51,7 @@ use crate::{
         v2::types::ErrorCode,
     },
     quic::{self, Windows},
-    BoxError, Config, PeerSocketAddr, Request, Response,
+    BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 /// The version 2 peers a state-snapshot bootstrap downloads from, dialled
@@ -163,15 +163,14 @@ pub async fn v2_bootstrap_clients(
     // start height of 0.
     let minimum_peer_version = MinimumPeerVersion::new(NoChainTip, network);
     let nonces = NonceRegistry::spawn(peers.len());
-    // The report receiver is dropped: there is no address book to ban peers in yet. A peer whose
-    // score reaches the threshold is still disconnected with `MISBEHAVIOR` by its connection.
-    let (misbehavior_tx, _dropped) = mpsc::channel(1);
     let params = ConnectionParams {
         inbound_service: service_fn(refuse_request),
         // Nothing listens for inventory: the bootstrap has no peer set to route by it.
         inv_collector: broadcast::channel(1).0,
         genesis_hash: network.genesis_hash(),
-        misbehavior: MisbehaviorScores::spawn(misbehavior_tx, peers.len()),
+        // A peer whose score reaches the threshold is disconnected with `MISBEHAVIOR` by its
+        // connection, and reported to a task that logs it: there is no address book to ban it in.
+        misbehavior: MisbehaviorScores::spawn(spawn_report_log(peers.len()), peers.len()),
         // The bootstrap keeps no addresses and relays none.
         address_book: None,
         discovery: false,
@@ -186,6 +185,8 @@ pub async fn v2_bootstrap_clients(
         object_permits: global_object_permits(),
     };
 
+    // The counter is only the connection trackers' source: the bootstrap dials a fixed list, so
+    // it has no limit to enforce with the count, which is never updated.
     let mut counter =
         ActiveConnectionCounter::new_counter_with(peers.len(), "Bootstrap v2 Connections");
     let mut attempts = JoinSet::new();
@@ -313,6 +314,35 @@ impl Endpoints {
     fn into_vec(self) -> Vec<quinn::Endpoint> {
         self.v4.into_iter().chain(self.v6).collect()
     }
+}
+
+/// Spawns a task that logs the misbehavior reports of up to `peers` bootstrap
+/// peers, and returns the channel the score task reports on.
+///
+/// During normal operation the reports go to the address book, which bans the
+/// peer's group; the bootstrap has no address book, and a report the score
+/// task cannot deliver leaves the peer's score at the threshold and warns of
+/// an unreachable address book on every penalty after it. The task ends when
+/// the score task drops its sender.
+pub(in crate::peer_set::initialize) fn spawn_report_log(
+    peers: usize,
+) -> mpsc::Sender<MisbehaviorReport> {
+    let (reports_tx, mut reports_rx) = mpsc::channel::<MisbehaviorReport>(peers.max(1));
+    tokio::spawn(
+        async move {
+            while let Some(report) = reports_rx.recv().await {
+                tracing::info!(
+                    addr = ?report.addr,
+                    score = report.score,
+                    reason = %report.reason,
+                    "state snapshot bootstrap peer misbehaved and was disconnected; there is no \
+                     address book to ban it in yet"
+                );
+            }
+        }
+        .in_current_span(),
+    );
+    reports_tx
 }
 
 /// The bootstrap's inbound service: it refuses every request, so its
