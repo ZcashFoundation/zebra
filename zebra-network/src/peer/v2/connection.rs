@@ -500,6 +500,7 @@ where
             .contains(PeerServices::NODE_SYNC_ARTIFACTS),
         peer_permits: Arc::new(Semaphore::new(inbound::MAX_OBJECT_STREAMS_PER_PEER)),
         global_permits: params.object_permits.clone(),
+        stall_backoff: Arc::new(inbound::hashes::StallBackoff::new()),
     };
     let task = ConnectionTask {
         connection: connection.clone(),
