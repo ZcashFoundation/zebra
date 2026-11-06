@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Verify Sapling proofs faster by batching Groth16 checks with 128-bit random weights and shared multi-scalar multiplication.
+time: 2026-11-04T17:15:00.000000000+01:00

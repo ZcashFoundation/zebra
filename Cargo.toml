@@ -419,3 +419,5 @@ halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc
 halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
 sinsemilla = { git = "https://github.com/upbqdn/sinsemilla", rev = "993b786db2ef1b73df93ea8ecbe9237f3203c55e" }
 sapling-crypto = { git = "https://github.com/upbqdn/sapling-crypto", rev = "b464b6a6ae84a35af96255515c80a59a23242e19" }
+bellman = { git = "https://github.com/upbqdn/bellman", rev = "fec2939e484b230069f76e0639ba2097c4bd79cf" }
+groth16 = { git = "https://github.com/upbqdn/bellman", rev = "fec2939e484b230069f76e0639ba2097c4bd79cf" }
