@@ -100,7 +100,11 @@ fn mainnet_unit_planning() {
             "units are anchored at checkpoints"
         );
         assert_eq!(unit.anchor, Anchor::Checkpoint);
-        assert_eq!(unit.max_bytes, MAX_UNIT_BYTES);
+        assert_eq!(
+            u64::from(unit.max_bytes),
+            unit.est_bytes.max(MAX_BLOCK_BYTES),
+            "units request their charge"
+        );
         assert!(unit.end.0 - unit.start.0 < MAX_UNIT_COUNT);
 
         let intervals = anchors.intervals_between(unit.start.previous().unwrap(), unit.end);
@@ -133,6 +137,42 @@ fn mainnet_unit_planning() {
     assert!(units
         .iter()
         .all(|unit| unit.est_bytes < 2 * FULL_INTERVAL_BYTES));
+}
+
+/// A peer can never deliver much more than admission charged: each
+/// request's `max_bytes` is at most the unit's estimate, or one
+/// maximum-size block.
+#[test]
+fn requests_ask_for_no_more_than_their_charge() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let config = EngineConfig::default();
+    let now = Instant::now();
+    // Early Mainnet: tiny blocks, so estimates are far below 64 MiB.
+    let start = checkpoints[1].next().unwrap();
+    let mut scheduler = scheduler(&config, start, checkpoints[40], now);
+    scheduler.set_peers(
+        &[(peer(1), block::Height::MAX), (peer(2), block::Height::MAX)],
+        now,
+    );
+
+    let mut seen = 0;
+    while let Some(assignment) = scheduler.next_assignment(now) {
+        let unit = assignment.unit;
+        assert!(
+            u64::from(unit.max_bytes) <= unit.est_bytes.max(MAX_BLOCK_BYTES),
+            "unit {:?} requests {} bytes but is charged {}",
+            unit.id,
+            unit.max_bytes,
+            unit.est_bytes,
+        );
+        seen += 1;
+        if seen >= 4 {
+            break;
+        }
+    }
+    assert!(seen > 0, "the scheduler assigns units");
 }
 
 /// A truncated unit keeps its delivered top part, and the remainder is
