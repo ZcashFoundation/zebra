@@ -72,3 +72,90 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that held locks are told apart from other I/O errors, using the messages
+/// RocksDB writes on each platform.
+#[test]
+fn lock_holder_matches_rocksdb_lock_messages() {
+    use super::LockHolder;
+
+    let _init_guard = zebra_test::init();
+
+    let cases = [
+        (
+            "IO error: While lock file: /state/LOCK: Resource temporarily unavailable",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: While lock file: /state/LOCK: Permission denied",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: Failed to create lock file: C:\\state\\LOCK: The process cannot access \
+             the file because it is being used by another process.\r\n",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: lock hold by current process, acquire time 1761209419 acquiring thread \
+             139890000000000: /state/LOCK: No locks available",
+            Some(LockHolder::ThisProcess),
+        ),
+        (
+            "IO error: While lock file: /state/LOCK: No locks available",
+            None,
+        ),
+        (
+            "IO error: Failed to create lock file: C:\\state\\LOCK: Access is denied.\r\n",
+            None,
+        ),
+        (
+            "IO error: while open a file for lock: /state/LOCK: Is a directory",
+            None,
+        ),
+        (
+            "IO error: No space left on device: While appending to file: /state/000001.log",
+            None,
+        ),
+    ];
+
+    for (message, expected) in cases {
+        assert_eq!(DiskDb::lock_holder(message), expected, "{message}");
+    }
+}
+
+/// Check that real RocksDB open errors are classified by who holds the lock.
+#[test]
+fn open_errors_distinguish_lock_holders_from_io_errors() {
+    use super::LockHolder;
+
+    let _init_guard = zebra_test::init();
+
+    let dir = tempfile::tempdir().expect("temporary directory is writable");
+    let mut opts = rocksdb::Options::default();
+    opts.create_if_missing(true);
+
+    // RocksDB on Windows has no per-process lock table, so a second open in this
+    // process fails like an open in another process.
+    let expected_holder = if cfg!(windows) {
+        LockHolder::OtherProcess
+    } else {
+        LockHolder::ThisProcess
+    };
+
+    let db_path = dir.path().join("db");
+    let _db = DB::open(&opts, &db_path).expect("new database opens in an empty directory");
+    let lock_error = DB::open(&opts, &db_path)
+        .expect_err("second open fails because the first instance holds the lock");
+    assert_eq!(
+        DiskDb::lock_holder(lock_error.as_ref()),
+        Some(expected_holder),
+        "{lock_error}"
+    );
+
+    let blocked_path = dir.path().join("blocked");
+    std::fs::create_dir_all(blocked_path.join("LOCK")).expect("temporary directory is writable");
+    let io_error = DB::open(&opts, &blocked_path)
+        .expect_err("open fails because the lock file path is a directory");
+    assert_eq!(io_error.kind(), rocksdb::ErrorKind::IOError, "{io_error}");
+    assert_eq!(DiskDb::lock_holder(io_error.as_ref()), None, "{io_error}");
+}
