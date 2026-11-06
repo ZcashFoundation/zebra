@@ -385,3 +385,14 @@ pub fn has_incomplete_spentness_hints(db: &ZebraDb) -> bool {
         Err(_) => true,
     }
 }
+
+/// Returns the artifact SHA-256 of the incomplete hinted construction in `db`:
+/// the artifact the node must deliver to resume it. Returns `None` when there
+/// is no record, when it is `Complete`, or when it cannot be read (see
+/// [`has_incomplete_spentness_hints`] for that case).
+pub fn incomplete_spentness_commitment(db: &ZebraDb) -> Option<[u8; 32]> {
+    match read_progress(db) {
+        Ok(Some((commitment, progress))) if progress.phase != Phase::Complete => Some(commitment),
+        Ok(_) | Err(_) => None,
+    }
+}

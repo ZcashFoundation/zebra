@@ -71,7 +71,7 @@ fn state_hints(
     let (state_hints, receiver) = StateHints::new(mode).expect("mode uses hints");
     let (tip, tip_sender) = MockChainTip::new();
     tip_sender.send_best_tip_height(tip_height);
-    (state_hints.for_state(&tip, incomplete), receiver)
+    (state_hints.for_state(&tip, incomplete, None), receiver)
 }
 
 /// Hints in `mode` for an empty state, and the state's receiver.
@@ -236,7 +236,7 @@ async fn restart_offers_the_saved_artifact_to_an_incomplete_state() {
         node_hints
             .run(
                 Network::Mainnet,
-                test_pin,
+                |network, _resume| test_pin(network),
                 no_peers(),
                 dir.path().to_owned(),
                 None,
@@ -251,6 +251,109 @@ async fn restart_offers_the_saved_artifact_to_an_incomplete_state() {
             .expect("the saved artifact was sent to the state");
         assert_eq!(artifact.header().terminal_height, TERMINAL_HEIGHT);
         assert_eq!(artifact.bytes().as_ref(), artifact_bytes().as_slice());
+    }
+}
+
+/// A resolver for a release that replaced the pin of [`artifact_bytes`] with a
+/// newer one, and kept the old pin as retired: like the production resolver, it
+/// finds a resumed sync's pin by its artifact hash, and gives the newer pin to a
+/// new sync.
+fn rotated_pin(network: &Network, resume: Option<[u8; 32]>) -> Option<MaxCheckpoint> {
+    let retired = test_pin(network)?;
+    match resume {
+        Some(commitment) if commitment == retired.spentness_hash => Some(retired),
+        Some(_) => None,
+        None => Some(MaxCheckpoint {
+            height: Height(TERMINAL_HEIGHT.0 + 1),
+            hash: block::Hash([0x33; 32]),
+            spentness_hash: ObjectHash::of(b"rotated").0,
+        }),
+    }
+}
+
+/// Hints in `mode` for a state whose hinted sync with the artifact `resume` a
+/// restart interrupted, and the state's receiver.
+fn resumed_hints(mode: Mode, resume: [u8; 32]) -> (NodeHints, zebra_state::SpentnessHintsReceiver) {
+    let (state_hints, receiver) = StateHints::new(mode).expect("mode uses hints");
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Some(Height(500)));
+    let node_hints = state_hints
+        .for_state(&tip, true, Some(resume))
+        .expect("an incomplete state uses hints");
+    (node_hints, receiver)
+}
+
+/// After a release changes the pin, an interrupted hinted sync still resumes with
+/// the artifact it started with: its saved file is kept and loaded, not deleted as
+/// stale (F-348).
+#[tokio::test]
+async fn restart_after_pin_rotation_resumes_the_record_artifact() {
+    let _init_guard = zebra_test::init();
+
+    let record = test_pin(&Network::Mainnet).expect("the test pin exists");
+    let (node_hints, receiver) = resumed_hints(Mode::Require, record.spentness_hash);
+    let gate = node_hints.gate();
+    let dir = tempfile::tempdir().expect("temporary directory");
+    save_test_artifact(dir.path());
+
+    node_hints
+        .run(
+            Network::Mainnet,
+            rotated_pin,
+            no_peers(),
+            dir.path().to_owned(),
+            None,
+        )
+        .await
+        .expect("the record's saved artifact needs no peers");
+
+    assert!(*gate.borrow(), "the gate is open");
+    let artifact = receiver
+        .borrow()
+        .clone()
+        .expect("the record's artifact was sent to the state");
+    assert_eq!(artifact.pin().spentness_hash, record.spentness_hash);
+    assert_eq!(artifact.bytes().as_ref(), artifact_bytes().as_slice());
+    assert!(
+        dir.path().join(record.object_hash().to_string()).exists(),
+        "the record's artifact file is kept"
+    );
+}
+
+/// An interrupted hinted sync whose artifact this release does not pin (for
+/// example, a revoked pin) stops Zebra at startup, in any mode, before any
+/// saved file is deleted (F-348).
+#[tokio::test]
+async fn restart_with_an_unpinned_record_artifact_fails() {
+    let _init_guard = zebra_test::init();
+
+    let record = test_pin(&Network::Mainnet).expect("the test pin exists");
+    for mode in [Mode::Auto, Mode::Require] {
+        let (node_hints, receiver) = resumed_hints(mode, ObjectHash::of(b"revoked").0);
+        let gate = node_hints.gate();
+        let dir = tempfile::tempdir().expect("temporary directory");
+        save_test_artifact(dir.path());
+
+        let result = node_hints
+            .run(
+                Network::Mainnet,
+                rotated_pin,
+                no_peers(),
+                dir.path().to_owned(),
+                None,
+            )
+            .await;
+
+        assert!(result.is_err(), "{mode:?}: an unpinned record stops Zebra");
+        assert!(!*gate.borrow(), "{mode:?}: the gate stays closed");
+        assert!(
+            receiver.borrow().is_none(),
+            "{mode:?}: no artifact was sent"
+        );
+        assert!(
+            dir.path().join(record.object_hash().to_string()).exists(),
+            "{mode:?}: no saved file was deleted"
+        );
     }
 }
 
@@ -272,7 +375,7 @@ async fn incomplete_state_without_a_saved_artifact_fetches_it_again() {
         let result = node_hints
             .run(
                 Network::new_regtest(Default::default()),
-                test_pin,
+                |network, _resume| test_pin(network),
                 no_peers(),
                 dir.path().to_owned(),
                 None,
@@ -299,7 +402,7 @@ async fn saved_artifact_loads_only_for_the_current_pin() {
 
     let dir = tempfile::tempdir().expect("temporary directory");
     assert!(
-        load_saved(&Network::Mainnet, test_pin, dir.path())
+        load_saved(&Network::Mainnet, test_pin(&Network::Mainnet), dir.path())
             .await
             .expect("a missing directory is not an error")
             .is_none(),
@@ -308,23 +411,27 @@ async fn saved_artifact_loads_only_for_the_current_pin() {
 
     save_test_artifact(dir.path());
     assert!(
-        load_saved(&Network::Mainnet, test_pin, dir.path())
+        load_saved(&Network::Mainnet, test_pin(&Network::Mainnet), dir.path())
             .await
             .expect("the saved artifact verifies")
             .is_some(),
         "the saved artifact loads"
     );
     assert!(
-        load_saved(&Network::Mainnet, no_pin, dir.path())
+        load_saved(&Network::Mainnet, no_pin(&Network::Mainnet), dir.path())
             .await
             .expect("no pin is not an error")
             .is_none(),
         "nothing loads without a pin"
     );
     assert!(
-        load_saved(&Network::new_default_testnet(), test_pin, dir.path())
-            .await
-            .is_err(),
+        load_saved(
+            &Network::new_default_testnet(),
+            test_pin(&Network::new_default_testnet()),
+            dir.path()
+        )
+        .await
+        .is_err(),
         "an artifact for another chain fails verification"
     );
 
@@ -336,7 +443,7 @@ async fn saved_artifact_loads_only_for_the_current_pin() {
     *damaged.last_mut().expect("artifact is not empty") ^= 0x01;
     std::fs::write(&path, damaged).expect("artifact file is writable");
     assert!(
-        load_saved(&Network::Mainnet, test_pin, dir.path())
+        load_saved(&Network::Mainnet, test_pin(&Network::Mainnet), dir.path())
             .await
             .expect("a damaged file is not an error")
             .is_none(),
@@ -360,7 +467,7 @@ async fn loading_the_saved_artifact_deletes_stale_files() {
         .expect("artifact file is writable");
 
     assert!(
-        load_saved(&Network::Mainnet, test_pin, dir.path())
+        load_saved(&Network::Mainnet, test_pin(&Network::Mainnet), dir.path())
             .await
             .expect("the saved artifact verifies")
             .is_some(),

@@ -1,4 +1,4 @@
 project: zebra-chain
 kind: Added
-body: Added the `parameters::spentness_hints` module, with the spentness-hint artifact format (`ParsedArtifact`, `VerifiedArtifact`, `ArtifactEncoder`, `Mode`, `SpentnessHintsError`) and the pinned `MaxCheckpoint` terminal checkpoint.
+body: Added the `parameters::spentness_hints` module, with the spentness-hint artifact format (`ParsedArtifact`, `VerifiedArtifact`, `ArtifactEncoder`, `Mode`, `SpentnessHintsError`) and the pinned `MaxCheckpoint` terminal checkpoint, with `MaxCheckpoint::for_commitment`, which finds the current or a retired pin by its artifact hash.
 time: 2026-11-05T15:49:40.101514519-05:00

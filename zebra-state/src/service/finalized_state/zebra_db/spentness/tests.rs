@@ -595,6 +595,25 @@ fn resume_requires_the_same_artifact() {
     }
 }
 
+/// The record's artifact hash is reported while a hinted sync is incomplete, and not
+/// after it completes (F-348).
+#[test]
+fn incomplete_commitment_is_the_record_artifact() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (mut state, mut writer) = fixture.open();
+    assert_eq!(super::incomplete_spentness_commitment(&state.db), None);
+    fixture.commit(&mut state, &mut writer, 0..=10);
+    assert_eq!(
+        super::incomplete_spentness_commitment(&state.db),
+        Some(fixture.artifact.pin().spentness_hash)
+    );
+    fixture.commit(&mut state, &mut writer, 11..=GENERATED_TIP as usize);
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_eq!(super::incomplete_spentness_commitment(&state.db), None);
+}
+
 /// A resumed writer waits for an artifact that arrives after its first block is queued.
 #[test]
 fn resume_waits_for_a_late_artifact() {

@@ -193,6 +193,35 @@ pub async fn acquire_spentness_hints(
     }
 
     let pin = MaxCheckpoint::for_network(&network).ok_or(HintsError::NotPinned)?;
+    acquire_pinned_spentness_hints(
+        network,
+        mode,
+        pin,
+        peers,
+        expected_output_count,
+        artifact_dir,
+    )
+    .await
+}
+
+/// Like [`acquire_spentness_hints`], for the artifact of `pin` rather than the
+/// network's current pin: a hinted sync started by an earlier release resumes
+/// with the artifact of a retired pin.
+///
+/// Only the file named by `pin` is loaded, and the files of every other pin
+/// are deleted.
+pub async fn acquire_pinned_spentness_hints(
+    network: Network,
+    mode: Mode,
+    pin: MaxCheckpoint,
+    peers: zebra_network::SyncPeers,
+    expected_output_count: u64,
+    artifact_dir: PathBuf,
+) -> Result<Option<VerifiedArtifact>, HintsError> {
+    if mode == Mode::Off {
+        return Ok(None);
+    }
+
     let hash = pin.object_hash();
 
     // The pinned artifact's exact length follows from the known-hash output
@@ -232,11 +261,12 @@ pub async fn acquire_spentness_hints(
 /// Registers the saved artifact for `get-object` serving: inserts its
 /// `ObjectEntry` (file path and size) into the index `objects` publishes
 /// (the sender of `zebra_network::Config::object_source`). Never registers
-/// an artifact that does not match the current pin.
+/// an artifact that does not match a pin of this release.
 ///
-/// The current pin is `artifact.pin()`: a [`VerifiedArtifact`] exists only
-/// once it has been authenticated against the network's `MaxCheckpoint`,
-/// and it is served under that pin's hash. The file is written first if it
+/// The pin is `artifact.pin()`: a [`VerifiedArtifact`] exists only once it
+/// has been authenticated against one of the network's `MaxCheckpoint`s (the
+/// current one, or a retired one that a resumed hinted sync uses), and it is
+/// served under that pin's hash. The file is written first if it
 /// is missing or has the wrong size (blocking I/O), so a `get-object` never
 /// finds a registered object it cannot read.
 pub fn serve_spentness_hints(
