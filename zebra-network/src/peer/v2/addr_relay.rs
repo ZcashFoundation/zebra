@@ -319,11 +319,10 @@ impl Hub {
     fn handle(&mut self, message: Message, now: Instant) {
         match message {
             Message::Register { peer, id, tx } => {
-                if self
-                    .peers
-                    .get(&peer)
-                    .is_some_and(|existing| !existing.tx.is_closed())
-                {
+                // A connection task that was aborted, or whose deregistration was dropped,
+                // never deregisters, so this keeps the map to live connections and this one.
+                self.peers.retain(|_, dest| !dest.tx.is_closed());
+                if self.peers.contains_key(&peer) {
                     // The peer set keeps the older of two connections to one address too.
                     return;
                 }

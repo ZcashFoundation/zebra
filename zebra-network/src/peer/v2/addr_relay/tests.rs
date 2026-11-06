@@ -409,3 +409,37 @@ fn addresses_dropped_for_a_full_queue_are_not_marked_known() {
         .collect();
     assert_eq!(queued, vec![dropped.addr()]);
 }
+
+/// Destinations whose connection ended without deregistering, like an
+/// aborted connection task, are dropped when another peer registers, so the
+/// hub keeps at most its live registrations and the new one.
+#[test]
+fn hub_drops_closed_destinations_without_deregistration() {
+    let _init_guard = zebra_test::init();
+    let mut hub = bare_hub();
+    let now = tokio::time::Instant::now();
+    for index in 1..=50 {
+        let (tx, rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+        drop(rx);
+        hub.handle(
+            super::Message::Register {
+                peer: peer(index),
+                id: u64::from(index),
+                tx,
+            },
+            now,
+        );
+    }
+
+    let (tx, _rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    hub.handle(
+        super::Message::Register {
+            peer: peer(200),
+            id: 200,
+            tx,
+        },
+        now,
+    );
+    assert_eq!(hub.peers.len(), 1);
+    assert!(hub.peers.contains_key(&peer(200)));
+}
