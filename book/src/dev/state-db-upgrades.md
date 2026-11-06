@@ -11,19 +11,19 @@ For deployment, direct-reader compatibility, and rollback, follow
 ## Format versions and paths
 
 The database format version is independent of Zebra and Rust crate versions.
-Zebra implements [format **29.1.0**][constants]:
+Zebra implements [format **30.0.0**][constants]:
 
 | Constant | Current value | Change requiring a bump |
 | --- | --- | --- |
-| `DATABASE_FORMAT_VERSION` | `29` | An incompatible encoding change or column family removal |
-| `DATABASE_FORMAT_MINOR_VERSION` | `1` | A significant compatible change, including a new column family |
+| `DATABASE_FORMAT_VERSION` | `30` | An incompatible encoding change or column family removal |
+| `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
 | `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
 A change that would otherwise be incompatible can use a minor bump only when
 all supported Zebra versions already contain the required compatibility code.
 The function `state_database_format_version_in_code()` returns the complete
 semantic version. Builds with the `indexer` feature return
-`29.1.0+indexer`; other builds return `29.1.0`.
+`30.0.0+indexer`; other builds return `30.0.0`.
 
 For persistent databases, the method `Config::db_path()` constructs this path:
 
@@ -39,7 +39,7 @@ this namespace. Databases for the same network with different minor or patch
 versions still use the same major-version directory.
 
 The file `version` inside the database directory records the full semantic
-version, for example `29.1.0` or `29.1.0+indexer`, without a trailing newline.
+version, for example `30.0.0` or `30.0.0+indexer`, without a trailing newline.
 The [version reader][config] also accepts the legacy `minor.patch` form and
 supplies the major version from the requested database path. If the file is
 absent but the directory exists, it reports `<major>.0.0`. If both are absent,
@@ -61,8 +61,8 @@ move a compatible database from the immediately preceding major version into
 the new directory, then apply the required format changes.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26`, `27`, `28`, and `29`. The [reuse implementation][disk-db] considers only
-`current_major - 1`: format 29 reuses format 28, not format 27 or earlier.
+`26`, `27`, `28`, `29`, and `30`. The [reuse implementation][disk-db] considers only
+`current_major - 1`: format 30 reuses format 29, not format 28 or earlier.
 
 Reuse requires all of the following:
 
@@ -94,6 +94,27 @@ not need rewriting because the new readers accept their older encodings.
 Legacy records read with a zero NSM balance; new writes use the wider encoding
 even when that balance is zero. See the [byte layouts](#data-formats).
 
+### The v29-to-v30 upgrade
+
+Format 30 adds the `spentness_journal` and `spentness_artifact` column
+families for spentness hints. The registered upgrade uses `NoMigration`: the
+new families are created empty when the database is opened, and no record is
+rewritten, so compatible v29 state (29.0.0 or 29.1.0) is moved to `state/v30`
+without a resync.
+
+The change is a major bump, not a minor one, because a partial hinted state
+leaves the outputs the artifact omits out of `utxo_by_out_loc`, and keeps them
+only in `spentness_journal` until the hinted sync reaches its terminal height.
+A 29.x reader would open a same-major directory through the newer-version
+path and assume the format is compatible: it would panic when it spends an
+omitted output, or commit past the construction record. A separate major
+directory keeps every 29.x binary away from it. Hinted construction only
+starts on an empty state, so a partial hinted state only ever exists in v30.
+
+A never-hinted v30 directory has the same records as v29 state, and can be
+renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
+backup instead.
+
 ### Old-database cleanup
 
 When enabled, the [cleanup task][config] scans major-version directories under
@@ -102,7 +123,7 @@ versions except predecessors of registered reusable upgrades. It skips current
 and newer versions, paths outside the canonical cache root, and ephemeral
 databases.
 
-The current registry protects `v25` through `v28`. Cleanup removes an eligible
+The current registry protects `v25` through `v29`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks
@@ -532,7 +553,7 @@ already-correct database can hide skipped records.
   are affected. Test read-only startup and refresh when reader behavior changes.
 
 The existing
-[`v28_cache_is_reused_with_legacy_value_pools` test][upgrade-tests] covers cleanup
+[`v29_cache_is_reused_with_legacy_value_pools` test][upgrade-tests] covers cleanup
 protection, directory reuse even with cleanup disabled, unchanged legacy bytes,
 and wider writes for subsequent blocks. The
 [`block_info_reads_every_record_layout` test][format-tests] checks old layouts
@@ -548,8 +569,8 @@ version whose registered upgrades the test needs to exercise, preserving the
 actual data layout and supported major-version path.
 
 Deleting the file does not select an arbitrary older format: it selects
-`<directory-major>.0.0`. Deleting `state/v29/<network>/version` therefore reports
-29.0.0 and does not trigger the 29.0.0 upgrade. Changing the marker does not
+`<directory-major>.0.0`. Deleting `state/v30/<network>/version` therefore reports
+30.0.0 and does not trigger the 30.0.0 upgrade. Changing the marker does not
 convert record encodings, create an old-format fixture, or prove that a
 major-version move works. Use the persistent-cache upgrade test pattern for
 those cases; never use version-file edits as an operator recovery procedure.
