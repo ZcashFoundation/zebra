@@ -213,15 +213,29 @@ pub(crate) fn mining_candidate_header_context(
         .then_some((parent_header, history))
 }
 
-/// Computes child context after checking candidate header rules and commitments, without committing.
-///
-/// Mining can use finalized-tip context before a non-finalized snapshot exists. Speculative child
-/// work does not authorize early relay or serving the candidate body.
+/// Computes child context like [`mining_candidate_chain_info_and_trees`], without its trees.
+#[cfg(test)]
 pub(crate) fn mining_candidate_chain_info(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
     network: &Network,
     block: Arc<block::Block>,
+) -> Option<GetBlockTemplateChainInfo> {
+    mining_candidate_chain_info_and_trees(non_finalized_state, db, network, block, None)
+}
+
+/// Computes child context after checking candidate header rules and commitments, without committing.
+///
+/// Mining can use finalized-tip context before a non-finalized snapshot exists. Speculative child
+/// work does not authorize early relay or serving the candidate body.
+///
+/// Publishes the block's note commitment trees to `trees_slot`, so its commit can reuse them.
+pub(crate) fn mining_candidate_chain_info_and_trees(
+    non_finalized_state: &NonFinalizedState,
+    db: &ZebraDb,
+    network: &Network,
+    block: Arc<block::Block>,
+    trees_slot: Option<crate::service::precomputed_trees::TreeSlotGuard>,
 ) -> Option<GetBlockTemplateChainInfo> {
     let (tip_height, tip_hash) = read::best_tip(non_finalized_state, db)?;
     let height = tip_height.next().ok()?;
@@ -238,27 +252,23 @@ pub(crate) fn mining_candidate_chain_info(
         (tip_height, tip_hash),
     )?;
     let chain = non_finalized_state.best_chain();
-    let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;
-    let mut orchard = read::tree::orchard_tree(chain, db, tip_hash.into())?;
-    let mut ironwood = read::tree::ironwood_tree(chain, db, tip_hash.into())?;
-    let commitments: Vec<_> = block.sapling_note_commitments().collect();
-    if !commitments.is_empty() {
-        Arc::make_mut(&mut sapling)
-            .append_batch(&commitments)
-            .ok()?;
+    // Build the parent trees the same way the commit does, so it can reuse these trees. The commit
+    // only reuses them if its own input trees are equal, so a mismatch just computes them again.
+    let input = match chain {
+        Some(chain) => chain.note_commitment_trees_for_tip(),
+        None => db.note_commitment_trees_for_tip(),
+    };
+    let trees = Arc::new(
+        crate::service::precomputed_trees::PrecomputedTrees::compute(block.clone(), input)?,
+    );
+    if let Some(trees_slot) = trees_slot {
+        trees_slot.finish(trees.clone());
     }
-    let commitments: Vec<_> = block.orchard_note_commitments().collect();
-    if !commitments.is_empty() {
-        Arc::make_mut(&mut orchard)
-            .append_batch(&commitments)
-            .ok()?;
-    }
-    let commitments: Vec<_> = block.ironwood_note_commitments().collect();
-    if !commitments.is_empty() {
-        Arc::make_mut(&mut ironwood)
-            .append_batch(&commitments)
-            .ok()?;
-    }
+    let (sapling, orchard, ironwood) = (
+        &trees.output().sapling,
+        &trees.output().orchard,
+        &trees.output().ironwood,
+    );
     let sapling_root = sapling.root();
     if let block::Commitment::FinalSaplingRoot(root) = block.commitment(network).ok()? {
         if root != sapling_root {

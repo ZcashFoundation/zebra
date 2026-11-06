@@ -42,6 +42,11 @@ use crate::request::Spend;
 use self::index::TransparentTransfers;
 use super::{AddressTransfers, CreatedUtxos};
 
+/// The number of commits that reused a mining candidate's note commitment trees.
+#[cfg(test)]
+pub(crate) static REUSED_TREES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 pub mod index;
 
 /// A single non-finalized partial chain, from the child of the finalized tip,
@@ -372,9 +377,19 @@ impl Chain {
     /// subsidy and miner fees. This method validates the chain updates in
     /// [`Self::update_chain_tip_with`]; success alone does not establish contextual validity.
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
-    pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+    pub fn push(self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
+        self.push_with_trees(block, None)
+    }
+
+    /// Pushes `block`, reusing `precomputed` note commitment trees if they were computed from
+    /// the same block body and this chain's tip trees.
+    pub(crate) fn push_with_trees(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+        precomputed: Option<&crate::service::precomputed_trees::PrecomputedTrees>,
+    ) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
-        self.update_chain_tip_with(&block)?;
+        self.update_chain_tip_with_block_parallel(&block, precomputed)?;
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, Arc::new(block));
@@ -1785,6 +1800,10 @@ impl Chain {
     }
 
     /// Returns the tip's note commitment trees and subtrees, which a new block's trees extend.
+    ///
+    /// Mining candidates build their trees from this too, so a commit can reuse them.
+    ///
+    /// Mining candidates build their trees from this too, so a commit can reuse them.
     pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
         NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree_for_tip(),
@@ -1809,6 +1828,7 @@ impl Chain {
     fn update_chain_tip_with_block_parallel(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
+        precomputed: Option<&crate::service::precomputed_trees::PrecomputedTrees>,
     ) -> Result<(), ValidateContextError> {
         let height = contextually_valid.height;
 
@@ -1828,7 +1848,19 @@ impl Chain {
             });
 
             // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+            tree_result = Some(
+                match precomputed
+                    .and_then(|precomputed| precomputed.reuse(&contextually_valid.block, &nct))
+                {
+                    Some(trees) => {
+                        #[cfg(test)]
+                        REUSED_TREES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        nct = trees;
+                        Ok(())
+                    }
+                    None => nct.update_trees_parallel(&contextually_valid.block.clone()),
+                },
+            );
         });
 
         tree_result.expect("scope has already finished")?;
@@ -2058,7 +2090,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
-        self.update_chain_tip_with_block_parallel(contextually_valid)
+        self.update_chain_tip_with_block_parallel(contextually_valid, None)
     }
 
     #[instrument(
