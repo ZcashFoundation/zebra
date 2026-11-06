@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added the experimental `[sync] v2_spentness_hints` option (`"off"`, `"auto"` or `"require"`, default `"off"`), which builds the UTXO set below the final checkpoint from a pinned spentness-hint artifact fetched from version 2 peers, on a state that starts empty, and needs `sync.v2_checkpoint_sync`. Until hints are acquired or given up, Zebra commits no block above genesis. Nodes with version 2 enabled serve a saved artifact to their version 2 peers with any mode.'
+time: 2026-11-05T16:30:08.395855648-05:00

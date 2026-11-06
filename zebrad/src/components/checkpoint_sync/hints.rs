@@ -12,9 +12,11 @@
 //! Ordering with the legacy syncer: with `Mode::Auto` or
 //! `Mode::Require` on an empty state, the caller passes a `hints_gate` to
 //! `CheckpointSync::new`, so the supervisor claims ownership right after
-//! genesis and nothing commits height 1 before acquisition finishes. With
-//! `Auto`, a failed or slow acquisition (5 min) leaves the state's receiver
-//! at `None`, opens the gate, and syncs unhinted.
+//! genesis, and the same gate to `ChainSync::with_hints_gate`, so the legacy
+//! syncer starts no sync round after genesis before the claim. So nothing
+//! commits height 1 before acquisition finishes. With `Auto`, a failed or
+//! slow acquisition (5 min) leaves the state's receiver at `None`, opens the
+//! gate, and syncs unhinted.
 //!
 //! # Blame
 //!
