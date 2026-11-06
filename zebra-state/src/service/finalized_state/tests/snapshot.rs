@@ -524,3 +524,50 @@ fn snapshot_database_requires_pruning() {
     let pruned = open(&config(cache.path().to_path_buf(), Some(RETENTION))).unwrap();
     assert_eq!(pruned.db.snapshot_base(), Some(base));
 }
+
+/// A snapshot-born database has no sync metadata, because exports leave the IBD column families
+/// out, and blocks committed above the snapshot do not start writing it: their cumulative
+/// transparent output counts would need the counts of the history below the snapshot. So a
+/// snapshot-born node answers every `get-hashes` request with no entries.
+#[test]
+fn blocks_above_a_snapshot_have_no_sync_metadata() {
+    use crate::constants::MAX_BLOCK_REORG_HEIGHT;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (mut state, base) = snapshot_state(
+        cache.path().to_path_buf(),
+        TIP,
+        WINDOW_START,
+        Coinbase::Branched,
+        0,
+    );
+
+    // The importer writes no sync metadata.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete_range(
+        &state.db.cf_handle("sync_meta_by_height").unwrap(),
+        Height::MIN,
+        Height::MAX,
+    );
+    state.db.write_batch(batch).unwrap();
+
+    // Commit enough blocks above the snapshot for `get-hashes` to serve heights above it.
+    for _ in 0..=MAX_BLOCK_REORG_HEIGHT + 1 {
+        commit_child(&mut state, Coinbase::Branched, vec![]);
+    }
+    let tip = state.db.finalized_tip_height().unwrap();
+    let above = Height(base.height.0 + 1);
+    assert!(Height(tip.0 - MAX_BLOCK_REORG_HEIGHT) > above);
+
+    assert_eq!(state.db.sync_metadata_range(Height::MIN..=tip), Vec::new());
+    assert!(!state.db.sync_metadata_is_complete());
+    assert_eq!(
+        read::sync_hashes(None::<Arc<Chain>>, &state.db, above, 10),
+        Vec::new()
+    );
+    assert_eq!(
+        read::sync_hashes(None::<Arc<Chain>>, &state.db, Height::MIN, 10),
+        Vec::new()
+    );
+}
