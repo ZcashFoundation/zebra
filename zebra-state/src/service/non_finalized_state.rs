@@ -751,9 +751,9 @@ impl NonFinalizedState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Returns the prepared chain with its proposal tip rebound to `block`, if the prepared chain
-    /// is `parent_chain`, without the blocks kept by [`Self::finalize_keeping_best_chain`], with
-    /// a proposal for `block` on top, and no reader shares it.
+    /// Returns the prepared chain with its proposal tip rebound to `block`, if it is
+    /// `parent_chain` with a proposal for `block` on top, apart from finalized roots, and no
+    /// reader shares it. Removes those roots before rebinding.
     ///
     /// Otherwise the prepared chain is left for the next proposal to replay.
     fn take_prepared_for(
@@ -764,7 +764,7 @@ impl NonFinalizedState {
         if parent_chain.is_empty() {
             return None;
         }
-        // Proposal checks extend a private copy, which drops the blocks finalization kept.
+        // Match at the first unfinalized height, even if the proposal still keeps older roots.
         let root_height = self
             .retained_finalized_height
             .and_then(|height| height.next().ok())
@@ -775,7 +775,8 @@ impl NonFinalizedState {
         let candidate = prepared.as_ref()?;
         let proposal = candidate.tip_block()?;
         if Arc::strong_count(candidate) != 1
-            || parent_chain.hash_by_height(root_height) != Some(candidate.non_finalized_root_hash())
+            || candidate.hash_by_height(root_height)
+                != Some(parent_chain.hash_by_height(root_height)?)
             || candidate.non_finalized_tip_height()
                 != parent_chain.non_finalized_tip_height().next().ok()?
             || !candidate.can_rebind_tip()
@@ -786,9 +787,14 @@ impl NonFinalizedState {
         let candidate = prepared.take()?;
         drop(prepared);
         let mut chain = Arc::unwrap_or_clone(candidate);
+        // The matching root hash commits to the same ancestors; only finalization can have
+        // removed them from the parent. Use the normal index cleanup, without copying the chain.
+        while chain.non_finalized_root_height() < root_height {
+            chain.pop_root();
+        }
         match chain.rebind_tip(block.clone()) {
             Ok(()) => Some(chain),
-            // The chain is unchanged, so the next proposal can still replay it.
+            // Keep the normalized chain so the next proposal can still replay it.
             Err(_) => {
                 self.replace_prepared(Some(Arc::new(chain)));
                 None
