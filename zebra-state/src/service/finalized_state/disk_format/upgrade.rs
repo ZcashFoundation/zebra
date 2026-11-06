@@ -174,8 +174,8 @@ pub fn restorable_db_versions() -> Vec<u64> {
 
 /// Returns source directory majors for a reusable database upgrade, newest first.
 ///
-/// Sources need not include `running_major - 1`. v33 prefers v32, with older registered sources
-/// as fallbacks, and every intervening migration still runs in version order.
+/// Sources need not include `running_major - 1`. v33 prefers v32, then v31, with older registered
+/// sources as fallbacks, and every intervening migration still runs in version order.
 pub fn restorable_db_source_versions(running_major: u64) -> Vec<u64> {
     if !restorable_db_versions().contains(&running_major) {
         return Vec::new();
@@ -1062,14 +1062,14 @@ fn format_upgrades_are_in_version_order() {
 #[test]
 fn reusable_source_follows_the_registered_upgrade_chain() {
     assert_eq!(restorable_db_source_versions(30).first(), Some(&29));
-    assert_eq!(restorable_db_source_versions(32).first(), Some(&30));
+    assert_eq!(restorable_db_source_versions(31).first(), Some(&30));
+    assert_eq!(restorable_db_source_versions(32).first(), Some(&31));
     let sources = restorable_db_source_versions(33);
     assert_eq!(sources.first(), Some(&32));
-    assert!(sources.contains(&30), "v30 remains a fallback");
-    assert!(sources.contains(&29), "older caches remain reusable");
+    assert!(sources.contains(&31), "v31 remains a fallback");
     assert!(
-        restorable_db_source_versions(31).is_empty(),
-        "no upgrade registers format 31"
+        sources.contains(&30),
+        "the spentness format remains reusable"
     );
     assert!(sources.contains(&29), "older caches remain reusable");
 }

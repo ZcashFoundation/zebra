@@ -249,18 +249,18 @@ penalty. `SchedulerConfig` carries these values.
 
 ## State changes
 
-- A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height,
-  block_hash, manifest, deferred_checks }`: two variable-width heights, two 32-byte hashes, and the
-  deferred checks byte. The intermediate 30.1.0 upgrade adds the column family without rewriting
-  records because `create_missing_column_families` already creates it. The 32.0.0 major format
-  puts snapshot-born databases in `state/v32`, enforcing the compatibility barrier instead of
-  relying on operators not to open them with older 30.x builds. The current 33.0.0 format then
-  converts the marker's heights and the other 26 height-dependent column families, including those
-  of snapshot-born v32 databases, and places the result in `state/v33`. Startup prefers an existing
-  v32 source, with v30, v29, and older registered sources as fallbacks, and runs every intervening
-  upgrade. Snapshot-born databases must not be renamed to v32, v30, v29, or any older directory:
-  those readers cannot decode the records, and the oldest cannot tell that the history below `L`
-  is missing.
+- A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height, block_hash,
+  manifest, deferred_checks }`: two variable-width heights, two 32-byte hashes, and the deferred
+  checks byte. The intermediate 31.1.0 upgrade adds the column family without rewriting records
+  because `create_missing_column_families` already creates it. The 32.0.0 major format puts
+  snapshot-born databases in `state/v32`, enforcing the compatibility barrier instead of relying on
+  operators not to open them with older 31.x builds. The current 33.0.0 format then converts the
+  marker's heights and the other 26 height-dependent column families, including those of
+  snapshot-born v32 databases, and places the result in `state/v33`. Startup prefers an existing v32
+  source, with v31, v30, v29, and older registered sources as fallbacks, and runs every intervening
+  upgrade. Snapshot-born databases must not be renamed to v32, v31, v30, v29, or any older
+  directory: those readers cannot decode the records, and the oldest cannot tell that the history
+  below `L` is missing.
 - `HistoryCapabilities` gains `lowest_known_height` and `snapshot_base: Option<SnapshotBase>`. With
   a marker, the retained floor is `max(L, first body)` and the database counts as pruned.
 - Fixes: `legacy_chain` and `PruningWitness::update` treat reaching the snapshot base as the

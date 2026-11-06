@@ -62,10 +62,10 @@ move a compatible database from a registered earlier source major into the new
 directory, then apply every intervening format change in version order.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26` through `30`, `32`, and `33`; no upgrade uses format 31. The
+`26` through `33`. The
 [`restorable_db_source_versions()`][upgrade] helper returns existing source
-candidates newest first: format 33 tries v32, v30, v29, v28, v27, v26, then
-v25. Every selected source runs all intervening migrations in version order.
+candidates newest first: format 33 tries v32, v31, v30, v29, v28, v27, v26,
+then v25. Every selected source runs all intervening migrations in version order.
 
 Reuse requires all of the following:
 
@@ -145,11 +145,11 @@ column family without rewriting existing records, and then format 32. Existing
 v31 databases move to `state/v32`; older registered sources run every
 intervening migration in version order. A snapshot import writes one marker
 containing the window start, snapshot height, block hash, manifest, and deferred
-chain checks. No upgrade uses format 31.
+chain checks.
 
-The v32 directory boundary prevents older 30.x builds from opening and
-downgrading snapshot-born state. Operators must not move that state to v30,
-v29, or any older directory, because those builds would treat its missing
+The v32 directory boundary prevents older 31.x builds from opening and
+downgrading snapshot-born state. Operators must not move that state to v31,
+v30, v29, or any older directory, because those builds would treat its missing
 pre-window bodies as an archive. Direct readers need the same snapshot-aware
 history handling as the writer. See [Upgrading Zebra](../user/upgrading.md#zebra-710)
 for the operator rollback rules.
@@ -162,7 +162,7 @@ checkpoint sync families `sync_meta_by_height` (height keys) and
 `spentness_journal` (output location keys). The `spentness_artifact` record keeps
 its fixed four-byte height and is not rewritten. Every earlier format, including
 snapshot-born v32 state, stores fixed-width heights, so the migration sits above
-the v32 snapshot barrier. Format 33 prefers a v32 source, then v30, then older
+the v32 snapshot barrier. Format 33 prefers a v32 source, then v31, then older
 registered sources. The upgrade chain applies every intervening format change in
 version order, and the height rewrite runs whenever the source predates v33.
 
@@ -216,7 +216,7 @@ the database-kind root, such as `<state.cache_dir>/state`, and removes older
 versions except registered reusable source majors. It skips current and newer
 versions, paths outside the canonical cache root, and ephemeral databases.
 
-The current registry protects `v25` through `v30` and `v32`. Cleanup removes an eligible
+The current registry protects `v25` through `v32`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks

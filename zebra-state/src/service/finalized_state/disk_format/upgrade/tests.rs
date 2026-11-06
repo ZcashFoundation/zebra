@@ -127,7 +127,7 @@ fn empty_upgrade_records_the_running_spending_index_layout() {
 }
 
 /// A non-empty database in the previous format is marked with the snapshot format once it is
-/// opened, because the format change registers the 30.1.0, 32.0.0 and 33.0.0 upgrades.
+/// opened, because the format change registers the 31.1.0, 32.0.0 and 33.0.0 upgrades.
 #[test]
 fn existing_database_is_marked_with_the_snapshot_base_format() {
     use std::sync::Arc;

@@ -153,9 +153,9 @@ what is trusted, and how to export and serve a snapshot from a stopped node.
 
 This release uses database format 33.0.0 for both archive and pruned nodes. When no v33 database
 exists, startup moves the newest reusable source inside the cache directory, preferring v32, then
-v30, then v29, to `state/v33/<network>/`. This is a move, not a backup, and happens even with
-pruning disabled. An older binary looking in the source directory will not find the moved state and
-may start syncing again. No release uses format 31.
+v31, then v30, then v29, to `state/v33/<network>/`. This is a move, not a backup, and happens even
+with pruning disabled. An older binary looking in the source directory will not find the moved state
+and may start syncing again.
 
 Every earlier format stores fixed three-byte heights, so startup rewrites the moved records to the
 variable-width height encoding before it serves reads or commits blocks. The rewrite is one-way:
@@ -169,8 +169,8 @@ and RPC clients.
 
 A database built from a [state snapshot](state-snapshot-sync.md) uses format 33.0.0 and records
 where its history starts. Never open it with an older Zebra build, and never move it to `v32`,
-`v30`, `v29`, or any older directory: those builds cannot decode its records, and older builds
-cannot tell that the history below the snapshot's window is missing. See the canonical
+`v31`, `v30`, `v29`, or any older directory: those builds cannot decode its records, and older
+builds cannot tell that the history below the snapshot's window is missing. See the canonical
 [format 33 upgrade and rollback rules](upgrading.md#zebra-710).
 
 Before upgrading or pruning, stop Zebra and keep any required archive backup outside the managed
