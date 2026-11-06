@@ -4,6 +4,8 @@
 mod addr;
 /// A Tokio codec that transforms an `AsyncRead` into a `Stream` of `Message`s.
 pub mod codec;
+/// Provisional compact-block relay and bounded reconstruction.
+pub mod compact;
 /// Inventory items.
 mod inv;
 /// An enum of all supported Bitcoin message types.

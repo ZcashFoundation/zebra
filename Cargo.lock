@@ -7328,6 +7328,8 @@ dependencies = [
  "regex",
  "schemars 1.2.1",
  "serde",
+ "sha2 0.10.9",
+ "siphasher",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
