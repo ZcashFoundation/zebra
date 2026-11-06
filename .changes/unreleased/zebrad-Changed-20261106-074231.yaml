@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Added `tokio-util` to consensus dependencies for cancellation-safe early block verification ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).
+time: 2026-11-06T07:42:31.3477964+01:00
