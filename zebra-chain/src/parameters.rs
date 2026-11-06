@@ -18,6 +18,7 @@ mod genesis;
 pub mod known_hashes;
 mod network;
 mod network_upgrade;
+pub mod spentness_hints;
 mod transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
