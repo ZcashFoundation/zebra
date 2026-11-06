@@ -684,7 +684,8 @@ pub struct EngineOutcome {
     /// The lowest height the engine did not commit.
     pub base: block::Height,
     /// The IP addresses of the peers whose streams of the frontier unit
-    /// failed since it last advanced, when the run ended with
+    /// failed since it last advanced, and of the peers that delivered
+    /// mismatched authorizing data at the frontier, when the run ended with
     /// [`EngineExit::NoProgress`]; otherwise empty.
     pub blamed: BTreeSet<IpAddr>,
 }
@@ -843,6 +844,11 @@ where
         let mut commits: FuturesUnordered<CommitFuture> = FuturesUnordered::new();
         let mut commit_failures: HashMap<block::Height, u32> = HashMap::new();
         let mut auth_mismatches: HashMap<block::Height, u32> = HashMap::new();
+        // The peers that delivered mismatched authorizing data at the
+        // frontier, blamed if the run ends without progress. A mismatch
+        // proves the peer lied, so the set is never cleared; it holds at
+        // most one entry per candidate peer.
+        let mut auth_mismatch_peers: BTreeSet<ConnectionId> = BTreeSet::new();
         let mut frontier_drops: u32 = 0;
         let mut gate_open = hints_gate
             .as_mut()
@@ -1029,20 +1035,24 @@ where
                             // lying peers keep the frontier from committing,
                             // hand back to the legacy syncer, which is not
                             // fatal.
+                            //
+                            // Every lying copy is penalized, the last one
+                            // too, before the limit is checked.
                             let mismatches = auth_mismatches.entry(height).or_default();
                             *mismatches += 1;
+                            if let Some(discarded) = window.discard(height) {
+                                if let Some(peer) = known_peers.get(&discarded.from) {
+                                    tokio::spawn(peer.penalize(AUTH_COMMITMENT_PENALTY, error.to_string()));
+                                }
+                                auth_mismatch_peers.insert(discarded.from);
+                                scheduler.back_off(discarded.from, Instant::now());
+                                scheduler.on_discarded(height, discarded.hash, discarded.bytes);
+                            }
                             if *mismatches >= FRONTIER_FAILURE_LIMIT {
                                 warn!(%error, height = height.0, "peers keep sending mismatched authorizing data; handing back");
                                 break EngineExit::NoProgress;
                             }
                             warn!(%error, height = height.0, "a peer sent mismatched authorizing data; refetching");
-                            if let Some(discarded) = window.discard(height) {
-                                if let Some(peer) = known_peers.get(&discarded.from) {
-                                    tokio::spawn(peer.penalize(AUTH_COMMITMENT_PENALTY, error.to_string()));
-                                }
-                                scheduler.back_off(discarded.from, Instant::now());
-                                scheduler.on_discarded(height, discarded.hash, discarded.bytes);
-                            }
                         }
                         CommitVerdict::Failed(error) => {
                             let failures = commit_failures.entry(height).or_default();
@@ -1114,6 +1124,7 @@ where
             scheduler
                 .frontier_failed_peers()
                 .iter()
+                .chain(auth_mismatch_peers.iter())
                 .filter_map(|id| peer_ips.get(id))
                 .copied()
                 .collect()
