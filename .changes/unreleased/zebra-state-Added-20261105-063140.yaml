@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added bounded early-relay admission, authentication, and rejected-block suppression through state requests, responses, and `EarlyRelayCache` ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).
+time: 2026-11-05T06:31:40.807737088+01:00
