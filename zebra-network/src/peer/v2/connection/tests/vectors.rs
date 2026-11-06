@@ -2945,6 +2945,9 @@ async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down
                 advertised: false,
                 peer_permits: Arc::new(tokio::sync::Semaphore::new(MAX_OBJECT_STREAMS_PER_PEER)),
                 global_permits: global_object_permits(),
+                stall_backoff: Arc::new(
+                    crate::peer::v2::connection::inbound::hashes::StallBackoff::new(),
+                ),
             },
         ));
 

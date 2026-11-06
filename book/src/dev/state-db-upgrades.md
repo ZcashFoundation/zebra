@@ -100,27 +100,49 @@ even when that balance is zero. See the [byte layouts](#data-formats).
 
 ### The v29-to-v30 upgrade
 
-Format 30 isolates state that may have pruned block bodies from older
-archive-only readers. Its registered upgrade moves compatible v29 archives into
-`state/v30` without rewriting records. The directory boundary keeps older
+Format 30 adds the `spentness_journal` and `spentness_artifact` column
+families for spentness hints. The registered upgrade uses `NoMigration`: the
+new families are created empty when the database is opened, and no record is
+rewritten, so compatible v29 state (29.0.0 or 29.1.0) is moved to `state/v30`
+without a resync.
+
+The change is a major bump, not a minor one, because a partial hinted state
+leaves the outputs the artifact omits out of `utxo_by_out_loc`, and keeps them
+only in `spentness_journal` until the hinted sync reaches its terminal height.
+A 29.x reader would open a same-major directory through the newer-version
+path and assume the format is compatible: it would panic when it spends an
+omitted output, or commit past the construction record. A separate major
+directory keeps every 29.x binary away from it. Hinted construction only
+starts on an empty state, so a partial hinted state only ever exists in v30.
+
+A never-hinted v30 directory has the same records as v29 state, and can be
+renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
+backup instead.
+
+### The v30-to-v31 upgrade
+
+Format 31 isolates state that may have pruned block bodies from older
+archive-only readers. Its registered upgrade moves compatible v30 archives into
+`state/v31` without rewriting records; older registered sources run every
+intervening upgrade first. The directory boundary keeps older
 readers from opening state that may be missing historical bodies, even when
 pruning is disabled.
 
-Retain a separate v29 archive backup for rollback; disabling old-database
+Retain a separate archive backup for rollback; disabling old-database
 cleanup does not preserve the moved directory. A pruned database cannot change
 spending-index mode: writable opens reject incompatible builds before any blocks
 can be committed.
 
 Direct database readers must be upgraded with the writer. They need a
-v30-compatible `zebra-state` dependency that handles unavailable block bodies.
+v31-compatible `zebra-state` dependency that handles unavailable block bodies.
 Manually renaming or symlinking versioned directories bypasses the pruning
 safety boundary.
 
-### The v30-to-v32 upgrade
+### The v31-to-v32 upgrade
 
-The upgrade chain first applies format 30.1, which adds the `snapshot_base`
+The upgrade chain first applies format 31.1, which adds the `snapshot_base`
 column family without rewriting existing records, and then format 32. Existing
-v30 databases move to `state/v32`; older registered sources run every
+v31 databases move to `state/v32`; older registered sources run every
 intervening migration in version order. A snapshot import writes one marker
 containing the window start, snapshot height, block hash, manifest, and deferred
 chain checks. No upgrade uses format 31.
@@ -692,8 +714,8 @@ version whose registered upgrades the test needs to exercise, preserving the
 actual data layout and supported major-version path.
 
 Deleting the file does not select an arbitrary older format: it selects
-`<directory-major>.0.0`. Deleting `state/v29/<network>/version` therefore reports
-29.0.0 and does not trigger the 29.0.0 upgrade. Changing the marker does not
+`<directory-major>.0.0`. Deleting `state/v30/<network>/version` therefore reports
+30.0.0 and does not trigger the 30.0.0 upgrade. Changing the marker does not
 convert record encodings, create an old-format fixture, or prove that a
 major-version move works. Use the persistent-cache upgrade test pattern for
 those cases; never use version-file edits as an operator recovery procedure.
