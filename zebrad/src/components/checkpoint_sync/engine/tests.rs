@@ -330,6 +330,8 @@ pub(crate) enum Behaviour {
     /// Fails its first this many requests with a transport error, then is
     /// honest.
     FailFirst(u32),
+    /// Answers every request with `REFUSED`.
+    Refused,
 }
 
 /// A simulated version 2 peer serving [`TestChain`].
@@ -513,6 +515,9 @@ impl RangePeer for MockPeer {
                 return Err(SyncPeerError::Transport("closed".to_string()));
             }
             let request_number = peer.requests.fetch_add(1, Ordering::SeqCst);
+            if peer.behaviour == Behaviour::Refused {
+                return Err(SyncPeerError::Refused);
+            }
             if matches!(peer.behaviour, Behaviour::FailFirst(count) if request_number < count) {
                 return Err(SyncPeerError::Transport("failing first".to_string()));
             }
@@ -640,6 +645,18 @@ pub(crate) fn mock_state_with_tip(
     fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
     tip_sender: Option<zebra_chain::chain_tip::mock::MockChainTipSender>,
 ) -> MockState {
+    mock_state_with_stall(commits, fail, tip_sender, |_, _| None)
+}
+
+/// [`mock_state_with_tip`], whose write task awaits `stall(height, attempt)`
+/// before it commits that height: requests sent meanwhile stay queued, and
+/// are committed once the stall ends, even if their senders stopped waiting.
+pub(crate) fn mock_state_with_stall(
+    commits: mpsc::UnboundedSender<(block::Height, block::Hash)>,
+    fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
+    tip_sender: Option<zebra_chain::chain_tip::mock::MockChainTipSender>,
+    stall: impl Fn(block::Height, u32) -> Option<BoxFuture<'static, ()>> + Send + 'static,
+) -> MockState {
     let (requests_tx, mut requests) = mpsc::unbounded_channel::<MockCommit>();
 
     tokio::spawn(async move {
@@ -684,6 +701,9 @@ pub(crate) fn mock_state_with_tip(
             while let Some(((block, rsp), attempt)) =
                 queue.remove(&tip.next().expect("test heights are small"))
             {
+                if let Some(stall) = stall(block.height, attempt) {
+                    stall.await;
+                }
                 if let Some(failure) = fail(block.height, attempt) {
                     reset_next = Some(block.height);
                     let _ = rsp.send(Err(failure.error()));
@@ -1060,8 +1080,9 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
     tokio::time::pause();
 
     let chain = TestChain::new();
+    let peers = honest_pair(&chain);
     let harness = run_engine_with(
-        honest_pair(&chain),
+        peers.clone(),
         |height, _| (height.0 == 3).then_some(MockFailure::AuthMismatch),
         None,
     )
@@ -1072,10 +1093,51 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
         EngineOutcome {
             exit: EngineExit::NoProgress,
             base: block::Height(3),
-            blamed: BTreeSet::new(),
+            blamed: peers.iter().map(|peer| peer.peer_ip()).collect(),
             known_hash_units: 0,
         },
-        "lying peers make the engine hand back, not fail"
+        "lying peers make the engine hand back, not fail, and are blamed"
+    );
+    let penalties: u32 = peers
+        .iter()
+        .map(|peer| peer.penalties.load(Ordering::SeqCst))
+        .sum();
+    assert_eq!(
+        penalties,
+        FRONTIER_FAILURE_LIMIT * AUTH_COMMITMENT_PENALTY,
+        "every lying copy is penalized, the last one too"
+    );
+}
+
+/// Peers that keep refusing ranges are blamed when the run hands back for
+/// too few peers, so the supervisor does not claim again with them.
+#[tokio::test]
+async fn engine_blames_peers_that_refuse_ranges() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let chain = TestChain::new();
+    let peers = vec![
+        MockPeer::new(1, chain.clone(), Behaviour::Refused),
+        MockPeer::new(2, chain.clone(), Behaviour::Refused),
+    ];
+    let harness = run_engine(peers.clone(), |_, _| false, None).await;
+
+    assert_eq!(
+        harness.outcome,
+        EngineOutcome {
+            exit: EngineExit::TooFewPeers,
+            base: block::Height(1),
+            blamed: peers.iter().map(|peer| peer.peer_ip()).collect(),
+            known_hash_units: 0,
+        },
+        "both refusing peers are blamed"
+    );
+    assert!(
+        peers
+            .iter()
+            .all(|peer| peer.requests.load(Ordering::SeqCst) >= 2),
+        "each peer refused at least twice"
     );
 }
 
