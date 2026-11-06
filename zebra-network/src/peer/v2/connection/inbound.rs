@@ -380,6 +380,9 @@ where
             serve_addr(response, address_book).await
         }
         WireRequest::Mempool => serve_mempool(response, inbound_service).await,
+        // Not served yet: without a body bound, `get-hashes` streams are refused above, before any
+        // body is read.
+        WireRequest::Hashes(_) => Err(Outcome::Refuse(ErrorCode::Refused)),
         WireRequest::BlockRange(request) => {
             let peer = range_permit
                 .take()
