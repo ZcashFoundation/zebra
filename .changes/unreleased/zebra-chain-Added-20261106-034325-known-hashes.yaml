@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `parameters::known_hashes`, with `KnownHashListSpec`, which pins a known-hash list as the SHA-256 of each 50,000-height chunk of `get-hashes` entries and verifies fetched chunks against it, and `chunk_pin`. No list is pinned for Mainnet or Testnet yet; Regtest and custom testnets take their pins from `KnownHashListSpec::from_config`.
+time: 2026-11-06T03:43:25.000000000Z
