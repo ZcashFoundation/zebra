@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Added the `PeerError::{ProtocolViolation, RequestStreamFailed, LocalEncodingError}` variants, which version 2 protocol connections report. `PeerError` is not `#[non_exhaustive]`, so exhaustive matches on it need new arms.'
+time: 2026-10-17T10:00:00.000000000+02:00

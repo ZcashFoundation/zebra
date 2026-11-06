@@ -267,6 +267,75 @@ fn peer_set_rejects_connections_past_per_ip_limit() {
     });
 }
 
+/// A peer set with version 2 enabled has room for one more peer than the legacy limits allow:
+/// version 2 connections are on top of the legacy ones.
+#[test]
+fn peer_set_with_v2_admits_peers_past_legacy_limit() {
+    let num_ready = peer_set_with_one_peer_past_legacy_limit(true);
+    let legacy = crate::Config {
+        peerset_initial_target_size: 1,
+        ..crate::Config::default()
+    };
+    assert_eq!(
+        num_ready,
+        legacy.peerset_outbound_connection_limit() + legacy.peerset_inbound_connection_limit() + 1,
+    );
+}
+
+/// Without version 2, going past the legacy limits is still a bug the peer set catches.
+#[test]
+#[should_panic(expected = "unexpectedly exceeded configured peer set connection limit")]
+fn peer_set_without_v2_panics_past_legacy_limit() {
+    peer_set_with_one_peer_past_legacy_limit(false);
+}
+
+/// Builds a peer set with one more peer than the legacy connection limits allow, and returns its
+/// number of ready peers.
+fn peer_set_with_one_peer_past_legacy_limit(v2_enabled: bool) -> usize {
+    let config = crate::Config {
+        peerset_initial_target_size: 1,
+        v2_listen_addr: v2_enabled.then(|| "127.0.0.1:0".parse().unwrap()),
+        ..crate::Config::default()
+    };
+    let num_peers =
+        config.peerset_outbound_connection_limit() + config.peerset_inbound_connection_limit() + 1;
+
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version; num_peers],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // CORRECTNESS: This test does not depend on external resources that could really timeout.
+    tokio::time::pause();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        // The mock peers all share 127.0.0.1, so lift the per-IP cap out of the way.
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_config(config)
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version)
+            .max_conns_per_ip(num_peers)
+            .build();
+
+        // Discovery admits at most a connection limit's worth of peers per poll, so poll again
+        // for the peer past the limit.
+        for _ in 0..2 {
+            peer_set
+                .ready()
+                .await
+                .expect("peer set service is always ready");
+        }
+        peer_set.ready_services.len()
+    })
+}
+
 /// Check that a peer set with an empty inventory registry routes requests to a random ready peer.
 #[test]
 fn peer_set_route_inv_empty_registry() {
@@ -437,6 +506,172 @@ async fn block_advert_bypasses_buffer_with_all_peers_busy() {
     assert_eq!(advert.await.unwrap(), Response::Nil);
     assert!(ordinary.as_mut().now_or_never().is_none());
     drop(pending_requests);
+}
+
+/// Block adverts only go to legacy peers: a version 2 peer neither receives one nor counts as an
+/// eligible advert peer, so it cannot use up the advert fanout without announcing the block.
+#[tokio::test]
+async fn block_adverts_skip_version_2_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let hash = block::Hash([21; 32]);
+    let legacy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let v2_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+
+    // One version 2 peer and one legacy peer: only the legacy peer gets the adverts.
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    let v2_client: LoadTrackedClient = v2_client.into();
+    let (mut minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    assert!(
+        v2_client.remote_version() >= minimum_peer_version.current(),
+        "the version 2 peer must be skipped for its protocol, not its version"
+    );
+    let (legacy_client, mut legacy) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .finish();
+    let discovery = stream::iter([
+        Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client)),
+        Ok(Change::Insert(legacy_addr, legacy_client.into())),
+    ])
+    .chain(stream::pending());
+    let (peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+    let mut advertiser = peer_set.block_advertiser();
+    let (_network_service, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+
+    timeout(Duration::from_secs(10), async {
+        for request in [
+            Request::AdvertiseBlockToAll(hash),
+            Request::AdvertiseBlock(hash, None),
+        ] {
+            let advert = advertiser.ready().await.unwrap().call(request.clone());
+            // Writing to the version 2 peer's closed advert channel would fail the advert.
+            let advert_result = tokio::spawn(advert);
+            let queued = legacy
+                .block_advert_receiver
+                .recv()
+                .await
+                .expect("the legacy peer gets the advert");
+            assert_eq!(queued.hash, hash);
+            queued.result.send(Ok(())).unwrap();
+            assert_eq!(
+                advert_result.await.unwrap().unwrap(),
+                Response::Nil,
+                "{request:?} must only be written to the legacy peer"
+            );
+        }
+    })
+    .await
+    .expect("adverts to the legacy peer complete");
+
+    // Only a version 2 peer: it serves ordinary requests, but the advertiser has no eligible peer.
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    let (minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    let discovery = stream::iter([Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client.into()))])
+        .chain(stream::pending());
+    let (peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    let mut advertiser = peer_set.block_advertiser();
+    let (mut network_service, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    timeout(Duration::from_secs(10), network_service.ready())
+        .await
+        .expect("the version 2 peer joins the peer set")
+        .unwrap();
+    assert!(
+        timeout(Duration::from_secs(2), advertiser.ready())
+            .await
+            .is_err(),
+        "a version 2 peer must not be an eligible advert peer"
+    );
+}
+
+/// A version 2 [`Client`] connected over loopback QUIC, and the peer's end of the connection,
+/// which must be kept for the client to stay connected.
+async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::Endpoint; 2])) {
+    use crate::{
+        peer::v2::{
+            connection::{spawn_connection, ConnectionParams},
+            handshake::{handshake, LocalIdentity, Role},
+            misbehavior::MisbehaviorScores,
+            nonces::NonceRegistry,
+        },
+        quic,
+    };
+
+    let dialer = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let listener = quic::bind(network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let listener_addr = listener.local_addr().expect("bound");
+    let (outbound, inbound) = tokio::join!(quic::connect(&dialer, listener_addr), async {
+        listener
+            .accept()
+            .await
+            .expect("the endpoint is open")
+            .accept()
+            .expect("the connection is acceptable")
+            .await
+    });
+    let (outbound, inbound) = (outbound.expect("connects"), inbound.expect("accepts"));
+
+    let identity = LocalIdentity {
+        user_agent: "/v2 advert test/".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (dialer_nonces, listener_nonces) = (NonceRegistry::spawn(2), NonceRegistry::spawn(2));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let (mut dialer_version, mut listener_version) = (
+        MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, network),
+        MinimumPeerVersion::new(zebra_chain::chain_tip::NoChainTip, network),
+    );
+    let (dialer_handshake, listener_handshake) = tokio::join!(
+        handshake(
+            &outbound,
+            ConnectedAddr::new_outbound_direct(listener_addr.into()),
+            Role::Initiator,
+            &identity,
+            &mut dialer_version,
+            &dialer_nonces,
+            deadline,
+        ),
+        handshake(
+            &inbound,
+            ConnectedAddr::new_inbound_direct(inbound.remote_address().into()),
+            Role::Responder,
+            &identity,
+            &mut listener_version,
+            &listener_nonces,
+            deadline,
+        ),
+    );
+
+    let mut counter = ActiveConnectionCounter::new_counter();
+    let params = ConnectionParams {
+        inbound_service: tower::service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
+        inv_collector: tokio::sync::broadcast::channel(16).0,
+        genesis_hash: network.genesis_hash(),
+        misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
+    };
+    let client = spawn_connection(
+        outbound,
+        dialer_handshake.expect("the handshake completes"),
+        counter.track_connection(),
+        params.clone(),
+        None,
+    );
+    let peer = spawn_connection(
+        inbound,
+        listener_handshake.expect("the handshake completes"),
+        counter.track_connection(),
+        params,
+        None,
+    );
+
+    (client, (peer, [dialer, listener]))
 }
 
 /// Discovery must reach block fanout without another ordinary buffered request.
@@ -990,7 +1225,7 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
     let info = std::sync::Arc::make_mut(&mut client.connection_info);
     info.early_block_relay = early_block_relay;
     info.remote
-        .services
+        .services_mut()
         .set(PeerServices::NODE_EARLY_BLOCK_RELAY, early_block_relay);
     let (client_tx, client_rx) = mpsc::channel(1);
     client.server_tx = client_tx;
@@ -1042,7 +1277,7 @@ async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
         // A remote service signal alone must not authorize delivery.
         legacy_info
             .remote
-            .services
+            .services_mut()
             .insert(PeerServices::NODE_EARLY_BLOCK_RELAY);
         let discover = stream::iter([
             Ok::<_, BoxError>(Change::Insert(early_addr, early.into())),

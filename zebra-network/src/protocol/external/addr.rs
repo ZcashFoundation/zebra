@@ -19,7 +19,7 @@ pub use in_version::AddrInVersion;
 // so that they don't leak outside the serialization code.
 
 pub(super) use v1::AddrV1;
-pub(super) use v2::AddrV2;
+pub(crate) use v2::AddrV2;
 
 #[allow(unused_imports)]
 #[cfg(any(test, feature = "proptest-impl"))]

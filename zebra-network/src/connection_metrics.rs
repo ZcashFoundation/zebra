@@ -134,7 +134,8 @@ pub(crate) fn network_kind_label(network: &Network) -> &'static str {
     }
 }
 
-/// Records that Zebra started a TCP connection attempt.
+/// Records that Zebra started a connection attempt, over TCP or (for the version 2 protocol)
+/// QUIC.
 pub(crate) fn record_connection_attempt_started(
     network: &Network,
     direction: ConnectionDirection,
@@ -149,7 +150,9 @@ pub(crate) fn record_connection_attempt_started(
     .increment(1);
 }
 
-/// Records the terminal result of a TCP connection and Zcash handshake attempt.
+/// Records the terminal result of a connection and Zcash handshake attempt, over TCP or QUIC.
+///
+/// Only connect-stage failures are labelled by transport (`tcp_connect` or `quic_connect`).
 pub(crate) fn record_connection_attempt_finished(
     network: &Network,
     direction: ConnectionDirection,
@@ -175,7 +178,7 @@ pub(crate) fn record_connection_attempt_finished(
     .increment(1);
 }
 
-/// Records an inbound TCP connection that Zebra rejected before its Zcash handshake.
+/// Records an inbound TCP or QUIC connection that Zebra rejected before its Zcash handshake.
 pub(crate) fn record_inbound_connection_rejected(
     network: &Network,
     addr: PeerSocketAddr,
@@ -215,6 +218,49 @@ fn classify_connection_error(
 
     if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
         return classify_io_error("tcp_connect", io_error);
+    }
+
+    if let Some(connect_error) = error.downcast_ref::<crate::quic::ConnectError>() {
+        use crate::quic::ConnectError::*;
+        return ConnectionErrorLabels {
+            stage: "quic_connect",
+            outcome: match connect_error {
+                Timeout => "timeout",
+                Start(_) | Handshake(_) => "transport",
+            },
+        };
+    }
+
+    if let Some(v2_error) = error.downcast_ref::<crate::peer::v2::handshake::HandshakeError>() {
+        use crate::{
+            peer::v2::handshake::HandshakeError::*,
+            protocol::v2::{types::ErrorCode, wire::Violation},
+        };
+        return ConnectionErrorLabels {
+            stage: match v2_error {
+                SelfConnection | MissingRequiredServices { .. } | Obsolete { .. } => "version",
+                _ => "handshake",
+            },
+            outcome: match v2_error {
+                Timeout => "timeout",
+                SelfConnection => "self_connection",
+                Obsolete { .. } => "obsolete_version",
+                Init(_) => "protocol_parse_error",
+                MissingRequiredServices { .. } => "missing_required_services",
+                // The framing error's own handling: a stream that failed or was reset is a
+                // transport failure, and this node's own oversized record is a local bug.
+                Record(wire_error) => match wire_error.violation() {
+                    None => "transport",
+                    Some(Violation::Close(ErrorCode::InternalError)) => "internal",
+                    Some(_) => "protocol_error",
+                },
+                // The peer intends to disconnect, as the legacy connection's clean close.
+                StreamFinished => "connection_closed",
+                FinishedBeforeStreamType => "protocol_error",
+                Nonces(_) => "internal",
+                Connection(_) | Write(_) | Read(_) => "transport",
+            },
+        };
     }
 
     let Some(handshake_error) = error.downcast_ref::<HandshakeError>() else {
@@ -412,6 +458,61 @@ mod tests {
             ConnectionErrorLabels {
                 stage: "handshake",
                 outcome: "connection_reset",
+            }
+        );
+    }
+
+    #[test]
+    fn v2_handshake_framing_errors_keep_their_meaning() {
+        use crate::{
+            peer::v2::handshake::HandshakeError as V2HandshakeError, protocol::v2::wire::WireError,
+        };
+
+        let cases: [(WireError, &str); 4] = [
+            (
+                WireError::Io(io::ErrorKind::ConnectionReset.into()),
+                "transport",
+            ),
+            (
+                WireError::LocalCountTooLarge {
+                    field: "record",
+                    count: 2,
+                    max: 1,
+                },
+                "internal",
+            ),
+            (
+                WireError::Flood {
+                    field: "record",
+                    count: 2,
+                    max: 1,
+                },
+                "protocol_error",
+            ),
+            (WireError::Truncated { what: "record" }, "protocol_error"),
+        ];
+
+        for (wire_error, outcome) in cases {
+            let description = wire_error.to_string();
+            let error: BoxError = V2HandshakeError::Record(wire_error).into();
+            for direction in [ConnectionDirection::Inbound, ConnectionDirection::Outbound] {
+                assert_eq!(
+                    classify_connection_error(direction, &error),
+                    ConnectionErrorLabels {
+                        stage: "handshake",
+                        outcome,
+                    },
+                    "{description}"
+                );
+            }
+        }
+
+        let error: BoxError = V2HandshakeError::StreamFinished.into();
+        assert_eq!(
+            classify_connection_error(ConnectionDirection::Inbound, &error),
+            ConnectionErrorLabels {
+                stage: "handshake",
+                outcome: "connection_closed",
             }
         );
     }
