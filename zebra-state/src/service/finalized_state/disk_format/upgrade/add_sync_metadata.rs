@@ -88,7 +88,7 @@ impl DiskFormatUpgrade for Upgrade {
                         let height = Height(height);
                         let (block, size) = db.block_and_size(height.into()).ok().flatten().expect(
                             "blocks below the observed tip height exist, and are not pruned \
-                             because pruning needs format 30, which runs after this upgrade",
+                             because pruning needs format 31, which runs after this upgrade",
                         );
 
                         (height, SyncMetadata::for_block(&block, size, 0, None))

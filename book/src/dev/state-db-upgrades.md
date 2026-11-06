@@ -62,12 +62,9 @@ move a compatible database from a registered earlier source major into the new
 directory, then apply every intervening format change in version order.
 
 The registry [`restorable_db_versions()`][upgrade] contains destination majors
-`26`, `27`, `28`, `29`, `30`, and `32`. The
+`26`, `27`, `28`, `29`, `30`, `31`, and `32`. The
 [`restorable_db_source_versions()`][upgrade] helper returns existing source
-candidates newest first: format 32 tries v30, v29, v28, v27, v26, then v25.
-Format v31 remains reserved for
-[#12182's variable-height record migration](https://github.com/ZcashFoundation/zebra/pull/12182)
-and becomes a source only when that migration is registered.
+candidates newest first: format 32 tries v31, v30, v29, v28, v27, v26, then v25.
 
 Reuse requires all of the following:
 
@@ -121,37 +118,37 @@ A never-hinted v30 directory has the same records as v29 state, and can be
 renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
 backup instead.
 
-Format 30 isolates state that may have pruned block bodies from older
-archive-only readers. Its registered upgrade moves compatible v29 archives into
-`state/v30` without rewriting records. The directory boundary keeps older
+### The v30-to-v31 upgrade
+
+Format 31 isolates state that may have pruned block bodies from older
+archive-only readers. Its registered upgrade moves compatible v30 archives into
+`state/v31` without rewriting records; older registered sources run every
+intervening upgrade first. The directory boundary keeps older
 readers from opening state that may be missing historical bodies, even when
 pruning is disabled.
 
-Retain a separate v29 archive backup for rollback; disabling old-database
+Retain a separate archive backup for rollback; disabling old-database
 cleanup does not preserve the moved directory. A pruned database cannot change
 spending-index mode: writable opens reject incompatible builds before any blocks
 can be committed.
 
 Direct database readers must be upgraded with the writer. They need a
-v30-compatible `zebra-state` dependency that handles unavailable block bodies.
+v31-compatible `zebra-state` dependency that handles unavailable block bodies.
 Manually renaming or symlinking versioned directories bypasses the pruning
 safety boundary.
 
-### The v30-to-v32 upgrade
+### The v31-to-v32 upgrade
 
-The upgrade chain first applies format 30.1, which adds the `snapshot_base`
+The upgrade chain first applies format 31.1, which adds the `snapshot_base`
 column family without rewriting existing records, and then format 32. Existing
-v30 databases move to `state/v32`; older registered sources run every
+v31 databases move to `state/v32`; older registered sources run every
 intervening migration in version order. A snapshot import writes one marker
 containing the window start, snapshot height, block hash, manifest, and deferred
 chain checks.
 
-Format v31 remains reserved for #12182's independent variable-height record
-migration. It is not a reusable source until that migration is registered.
-
-The v32 directory boundary prevents older 30.x builds from opening and
-downgrading snapshot-born state. Operators must not move that state to v30,
-v31, v29, or any older directory, because those builds would treat its missing
+The v32 directory boundary prevents older 31.x builds from opening and
+downgrading snapshot-born state. Operators must not move that state to v31,
+v30, v29, or any older directory, because those builds would treat its missing
 pre-window bodies as an archive. Direct readers need the same snapshot-aware
 history handling as the writer. See [Upgrading Zebra](../user/upgrading.md#zebra-710)
 for the operator rollback rules.
@@ -163,7 +160,7 @@ the database-kind root, such as `<state.cache_dir>/state`, and removes older
 versions except registered reusable source majors. It skips current and newer
 versions, paths outside the canonical cache root, and ephemeral databases.
 
-The current registry protects `v25` through `v30`. Cleanup removes an eligible
+The current registry protects `v25` through `v31`. Cleanup removes an eligible
 major-version directory as a whole, including its network subdirectories.
 
 ### Upgrade execution and validity checks
