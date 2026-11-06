@@ -2,8 +2,12 @@
 //!
 //! The peer set keeps at most one connection per remote address across both protocols, and
 //! drops a new connection whose address is already connected, or whose IP is at the per-IP
-//! limit. The dialers check the same rules before they dial, so they don't open connections
+//! limit. The dialers check the same rules before they dial, so they open fewer connections
 //! the peer set would drop.
+//!
+//! The check is best-effort: it only sees admitted connections. Handshakes still in progress,
+//! over either protocol, reserve nothing, so two dials to one address or IP can both pass it.
+//! The peer set's own check stays authoritative, and drops the later of the racing connections.
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -48,6 +52,9 @@ impl ConnectedPeers {
     ///
     /// The peer set drops a connection to an address it is already connected to, or to an
     /// IPv4 address or IPv6 `/64` that already has `max_conns_per_ip` connections.
+    ///
+    /// Only admitted connections count: a pending handshake to `addr`, or to its IP, doesn't
+    /// block the dial, so the peer set can still drop the connection when it completes.
     pub(crate) fn blocks_dial(&self, addr: PeerSocketAddr) -> Option<&'static str> {
         let keys = self.keys.borrow();
         if keys.contains(&addr) {
