@@ -23,6 +23,225 @@ use crate::{
 
 use super::generate; // TODO: this should be rewritten as strategies
 
+/// Independent Bitcoin-style reduction: SHA256d, duplicating the last node on odd levels.
+fn serial_transaction_merkle_root(leaves: &[[u8; 32]]) -> Option<[u8; 32]> {
+    let mut level = leaves.to_vec();
+    while level.len() > 1 {
+        if !level.len().is_multiple_of(2) {
+            level.push(*level.last().unwrap());
+        }
+        let mut parents = Vec::new();
+        for pair in level.chunks_exact(2) {
+            let mut writer = sha256d::Writer::default();
+            writer.write_all(&pair[0]).unwrap();
+            writer.write_all(&pair[1]).unwrap();
+            parents.push(writer.finish());
+        }
+        level = parents;
+    }
+    level.first().copied()
+}
+
+/// Independent ZIP-244 reduction: zero-pad once, then hash with the auth-data personalization.
+fn serial_auth_data_root(leaves: &[[u8; 32]]) -> [u8; 32] {
+    let mut level = leaves.to_vec();
+    level.resize(level.len().next_power_of_two(), [0; 32]);
+    while level.len() > 1 {
+        let mut parents = Vec::new();
+        for pair in level.chunks_exact(2) {
+            let digest = blake2b_simd::Params::new()
+                .hash_length(32)
+                .personal(b"ZcashAuthDatHash")
+                .to_state()
+                .update(&pair[0])
+                .update(&pair[1])
+                .finalize();
+            parents.push(digest.as_bytes().try_into().unwrap());
+        }
+        level = parents;
+    }
+    level[0]
+}
+
+/// Both reducers must preserve serial semantics across padding, chunk, and scheduling boundaries.
+#[test]
+fn parallel_merkle_roots_match_serial_reference() {
+    use crate::{
+        block::merkle::{AuthDataRoot, Root, PARALLEL_MERKLE_THRESHOLD},
+        transaction::{AuthDigest, Hash as TransactionHash},
+    };
+
+    let _init_guard = zebra_test::init();
+    let cutoff = PARALLEL_MERKLE_THRESHOLD;
+    let mut state = 0x4d59_5df4_d0f3_3173_u64;
+    let leaves: Vec<[u8; 32]> = (0..20_000)
+        .map(|_| {
+            let mut leaf = [0; 32];
+            for bytes in leaf.chunks_exact_mut(8) {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                bytes.copy_from_slice(&state.to_le_bytes());
+            }
+            leaf
+        })
+        .collect();
+
+    for leaf_count in [
+        0,
+        1,
+        2,
+        3,
+        127,
+        128,
+        129,
+        255,
+        256,
+        257,
+        511,
+        512,
+        513,
+        cutoff - 1,
+        cutoff,
+        cutoff + 1,
+        2_047,
+        2_048,
+        2_049,
+        4_095,
+        4_096,
+        4_097,
+        8_191,
+        8_192,
+        8_193,
+        9_194,
+        16_383,
+        16_384,
+        16_385,
+        19_999,
+        20_000,
+    ] {
+        let leaves = &leaves[..leaf_count];
+        let actual_auth = leaves
+            .iter()
+            .copied()
+            .map(AuthDigest)
+            .collect::<AuthDataRoot>();
+        assert_eq!(
+            actual_auth,
+            AuthDataRoot::from(serial_auth_data_root(leaves)),
+            "auth-data root for {leaf_count} leaves"
+        );
+
+        let transaction_root = || {
+            leaves
+                .iter()
+                .copied()
+                .map(TransactionHash)
+                .collect::<Root>()
+        };
+        match serial_transaction_merkle_root(leaves) {
+            Some(expected) => assert_eq!(
+                transaction_root(),
+                Root::from(expected),
+                "transaction root for {leaf_count} leaves"
+            ),
+            None => assert!(
+                std::panic::catch_unwind(transaction_root).is_err(),
+                "an empty transaction tree must still panic"
+            ),
+        }
+    }
+}
+
+/// Parallel reduction must preserve independent serial roots and block headers.
+#[test]
+fn parallel_merkle_roots_match_serial_vectors() {
+    use crate::{
+        block::merkle::{AuthDataRoot, Root},
+        transaction::AuthDigest,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    for block_bytes in zebra_test::vectors::BLOCKS.iter() {
+        let block = Block::zcash_deserialize(*block_bytes).unwrap();
+        let auth_digests: Vec<_> = block
+            .transactions
+            .iter()
+            .map(|tx| tx.auth_digest().unwrap_or(AuthDigest([0xFF; 32])).0)
+            .collect();
+        let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash().0).collect();
+
+        assert_eq!(
+            block.auth_data_root(),
+            AuthDataRoot::from(serial_auth_data_root(&auth_digests)),
+            "auth data root at {:?}",
+            block.coinbase_height()
+        );
+        assert_eq!(
+            block.header.merkle_root,
+            Root::from(serial_transaction_merkle_root(&transaction_hashes).unwrap()),
+            "header transaction root at {:?}",
+            block.coinbase_height()
+        );
+        assert_eq!(
+            block.transactions.iter().collect::<Root>(),
+            block.header.merkle_root,
+            "parallel transaction root at {:?}",
+            block.coinbase_height()
+        );
+    }
+}
+
+/// Cover empty, legacy, mixed-version, and padded trees.
+#[test]
+fn parallel_merkle_roots_match_serial_edge_cases() {
+    use crate::{block::merkle::AuthDataRoot, transaction::AuthDigest};
+
+    let _init_guard = zebra_test::init();
+    let legacy =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES).unwrap();
+    let mut mixed =
+        Block::zcash_deserialize(&**zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES).unwrap();
+
+    assert!(legacy
+        .transactions
+        .iter()
+        .all(|tx| tx.auth_digest().is_none()));
+    assert!(mixed
+        .transactions
+        .iter()
+        .any(|tx| tx.auth_digest().is_some()));
+    mixed.transactions.insert(1, legacy.transactions[0].clone());
+
+    for source in [legacy, mixed] {
+        for tx_count in [0, 1, 2, 3, 7, 15, 16, 17, 32, 257] {
+            let block = Block {
+                header: source.header.clone(),
+                transactions: source
+                    .transactions
+                    .iter()
+                    .cycle()
+                    .take(tx_count)
+                    .cloned()
+                    .collect(),
+            };
+            let digests: Vec<_> = block
+                .transactions
+                .iter()
+                .map(|tx| tx.auth_digest().unwrap_or(AuthDigest([0xFF; 32])).0)
+                .collect();
+            let serial = AuthDataRoot::from(serial_auth_data_root(&digests));
+            let actual = block.auth_data_root();
+
+            assert_eq!(actual, serial, "auth data root for {tx_count} transactions");
+            if tx_count == 0 {
+                assert_eq!(actual, AuthDataRoot::from([0; 32]));
+            }
+        }
+    }
+}
+
 #[test]
 fn blockheaderhash_debug() {
     let _init_guard = zebra_test::init();
