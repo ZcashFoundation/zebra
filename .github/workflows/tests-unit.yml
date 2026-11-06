@@ -110,8 +110,19 @@ jobs:
         # Many of the slowest tests wait on timers or peers rather than the CPU, so run twice as many
         # tests as the runner has CPUs.
         run: |
+          profile_args=()
+          if [[ "$GITHUB_EVENT_NAME" == pull_request &&
+                "${GITHUB_BASE_REF:-}" == main &&
+                "$GITHUB_REPOSITORY" == ZcashFoundation/zebra ]]; then
+            metadata=$(cargo metadata --locked --no-deps --format-version=1)
+            packages=$(jq -er '.packages[].name' <<< "$metadata")
+            while IFS= read -r package; do
+              profile_args+=(--config "profile.release.package.\"$package\".opt-level=1")
+            done <<< "$packages"
+            echo "Using opt-level=1 for workspace tests; dependency profiles are unchanged"
+          fi
           echo "Running the tests on $(nproc) CPUs"
-          NEXTEST_TEST_THREADS=$((2 * $(nproc))) cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
+          NEXTEST_TEST_THREADS=$((2 * $(nproc))) cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all "${profile_args[@]}"
 
       - name: Summarize flaky and failed unit tests
         if: always()
