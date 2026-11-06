@@ -13,19 +13,24 @@
 //!
 //! - the hashes and headers of `{0} ∪ L..=H`, but the bodies of genesis and
 //!   `H` only: an importing node keeps the bodies it commits above `H`, so it
-//!   downloads no window body it would not keep. The bodies' transaction index
-//!   rows and the address transaction rows of their transactions are shipped;
+//!   downloads no window body it would not keep. The location rows of their
+//!   transactions are shipped;
 //! - `block_info` also ships `L - 1`, the parent of the window's first block,
 //!   but no hash or height row for it;
-//! - for the other blocks, the transaction index ships only the transactions
+//! - for the other blocks, the transaction locations of only the transactions
 //!   that still have an unspent output at `H`, which the UTXO set needs;
 //! - the note commitment tree column families ship genesis, every subtree's
 //!   end height, the last row below the window, and the window, so the subtree
 //!   format checks pass and every window height reads its own tree;
-//! - the UTXO set, the address balances and UTXO index, the nullifier and
-//!   anchor sets, the subtrees, and the tip singletons are shipped whole.
+//! - the UTXO set, the nullifier and anchor sets, the subtrees, and the tip
+//!   singletons are shipped whole.
 //!
-//! The spending index (`tx_loc_by_spent_out_loc`) is never shipped.
+//! The indexes an importer rebuilds are never shipped: the transaction hashes
+//! by location (`hash_by_tx_loc`), which is the inverse of the shipped
+//! locations, and the address balance, UTXO and transaction indexes, which
+//! follow from the UTXO set, except for each address's received total and
+//! history, which a pruned node cannot know. The spending index
+//! (`tx_loc_by_spent_out_loc`) is never shipped either.
 //!
 //! # Reading
 //!
@@ -33,8 +38,8 @@
 //! database as of its last catch-up with the primary, so every component reads
 //! the same state. Each component is read on its own thread with raw
 //! iterators that skip the block cache and read ahead, and the transaction
-//! index rows of the blocks without bodies are selected with a merge join
-//! against the UTXO set's transaction locations.
+//! locations of the blocks without bodies are selected with a binary search
+//! of the UTXO set's transaction locations.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -77,10 +82,6 @@ mod tests;
 /// How far ahead the column family scans read.
 const READAHEAD_BYTES: usize = 4 << 20;
 
-/// The number of parallel scans of the address transaction index, which is
-/// read in full to find the rows of the window's transactions.
-const ADDRESS_TX_SCANS: u64 = 8;
-
 /// The length of an on-disk block height.
 const HEIGHT_LEN: usize = 3;
 
@@ -90,10 +91,6 @@ const TX_LOC_LEN: usize = HEIGHT_LEN + 2;
 /// The length of an on-disk output location: a transaction location and an
 /// output index. Address locations are output locations.
 const OUTPUT_LOC_LEN: usize = TX_LOC_LEN + 3;
-
-/// The length of an address transaction key: an address location and a
-/// transaction location.
-const ADDRESS_TX_LEN: usize = OUTPUT_LOC_LEN + TX_LOC_LEN;
 
 /// The length of a note commitment subtree value: an end height and a root.
 const SUBTREE_VALUE_LEN: usize = HEIGHT_LEN + 32;
@@ -359,9 +356,7 @@ fn key_height(key: &[u8]) -> Height {
 fn is_set(component: ComponentId) -> bool {
     matches!(
         component,
-        ComponentId::AddressUtxos
-            | ComponentId::AddressTxs
-            | ComponentId::SproutNullifiers
+        ComponentId::SproutNullifiers
             | ComponentId::SaplingNullifiers
             | ComponentId::OrchardNullifiers
             | ComponentId::IronwoodNullifiers
@@ -514,15 +509,10 @@ impl Exporter<'_> {
                     // The threads own the locations, because they may outlive this closure's
                     // locals until the scope joins them.
                     let locations = Arc::new(locations);
-                    let hash_by_tx_loc = {
-                        let locations = Arc::clone(&locations);
-                        scope.spawn(move || self.run(|| self.hash_by_tx_loc(&locations)))
-                    };
                     let tx_loc_by_hash = {
                         let locations = Arc::clone(&locations);
                         scope.spawn(move || self.run(|| self.tx_loc_by_hash(&locations)))
                     };
-                    results.insert(ComponentId::HashByTxLoc, join(hash_by_tx_loc));
                     results.insert(ComponentId::TxLocByHash, join(tx_loc_by_hash));
                 }
                 Err(error) => {
@@ -582,14 +572,11 @@ impl Exporter<'_> {
 
     /// Whether `component` is exported after the UTXO set.
     fn needs_utxos(component: ComponentId) -> bool {
-        matches!(
-            component,
-            ComponentId::Utxos | ComponentId::HashByTxLoc | ComponentId::TxLocByHash
-        )
+        matches!(component, ComponentId::Utxos | ComponentId::TxLocByHash)
     }
 
-    /// Checks that both directions of the transaction index ship the same
-    /// transactions: those with bodies, and `without_body` more.
+    /// Checks that the transaction locations ship one row for each
+    /// transaction with a body, and `without_body` more.
     fn check_transaction_index(
         manifests: &BTreeMap<ComponentId, ComponentManifest>,
         without_body: usize,
@@ -598,17 +585,15 @@ impl Exporter<'_> {
         // A count of locations in memory fits in a `u64`.
         let expected = entries(ComponentId::Transactions) + without_body as u64;
 
-        for component in [ComponentId::HashByTxLoc, ComponentId::TxLocByHash] {
-            if entries(component) != expected {
-                return Err(inconsistent(
-                    component,
-                    format!(
-                        "it has {} rows for the {} shipped transactions",
-                        entries(component),
-                        expected,
-                    ),
-                ));
-            }
+        if entries(ComponentId::TxLocByHash) != expected {
+            return Err(inconsistent(
+                ComponentId::TxLocByHash,
+                format!(
+                    "it has {} rows for the {} shipped transactions",
+                    entries(ComponentId::TxLocByHash),
+                    expected,
+                ),
+            ));
         }
 
         Ok(())
@@ -624,9 +609,7 @@ impl Exporter<'_> {
             ComponentId::HeightByHash => self.height_by_hash(),
             ComponentId::Transactions => self.transactions(),
 
-            ComponentId::AddressBalances
-            | ComponentId::AddressUtxos
-            | ComponentId::SproutNullifiers
+            ComponentId::SproutNullifiers
             | ComponentId::SaplingNullifiers
             | ComponentId::OrchardNullifiers
             | ComponentId::IronwoodNullifiers
@@ -638,8 +621,6 @@ impl Exporter<'_> {
             | ComponentId::OrchardSubtrees
             | ComponentId::IronwoodSubtrees => self.all_rows(component),
 
-            ComponentId::AddressTxs => self.address_txs(),
-
             ComponentId::SaplingTree => self.tree(component, ComponentId::SaplingSubtrees),
             ComponentId::OrchardTree => self.tree(component, ComponentId::OrchardSubtrees),
             ComponentId::IronwoodTree => self.tree(component, ComponentId::IronwoodSubtrees),
@@ -648,7 +629,7 @@ impl Exporter<'_> {
                 self.singleton(component)
             }
 
-            ComponentId::Utxos | ComponentId::HashByTxLoc | ComponentId::TxLocByHash => {
+            ComponentId::Utxos | ComponentId::TxLocByHash => {
                 unreachable!("the UTXO set and the transaction index are exported separately")
             }
         }
@@ -914,53 +895,6 @@ impl Exporter<'_> {
         tx_loc[..HEIGHT_LEN] == GENESIS || tx_loc[..HEIGHT_LEN] == height_bytes(self.height)[..]
     }
 
-    /// Exports the transaction hashes of the shipped transactions: genesis,
-    /// the snapshot block, and the transactions of the other blocks with
-    /// unspent outputs at `without_body`, found by a merge join with the index.
-    fn hash_by_tx_loc(
-        &self,
-        without_body: &[[u8; TX_LOC_LEN]],
-    ) -> Result<ComponentManifest, SnapshotError> {
-        let component = ComponentId::HashByTxLoc;
-        let mut writer = ComponentWriter::new(component, self.store);
-        let mut unspent = without_body.iter().peekable();
-        let mut found = 0;
-        let end = [self.end_bytes().as_slice(), &[0, 0]].concat();
-
-        self.scan(component.column_family(), None, Some(&end), |key, value| {
-            if key.len() != TX_LOC_LEN {
-                return Err(inconsistent(
-                    component,
-                    "a key is not a transaction location",
-                ));
-            }
-            if self.in_shipped_block(key) {
-                return writer.push_row(key, value);
-            }
-
-            // Both lists are in key order, so the locations below this key have no hash row,
-            // which the count below reports.
-            while unspent.next_if(|tx_loc| tx_loc.as_slice() < key).is_some() {}
-            if unspent.next_if(|tx_loc| tx_loc.as_slice() == key).is_some() {
-                found += 1;
-                return writer.push_row(key, value);
-            }
-            Ok(())
-        })?;
-
-        if found != without_body.len() {
-            return Err(inconsistent(
-                component,
-                format!(
-                    "{} transactions with unspent outputs have no hash row",
-                    without_body.len() - found,
-                ),
-            ));
-        }
-
-        writer.finish()
-    }
-
     /// Exports the locations of the shipped transactions by hash: one scan,
     /// whose rows are already in key order.
     fn tx_loc_by_hash(
@@ -993,67 +927,6 @@ impl Exporter<'_> {
             writer.push_row(key, value)
         })?;
         writer.finish()
-    }
-
-    /// Exports the address transaction rows of the shipped transactions.
-    ///
-    /// The index is keyed by address, so finding them reads it in full: the
-    /// key space is split by the address location's height into ranges that
-    /// are read in parallel, and their rows are then written in key order.
-    fn address_txs(&self) -> Result<ComponentManifest, SnapshotError> {
-        let component = ComponentId::AddressTxs;
-        let tip_end = u64::from(self.height.0) + 1;
-        let bound = |scan: u64| {
-            (scan > 0 && scan < ADDRESS_TX_SCANS).then(|| {
-                // The bound is at most the tip height plus one, so it fits in a `u32`.
-                let height = (tip_end * scan / ADDRESS_TX_SCANS) as u32;
-                height_bytes(Height(height)).to_vec()
-            })
-        };
-
-        let ranges = thread::scope(|scope| {
-            let handles: Vec<_> = (0..ADDRESS_TX_SCANS)
-                .map(|scan| {
-                    let (from, to) = (bound(scan), bound(scan + 1));
-                    scope.spawn(move || self.address_tx_rows(from.as_deref(), to.as_deref()))
-                })
-                .collect();
-            handles.into_iter().map(join).collect::<Vec<_>>()
-        });
-
-        let mut writer = ComponentWriter::new(component, self.store);
-        for rows in ranges {
-            for key in rows? {
-                writer.push_row(&key, &[])?;
-            }
-        }
-        writer.finish()
-    }
-
-    /// Returns the keys of the address transaction rows of shipped
-    /// transactions from `from` (inclusive) to `to` (exclusive).
-    fn address_tx_rows(
-        &self,
-        from: Option<&[u8]>,
-        to: Option<&[u8]>,
-    ) -> Result<Vec<Vec<u8>>, SnapshotError> {
-        let component = ComponentId::AddressTxs;
-        let mut rows = Vec::new();
-
-        self.scan(component.column_family(), from, to, |key, value| {
-            if key.len() != ADDRESS_TX_LEN || !value.is_empty() {
-                return Err(inconsistent(
-                    component,
-                    "a row is not an address and a transaction location",
-                ));
-            }
-            if self.in_shipped_block(&key[OUTPUT_LOC_LEN..]) {
-                rows.push(key.to_vec());
-            }
-            Ok(())
-        })?;
-
-        Ok(rows)
     }
 
     /// Exports the note commitment trees of `component` that the snapshot

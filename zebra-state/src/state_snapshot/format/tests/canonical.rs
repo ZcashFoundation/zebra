@@ -178,42 +178,6 @@ fn block_info_widens_to_the_current_layout() {
     );
 }
 
-#[test]
-fn address_balances_gain_a_received_total() {
-    let _init_guard = zebra_test::init();
-
-    // The balance, the address location (height 1, transaction 0, output 1), and the total.
-    let mut current = 50_000_i64.to_le_bytes().to_vec();
-    current.extend_from_slice(&[0, 0, 1, 0, 0, 0, 0, 1]);
-    current.extend_from_slice(&70_000_u64.to_le_bytes());
-    assert_eq!(
-        canonical_value(ComponentId::AddressBalances, &[], &current).expect("valid"),
-        current,
-    );
-
-    // Before the `received` total, it reads as zero.
-    let mut expected = current[..16].to_vec();
-    expected.extend_from_slice(&0_u64.to_le_bytes());
-    assert_eq!(
-        canonical_value(ComponentId::AddressBalances, &[], &current[..16]).expect("valid"),
-        expected,
-    );
-
-    assert_err!(
-        canonical_value(ComponentId::AddressBalances, &[], &current[..15]),
-        FormatError::InvalidValue {
-            component: ComponentId::AddressBalances,
-            ..
-        },
-    );
-    let mut negative = current.clone();
-    negative[..8].copy_from_slice(&(-1_i64).to_le_bytes());
-    assert_err!(
-        canonical_value(ComponentId::AddressBalances, &[], &negative),
-        FormatError::InvalidValue { .. },
-    );
-}
-
 /// The layout of a history tree written before NU6.3, with narrower entries.
 #[derive(serde::Serialize)]
 struct LegacyParts {

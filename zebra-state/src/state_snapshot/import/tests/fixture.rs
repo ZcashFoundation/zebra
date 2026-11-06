@@ -387,17 +387,9 @@ pub(super) fn select(state: &FinalizedState) -> Records {
                     height.is_min() || height.0 >= start.0 - 1
                 })
                 .collect(),
-            HashByTxLoc => all
-                .into_iter()
-                .filter(|(key, _)| stored(height_of(key)) || utxo_transactions.contains(key))
-                .collect(),
             TxLocByHash => all
                 .into_iter()
                 .filter(|(_, value)| stored(height_of(value)) || utxo_transactions.contains(value))
-                .collect(),
-            AddressTxs => all
-                .into_iter()
-                .filter(|(key, _)| stored(height_of(&key[8..])))
                 .collect(),
             SaplingTree | OrchardTree | IronwoodTree => {
                 let subtrees = match component {

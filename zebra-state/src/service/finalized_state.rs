@@ -92,8 +92,12 @@ pub use disk_format::KV;
 
 pub use disk_format::upgrade::{restorable_db_source_versions, restorable_db_versions};
 
-// The state snapshot format decodes and re-encodes these values.
-pub(crate) use disk_format::{chain::LegacyHistoryTreeParts, transparent::AddressBalanceLocation};
+// The state snapshot format decodes and re-encodes these values, and the importer rebuilds the
+// address indexes with them.
+pub(crate) use disk_format::{
+    chain::LegacyHistoryTreeParts,
+    transparent::{AddressBalanceLocation, AddressUnspentOutput},
+};
 
 // The state snapshot exporter refuses databases that need a migration.
 pub(crate) use disk_format::upgrade::can_read_without_migration;

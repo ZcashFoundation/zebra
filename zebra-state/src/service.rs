@@ -2418,6 +2418,8 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::AddressBalance(addresses) => {
                 let (balance, received) =
                     read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
+                // A snapshot-imported database's received totals start at the import.
+                let received = state.db.snapshot_base().is_none().then_some(received);
                 Ok(ReadResponse::AddressBalance { balance, received })
             }
 

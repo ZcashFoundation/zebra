@@ -264,9 +264,10 @@ impl DiskFormatUpgrade for Upgrade {
             }
         }
 
-        // Its bodies start at the snapshot height, so the address checks cannot start below it.
+        // Its received totals start at zero at the import, because the outputs spent below the
+        // snapshot height are gone, so the address checks start above the snapshot height.
         let address_start = match history.snapshot_base {
-            Some(base) => start_height.max(base.body_start()),
+            Some(base) => start_height.max(base.height.next().unwrap_or(base.height)),
             None => start_height,
         };
         if tip_height != Height::MIN && retained_floor > address_start.max(Height(1)) {

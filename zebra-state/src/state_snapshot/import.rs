@@ -3,7 +3,8 @@
 //!
 //! Each verified piece becomes one SST file for its component, built as the
 //! pieces arrive. The importer then ingests the SST files into a database
-//! under a temporary root, writes the singletons, the [`SnapshotBase`] marker
+//! under a temporary root, rebuilds the indexes the snapshot does not ship,
+//! writes the singletons, the [`SnapshotBase`] marker
 //! and the version file, reopens the database to run the self-consistency and
 //! chain checks, and renames it into place only if every check passes.
 //!
@@ -52,6 +53,7 @@ use super::{
 };
 
 mod checks;
+mod rebuild;
 mod records;
 
 #[cfg(test)]
@@ -159,10 +161,11 @@ pub enum ImportCheck {
     /// snapshot block bodies are complete.
     Window,
 
-    /// Every stored transaction location has its hash and location index rows.
+    /// Every stored transaction and every UTXO's transaction has a location,
+    /// and no two transactions share one.
     TransactionIndex,
 
-    /// The address indexes match the UTXO set.
+    /// The address balances rebuilt from the UTXO set fit in an amount.
     AddressIndex,
 
     /// The value pools match the UTXO set and the block info at the snapshot
@@ -490,6 +493,7 @@ pub fn decode_history_tree(
 /// check of the design's trust model runs before the database is renamed into
 /// place, and any failure refuses the import: [`SnapshotError::Refused`] names
 /// the check. The caller deletes `temp_root` afterwards, whatever the result.
+#[allow(clippy::too_many_arguments)]
 pub fn import_state_snapshot(
     temp_root: &Path,
     manifest: &Manifest,
@@ -522,6 +526,7 @@ pub fn import_state_snapshot(
         for (component, paths) in &ssts {
             ingest(&db, *component, paths)?;
         }
+        rebuild::rebuild_indexes(&db, temp_root, network)?;
         let singletons = write_singletons(&db, manifest, base, network, pieces)?;
         checks::check_raw(&db, manifest, &base, network, &singletons)?;
         let version_path = import_path.join(DATABASE_FORMAT_VERSION_FILE_NAME);
@@ -782,19 +787,21 @@ fn column_family<'db>(db: &'db DB, name: &str) -> &'db rocksdb::ColumnFamily {
 
 /// Ingests the SST files of `component` into its empty column family, moving
 /// them into the database.
+fn ingest(db: &DB, component: ComponentId, paths: &[PathBuf]) -> Result<(), SnapshotError> {
+    ingest_paths(db, component.column_family(), paths)
+}
+
+/// Ingests the SST files at `paths` into the empty column family `cf`, moving
+/// them into the database.
 ///
 /// Global sequence numbers are disabled, so the files land at the bottom level
 /// and ingestion fails if the column family is not empty or the files overlap.
-fn ingest(db: &DB, component: ComponentId, paths: &[PathBuf]) -> Result<(), SnapshotError> {
+fn ingest_paths(db: &DB, cf: &str, paths: &[PathBuf]) -> Result<(), SnapshotError> {
     let mut options = IngestExternalFileOptions::default();
     options.set_move_files(true);
     options.set_allow_global_seqno(false);
-    db.ingest_external_file_cf_opts(
-        column_family(db, component.column_family()),
-        &options,
-        paths.to_vec(),
-    )
-    .map_err(db_error("ingesting snapshot SST files"))
+    db.ingest_external_file_cf_opts(column_family(db, cf), &options, paths.to_vec())
+        .map_err(db_error("ingesting snapshot SST files"))
 }
 
 /// The decoded singletons of a snapshot.

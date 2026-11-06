@@ -153,8 +153,15 @@ fn import_round_trip() {
             .map(|utxo| utxo.utxo.output),
     );
     assert_eq!(
-        state.db.address_balance(&fixture::address(3)),
-        chain.state.db.address_balance(&fixture::address(3)),
+        state
+            .db
+            .address_balance_location(&fixture::address(3))
+            .map(|balance| balance.balance()),
+        chain
+            .state
+            .db
+            .address_balance_location(&fixture::address(3))
+            .map(|balance| balance.balance()),
     );
     assert!(
         chain
@@ -358,7 +365,7 @@ fn tampered_utxo_set_is_refused() {
     let result = import_tampered(&chain, |records| {
         records.get_mut(&ComponentId::Utxos).unwrap().remove(0);
     });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    assert_eq!(refused_by(&result), ImportCheck::ValuePools);
 
     let network = chain.network.clone();
     let result = import_tampered(&chain, |records| {
@@ -379,65 +386,71 @@ fn tampered_utxo_set_is_refused() {
     assert_eq!(refused_by(&result), ImportCheck::ValuePools);
 }
 
-/// Adds `change` to the balance in an address balance record, which is its
-/// first 8 bytes, little-endian.
-fn add_to_balance(balance: &mut [u8], change: i64) {
-    let (amount, _) = balance.split_first_chunk_mut::<8>().unwrap();
-    *amount = (i64::from_le_bytes(*amount) + change).to_le_bytes();
-}
-
-/// An address balance that is not the sum of the address's unspent outputs is
-/// refused: one that is off, two that are off in opposite directions, and one
-/// for an address without unspent outputs.
+/// The importer rebuilds the address balance and UTXO indexes from the UTXO
+/// set: each balance and UTXO row is the source's, except that the received
+/// totals start at zero, and the address transaction index is empty below the
+/// snapshot height.
 #[test]
-fn tampered_address_balance_is_refused() {
+fn address_indexes_are_rebuilt_from_the_utxo_set() {
     let _init_guard = zebra_test::init();
     let chain = fixture::chain();
-    let result = import_tampered(&chain, |records| {
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(3).as_bytes(),
-            ),
-            1,
-        );
-    });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    let records = fixture::select(&chain.state);
+    let import = fixture::import(&chain, &records, &chain.network, 0);
+    import.result.unwrap();
+    let state = FinalizedState::new_with_debug(
+        &import.config,
+        &chain.network,
+        false,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
 
-    let result = import_tampered(&chain, |records| {
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(3).as_bytes(),
-            ),
-            -1,
-        );
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(4).as_bytes(),
-            ),
-            1,
-        );
-    });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    let source_utxos = fixture::rows(&chain.state, ComponentId::Utxos);
+    assert!(!source_utxos.is_empty());
+    let cf_rows = |state: &FinalizedState, cf: &str| -> Vec<(Vec<u8>, Vec<u8>)> {
+        let cf = state.db.cf_handle(cf).unwrap();
+        state
+            .db
+            .zs_forward_range_iter::<_, crate::service::finalized_state::RawBytes, crate::service::finalized_state::RawBytes, _>(&cf, ..)
+            .map(|(key, value)| (key.raw_bytes().clone(), value.raw_bytes().clone()))
+            .collect()
+    };
+    let utxo_index = "utxo_loc_by_transparent_addr_loc";
+    assert_eq!(
+        cf_rows(&state, utxo_index),
+        cf_rows(&chain.state, utxo_index)
+    );
 
+    for height in 0..5 {
+        let address = fixture::address(height);
+        let source = chain.state.db.address_balance_location(&address).unwrap();
+        let imported = state.db.address_balance_location(&address).unwrap();
+        assert_eq!(imported.balance(), source.balance(), "{address}");
+        assert_eq!(imported.address_location(), source.address_location());
+        assert!(source.received() > 0);
+        assert_eq!(imported.received(), 0, "the received total is unknown");
+    }
+    assert!(cf_rows(&state, "tx_loc_by_transparent_addr_loc").is_empty());
+}
+
+/// Two transactions at one location are refused: the rebuilt hash index would
+/// lose one of them.
+#[test]
+fn transactions_sharing_a_location_are_refused() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let below_window = TransactionLocation::from_usize(Height(3), 0).as_bytes();
+    let other = TransactionLocation::from_usize(Height(4), 0).as_bytes();
     let result = import_tampered(&chain, |records| {
-        let address = zebra_chain::transparent::Address::from_pub_key_hash(
-            zebra_chain::parameters::NetworkKind::Regtest,
-            [0xee; 20],
-        );
-        let mut value = vec![0; 24];
-        add_to_balance(&mut value, 5);
-        records
-            .get_mut(&ComponentId::AddressBalances)
-            .unwrap()
-            .push((address.as_bytes().to_vec(), value));
+        for (_, location) in records.get_mut(&ComponentId::TxLocByHash).unwrap() {
+            if *location == other {
+                *location = below_window.to_vec();
+            }
+        }
     });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
 }
 
 /// A snapshot block body whose transactions do not have the header's merkle
@@ -455,7 +468,6 @@ fn tampered_snapshot_block_body_is_refused() {
         outputs[0].value = (outputs[0].value + Amount::try_from(1).unwrap()).unwrap();
         let tampered = coinbase.with_transparent_outputs(outputs);
         *body = tampered.zcash_serialize_to_vec().unwrap();
-        *record(records, ComponentId::HashByTxLoc, &location) = tampered.hash().as_bytes().to_vec();
         let index = records.get_mut(&ComponentId::TxLocByHash).unwrap();
         index.retain(|(hash, _)| *hash != old_hash.as_bytes());
         index.push((tampered.hash().as_bytes().to_vec(), location.to_vec()));
@@ -654,40 +666,14 @@ fn tampered_indexes_are_refused() {
     });
     assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
 
-    // Location index rows that point at each other's transactions.
+    // A location above the snapshot height.
+    let above = TransactionLocation::from_usize(Height(HEIGHT.0 + 1), 0).as_bytes();
     let result = import_tampered(&chain, |records| {
         for (_, location) in records.get_mut(&ComponentId::TxLocByHash).unwrap() {
-            if *location == below_window {
-                *location = other.to_vec();
-            } else if *location == other {
-                *location = below_window.to_vec();
+            if *location == other {
+                *location = above.to_vec();
             }
         }
-    });
-    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
-
-    // An address transaction row for a transaction whose outputs are all spent, so its index
-    // rows are not shipped.
-    let spent = TransactionLocation::from_usize(Height(9), 0).as_bytes();
-    let row = fixture::rows(&chain.state, ComponentId::AddressTxs)
-        .into_iter()
-        .find(|(key, _)| key[8..] == spent)
-        .expect("the coinbase at height 9 pays an address");
-    let result = import_tampered(&chain, |records| {
-        records.get_mut(&ComponentId::AddressTxs).unwrap().push(row);
-    });
-    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
-
-    // An unspent output whose transaction has neither index row.
-    let result = import_tampered(&chain, |records| {
-        records
-            .get_mut(&ComponentId::HashByTxLoc)
-            .unwrap()
-            .retain(|(location, _)| *location != below_window);
-        records
-            .get_mut(&ComponentId::TxLocByHash)
-            .unwrap()
-            .retain(|(_, location)| *location != below_window);
     });
     assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
 

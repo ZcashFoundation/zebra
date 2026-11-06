@@ -737,6 +737,22 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .map_err(|err| eyre!(err))?;
         let header = block::Header::zcash_deserialize(hex::decode(header_hex)?.as_slice())?;
         assert_eq!(header.hash(), commitment.block_hash);
+        // The importer rebuilds the address balances from the UTXO set, but cannot know what an
+        // address received and spent below `H`, so `getaddressbalance` omits `received`.
+        let balance: Value = b
+            .json_result_from_call(
+                "getaddressbalance",
+                json!([{ "addresses": [address_a.to_string()] }]).to_string(),
+            )
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert!(balance["balance"]
+            .as_u64()
+            .is_some_and(|balance| balance > 0));
+        assert!(
+            balance.get("received").is_none(),
+            "a snapshot-born node omits the received total: {balance}"
+        );
         for verbosity in [0, 2] {
             let error = get_block_error(&b, L - 1, verbosity).await?;
             // The snapshot ships no body below `L`. Whether the RPC reports it as pruned data

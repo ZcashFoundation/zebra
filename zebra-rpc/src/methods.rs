@@ -248,8 +248,10 @@ pub trait Rpc {
     /// zcashd also accepts a single string parameter instead of an array of strings, but Zebra
     /// doesn't because lightwalletd always calls this RPC with an array of addresses.
     ///
-    /// zcashd also returns the total amount of Zatoshis received by the addresses, but Zebra
-    /// doesn't because lightwalletd doesn't use that information.
+    /// The result also has the total amount of zatoshis received by the addresses, including
+    /// change, in `received`. A node bootstrapped from a state snapshot does not know the
+    /// outputs the addresses received and spent below the snapshot height, so it omits
+    /// `received`.
     ///
     /// The RPC documentation says that the returned object has a string `balance` field, but
     /// zcashd actually [returns an
@@ -481,6 +483,8 @@ pub trait Rpc {
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
     /// - At most 10,000 addresses are accepted, and a query matching more than 100,000
     ///   transactions is rejected; narrow the height range instead.
+    /// - A node bootstrapped from a state snapshot has the address transactions from the block
+    ///   after the snapshot height only: it never had the earlier blocks.
     #[method(name = "getaddresstxids")]
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
 
@@ -4637,8 +4641,10 @@ impl GetAddressBalanceRequest {
 pub struct GetAddressBalanceResponse {
     /// The total transparent balance.
     balance: u64,
-    /// The total received balance, including change.
-    pub received: u64,
+    /// The total received balance, including change, or `None` on a node bootstrapped from a
+    /// state snapshot, which does not know the outputs spent below the snapshot height.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received: Option<u64>,
 }
 
 #[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]

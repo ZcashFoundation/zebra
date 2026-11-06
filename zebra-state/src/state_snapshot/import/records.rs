@@ -47,17 +47,6 @@ use crate::{
 /// The width of a hash, nullifier or note commitment tree root.
 const HASH_BYTES: usize = 32;
 
-/// The width of a transparent address key: the address kind and its hash.
-const ADDRESS_BYTES: usize = 21;
-
-/// The largest address kind byte: P2PKH, P2SH and TEX for Mainnet and the
-/// test networks.
-const MAX_ADDRESS_KIND: u8 = 5;
-
-/// The width of an address balance: the balance, the address location and the
-/// total received.
-const ADDRESS_BALANCE_BYTES: usize = 8 + OUTPUT_LOCATION_DISK_BYTES + 8;
-
 /// The width of a note commitment subtree index.
 const SUBTREE_INDEX_BYTES: usize = 2;
 
@@ -102,10 +91,6 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             width(key, TRANSACTION_LOCATION_DISK_BYTES, "transaction location")?;
             decode_all::<Transaction>(value, "transaction").map(drop)
         }
-        HashByTxLoc => {
-            width(key, TRANSACTION_LOCATION_DISK_BYTES, "transaction location")?;
-            width(value, HASH_BYTES, "transaction hash")
-        }
         TxLocByHash => {
             width(key, HASH_BYTES, "transaction hash")?;
             width(
@@ -121,29 +106,6 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
         Utxos => {
             width(key, OUTPUT_LOCATION_DISK_BYTES, "output location")?;
             decode_all::<transparent::Output>(value, "transparent output").map(drop)
-        }
-        AddressBalances => {
-            width(key, ADDRESS_BYTES, "transparent address")?;
-            if key[0] > MAX_ADDRESS_KIND {
-                return Err(format!("unknown transparent address kind {}", key[0]));
-            }
-            address_balance(value).map(drop)
-        }
-        AddressUtxos => {
-            width(
-                key,
-                2 * OUTPUT_LOCATION_DISK_BYTES,
-                "address unspent output location",
-            )?;
-            width(value, 0, "address unspent output value")
-        }
-        AddressTxs => {
-            width(
-                key,
-                OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES,
-                "address transaction location",
-            )?;
-            width(value, 0, "address transaction value")
         }
         SproutNullifiers | SaplingNullifiers | OrchardNullifiers | IronwoodNullifiers => {
             width(key, HASH_BYTES, "nullifier")?;
@@ -430,43 +392,6 @@ pub(super) fn block_info(bytes: &[u8]) -> Result<BlockInfo, String> {
             .map_err(|_| "block info size is not 4 bytes".to_string())?,
     );
     Ok(BlockInfo::new(value_pools, size))
-}
-
-/// An address balance record: the balance and the location of the first
-/// output the address received.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) struct AddressBalance {
-    /// The address's balance.
-    pub(super) balance: Amount<NonNegative>,
-
-    /// The location of the first output the address received, which keys its
-    /// address indexes.
-    pub(super) location: OutputLocation,
-
-    /// The total the address has received.
-    pub(super) received: u64,
-}
-
-/// Decodes an address balance record in the current encoding.
-pub(super) fn address_balance(bytes: &[u8]) -> Result<AddressBalance, String> {
-    width(bytes, ADDRESS_BALANCE_BYTES, "address balance")?;
-    let (balance, rest) = bytes.split_at(8);
-    let (location, received) = rest.split_at(OUTPUT_LOCATION_DISK_BYTES);
-    let balance = Amount::<NonNegative>::from_bytes(
-        balance
-            .try_into()
-            .map_err(|_| "address balance is not 8 bytes".to_string())?,
-    )
-    .map_err(|error| format!("invalid address balance: {error}"))?;
-    Ok(AddressBalance {
-        balance,
-        location: crate::FromDisk::from_bytes(location),
-        received: u64::from_le_bytes(
-            received
-                .try_into()
-                .map_err(|_| "address received total is not 8 bytes".to_string())?,
-        ),
-    })
 }
 
 /// Decodes a height key or value, which `check_record` already checked the width of.

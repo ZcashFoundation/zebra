@@ -729,8 +729,10 @@ pub enum ReadResponse {
     AddressBalance {
         /// The total balance of the addresses.
         balance: Amount<NonNegative>,
-        /// The total received funds in zatoshis, including change.
-        received: u64,
+        /// The total received funds in zatoshis, including change, or `None` in a database
+        /// imported from a state snapshot, which does not know the funds the addresses received
+        /// and spent below the snapshot height.
+        received: Option<u64>,
     },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
