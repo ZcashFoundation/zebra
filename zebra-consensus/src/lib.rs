@@ -60,7 +60,9 @@ pub use block::{
     AdmittedProposal, DecodedBlock, PreparedBlockCache, Request, ShieldedActionCounts,
     VerifyBlockError, DEFAULT_PROPOSAL_CACHE_BYTES, MAX_BLOCK_SIGOPS,
 };
-pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
+pub use checkpoint::{
+    CommittedTip, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,
+};
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{
