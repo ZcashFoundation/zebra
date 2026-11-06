@@ -5,7 +5,8 @@
 //! `sync.v2_checkpoint_sync` set: the checkpoint sync engine takes block download over from the
 //! legacy syncer, hands it back at a checkpoint, and the legacy syncer finishes the blocks above
 //! the final checkpoint. A second run stops a server while the engine runs, and C falls back to
-//! the legacy syncer.
+//! the legacy syncer. A third run gives C known-hash pins for S's chain, and the engine anchors
+//! its downloads at known hashes it fetches from S and S2 with `get-hashes`.
 //!
 //! The tests wait for the syncer's ownership log lines, which `zebrad::components::sync` writes.
 //! They run three nodes through thousands of blocks, so they are ignored, and the nextest
@@ -27,15 +28,20 @@ use regex::Regex;
 use tempfile::TempDir;
 
 use zebra_chain::{
-    block::{self, Height},
+    block::{self, Block, Height, SyncHashEntry},
     parameters::{
+        known_hashes::chunk_pin,
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network,
     },
+    serialization::ZcashDeserializeInto,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_test::{args, command::TestChild, prelude::*};
-use zebrad::config::ZebradConfig;
+use zebrad::{
+    components::checkpoint_sync::known_hashes::{ChunkPin, KnownHashPins},
+    config::ZebradConfig,
+};
 
 use crate::common::{
     config::{rpc_port_config, testdir},
@@ -79,6 +85,21 @@ const ENGINE_OWNS: &str = "the checkpoint sync engine owns block download";
 
 /// The syncer's log line when the engine hands block download back.
 const ENGINE_HANDED_BACK: &str = "the checkpoint sync engine handed block download back";
+
+/// The supervisor's log line when the engine hands block download back, with the number of
+/// units it anchored at known hashes.
+const SUPERVISOR_HANDED_BACK: &str =
+    "checkpoint sync engine handed block download back to the legacy syncer";
+
+/// The highest height of the known-hash list, one chunk. Nodes serve `get-hashes` entries only
+/// up to `MAX_BLOCK_REORG_HEIGHT` below their tips, so the list ends well below S's tip minus
+/// that margin.
+const KNOWN_HASH_MAX_HEIGHT: u32 = 1_900;
+
+const _: () = assert!(
+    KNOWN_HASH_MAX_HEIGHT + zebra_state::MAX_BLOCK_REORG_HEIGHT < FINAL_CHECKPOINT + TAIL,
+    "S and S2 serve every entry of the list"
+);
 
 fn reserve_tcp_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
@@ -199,6 +220,27 @@ async fn mine_to(client: &RpcRequestClient, best_tip: u32) -> Result<()> {
     }
 }
 
+/// The known-hash list pins of S's chain up to `max_height`, from S's blocks.
+async fn known_hash_pins(client: &RpcRequestClient, max_height: u32) -> Result<KnownHashPins> {
+    let mut entries = Vec::new();
+    for height in 0..=max_height {
+        let raw = hex::decode(
+            client
+                .json_result_from_call::<String>("getblock", format!("[\"{height}\", 0]"))
+                .await
+                .map_err(|err| eyre!(err))?,
+        )?;
+        let block: Block = raw.zcash_deserialize_into()?;
+        entries.push(SyncHashEntry::for_block(&block, raw.len()));
+    }
+
+    // A list below 50,000 heights is one chunk.
+    Ok(KnownHashPins {
+        max_height: Height(max_height),
+        chunk_hashes: vec![ChunkPin(chunk_pin(&entries))],
+    })
+}
+
 async fn block_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash> {
     Ok(client
         .json_result_from_call::<String>("getblockhash", format!("[{height}]"))
@@ -217,8 +259,9 @@ struct Nodes {
     checkpoint_heights: Vec<u32>,
 }
 
-/// Mines S's chain, syncs S2 from S, and starts C.
-async fn start_nodes() -> Result<Nodes> {
+/// Mines S's chain, syncs S2 from S, and starts C, with known-hash pins for S's chain up to
+/// `known_hash_max_height` if it is set.
+async fn start_nodes(known_hash_max_height: Option<u32>) -> Result<Nodes> {
     let s_ports = Ports::reserve()?;
     let s2_ports = Ports::reserve()?;
     let c_ports = Ports::reserve()?;
@@ -251,6 +294,9 @@ async fn start_nodes() -> Result<Nodes> {
         "warn,zebrad::components::sync=info,zebrad::components::checkpoint_sync=info",
     )?;
     c_config.sync.v2_checkpoint_sync = true;
+    if let Some(max_height) = known_hash_max_height {
+        c_config.sync.v2_known_hash_pins = Some(known_hash_pins(&s_rpc, max_height).await?);
+    }
     let c = start_node(testdir()?.with_config(&mut c_config)?)?;
 
     Ok(Nodes {
@@ -293,7 +339,7 @@ async fn v2_checkpoint_sync_regtest() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let mut nodes = start_nodes().await?;
+        let mut nodes = start_nodes(None).await?;
 
         nodes.c.expect_stdout_line_matches(ENGINE_OWNS)?;
         let line = nodes.c.expect_stdout_line_matches(ENGINE_HANDED_BACK)?;
@@ -330,7 +376,7 @@ async fn v2_checkpoint_sync_regtest_falls_back_to_legacy() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let mut nodes = start_nodes().await?;
+        let mut nodes = start_nodes(None).await?;
 
         nodes.c.expect_stdout_line_matches(ENGINE_OWNS)?;
         let Nodes {
@@ -359,6 +405,38 @@ async fn v2_checkpoint_sync_regtest_falls_back_to_legacy() -> Result<()> {
         );
 
         stop_node(c)?;
+        stop_node(s)?;
+        Ok(())
+    })
+    .await?
+}
+
+/// With known-hash pins for S's chain, C's engine fetches the list from S and S2 with
+/// `get-hashes`, verifies it against the pins, and anchors its downloads at known hashes.
+#[ignore = "runs three nodes through 3,000 blocks; run manually, see the module docs"]
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_checkpoint_sync_regtest_anchors_at_known_hashes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut nodes = start_nodes(Some(KNOWN_HASH_MAX_HEIGHT)).await?;
+
+        nodes.c.expect_stdout_line_matches(ENGINE_OWNS)?;
+        let line = nodes.c.expect_stdout_line_matches(SUPERVISOR_HANDED_BACK)?;
+        let known_hash_units: u64 = Regex::new(r"known_hash_units=(\d+)")?
+            .captures(&line)
+            .ok_or_else(|| eyre!("no known-hash unit count in {line:?}"))?[1]
+            .parse()?;
+        assert!(
+            known_hash_units > 0,
+            "the engine anchored units at known hashes: {line:?}"
+        );
+
+        assert_same_chain(&nodes).await?;
+
+        let Nodes { s, s2, c, .. } = nodes;
+        stop_node(c)?;
+        stop_node(s2)?;
         stop_node(s)?;
         Ok(())
     })

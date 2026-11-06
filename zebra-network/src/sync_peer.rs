@@ -29,17 +29,27 @@ use crate::{
 };
 
 pub mod block_range;
+pub mod hashes;
 pub mod registry;
 
 #[cfg(test)]
 mod tests;
 
-pub use crate::protocol::v2::{request::GetBlockRange, types::ErrorCode};
+pub use crate::protocol::v2::{
+    request::{GetBlockRange, GetHashes},
+    types::ErrorCode,
+};
 pub use block_range::{BlockRangeStream, RangeItem};
 pub use registry::{SyncPeers, SyncPeersSender};
 
 /// The bulk streams one [`SyncPeer`] may have open at once, across clones.
 pub const BULK_STREAMS_PER_PEER: usize = 2;
+
+/// The `get-hashes` streams one [`SyncPeer`] may have open at once, across
+/// clones: as many as a Zebra responder serves for one peer. They are
+/// separate from the [`BULK_STREAMS_PER_PEER`] streams, like the responder's
+/// permits, so `get-hashes` never waits behind long block-range streams.
+pub const HASHES_STREAMS_PER_PEER: usize = 2;
 
 /// Identifies one version 2 connection for the life of the process: assigned
 /// from a monotonic counter when the connection's handshake completes, never
@@ -70,6 +80,8 @@ pub struct SyncPeer {
     remote_tip_height: block::Height,
     connection: quinn::Connection,
     bulk_permits: Arc<Semaphore>,
+    /// [`HASHES_STREAMS_PER_PEER`] permits, for `get-hashes`.
+    hashes_permits: Arc<Semaphore>,
     misbehavior: MisbehaviorScores,
     /// Closes the connection through its connection task, so the close is in
     /// the task's error slot and log, as for a violation a stream task finds.
@@ -99,6 +111,7 @@ impl SyncPeer {
             remote_tip_height,
             connection,
             bulk_permits: Arc::new(Semaphore::new(BULK_STREAMS_PER_PEER)),
+            hashes_permits: Arc::new(Semaphore::new(HASHES_STREAMS_PER_PEER)),
             misbehavior,
             closer,
         }
@@ -233,6 +246,7 @@ impl fmt::Debug for SyncPeer {
             .field("services", &self.services)
             .field("remote_tip_height", &self.remote_tip_height)
             .field("bulk_permits", &self.bulk_permits.available_permits())
+            .field("hashes_permits", &self.hashes_permits.available_permits())
             .finish_non_exhaustive()
     }
 }

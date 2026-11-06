@@ -42,6 +42,7 @@ async fn supervisor_claims_runs_and_hands_back() {
         engine_side,
         // A hints gate makes the supervisor claim despite the short span.
         Some(gate_rx),
+        None,
     );
     supervisor.anchors = Anchors::new(&chain.list);
     let task = tokio::spawn(supervisor.run());
@@ -112,6 +113,7 @@ async fn supervisor_stays_idle_without_peers_or_span() {
         mock_state(commits_tx, |_, _| false),
         latest_chain_tip,
         engine_side,
+        None,
         None,
     );
     supervisor.anchors = Anchors::new(&chain.list);
@@ -184,6 +186,7 @@ async fn supervisor_hands_back_at_the_durable_tip_after_a_mid_interval_failure()
         latest_chain_tip,
         engine_side,
         Some(gate_rx),
+        None,
     );
     supervisor.anchors = Anchors::new(&chain.list);
     legacy.ack.send_replace(1);
@@ -226,6 +229,7 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
         mock_state(commits_tx, |_, _| false),
         latest_chain_tip,
         engine_side,
+        None,
         None,
     );
     assert!(supervisor.claim_target(block::Height(0)).is_some());

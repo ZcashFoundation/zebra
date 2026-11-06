@@ -7,7 +7,12 @@
 //! Commits go through `zs::Request::CommitCheckpointVerifiedBlock`, for the
 //! contiguous frontier only, a whole checkpoint interval at a time, at most
 //! 1,024 blocks or 64 MiB outstanding, each future timed (120 s, retried
-//! once).
+//! once). Units anchored at known hashes only change planning: their blocks
+//! are committed a whole checkpoint interval at a time too.
+//!
+//! The scheduler owns the known-hash source, if the network has a list: the
+//! engine waits on its changes, and the scheduler asks it for the entries
+//! above the commit frontier and releases those below.
 //!
 //! The window and its commit-reset recovery are ported from
 //! `ibd:zebrad/src/components/ibd/engine.rs` (`Slot`, `advance_base`,
@@ -45,7 +50,8 @@ use super::{
     anchors::Anchors,
     convert::{spawn_convert, spawn_rebuild, ConvertError},
     scheduler::{
-        Assignment, Scheduler, StreamFailure, StreamId, MIN_ENGINE_PEERS, SAMPLE_INTERVAL,
+        Assignment, HashSource, Scheduler, StreamFailure, StreamId, MIN_ENGINE_PEERS,
+        SAMPLE_INTERVAL,
     },
 };
 use crate::BoxError;
@@ -687,6 +693,8 @@ pub struct EngineOutcome {
     /// failed since it last advanced, when the run ended with
     /// [`EngineExit::NoProgress`]; otherwise empty.
     pub blamed: BTreeSet<IpAddr>,
+    /// The number of units the run anchored at a known hash.
+    pub known_hash_units: u64,
 }
 
 /// The inputs of one engine run.
@@ -715,6 +723,10 @@ pub struct EngineRun<P, ZS> {
     /// progress: this run does not download from them, whatever their
     /// connection.
     pub blamed: BTreeSet<IpAddr>,
+    /// The known-hash list, if the network has one: units are anchored at
+    /// its verified entries where they are resident, and at checkpoints
+    /// elsewhere.
+    pub hashes: Option<Box<dyn HashSource>>,
 }
 
 enum StreamItem {
@@ -823,11 +835,15 @@ where
             unit_lengths,
             charged,
             blamed: excluded,
+            hashes,
         } = self;
 
         let now = Instant::now();
         let shared_charge = charged.clone();
         let mut scheduler = Scheduler::new(&config, anchors.clone(), start, target, charged, now);
+        if let Some(hashes) = hashes {
+            scheduler = scheduler.with_hash_source(hashes);
+        }
         let mut window: Window<CheckpointVerifiedBlock> = Window::new(start);
         let (events_tx, mut events) = mpsc::channel(
             EVENTS_PER_STREAM * BULK_STREAMS_PER_PEER * config.target_peers.max(MIN_ENGINE_PEERS),
@@ -936,13 +952,15 @@ where
 
             tokio::select! {
                 Some(event) = events.recv() => {
-                    on_stream_event(
+                    if let Some(defect) = on_stream_event(
                         event,
                         &mut scheduler,
                         &mut window,
                         &mut streams,
                         &mut to_convert,
-                    );
+                    ) {
+                        break EngineExit::Defect(defect);
+                    }
                 }
 
                 Some((height, result)) = converts.next() => match result {
@@ -1087,6 +1105,15 @@ where
                     );
                 }
 
+                // New known-hash entries are planned from at the next
+                // assignment.
+                changed = scheduler.hashes_changed() => {
+                    if changed.is_err() {
+                        // The source logged why.
+                        scheduler.drop_hash_source();
+                    }
+                }
+
                 open = wait_for_gate(&mut hints_gate), if !gate_open => {
                     gate_open = open;
                     // Count the failures from here: the frontier could not
@@ -1120,6 +1147,7 @@ where
         } else {
             BTreeSet::new()
         };
+        let known_hash_units = scheduler.known_hash_units();
 
         // The window's blocks are dropped with the run: nothing stays
         // charged while the legacy syncer runs.
@@ -1134,6 +1162,7 @@ where
             exit,
             base: window.base(),
             blamed,
+            known_hash_units,
         }
     }
 }
@@ -1249,13 +1278,17 @@ async fn stream_task<P: RangePeer>(
     }
 }
 
+/// Applies one stream event to the scheduler and the window.
+///
+/// Returns a defect if a delivered block's hash is not the known-hash list's
+/// entry at its height.
 fn on_stream_event(
     event: StreamEvent,
     scheduler: &mut Scheduler,
     window: &mut Window<CheckpointVerifiedBlock>,
     streams: &mut Streams,
     to_convert: &mut VecDeque<block::Height>,
-) {
+) -> Option<String> {
     let now = Instant::now();
     if !scheduler.is_live(event.stream) {
         // A cancelled stream's buffered events, or the end marker of the
@@ -1266,11 +1299,9 @@ fn on_stream_event(
         ) {
             streams.0.remove(&event.stream);
         }
-        return;
+        return None;
     }
-    let Some(stream) = streams.0.get_mut(&event.stream) else {
-        return;
-    };
+    let stream = streams.0.get_mut(&event.stream)?;
 
     match event.item {
         StreamItem::Block { raw, header, hash } => {
@@ -1282,9 +1313,23 @@ fn on_stream_event(
                 if let Some(stream) = streams.0.remove(&event.stream) {
                     stream.task.abort();
                 }
-                return;
+                return None;
             };
             stream.next_height = height.previous().ok();
+
+            // The stream reader chained this block's hash to the unit's anchor, a checkpoint
+            // or a known hash, so a block that is not the list's entry means the list and the
+            // checkpoints disagree (design §5).
+            if let Some(entry) = scheduler
+                .known_hash(height)
+                .filter(|entry| entry.hash != hash)
+            {
+                return Some(format!(
+                    "the block at {height:?} chained to the checkpoints is {hash:?}, \
+                     but the known-hash list has {:?}",
+                    entry.hash
+                ));
+            }
 
             // `usize` fits in `u64`.
             let bytes = raw.len() as u64;
@@ -1330,6 +1375,8 @@ fn on_stream_event(
             streams.0.remove(&event.stream);
         }
     }
+
+    None
 }
 
 /// Refreshes the candidate peers from the registry, leaving out the

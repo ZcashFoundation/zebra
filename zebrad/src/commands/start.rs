@@ -93,7 +93,9 @@ use tokio::{
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_chain::{
+    block::genesis::regtest_genesis_block, parameters::known_hashes::KnownHashListSpec,
+};
 use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, SubmittedBlockCache};
 
@@ -278,12 +280,16 @@ impl StartCmd {
     ///
     /// Without `peers` and `ownership`, which `start` creates only when
     /// `sync.v2_checkpoint_sync` is set, the returned task never finishes.
+    ///
+    /// The engine anchors its downloads at the verified entries of
+    /// `known_hashes` where it can, and at checkpoints elsewhere.
     fn spawn_checkpoint_sync_engine<ZS, ZSTip>(
         config: &ZebradConfig,
         peers: Option<zebra_network::SyncPeers>,
         ownership: Option<checkpoint_sync::EngineOwnership>,
         state: ZS,
         latest_chain_tip: ZSTip,
+        known_hashes: Option<KnownHashListSpec>,
     ) -> tokio::task::JoinHandle<Result<(), Report>>
     where
         ZS: tower::Service<
@@ -317,7 +323,10 @@ impl StartCmd {
             );
         }
 
-        info!("spawning checkpoint sync engine");
+        info!(
+            known_hash_list_max_height = ?known_hashes.as_ref().map(|list| list.max_height),
+            "spawning checkpoint sync engine"
+        );
         let owner = ownership.owner.subscribe();
         let supervisor = checkpoint_sync::CheckpointSync::new(
             config.sync.v2_engine_config(),
@@ -327,6 +336,7 @@ impl StartCmd {
             latest_chain_tip,
             ownership,
             None,
+            known_hashes,
         );
 
         tokio::spawn(
@@ -346,6 +356,13 @@ impl StartCmd {
 
         let config = APPLICATION.config();
         config.notify.validate()?;
+        // Refuses configured known-hash pins that the network does not take, or that are
+        // inconsistent, before anything starts.
+        let known_hashes = checkpoint_sync::known_hashes::known_hash_list(
+            &config.network.network,
+            config.sync.v2_known_hash_pins.as_ref(),
+        )
+        .map_err(|error| eyre!(error).wrap_err("invalid sync.v2_known_hash_pins"))?;
         #[cfg(feature = "zmq")]
         let zmq_socket = if let Some(endpoint) = config.notify.zmqpubhashblock.clone() {
             Some(notify::zmq::bind(endpoint).await?)
@@ -557,6 +574,7 @@ impl StartCmd {
             engine_ownership,
             state.clone(),
             latest_chain_tip.clone(),
+            known_hashes,
         );
 
         info!("initializing syncer");

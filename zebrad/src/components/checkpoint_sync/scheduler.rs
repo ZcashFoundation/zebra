@@ -7,23 +7,33 @@
 //! from stream events and a [`SAMPLE_INTERVAL`] tick, and the scheduler
 //! simulation in the tests drives it from a deterministic event queue.
 //!
-//! Units are planned lazily from the commit frontier upwards. In IBD-1 every
-//! unit is anchored at a checkpoint: the first (frontier) unit is exactly one
-//! checkpoint interval, deeper units coalesce consecutive intervals while the
-//! estimate stays below [`MAX_UNIT_BYTES`]. A truncated, stalled or failed
-//! unit keeps its delivered top part; the remainder is planned again, at the
-//! checkpoints inside it, and above the highest of them at the verified
+//! Units are planned lazily from the commit frontier upwards. A unit that
+//! starts at a height whose verified known-hash entry is resident (see
+//! [`HashSource`]) is anchored at a known hash: it has an exact size, and
+//! ends at any height, at [`FRONTIER_UNIT_BYTES`] for the frontier unit and
+//! [`DEEP_UNIT_BYTES`] deeper. Otherwise the unit is anchored at a
+//! checkpoint: the frontier unit is exactly one checkpoint interval, deeper
+//! units coalesce consecutive intervals while the estimate stays below
+//! [`MAX_UNIT_BYTES`]. A truncated, stalled or failed unit keeps its
+//! delivered top part; the remainder is planned again, at known hashes or at
+//! the checkpoints inside it, and above the highest of them at the verified
 //! `next_expected` hash ([`Anchor::Resumed`]).
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    fmt,
+    future::Future,
+    pin::Pin,
     sync::atomic::Ordering,
     time::Duration,
 };
 
 use tokio::time::Instant;
 
-use zebra_chain::block;
+use zebra_chain::{
+    block::{self, SyncHashEntry},
+    BoxError,
+};
 use zebra_network::sync_peer::{ConnectionId, BULK_STREAMS_PER_PEER};
 
 use super::{
@@ -40,6 +50,8 @@ pub struct UnitId(pub u64);
 pub enum Anchor {
     /// A hard-coded checkpoint (IBD-1).
     Checkpoint,
+    /// A verified known-hash list entry (IBD-2).
+    KnownHash,
     /// The verified `next_expected` hash of a truncated or stalled unit's
     /// delivered prefix.
     Resumed,
@@ -70,6 +82,99 @@ pub const MAX_UNIT_BYTES: u32 = 64 * 1024 * 1024;
 
 /// The most blocks one unit requests (`MAX_GET_BLOCK_RANGE_COUNT`).
 pub const MAX_UNIT_COUNT: u32 = 65_536;
+
+/// The exact size of a known-hash frontier unit: small, so the lowest blocks
+/// arrive and commit soon.
+pub const FRONTIER_UNIT_BYTES: u64 = 16 * 1024 * 1024;
+
+/// The exact size of a deeper known-hash unit: [`MAX_UNIT_BYTES`].
+// A `u32` always fits in a `u64`.
+pub const DEEP_UNIT_BYTES: u64 = MAX_UNIT_BYTES as u64;
+
+/// A source of verified per-height entries that makes every height an
+/// anchor.
+///
+/// Every entry a source returns is verified (its chunk matched its pin).
+/// Units whose entries are not resident fall back to checkpoint anchors, so
+/// a slow source slows the engine but never blocks it.
+pub trait HashSource: fmt::Debug + Send + 'static {
+    /// The highest height the list covers, verified or not.
+    fn max_height(&self) -> block::Height;
+
+    /// The verified entry at `height`, or `None` if its chunk is not
+    /// verified and resident.
+    fn entry(&self, height: block::Height) -> Option<SyncHashEntry>;
+
+    /// Asks the source to make `start..=end` resident, fetching at most 4
+    /// chunks ahead of `start`. Returns at once; progress is reported through
+    /// [`HashSource::changed`].
+    fn request(&mut self, start: block::Height, end: block::Height);
+
+    /// Resolves when new entries became resident, or with an error if the
+    /// source has failed for good (the engine then continues with checkpoint
+    /// anchors only).
+    fn changed(&mut self) -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + '_>>;
+
+    /// Drops resident entries below `height` (the committed frontier).
+    fn release_below(&mut self, height: block::Height);
+}
+
+/// Plans one known-hash unit from the verified entries of `source`: the
+/// blocks `start..=end`, where `end` is the highest height at most `limit`
+/// that keeps the exact size within `budget` bytes ([`FRONTIER_UNIT_BYTES`]
+/// for the frontier unit, [`DEEP_UNIT_BYTES`] for the others).
+///
+/// Every height is an anchor, so the unit can end anywhere: it ends at the
+/// budget, at `limit`, after [`MAX_UNIT_COUNT`] blocks, or below the first
+/// height whose entry is not resident. It always has at least one block,
+/// even one larger than `budget`.
+///
+/// Returns `None` if the entry at `start` is not resident: the caller then
+/// plans the unit with a checkpoint anchor, so a slow known-hash source slows
+/// the engine but never blocks it.
+pub fn known_hash_unit(
+    source: &(impl HashSource + ?Sized),
+    id: UnitId,
+    start: block::Height,
+    limit: block::Height,
+    budget: u64,
+) -> Option<Unit> {
+    if limit < start {
+        return None;
+    }
+
+    let mut end_entry = source.entry(start)?;
+    let mut end = start;
+    let mut est_bytes = end_entry.size;
+    let mut blocks = 1;
+
+    while end < limit && blocks < MAX_UNIT_COUNT {
+        let next = block::Height(end.0 + 1);
+        let Some(entry) = source.entry(next) else {
+            break;
+        };
+        let Some(total) = est_bytes
+            .checked_add(entry.size)
+            .filter(|&total| total <= budget)
+        else {
+            break;
+        };
+        est_bytes = total;
+        end = next;
+        end_entry = entry;
+        blocks += 1;
+    }
+
+    Some(Unit {
+        id,
+        start,
+        end,
+        end_hash: end_entry.hash,
+        anchor: Anchor::KnownHash,
+        max_bytes: MAX_UNIT_BYTES,
+        est_bytes,
+    })
+}
 
 /// The charge per delivered byte: a deserialized `Arc<Block>` retains about
 /// three times its serialized size (#12192's
@@ -297,6 +402,11 @@ pub struct Scheduler {
     /// frontier last advanced.
     frontier_failed_peers: BTreeSet<ConnectionId>,
     window_changes: Vec<WindowChange>,
+
+    /// The known-hash list, if this network has one and it has not failed.
+    hashes: Option<Box<dyn HashSource>>,
+    /// The number of units planned at a known hash.
+    known_hash_units: u64,
 }
 
 impl Scheduler {
@@ -337,7 +447,44 @@ impl Scheduler {
             frontier_failures: 0,
             frontier_failed_peers: BTreeSet::new(),
             window_changes: Vec::new(),
+            hashes: None,
+            known_hash_units: 0,
         }
+    }
+
+    /// Plans units at the verified entries of `source` where they are
+    /// resident, and asks it for the entries from the commit frontier up.
+    pub fn with_hash_source(mut self, mut source: Box<dyn HashSource>) -> Self {
+        source.request(self.frontier, self.target);
+        self.hashes = Some(source);
+        self
+    }
+
+    /// Resolves when the known-hash source has new entries, or with an error
+    /// if it has failed for good. Never resolves without a source.
+    pub fn hashes_changed(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + '_>> {
+        match self.hashes.as_mut() {
+            Some(source) => source.changed(),
+            None => Box::pin(std::future::pending()),
+        }
+    }
+
+    /// Stops using the known-hash source, which has failed for good: later
+    /// units are anchored at checkpoints only.
+    pub fn drop_hash_source(&mut self) {
+        self.hashes = None;
+    }
+
+    /// The verified known-hash entry at `height`, if it is resident.
+    pub fn known_hash(&self, height: block::Height) -> Option<SyncHashEntry> {
+        self.hashes.as_ref()?.entry(height)
+    }
+
+    /// The number of units planned at a known hash so far.
+    pub fn known_hash_units(&self) -> u64 {
+        self.known_hash_units
     }
 
     // Queries
@@ -798,17 +945,39 @@ impl Scheduler {
         }
     }
 
-    /// Plans one unit from `start`, ending at or below `limit`:
-    /// the frontier unit is exactly one checkpoint interval, a deeper unit
-    /// coalesces consecutive intervals while the estimate stays below
-    /// [`MAX_UNIT_BYTES`]. Above the last checkpoint below `limit`, the unit
-    /// is anchored at `limit_hash`.
+    /// Plans one unit from `start`, ending at or below `limit`.
+    ///
+    /// If the known-hash entry at `start` is resident, the unit is anchored
+    /// at a known hash, with an exact size of at most [`FRONTIER_UNIT_BYTES`]
+    /// for the frontier unit or [`DEEP_UNIT_BYTES`] deeper (see
+    /// [`known_hash_unit`]).
+    ///
+    /// Otherwise, the frontier unit is exactly one checkpoint interval, a
+    /// deeper unit coalesces consecutive intervals while the estimate stays
+    /// below [`MAX_UNIT_BYTES`]. Above the last checkpoint below `limit`, the
+    /// unit is anchored at `limit_hash`.
     fn plan_piece(
         &self,
         start: block::Height,
         limit: block::Height,
         limit_hash: Option<block::Hash>,
     ) -> (block::Height, block::Hash, Anchor, u64) {
+        let is_frontier = start <= self.frontier_interval_end();
+
+        if let Some(source) = self.hashes.as_deref() {
+            let budget = if is_frontier {
+                FRONTIER_UNIT_BYTES
+            } else {
+                DEEP_UNIT_BYTES
+            };
+            // The ID is assigned when the unit is queued.
+            if let Some(unit) =
+                known_hash_unit(source, UnitId(self.next_unit), start, limit, budget)
+            {
+                return (unit.end, unit.end_hash, unit.anchor, unit.est_bytes);
+            }
+        }
+
         let Some((mut end, mut end_hash)) = self
             .anchors
             .at_or_above(start)
@@ -826,7 +995,6 @@ impl Scheduler {
 
         // The frontier unit is exactly one interval: delivery is descending,
         // so it must be small to reach the frontier quickly.
-        let is_frontier = start <= self.frontier_interval_end();
         while !is_frontier && end < limit {
             let next_start = end.next().expect("below the limit");
             let Some((next_end, next_hash)) = self
@@ -862,6 +1030,9 @@ impl Scheduler {
     ) {
         let id = UnitId(self.next_unit);
         self.next_unit += 1;
+        if anchor == Anchor::KnownHash {
+            self.known_hash_units += 1;
+        }
 
         let unit = Unit {
             id,
@@ -1113,9 +1284,12 @@ impl Scheduler {
                 }
                 // A peer whose advertised tip covers a checkpoint has every
                 // block below it: not finding it is as good as a refusal.
+                // A known hash is a best-chain hash below the final checkpoint,
+                // so it is the same.
                 Release::Failure(StreamFailure::NotFound)
                     if unit.is_some_and(|unit| {
-                        unit.anchor == Anchor::Checkpoint && unit.end <= peer.remote_tip
+                        matches!(unit.anchor, Anchor::Checkpoint | Anchor::KnownHash)
+                            && unit.end <= peer.remote_tip
                     }) =>
                 {
                     peer.refused_until = Some(now + REFUSED_EXCLUSION);
@@ -1199,6 +1373,14 @@ impl Scheduler {
         if base > self.frontier {
             self.frontier = base;
             self.reset_frontier_failures();
+
+            // Every unit below the frontier is committed, and the units above
+            // it hold their anchors, so only the entries from the frontier up
+            // can still be planned.
+            if let Some(source) = self.hashes.as_mut() {
+                source.release_below(base);
+                source.request(base, self.target);
+            }
         }
 
         let mut lengths = Vec::new();
