@@ -893,10 +893,7 @@ impl Sim<'_> {
             let rate = self.peers[stream.peer.0 as usize].rate as f64;
             stream.credit += rate / f64::from(active[&stream.peer]) * STEP.as_secs_f64();
 
-            loop {
-                let Some(stream) = self.streams.get_mut(&id) else {
-                    break;
-                };
+            while let Some(stream) = self.streams.get_mut(&id) {
                 if stream.stall_after == Some(stream.sent_blocks) {
                     stream.silent_since = Some(now);
                     break;
