@@ -57,6 +57,20 @@ pub(in crate::peer::v2::connection) const OBJECT_READ_CHUNK: usize = 1 << 20;
 pub(in crate::peer::v2::connection) const OBJECT_EARLY_FIN_MARGIN: Duration =
     Duration::from_secs(4);
 
+/// How long one [`OBJECT_READ_CHUNK`] write to a `get-object` response may
+/// wait for the peer to read, before the response is finished early with the
+/// bytes written so far.
+///
+/// # Security
+///
+/// A peer that reads slowly holds its object stream permits, and one of the
+/// node's [`MAX_OBJECT_STREAMS_GLOBAL`], for as long as the response runs. So
+/// a write that stalls on the peer's flow control ends the response, rather
+/// than waiting for the deadline: a peer must read about 200 KiB/s, a little
+/// below the rate that Zebra's artifact downloads require of the peers they
+/// fetch from, to keep a stream.
+pub(in crate::peer::v2::connection) const OBJECT_WRITE_STALL: Duration = Duration::from_secs(5);
+
 // A response must have time to start before the margin; checked at compile time.
 const _: () = assert!(OBJECT_EARLY_FIN_MARGIN.as_millis() * 2 < REQUEST_TIMEOUT.as_millis());
 
@@ -100,7 +114,8 @@ pub(in crate::peer::v2::connection) struct ObjectServing {
 /// blocking pool and written as it arrives, up to the request's `length`.
 ///
 /// Once `result` and `size` are written, the stream is never reset: a read
-/// failure, a file shorter than the index says, or a peer that reads slowly
+/// failure, a file shorter than the index says, or a peer that reads slowly,
+/// so that one chunk's write waits longer than [`OBJECT_WRITE_STALL`],
 /// finishes the response early with the bytes written so far, which the
 /// draft allows and the requester re-requests. Every wait here, the header
 /// writes of probes and misses included, stops [`OBJECT_EARLY_FIN_MARGIN`]
@@ -217,10 +232,12 @@ pub(in crate::peer::v2::connection) async fn serve_object(
             break;
         }
 
-        match tokio::time::timeout_at(early_deadline, response.write(&chunk)).await {
+        let write_deadline = early_deadline.min(Instant::now() + OBJECT_WRITE_STALL);
+        match tokio::time::timeout_at(write_deadline, response.write(&chunk)).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => return Err(error),
-            // The peer reads slowly: finish with what it has, before the deadline resets.
+            // The peer reads slowly: finish with what it has, before the deadline resets, and
+            // free the permits for other requests.
             Err(_elapsed) => break,
         }
         // `chunk.len()` is at most `want`, which fits in a `u64` as it did in a `usize`.

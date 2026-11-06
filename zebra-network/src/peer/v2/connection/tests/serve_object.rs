@@ -32,6 +32,7 @@ use crate::{
                 record_sent_object_bytes, request_permit, serve_object, spawn_object_disk,
                 unreadable, ObjectServing, Outcome, ResponseSend, MAX_OBJECT_STREAMS_GLOBAL,
                 MAX_OBJECT_STREAMS_PER_PEER, OBJECT_EARLY_FIN_MARGIN, OBJECT_READ_CHUNK,
+                OBJECT_WRITE_STALL,
             },
             refuse_stream,
         },
@@ -722,6 +723,69 @@ async fn object_responses_finish_early_before_the_deadline() {
         )
         .await;
         assert_eq!(served, Served::REFUSED);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A response whose chunk write waits for the peer longer than
+/// [`OBJECT_WRITE_STALL`] is finished early with the bytes written so far,
+/// long before its deadline, so a peer that reads slowly cannot hold the
+/// node's object stream permits until then.
+#[tokio::test]
+async fn object_responses_finish_early_when_a_write_stalls() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // The peer grants the node a small receive window, so the response stalls on flow
+        // control until the peer reads.
+        let window = 64 * 1024;
+        let client_config =
+            crate::quic::client_config_with_receive_windows(&network, window, 2 * window);
+        let (peer, node, _client_ep, _server_ep) =
+            connected_pair_with(&network, Some(client_config)).await;
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let len = 4 * OBJECT_READ_CHUNK;
+        let (hash, entry, data) = write_object(dir.path(), len);
+        let (_index_tx, objects) = serving([(hash, entry)].into_iter().collect(), true);
+
+        // The deadline is far beyond the stall limit.
+        let deadline = Instant::now() + OBJECT_EARLY_FIN_MARGIN + 4 * OBJECT_WRITE_STALL;
+        let (served, timing) = serve(
+            &peer,
+            &node,
+            request(
+                hash,
+                0,
+                u32::try_from(len).expect("the test object is small"),
+            ),
+            &objects,
+            deadline,
+            // The peer starts reading only after the node has given up writing.
+            OBJECT_WRITE_STALL + Duration::from_secs(2),
+        )
+        .await;
+        let Served::Found { data: prefix, .. } = served else {
+            panic!("a started response is finished, not reset: got {served:?}");
+        };
+        assert!(
+            !prefix.is_empty() && prefix.len() < len,
+            "a short answer: {} of {len} bytes",
+            prefix.len()
+        );
+        assert_eq!(prefix, data[..prefix.len()], "the prefix is the object's");
+        // The node finished at the stall limit (timers fire a little early), well before the
+        // deadline, and before the peer read anything.
+        assert!(
+            timing.node_finished + TIMER_SLACK >= OBJECT_WRITE_STALL,
+            "the node finished before the stall limit: {timing:?}"
+        );
+        assert!(
+            timing.node_finished < timing.peer_read_from,
+            "the node waited for the peer: {timing:?}"
+        );
+        assert_permits_free(&objects);
     })
     .await
     .expect("the test completes well within the timeout");
