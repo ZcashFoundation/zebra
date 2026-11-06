@@ -2021,6 +2021,10 @@ impl Service<ReadRequest> for ReadStateService {
                 max_bytes,
             ))),
 
+            ReadRequest::SyncHashes { start, count } => Ok(ReadResponse::SyncHashes(
+                read::sync_hashes(state.latest_best_chain(), &state.db, start, count),
+            )),
+
             ReadRequest::FindForkPoint { known_blocks } => {
                 // Reject over-long locators before doing any work, so an untrusted
                 // caller can't force unbounded lookups.

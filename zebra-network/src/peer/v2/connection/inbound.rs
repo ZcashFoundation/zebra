@@ -62,8 +62,10 @@ use crate::{
 use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
 pub(crate) mod block_range;
+pub(super) mod hashes;
 
 pub(crate) use block_range::{global_block_range_permits, BlockRangeServing};
+pub(crate) use hashes::global_hashes_permits;
 
 use block_range::{serve_block_range, PendingRange};
 
@@ -161,7 +163,7 @@ pub(super) async fn serve<S>(
     send: SendStream,
     mut recv: RecvStream,
     inbound_service: S,
-    permits: Arc<Semaphore>,
+    permits: StreamPermits,
     overloads: Arc<Overloads>,
     get_addr_allowed: Arc<AtomicBool>,
     address_book: Option<V2BookHandle>,
@@ -279,7 +281,7 @@ async fn serve_inner<S>(
     response: &mut ResponseSend,
     recv: &mut RecvStream,
     inbound_service: S,
-    permits: Arc<Semaphore>,
+    permits: StreamPermits,
     overloads: &Overloads,
     get_addr_allowed: &AtomicBool,
     address_book: Option<&V2BookHandle>,
@@ -323,19 +325,22 @@ where
     // # Security
     //
     // Only a few of one peer's requests are buffered and reach the inbound service at once; the
-    // rest wait here, holding nothing, until the peer's share frees up. Range requests hold none
-    // of these permits: they are bounded by their own, which are never waited for, so excess
-    // range streams are refused at once, and never starve the peer's other requests. A range
-    // stream claims its peer permit here, and the node permit only once its request is decoded,
-    // so streams that never send a request cannot hold the node's permits.
+    // rest wait here, holding nothing, until the peer's share frees up. Range and `get-hashes`
+    // requests hold none of these permits: they are bounded by their own, per peer and over all
+    // peers, which are never waited for, so excess bulk streams are refused at once, and never
+    // starve the peer's other requests. A range stream claims its peer permit here, and the node
+    // permit only once its request is decoded, and a `get-hashes` stream claims both once its
+    // request is decoded, so streams that never send a request cannot hold the node's permits.
     let mut range_permit = match stream_type {
         StreamType::GetBlockRange => Some(block_ranges.claim_peer()?),
         _ => None,
     };
-    let _permit = match range_permit {
-        Some(_) => None,
-        None => Some(
+    let _permit = match (&range_permit, stream_type) {
+        (Some(_), _) | (None, StreamType::GetHashes) => None,
+        (None, _) => Some(
             permits
+                .request
+                .clone()
                 .acquire_owned()
                 .await
                 .map_err(|_closed| Outcome::Transport)?,
@@ -380,9 +385,17 @@ where
             serve_addr(response, address_book).await
         }
         WireRequest::Mempool => serve_mempool(response, inbound_service).await,
-        // Not served yet: without a body bound, `get-hashes` streams are refused above, before any
-        // body is read.
-        WireRequest::Hashes(_) => Err(Outcome::Refuse(ErrorCode::Refused)),
+        WireRequest::Hashes(request) => {
+            hashes::serve_hashes(
+                response,
+                request,
+                &permits.hashes,
+                &permits.hashes_backoff,
+                &permits.hashes_global,
+                inbound_service,
+            )
+            .await
+        }
         WireRequest::BlockRange(request) => {
             let peer = range_permit
                 .take()
@@ -401,6 +414,38 @@ where
     // `finish` only fails if the stream was already closed, which the peer may do at will.
     let _ = response.send.finish();
     Ok(None)
+}
+
+/// The permits that bound one peer's request streams, apart from its
+/// `get-block-range` streams, which have their own (see [`BlockRangeServing`]).
+#[derive(Clone, Debug)]
+pub(super) struct StreamPermits {
+    /// [`INBOUND_REQUEST_CONCURRENCY`] permits, for every request type
+    /// without permits of its own.
+    request: Arc<Semaphore>,
+
+    /// [`hashes::HASHES_STREAMS_PER_PEER`] permits, for `get-hashes`.
+    hashes: Arc<Semaphore>,
+
+    /// The node's `get-hashes` permits, shared by every connection (see
+    /// [`global_hashes_permits`]).
+    hashes_global: Arc<Semaphore>,
+
+    /// The `get-hashes` backoff after a stalled response.
+    hashes_backoff: Arc<hashes::StallBackoff>,
+}
+
+impl StreamPermits {
+    /// A new peer's permits, which share the node's `hashes_global` permits
+    /// with every other connection.
+    pub(super) fn new(hashes_global: Arc<Semaphore>) -> Self {
+        Self {
+            request: Arc::new(Semaphore::new(INBOUND_REQUEST_CONCURRENCY)),
+            hashes: Arc::new(Semaphore::new(hashes::HASHES_STREAMS_PER_PEER)),
+            hashes_global,
+            hashes_backoff: Arc::new(hashes::StallBackoff::new()),
+        }
+    }
 }
 
 /// Calls the inbound service, mapping its failures to stream refusals, or,
@@ -453,7 +498,9 @@ impl ResponseSend {
 
     /// Writes `bytes` to the response stream. A peer that stops reading is
     /// bounded by the request deadline in [`serve`], not here, so a slow
-    /// reader cannot extend the exchange one write at a time.
+    /// reader cannot extend the exchange one write at a time. (`get-hashes`
+    /// responses also have a shorter write deadline, see
+    /// [`hashes::HASHES_WRITE_TIMEOUT`].)
     async fn write(&mut self, bytes: &[u8]) -> Result<(), Outcome> {
         // Set before the write: a write abandoned at the deadline may have sent some of its bytes.
         self.written = true;

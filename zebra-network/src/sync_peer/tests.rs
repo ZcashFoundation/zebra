@@ -96,6 +96,7 @@ async fn fixture() -> Fixture {
             addr_relay: None,
             serve_block_ranges: true,
             block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
+            hashes_permits: crate::peer::v2::connection::global_hashes_permits(),
         },
         None,
     );

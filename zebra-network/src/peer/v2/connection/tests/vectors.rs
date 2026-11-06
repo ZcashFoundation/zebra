@@ -29,7 +29,8 @@ use crate::{
             connection::{
                 announcements::AnnouncementWriter,
                 inbound::{
-                    global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
+                    global_block_range_permits, global_hashes_permits,
+                    serve as serve_request_stream, BlockRangeServing, StreamPermits,
                     INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
                     RESPONSE_BYTES_LIMIT,
                 },
@@ -57,10 +58,11 @@ use crate::{
             constants::MAX_RECORD_PAYLOAD_LEN,
             handshake::{InitRecord, INIT_RECORD_KIND},
             record::RecordCodec,
-            request::{GetBlocks, GetHeaders, GetTx, Request as WireRequest},
+            request::{GetBlocks, GetHashes, GetHeaders, GetTx, Request as WireRequest},
             response::{
-                decode_addr_response, encode_addr_response, read_headers, read_objects,
-                write_headers_response, ObjectResult,
+                decode_addr_response, encode_addr_response,
+                hashes::{decode_hashes_response, MAX_HASHES_RESPONSE_LEN},
+                read_headers, read_objects, write_headers_response, ObjectResult,
             },
             txref::{ShortTxId, TxRef},
             types::{ErrorCode, StreamType},
@@ -281,6 +283,7 @@ fn spawn_node_scored(
             addr_relay: relaying.addr_relay,
             serve_block_ranges: true,
             block_range_permits: global_block_range_permits(),
+            hashes_permits: global_hashes_permits(),
         },
         None,
     )
@@ -1419,9 +1422,10 @@ async fn mempool_snapshot_and_unserved_requests() {
             .collect();
         assert_eq!(ids, expected);
 
-        // get-hashes is a known request type this node does not serve: REFUSED, connection open.
+        // get-tree-roots is a known request type this node does not serve: REFUSED, connection
+        // open.
         let (mut send, mut recv) = raw.connection.open_bi().await.expect("opens");
-        send.write_all(&[StreamType::GetHashes.code()])
+        send.write_all(&[StreamType::GetTreeRoots.code()])
             .await
             .expect("writes");
         send.finish().expect("finishes");
@@ -2892,7 +2896,7 @@ async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down
             send,
             server_recv,
             service,
-            Arc::new(tokio::sync::Semaphore::new(INBOUND_REQUEST_CONCURRENCY)),
+            StreamPermits::new(global_hashes_permits()),
             Arc::new(Overloads::new()),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             None,
@@ -3878,6 +3882,170 @@ async fn banned_addresses_are_never_relayed() {
             decode_addr_record(&payload).expect("decodes"),
             Some(allowed),
             "the first relayed record is the allowed address, not the banned one"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Opens a `get-hashes` request stream for `count` heights from `start`.
+///
+/// The body is written by hand: `start_height u32 LE ‖ count u32 LE`.
+async fn raw_get_hashes(connection: &Connection, start: u32, count: u32) -> RecvStream {
+    let (mut send, recv) = connection.open_bi().await.expect("opens");
+    let mut request = vec![StreamType::GetHashes.code()];
+    request.extend_from_slice(&start.to_le_bytes());
+    request.extend_from_slice(&count.to_le_bytes());
+    send.write_all(&request).await.expect("writes");
+    send.finish().expect("finishes");
+    recv
+}
+
+/// `n` distinct `get-hashes` entries.
+fn sync_hash_entries(n: u32) -> Vec<block::SyncHashEntry> {
+    (0..n)
+        .map(|k| block::SyncHashEntry {
+            hash: block::Hash([u8::try_from(k % 256).expect("in range"); 32]),
+            size: 1_000 + u64::from(k),
+            txs: 1,
+            // Above one byte, so the CompactSize encoding is exercised.
+            txouts: 300 + u64::from(k),
+            notes: 0,
+        })
+        .collect()
+}
+
+/// A `get-hashes` request reaches the inbound service as
+/// `Request::SyncHashes`, and its answer is sent as one response body; an
+/// empty answer is a response with no entries, and an answer longer than the
+/// request is cut to the requested prefix.
+#[tokio::test]
+async fn get_hashes_is_served_from_the_inbound_service() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requests_tx, mut requests_rx) = tokio::sync::mpsc::unbounded_channel();
+        let service = service_fn(move |request: Request| {
+            let _ = requests_tx.send(request.clone());
+            async move {
+                match request {
+                    // Answers with 7 entries whatever the count, to check the cut.
+                    Request::SyncHashes {
+                        start: block::Height(10),
+                        ..
+                    } => Ok(Response::SyncHashes(sync_hash_entries(7))),
+                    Request::SyncHashes { .. } => Ok(Response::SyncHashes(Vec::new())),
+                    _ => Err::<Response, BoxError>("unexpected request".into()),
+                }
+            }
+        });
+        let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(service))).await;
+
+        for (count, expected) in [(7, 7), (100, 7), (3, 3)] {
+            let mut recv = raw_get_hashes(&raw.connection, 10, count).await;
+            let body = recv
+                .read_to_end(MAX_HASHES_RESPONSE_LEN)
+                .await
+                .expect("a complete response");
+            let request = GetHashes {
+                start_height: block::Height(10),
+                count,
+            };
+            let entries = decode_hashes_response(&body, &request).expect("a conforming response");
+            assert_eq!(entries, sync_hash_entries(expected), "count {count}");
+            assert_eq!(
+                requests_rx.recv().await,
+                Some(Request::SyncHashes {
+                    start: block::Height(10),
+                    count,
+                })
+            );
+        }
+
+        // Nothing to serve: a response with no entries, not a refusal.
+        let mut recv = raw_get_hashes(&raw.connection, 1_000_000, 50).await;
+        let body = recv.read_to_end(16).await.expect("a complete response");
+        assert_eq!(body, [0], "a zero count and no entries");
+
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the connection stays open"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// One peer's `get-hashes` requests beyond `HASHES_STREAMS_PER_PEER` are
+/// refused at once, while the peer's other requests are still served from
+/// their own permits.
+#[tokio::test]
+async fn excess_get_hashes_streams_are_refused() {
+    use super::super::inbound::hashes::HASHES_STREAMS_PER_PEER;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // `get-hashes` lookups wait until released; everything else is answered from the fixture.
+        let (release_tx, release_rx) = tokio::sync::watch::channel(false);
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let fixture = Fixture::new();
+        let service = service_fn(move |request: Request| {
+            let fixture = fixture.clone();
+            let mut release_rx = release_rx.clone();
+            let started_tx = started_tx.clone();
+            async move {
+                if let Request::SyncHashes { .. } = request {
+                    let _ = started_tx.send(());
+                    release_rx
+                        .wait_for(|released| *released)
+                        .await
+                        .expect("the test keeps the sender");
+                    return Ok(Response::SyncHashes(sync_hash_entries(1)));
+                }
+                Ok::<Response, BoxError>(fixture.answer(request))
+            }
+        });
+        let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(service))).await;
+
+        // The peer's share of `get-hashes` permits, all waiting on the inbound service.
+        let mut held = Vec::new();
+        for _ in 0..HASHES_STREAMS_PER_PEER {
+            held.push(raw_get_hashes(&raw.connection, 10, 1).await);
+            started_rx.recv().await.expect("the lookup starts");
+        }
+
+        // One more is refused at once, and never reaches the inbound service.
+        let mut excess = raw_get_hashes(&raw.connection, 10, 1).await;
+        assert_reset(excess.read_to_end(1024).await, ErrorCode::Refused);
+        assert!(
+            started_rx.try_recv().is_err(),
+            "the refused lookup never starts"
+        );
+
+        // The peer's other requests are not held up behind its `get-hashes` requests.
+        let mut recv = raw_request(&raw.connection, &WireRequest::Mempool).await;
+        recv.read_to_end(1 << 20)
+            .await
+            .expect("get-mempool is served while get-hashes permits are taken");
+
+        // Released, the waiting requests complete, and their permits are free again.
+        release_tx.send(true).expect("the service keeps a receiver");
+        for mut recv in held {
+            recv.read_to_end(MAX_HASHES_RESPONSE_LEN)
+                .await
+                .expect("a complete response");
+        }
+        let mut recv = raw_get_hashes(&raw.connection, 10, 1).await;
+        recv.read_to_end(MAX_HASHES_RESPONSE_LEN)
+            .await
+            .expect("a complete response");
+
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the connection stays open"
         );
     })
     .await

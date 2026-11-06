@@ -1775,6 +1775,25 @@ pub enum ReadRequest {
         max_bytes: u64,
     },
 
+    /// Returns best-chain sync-metadata entries for `count` heights from
+    /// `start`, for serving version 2 `get-hashes` requests.
+    ///
+    /// One range scan of the `sync_meta_by_height` column family plus the
+    /// hash-by-height index. `txouts` is `cum_txouts[h] - cum_txouts[h - 1]`.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::SyncHashes`]: entry `k` is height `start + k`; a
+    /// prefix of the request that stops at the best tip minus
+    /// `MAX_BLOCK_REORG_HEIGHT`, and at the first height whose metadata is
+    /// missing (an unfinished 29.1.0 upgrade).
+    SyncHashes {
+        /// The height of the first entry.
+        start: block::Height,
+        /// The most entries to return.
+        count: u32,
+    },
+
     /// Finds the fork point between the locator `known_blocks` and the best chain.
     ///
     /// `known_blocks` is a block locator. Returns the most recent locator entry that is
@@ -2063,6 +2082,7 @@ impl ReadRequest {
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::AncestorBlocks { .. } => "ancestor_blocks",
+            ReadRequest::SyncHashes { .. } => "sync_hashes",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",

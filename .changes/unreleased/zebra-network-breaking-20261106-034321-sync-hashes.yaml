@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: 'Added the `Request::SyncHashes` and `Response::SyncHashes` variants, which ask the inbound service for best-chain sync metadata entries, to serve version 2 `get-hashes` requests. These enums are not `#[non_exhaustive]`, so exhaustive matches on them need new arms.'
+time: 2026-11-06T03:43:21.000000000Z

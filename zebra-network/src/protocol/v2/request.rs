@@ -13,8 +13,8 @@ use zebra_chain::{
 
 use super::{
     constants::{
-        GET_BLOCK_RANGE_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
-        MAX_TXS_PER_REQUEST,
+        GET_BLOCK_RANGE_REQUEST_LEN, GET_HASHES_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST,
+        MAX_LOCATOR_HASHES, MAX_TXS_PER_REQUEST,
     },
     txref::TxRef,
     types::StreamType,
@@ -41,6 +41,8 @@ pub fn max_body_len(stream_type: StreamType) -> Option<usize> {
         StreamType::GetAddr | StreamType::GetMempool => 0,
         // A final hash, a count, and a byte bound.
         StreamType::GetBlockRange => GET_BLOCK_RANGE_REQUEST_LEN,
+        // A start height and a count.
+        StreamType::GetHashes => GET_HASHES_REQUEST_LEN,
         _ => return None,
     })
 }
@@ -104,8 +106,8 @@ impl Request {
 
     /// Decodes the complete body of a request received on `stream_type`.
     ///
-    /// Only the five served request types, `get-block-range` and `get-hashes`
-    /// have a format here; any other type is [`NotARequest`](WireError::NotARequest). The stream's owner decides
+    /// Only the served request types have a format here; any other type is
+    /// [`NotARequest`](WireError::NotARequest). The stream's owner decides
     /// before calling whether such a stream is refused or a connection error,
     /// and refuses unknown type bytes as `UNSUPPORTED_STREAM_TYPE` without
     /// reading a request.
