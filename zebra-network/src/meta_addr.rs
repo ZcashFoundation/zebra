@@ -330,7 +330,8 @@ pub enum MetaAddrChange {
         services: Option<PeerServices>,
     },
 
-    /// Suppresses an outbound dial target after a self-connection nonce-reuse error.
+    /// Temporarily suppresses an outbound dial target after a nonce-reuse error.
+    /// See [`crate::constants::SELF_CONNECTION_SUPPRESSION_DURATION`].
     UpdateSelfConnection {
         #[cfg_attr(
             any(test, feature = "proptest-impl"),

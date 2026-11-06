@@ -51,7 +51,8 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerAddrState, PeerSocketAddr, Request,
+    Response,
 };
 
 use Network::*;
@@ -2394,6 +2395,96 @@ async fn add_initial_peers_is_rate_limited() {
             || matches!(updater_result, Some(Ok(Err(ref _all_senders_closed)))),
         "unexpected error or panic in address book updater task: {updater_result:?}",
     );
+}
+
+/// Startup must suppress nonce-reuse targets from both configuration and the disk cache.
+#[tokio::test]
+async fn initial_peer_nonce_reuse_is_suppressed() {
+    let _init_guard = zebra_test::init();
+    check_initial_peer_failure(true).await;
+}
+
+/// Other startup failures must leave their targets available for the crawler to retry.
+#[tokio::test]
+async fn initial_peer_other_errors_remain_retryable() {
+    let _init_guard = zebra_test::init();
+    check_initial_peer_failure(false).await;
+}
+
+async fn check_initial_peer_failure(nonce_reuse: bool) {
+    let addr: PeerSocketAddr = "127.1.1.1:8233".parse().unwrap();
+    for from_cache in [false, true] {
+        let cache = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            initial_mainnet_peers: IndexSet::new(),
+            initial_testnet_peers: IndexSet::new(),
+            cache_dir: CacheDir::disabled(),
+            listen_addr: "0.0.0.0:0".parse().unwrap(),
+            network: Mainnet,
+            peerset_initial_target_size: 1,
+            ..Config::default()
+        };
+        if from_cache {
+            config.cache_dir = CacheDir::custom_path(cache.path());
+            config.update_peer_cache([addr].into()).await.unwrap();
+        } else {
+            config
+                .initial_mainnet_peers
+                .insert(addr.remove_socket_addr_privacy().to_string());
+        }
+
+        let (
+            address_book,
+            _bans_receiver,
+            _address_book_updater,
+            address_book_service,
+            _address_metrics,
+            updater_task,
+        ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+        let connector_book = address_book.clone();
+        let outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+            assert_eq!(req.addr, addr);
+            assert!(connector_book.lock().unwrap().get(addr).is_some());
+            async move {
+                let error: BoxError = if nonce_reuse {
+                    peer::HandshakeError::RemoteNonceReuse.into()
+                } else {
+                    std::io::Error::from(std::io::ErrorKind::ConnectionRefused).into()
+                };
+                Err(error)
+            }
+        });
+        let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
+        tokio::time::timeout(
+            LISTENER_TEST_TIMEOUT,
+            add_initial_peers(config, outbound_connector, peerset_tx, address_book_service),
+        )
+        .await
+        .expect("the initial handshake should finish")
+        .expect("a failed handshake should not fail startup");
+        assert!(matches!(peerset_rx.next().now_or_never(), Some(None)));
+
+        {
+            let mut book = address_book.lock().unwrap();
+            assert_eq!(
+                book.get(addr).is_none(),
+                nonce_reuse,
+                "from_cache={from_cache}"
+            );
+            if !nonce_reuse {
+                assert_eq!(
+                    book.get(addr).unwrap().last_connection_state,
+                    PeerAddrState::NeverAttemptedGossiped,
+                );
+            }
+            assert_eq!(
+                book.update(MetaAddr::new_initial_peer(addr)).is_none(),
+                nonce_reuse,
+                "suppressed initial peers must not be restored by seed recovery"
+            );
+        }
+        updater_task.abort();
+    }
 }
 
 /// Test that self-connections fail.

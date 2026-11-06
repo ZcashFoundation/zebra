@@ -9,7 +9,7 @@ use std::{
 };
 
 use chrono::Utc;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use tokio::sync::watch;
 use tracing::Span;
 
@@ -84,9 +84,10 @@ pub struct AddressBook {
     /// controls.
     bans: BanList,
 
-    /// Outbound targets suppressed after nonce reuse, in discovery order.
+    /// Outbound targets and their most recent nonce-reuse time, oldest first.
+    /// Suppression expires after [`constants::SELF_CONNECTION_SUPPRESSION_DURATION`].
     /// Bounded by `addr_limit`; the oldest target can be retried after eviction.
-    self_addrs: IndexSet<PeerSocketAddr>,
+    self_addrs: IndexMap<PeerSocketAddr, tokio::time::Instant>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -163,7 +164,7 @@ impl AddressBook {
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
             by_addr: IndexMap::new(),
-            self_addrs: IndexSet::new(),
+            self_addrs: IndexMap::new(),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
@@ -308,9 +309,8 @@ impl AddressBook {
 
         let mut peers = self.by_addr.clone();
 
-        // Unconditionally add our local listener address to the advertised peers,
-        // to replace any self-connection failures. The address book and change
-        // constructors make sure that the SocketAddr is canonical.
+        // Advertise our local listener even when it is suppressed as a dial target.
+        // The address book and change constructors make sure the SocketAddr is canonical.
         let local_listener = self.local_listener_meta_addr(now);
         peers.insert(local_listener.addr, local_listener);
 
@@ -445,9 +445,19 @@ impl AddressBook {
     #[allow(clippy::unwrap_in_result)]
     fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
         let addr = change.addr();
+        let now = tokio::time::Instant::now();
+        if self.self_addrs.get(&addr).is_some_and(|suppressed_at| {
+            now.saturating_duration_since(*suppressed_at)
+                >= constants::SELF_CONNECTION_SUPPRESSION_DURATION
+        }) {
+            self.self_addrs.shift_remove(&addr);
+        }
         if matches!(change, MetaAddrChange::UpdateSelfConnection { .. }) {
-            // A peer can echo an observed nonce, so bound this remote-influenced set.
-            if self.self_addrs.insert(addr) && self.self_addrs.len() > self.addr_limit {
+            // A peer can echo an observed nonce, so bound this remote-influenced map.
+            // Refresh the time and eviction order only for a new nonce-reuse failure.
+            self.self_addrs.shift_remove(&addr);
+            self.self_addrs.insert(addr, now);
+            if self.self_addrs.len() > self.addr_limit {
                 self.self_addrs.shift_remove_index(0);
             }
             self.by_addr.shift_remove(&addr);
@@ -459,7 +469,7 @@ impl AddressBook {
             return None;
         }
         // Misbehavior still needs to reach the group-ban path below.
-        if self.self_addrs.contains(&addr)
+        if self.self_addrs.contains_key(&addr)
             && !matches!(change, MetaAddrChange::UpdateMisbehavior { .. })
         {
             return None;
@@ -556,7 +566,7 @@ impl AddressBook {
             }
 
             // A sub-threshold misbehavior report must not restore a suppressed target.
-            if self.self_addrs.contains(&addr) {
+            if self.self_addrs.contains_key(&addr) {
                 return None;
             }
 

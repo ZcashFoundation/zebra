@@ -464,6 +464,21 @@ where
             Err((addr, ref e)) => {
                 handshake_error_total += 1;
 
+                if matches!(
+                    e.downcast_ref::<peer::HandshakeError>(),
+                    Some(peer::HandshakeError::RemoteNonceReuse)
+                ) {
+                    // Apply suppression before startup finishes, so the crawler cannot
+                    // retry this initial target before its failure has been processed.
+                    address_book_service
+                        .clone()
+                        .oneshot(AddressBookRequest::Change(MetaAddr::new_self_connection(
+                            addr,
+                        )))
+                        .boxed()
+                        .await?;
+                }
+
                 // this is verbose, but it's better than just hanging with no output when there are errors
                 let mut expected_error = false;
                 if let Some(io_error) = e.downcast_ref::<tokio::io::Error>() {

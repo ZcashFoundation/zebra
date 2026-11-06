@@ -930,6 +930,46 @@ fn self_connection_addr_is_removed_and_ignored() {
     }
 }
 
+/// Gossip and queued updates cannot prolong suppression, and clones expire too.
+#[tokio::test(start_paused = true)]
+async fn self_connection_suppression_expires() {
+    let addr = "127.0.0.2:8233".parse().unwrap();
+    let mut book = AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 1, Span::none());
+    book.update(MetaAddr::new_self_connection(addr));
+    tokio::time::advance(Duration::from_secs(3 * 60 * 60) - Duration::from_nanos(1)).await;
+    for change in [
+        gossiped_change(addr, PeerServices::NODE_NETWORK, DateTime32::now()),
+        MetaAddr::new_initial_peer(addr),
+        MetaAddr::new_responded(addr, None),
+        MetaAddr::new_errored(addr, None),
+    ] {
+        assert!(book.update(change).is_none());
+        assert!(book.get(addr).is_none());
+    }
+    let cloned = book.clone();
+    tokio::time::advance(Duration::from_nanos(1)).await;
+    for mut book in [book, cloned] {
+        assert!(book.update(MetaAddr::new_initial_peer(addr)).is_some());
+        assert!(book
+            .reconnection_peers(Instant::now(), Utc::now())
+            .any(|peer| peer.addr() == addr));
+    }
+}
+
+/// A fresh nonce-reuse failure starts a new suppression interval.
+#[tokio::test(start_paused = true)]
+async fn self_connection_suppression_refreshes_on_nonce_reuse() {
+    let addr = "127.0.0.2:8233".parse().unwrap();
+    let mut book = AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 1, Span::none());
+    book.update(MetaAddr::new_self_connection(addr));
+    tokio::time::advance(Duration::from_secs(2 * 60 * 60)).await;
+    book.update(MetaAddr::new_self_connection(addr));
+    tokio::time::advance(Duration::from_secs(60 * 60)).await;
+    assert!(book.update(MetaAddr::new_initial_peer(addr)).is_none());
+    tokio::time::advance(Duration::from_secs(2 * 60 * 60)).await;
+    assert!(book.update(MetaAddr::new_initial_peer(addr)).is_some());
+}
+
 /// Remote-influenced suppression state has the same bound as the address book.
 #[test]
 fn self_connection_suppression_is_bounded() {
@@ -956,8 +996,8 @@ fn self_connection_suppression_is_bounded() {
     }
 }
 
-#[test]
-fn self_connection_suppression_preserves_misbehavior_bans() {
+#[tokio::test(start_paused = true)]
+async fn self_connection_suppression_preserves_misbehavior_bans() {
     let addr = "127.0.0.2:8233".parse().unwrap();
     let mut book = AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 1, Span::none());
     book.update(MetaAddr::new_self_connection(addr));
@@ -966,6 +1006,8 @@ fn self_connection_suppression_preserves_misbehavior_bans() {
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
         reason: "test misbehavior".to_string(),
     });
+    tokio::time::advance(Duration::from_secs(3 * 60 * 60)).await;
+    assert!(book.update(MetaAddr::new_initial_peer(addr)).is_none());
     assert!(book.bans.is_banned(addr.ip()));
     assert!(book.get(addr).is_none());
 }
