@@ -94,19 +94,20 @@ version 2 peers are recorded in a separate version 2 address book.
   2, and its own version 2 address when it has a specific one
   (`v2_listen_addr`, or the IP address of `external_addr` with the
   `v2_listen_addr` port). It keeps the version 2 peers it connected to most
-  recently in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
+  recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
   cache, and tries them at startup. It never caches an address it only heard
   of. Zebra dials the peers it connected to before first, then picks at random
   among the others, giving seeded and cached addresses even odds against
-  relayed ones, whatever time the relaying peer claimed. When it knows too few, it looks up the DNS seeders in
+  relayed ones, whatever time the relaying peer claimed. When it has no address left to dial and fewer discovered peers than it
+  wants, it looks up the DNS seeders in
   `initial_mainnet_peers` or `initial_testnet_peers` and dials the results on
   the network's default port, UDP 8233 on Mainnet and 18233 on Testnet, at most
   every 30 minutes. Configured peers keep the first claim on the outbound
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
   results fail to connect, which Zebra logs at the `debug` level.
-- Relaying version 2 addresses. Zebra relays each fresh address a version 2
-  peer announces to two of its other version 2 peers, and limits each peer to
+- Relaying version 2 addresses. Zebra relays each fresh full-node address a
+  version 2 peer announces to two of its other version 2 peers, and limits each peer to
   about one announced address every 10 seconds, dropping the rest. It also
   advertises its own version 2 address to each version 2 peer soon after
   connecting and then about once a day: the IP address of `external_addr` with
@@ -355,7 +356,9 @@ go in these metrics, and its progress in the usual `state.*` and
 - **One connection per host across both protocols.** By design, Zebra keeps
   at most one connection to each IP address and port, whatever its protocol.
   Each protocol's dialer skips a host that the other protocol is already
-  connected to, so connections are not dropped and redialled. An existing
+  connected to, so connections are rarely dropped and redialled. A dial still
+  in progress doesn't count, so both protocols can occasionally dial one host
+  at once; Zebra then keeps the first connection and drops the other. An existing
   legacy connection is not replaced with a version 2 one: while Zebra has a
   legacy connection to a version 2 peer, configured or discovered, it dials
   that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
