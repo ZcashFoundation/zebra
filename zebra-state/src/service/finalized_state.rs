@@ -23,6 +23,7 @@ use std::{
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NonNegative},
     block,
+    history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
     parameters::{
         subsidy::{block_subsidy_with_parent_pools, SubsidyError},
@@ -139,6 +140,55 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "tip_chain_value_pool",
     BLOCK_INFO,
 ];
+
+/// The finalized tip's data, carried by the block write task from one checkpoint commit to the
+/// next, so each commit doesn't read and decode it from the database again.
+///
+/// Only [`FinalizedState::commit_checkpoint_verified`] creates or uses this cache. It is only
+/// valid for the next commit by the same block write task, because:
+/// - nothing else writes blocks while the block write task is committing checkpoint-verified
+///   blocks,
+/// - it isn't returned after a failed commit, or created while a database format upgrade (which
+///   can rewrite the history tree) is running,
+/// - it lives in memory only, so a restart reads the database again.
+///
+/// Debug builds check that it matches the database before every use.
+#[derive(Clone, Debug)]
+pub(crate) struct CheckpointTipCache {
+    /// The height and hash of the finalized tip.
+    pub(crate) tip: (block::Height, block::Hash),
+
+    /// The history tree at the finalized tip.
+    pub(crate) history_tree: Arc<HistoryTree>,
+
+    /// The chain value pools at the finalized tip.
+    pub(crate) value_pool: ValueBalance<NonNegative>,
+}
+
+impl CheckpointTipCache {
+    /// Panics if this cache doesn't match the finalized tip data in `db`.
+    #[cfg(any(test, debug_assertions))]
+    pub(crate) fn assert_matches_db(&self, db: &ZebraDb) {
+        use disk_format::chain::HistoryTreeParts;
+
+        let history_tree_bytes = |tree: &HistoryTree| {
+            tree.as_ref()
+                .map(|tree| HistoryTreeParts::from(tree).as_bytes())
+        };
+
+        assert_eq!(Some(self.tip), db.tip(), "cached finalized tip is stale");
+        assert_eq!(
+            history_tree_bytes(&self.history_tree),
+            history_tree_bytes(&db.history_tree()),
+            "cached finalized history tree is stale",
+        );
+        assert_eq!(
+            self.value_pool,
+            db.finalized_value_pool(),
+            "cached finalized value pool is stale",
+        );
+    }
+}
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -264,6 +314,30 @@ impl FinalizedState {
         checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_checkpoint_verified(checkpoint_verified, prev_note_commitment_trees, None)
+            .map(|(tip_block, note_commitment_trees, _tip_cache)| {
+                (tip_block, note_commitment_trees)
+            })
+    }
+
+    /// Commit a checkpoint-verified block to the state, like [`Self::commit_finalized`].
+    ///
+    /// `tip_cache` must be the cache returned by the previous commit, or `None` to read the
+    /// finalized tip's data from the database. Returns the committed chain-tip data, the updated
+    /// note commitment trees, and, if it can be used for the next commit, the new tip cache.
+    pub(crate) fn commit_checkpoint_verified(
+        &mut self,
+        checkpoint_verified: CheckpointVerifiedBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        tip_cache: Option<CheckpointTipCache>,
+    ) -> Result<
+        (
+            ChainTipBlock,
+            NoteCommitmentTrees,
+            Option<CheckpointTipCache>,
+        ),
+        CommitCheckpointVerifiedError,
+    > {
         let tip_block = ChainTipBlock {
             hash: checkpoint_verified.hash,
             height: checkpoint_verified.height,
@@ -272,9 +346,10 @@ impl FinalizedState {
             transaction_hashes: checkpoint_verified.transaction_hashes.clone(),
             previous_block_hash: checkpoint_verified.block.header.previous_block_hash,
         };
-        let result = self.commit_finalized_direct(
+        let result = self.commit_finalized_direct_with_cache(
             checkpoint_verified.into(),
             prev_note_commitment_trees,
+            tip_cache,
             "commit checkpoint-verified request",
         );
 
@@ -293,7 +368,9 @@ impl FinalizedState {
             metrics::gauge!("state.checkpoint.error.block.height").set(tip_block.height.0 as f64);
         };
 
-        result.map(|(_hash, note_commitment_trees)| (tip_block, note_commitment_trees))
+        result.map(|(_hash, note_commitment_trees, tip_cache)| {
+            (tip_block, note_commitment_trees, tip_cache)
+        })
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -309,18 +386,65 @@ impl FinalizedState {
     /// - Propagates any errors from updating history and note commitment trees
     /// - If `hashFinalSaplingRoot` / `hashLightClientRoot` / `hashBlockCommitments`
     ///   does not match the expected value
-    #[allow(clippy::unwrap_in_result)]
     pub fn commit_finalized_direct(
         &mut self,
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_finalized_direct_with_cache(
+            finalizable_block,
+            prev_note_commitment_trees,
+            None,
+            source,
+        )
+        .map(|(hash, note_commitment_trees, _tip_cache)| (hash, note_commitment_trees))
+    }
+
+    /// Immediately commit a `finalized` block to the finalized state, like
+    /// [`Self::commit_finalized_direct`].
+    ///
+    /// For checkpoint-verified blocks, uses `tip_cache` instead of reading the finalized tip's
+    /// data from the database, and returns the new tip cache. See [`CheckpointTipCache`] for when
+    /// the cache is used. Blocks finalized by the non-finalized state never use or return it.
+    #[allow(clippy::unwrap_in_result)]
+    fn commit_finalized_direct_with_cache(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        tip_cache: Option<CheckpointTipCache>,
+        source: &str,
+    ) -> Result<
+        (block::Hash, NoteCommitmentTrees, Option<CheckpointTipCache>),
+        CommitCheckpointVerifiedError,
+    > {
+        let is_checkpoint = matches!(finalizable_block, FinalizableBlock::Checkpoint { .. });
+
+        // Format upgrades can rewrite the history tree in another thread, so only use or create
+        // a cache once they have finished. This flag never goes back to `false`.
+        let use_tip_cache = is_checkpoint && self.db.finished_format_upgrades();
+        let tip_cache = tip_cache.filter(|_| use_tip_cache);
+
+        #[cfg(debug_assertions)]
+        if let Some(tip_cache) = &tip_cache {
+            tip_cache.assert_matches_db(&self.db);
+        }
+
+        let (parent_tip, parent_history_tree, cached_value_pool) = match tip_cache {
+            Some(CheckpointTipCache {
+                tip,
+                history_tree,
+                value_pool,
+            }) => (Some(tip), Some(history_tree), Some(value_pool)),
+            None => (None, None, None),
+        };
+
         // Only checkpoint commits are timed, so the `checkpoint_*` phases don't mix in blocks
         // finalized by the non-finalized state.
-        let mut phase_timer =
-            matches!(finalizable_block, FinalizableBlock::Checkpoint { .. }).then(Instant::now);
+        let mut phase_timer = is_checkpoint.then(Instant::now);
 
+        // The parent's value pools, which the block write also needs.
+        let parent_value_pool;
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
@@ -332,7 +456,8 @@ impl FinalizedState {
                 // finalized tip is the parent block of the block being committed.
 
                 let block = checkpoint_verified.block.clone();
-                let mut history_tree = self.db.history_tree();
+                let mut history_tree =
+                    parent_history_tree.unwrap_or_else(|| self.db.history_tree());
                 record_phase!(phase_timer, "checkpoint_history_tree_load");
 
                 let prev_note_commitment_trees = prev_note_commitment_trees
@@ -401,10 +526,12 @@ impl FinalizedState {
                 };
 
                 let height = checkpoint_verified.height;
+                parent_value_pool =
+                    cached_value_pool.unwrap_or_else(|| self.db.finalized_value_pool());
                 let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
                     height,
                     &self.network(),
-                    self.db.finalized_value_pool(),
+                    parent_value_pool,
                 )
                 .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
                     subsidy_error: subsidy_error.into(),
@@ -429,10 +556,11 @@ impl FinalizedState {
                 treestate,
             } => {
                 let height = contextually_verified.height;
+                parent_value_pool = self.db.finalized_value_pool();
                 let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
                     height,
                     &self.network(),
-                    self.db.finalized_value_pool(),
+                    parent_value_pool,
                 )
                 .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
                     subsidy_error: subsidy_error.into(),
@@ -454,11 +582,17 @@ impl FinalizedState {
         };
         record_phase!(phase_timer, "checkpoint_finalized_block");
 
-        let committed_tip_hash = self.db.finalized_tip_hash();
-        let committed_tip_height = self.db.finalized_tip_height();
+        let (committed_tip_height, committed_tip_hash, is_empty) = match parent_tip {
+            Some((height, hash)) => (Some(height), hash, false),
+            None => (
+                self.db.finalized_tip_height(),
+                self.db.finalized_tip_hash(),
+                self.db.is_empty(),
+            ),
+        };
 
         // Assert that callers (including unit tests) get the chain order correct
-        if self.db.is_empty() {
+        if is_empty {
             assert_eq!(
                 committed_tip_hash, finalized.block.header.previous_block_hash,
                 "the first block added to an empty state must be a genesis block, source: {source}",
@@ -484,10 +618,14 @@ impl FinalizedState {
         record_phase!(phase_timer, "checkpoint_tip_checks");
 
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+        // An `Arc` clone: the block write drops its copy, so the next commit can update the tree
+        // in place.
+        let history_tree = use_tip_cache.then(|| finalized.treestate.history_tree.clone());
 
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
+            parent_value_pool,
             &self.network(),
             source,
             phase_timer,
@@ -515,7 +653,15 @@ impl FinalizedState {
             }
         }
 
-        result.map(|hash| (hash, note_commitment_trees))
+        result.map(|(hash, value_pool)| {
+            let tip_cache = history_tree.map(|history_tree| CheckpointTipCache {
+                tip: (height, hash),
+                history_tree,
+                value_pool,
+            });
+
+            (hash, note_commitment_trees, tip_cache)
+        })
     }
 
     /// Stop the process if `block_height` is greater than or equal to the

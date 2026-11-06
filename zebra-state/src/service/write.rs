@@ -19,7 +19,7 @@ use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
-        finalized_state::{record_phase, FinalizedState, ZebraDb},
+        finalized_state::{record_phase, CheckpointTipCache, FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
@@ -281,6 +281,10 @@ impl WriteBlockWorkerTask {
 
         let mut prev_finalized_note_commitment_trees = None;
 
+        // Tip data from the last checkpoint commit, so non-finalized commits never see it;
+        // `None` after a failed commit.
+        let mut checkpoint_tip_cache = None;
+
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
         while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
@@ -299,13 +303,13 @@ impl WriteBlockWorkerTask {
             // we need to drop all the descendants of that block,
             // until we receive a block at the required next height.
             let mut phase_timer = Some(Instant::now());
-            let next_valid_height = finalized_state
-                .db
-                .finalized_tip_height()
+            let finalized_tip_height = match &checkpoint_tip_cache {
+                Some(CheckpointTipCache { tip, .. }) => Some(tip.0),
+                None => finalized_state.db.finalized_tip_height(),
+            };
+            let next_valid_height = finalized_tip_height
                 .map(|height| (height + 1).expect("committed heights are valid"))
                 .unwrap_or(Height(0));
-            record_phase!(phase_timer, "checkpoint_next_height");
-
             if ordered_block.0.height != next_valid_height {
                 debug!(
                     ?next_valid_height,
@@ -319,6 +323,7 @@ impl WriteBlockWorkerTask {
                 std::mem::drop(ordered_block);
                 continue;
             }
+            record_phase!(phase_timer, "checkpoint_next_height");
 
             let committed_permit = match ordered_block
                 .2
@@ -342,13 +347,15 @@ impl WriteBlockWorkerTask {
             // Try committing the block, but keep notifications until its context is published.
             let (checkpoint_verified, rsp_tx, _) = ordered_block;
             let height = checkpoint_verified.height;
-            let result = match finalized_state.commit_finalized(
+            let result = match finalized_state.commit_checkpoint_verified(
                 checkpoint_verified,
                 prev_finalized_note_commitment_trees.take(),
+                checkpoint_tip_cache.take(),
             ) {
-                Ok((tip_block, note_commitment_trees)) => {
+                Ok((tip_block, note_commitment_trees, tip_cache)) => {
                     let hash = tip_block.hash;
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+                    checkpoint_tip_cache = tip_cache;
 
                     phase_timer = Some(Instant::now());
                     chain_tip_sender.set_finalized_tip(tip_block);

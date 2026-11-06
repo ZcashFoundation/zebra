@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Checkpoint sync keeps the finalized tip, history tree and chain value pools in memory between consecutive block commits, instead of reading and decoding them from the database for every block. The database format is unchanged.'
+time: 2026-11-06T12:22:23.000000000Z

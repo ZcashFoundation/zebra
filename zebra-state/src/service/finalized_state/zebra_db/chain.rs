@@ -263,6 +263,25 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), ValidateContextError> {
+        self.prepare_chain_value_pools_batch_with_value_pool(
+            db,
+            finalized,
+            utxos_spent_by_block,
+            value_pool,
+        )
+        .map(|_new_value_pool| ())
+    }
+
+    /// Prepares a database batch containing the chain value pool update from `finalized.block`,
+    /// like [`Self::prepare_chain_value_pools_batch`], and returns the chain value pools after
+    /// the block.
+    pub(crate) fn prepare_chain_value_pools_batch_with_value_pool(
+        &mut self,
+        db: &ZebraDb,
+        finalized: &FinalizedBlock,
+        utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
+        value_pool: ValueBalance<NonNegative>,
+    ) -> Result<ValueBalance<NonNegative>, ValidateContextError> {
         let calculate_value_change_error =
             |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,
@@ -310,7 +329,7 @@ impl DiskWriteBatch {
             &BlockInfo::new(new_value_pool, block_size as u32),
         );
 
-        Ok(())
+        Ok(new_value_pool)
     }
 }
 

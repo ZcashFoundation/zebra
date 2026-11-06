@@ -531,26 +531,30 @@ impl ZebraDb {
     /// Write `finalized` to the finalized state.
     ///
     /// Uses:
-    /// - `history_tree`: the current tip's history tree
+    /// - `prev_note_commitment_trees`: the current tip's note commitment trees, if known
+    /// - `value_pool`: the current tip's chain value pools
     /// - `network`: the configured network
     /// - `source`: the source of the block in log messages
     /// - `phase_timer`: if `Some`, the start of the next checkpoint commit phase, used to record
     ///   the time spent in each phase of this method
+    ///
+    /// Returns the block hash and the new chain value pools.
     ///
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from computing the block's chain value balance change or
     ///   from applying the change to the chain value balance
-    #[allow(clippy::unwrap_in_result)]
+    #[allow(clippy::unwrap_in_result, clippy::too_many_arguments)]
     pub(in super::super) fn write_block(
         &mut self,
         finalized: FinalizedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        value_pool: ValueBalance<NonNegative>,
         network: &Network,
         source: &str,
         mut phase_timer: Option<Instant>,
-    ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
+    ) -> Result<(block::Hash, ValueBalance<NonNegative>), CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
             .iter()
@@ -678,7 +682,7 @@ impl ZebraDb {
         let mut batch = DiskWriteBatch::new();
 
         // In case of errors, propagate and do not write the batch.
-        batch.prepare_block_batch(
+        let new_value_pool = batch.prepare_block_batch_with_value_pool(
             self,
             network,
             &finalized,
@@ -688,7 +692,7 @@ impl ZebraDb {
             #[cfg(feature = "indexer")]
             out_loc_by_outpoint,
             address_balances,
-            self.finalized_value_pool(),
+            value_pool,
             prev_note_commitment_trees,
         )?;
         record_phase!(phase_timer, "checkpoint_batch_build");
@@ -704,7 +708,7 @@ impl ZebraDb {
 
         tracing::trace!(?source, "committed block from");
 
-        Ok(finalized.hash)
+        Ok((finalized.hash, new_value_pool))
     }
 
     /// Writes the given batch to the database.
@@ -785,6 +789,41 @@ impl DiskWriteBatch {
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), CommitCheckpointVerifiedError> {
+        self.prepare_block_batch_with_value_pool(
+            zebra_db,
+            network,
+            finalized,
+            new_outputs_by_out_loc,
+            spent_utxos_by_outpoint,
+            spent_utxos_by_out_loc,
+            #[cfg(feature = "indexer")]
+            out_loc_by_outpoint,
+            address_balances,
+            value_pool,
+            prev_note_commitment_trees,
+        )
+        .map(|_new_value_pool| ())
+    }
+
+    /// Prepare a database batch containing `finalized.block`, like [`Self::prepare_block_batch`],
+    /// and return the chain value pools after the block.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_block_batch_with_value_pool(
+        &mut self,
+        zebra_db: &ZebraDb,
+        network: &Network,
+        finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
+        spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
+        address_balances: AddressBalanceLocationUpdates,
+        value_pool: ValueBalance<NonNegative>,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<ValueBalance<NonNegative>, CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
         // Commit block, transaction, and note commitment tree data.
@@ -824,7 +863,7 @@ impl DiskWriteBatch {
         }
 
         // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(
+        let new_value_pool = self.prepare_chain_value_pools_batch_with_value_pool(
             zebra_db,
             finalized,
             spent_utxos_by_outpoint,
@@ -834,7 +873,7 @@ impl DiskWriteBatch {
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);
 
-        Ok(())
+        Ok(new_value_pool)
     }
 
     /// Prepare a database batch containing the block header and transaction data
