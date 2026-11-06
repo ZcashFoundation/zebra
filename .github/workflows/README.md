@@ -234,6 +234,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 ### Supporting/Reusable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+  Hosted VMs discard local builders; self-hosted runners and remote drivers retain cleanup.
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
