@@ -45,7 +45,9 @@ pub enum ConvertError {
     },
 
     /// The coinbase height of a body that matches its header differs from
-    /// the height the hash chain gives.
+    /// the height the hash chain gives, and the merkle root binds that
+    /// coinbase height: a pre-v5 coinbase, or a v5+ coinbase whose expiry
+    /// height also differs.
     ///
     /// Unreachable for blocks hash-chained to a correct checkpoint, because
     /// the merkle check bound the body to the header first: the engine
@@ -55,6 +57,23 @@ pub enum ConvertError {
          the checkpoint list is defective"
     )]
     WrongHeight {
+        /// The expected height.
+        height: block::Height,
+        /// The hash the stream reader verified.
+        hash: block::Hash,
+        /// The coinbase height in the block.
+        coinbase_height: Option<block::Height>,
+    },
+
+    /// A v5+ coinbase whose scriptSig height differs from the hash chain's,
+    /// while its expiry height matches it.
+    ///
+    /// ZIP-244 excludes the scriptSig from v5+ txids, so the merkle root does
+    /// not bind the coinbase height: the peer forged it. The merkle root
+    /// binds a v5+ coinbase's expiry height, which equals the block height
+    /// from NU5 on (ZIP 203).
+    #[error("block {hash:?} at {height:?} has a forged coinbase height {coinbase_height:?}")]
+    ForgedHeight {
         /// The expected height.
         height: block::Height,
         /// The hash the stream reader verified.
@@ -88,7 +107,9 @@ impl ConvertError {
     pub fn is_peer_fault(&self) -> bool {
         matches!(
             self,
-            ConvertError::Deserialize { .. } | ConvertError::BadBody { .. }
+            ConvertError::Deserialize { .. }
+                | ConvertError::ForgedHeight { .. }
+                | ConvertError::BadBody { .. }
         )
     }
 }
@@ -145,10 +166,25 @@ pub fn convert(
 
     let coinbase_height = block.coinbase_height();
     if coinbase_height != Some(height) {
-        return Err(ConvertError::WrongHeight {
-            height,
-            hash,
-            coinbase_height,
+        // ZIP-244 excludes the scriptSig from v5+ txids, so the merkle root
+        // binds a v5+ coinbase's expiry height (ZIP 203: equal to the block
+        // height from NU5 on), but not its scriptSig height.
+        let forged = block
+            .transactions
+            .first()
+            .is_some_and(|tx| tx.version() >= 5 && tx.expiry_height() == Some(height));
+        return Err(if forged {
+            ConvertError::ForgedHeight {
+                height,
+                hash,
+                coinbase_height,
+            }
+        } else {
+            ConvertError::WrongHeight {
+                height,
+                hash,
+                coinbase_height,
+            }
         });
     }
 
@@ -325,6 +361,44 @@ mod tests {
 
         // The same block without padding still converts.
         convert(&Network::Mainnet, block::Height(5), hash, &raw).unwrap();
+    }
+
+    /// ZIP-244 excludes the scriptSig from v5+ txids, so a peer can change
+    /// a v5 coinbase's height under a canonical header: that is the peer's
+    /// fault, not a checkpoint-list defect.
+    #[test]
+    fn rejects_forged_v5_coinbase_heights_as_peer_faults() {
+        let _init_guard = zebra_test::init();
+
+        let height = block::Height(1_687_107);
+        let (raw, hash) = mainnet_block(height.0);
+        let mut block: Block = raw.zcash_deserialize_into().unwrap();
+        let coinbase = Arc::make_mut(&mut block.transactions[0]);
+        assert!(coinbase.version() >= 5, "this vector needs a v5 coinbase");
+        let mut inputs = coinbase.inputs();
+        let transparent::Input::Coinbase { height: forged, .. } = &mut inputs[0] else {
+            panic!("the first coinbase input is a coinbase input");
+        };
+        *forged = block::Height(forged.0 + 1);
+        *coinbase = coinbase.clone().with_transparent_inputs(inputs);
+        assert_eq!(
+            block.hash(),
+            hash,
+            "the scriptSig is outside the v5 txid, so the header still matches"
+        );
+        assert_eq!(block.coinbase_height(), Some(block::Height(height.0 + 1)));
+        let raw =
+            zebra_chain::serialization::ZcashSerialize::zcash_serialize_to_vec(&block).unwrap();
+
+        let error = convert(&Network::Mainnet, height, hash, &raw).unwrap_err();
+        assert!(
+            matches!(error, ConvertError::ForgedHeight { .. }),
+            "{error:?}"
+        );
+        assert!(
+            error.is_peer_fault(),
+            "a forged v5 coinbase height is the peer's fault: {error:?}"
+        );
     }
 
     /// Duplicating the final transaction of an odd-length list leaves the
