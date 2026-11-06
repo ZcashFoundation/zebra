@@ -413,7 +413,7 @@ reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf
 zcash_encoding = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_primitives = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_transparent = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
-pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "8cf375255b07e486b3eeceaa2ec465ec79bb2086" }
+pasta_curves = { git = "https://github.com/upbqdn/pasta_curves", rev = "65e2c6de9546a76eaf9b06970dc9ba198a3acc36" }
 halo2_proofs = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
 halo2_gadgets = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
 halo2_poseidon = { git = "https://github.com/upbqdn/halo2", rev = "2332fc0e2060dc99c6865097f70f817c8cb6aa4e" }
