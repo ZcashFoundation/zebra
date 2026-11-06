@@ -93,9 +93,10 @@ pub(in crate::peer::v2::connection) const HASHES_WRITE_TIMEOUT: Duration = Durat
 /// every backoff, instead of all the time.
 pub(in crate::peer::v2::connection) const HASHES_STALL_BACKOFF: Duration = Duration::from_secs(60);
 
-/// When a connection's `get-hashes` requests are served again after one of
-/// its responses stalled. Shared by the connection's request streams, without
-/// a lock.
+/// When a connection's requests of one stream type (`get-hashes`, or
+/// `get-object` data) are served again after one of its responses of that
+/// type stalled, for [`HASHES_STALL_BACKOFF`]. Shared by the connection's
+/// request streams, without a lock.
 #[derive(Debug)]
 pub(in crate::peer::v2::connection) struct StallBackoff {
     /// The time the backoff deadline is measured from.
@@ -114,14 +115,14 @@ impl StallBackoff {
         }
     }
 
-    /// Whether the connection's `get-hashes` requests are refused at `now`.
-    fn backing_off(&self, now: Instant) -> bool {
+    /// Whether the connection's requests of this stream type are refused at `now`.
+    pub(in crate::peer::v2::connection) fn backing_off(&self, now: Instant) -> bool {
         self.millis(now) < self.until.load(Ordering::Relaxed)
     }
 
     /// Records that a response stalled at `now`: refuses the connection's
     /// requests for [`HASHES_STALL_BACKOFF`].
-    fn stalled(&self, now: Instant) {
+    pub(in crate::peer::v2::connection) fn stalled(&self, now: Instant) {
         // The backoff is 60 s, so its milliseconds fit in a `u64`.
         let backoff = HASHES_STALL_BACKOFF.as_millis() as u64;
         self.until
