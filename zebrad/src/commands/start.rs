@@ -120,6 +120,8 @@ use crate::{
 #[cfg(feature = "internal-miner")]
 use crate::components;
 
+mod spentness_hints;
+
 /// Start the application (default command)
 #[derive(Command, Debug, Default, clap::Parser)]
 pub struct StartCmd {
@@ -283,6 +285,9 @@ impl StartCmd {
     ///
     /// The engine anchors its downloads at the verified entries of
     /// `known_hashes` where it can, and at checkpoints elsewhere.
+    ///
+    /// `hints_gate` is `Some` while spentness hints may apply: the engine then
+    /// commits nothing above genesis until the hints task opens it.
     fn spawn_checkpoint_sync_engine<ZS, ZSTip>(
         config: &ZebradConfig,
         peers: Option<zebra_network::SyncPeers>,
@@ -290,6 +295,7 @@ impl StartCmd {
         state: ZS,
         latest_chain_tip: ZSTip,
         known_hashes: Option<KnownHashListSpec>,
+        hints_gate: Option<watch::Receiver<bool>>,
     ) -> tokio::task::JoinHandle<Result<(), Report>>
     where
         ZS: tower::Service<
@@ -335,7 +341,7 @@ impl StartCmd {
             state,
             latest_chain_tip,
             ownership,
-            None,
+            hints_gate,
             known_hashes,
         );
 
@@ -452,15 +458,45 @@ impl StartCmd {
 
         info!("opening database, this may take a few minutes");
 
+        // With spentness hints, the state's writer can receive a verified artifact
+        // after the network starts.
+        let spentness_hints_mode = spentness_hints::effective_mode(
+            config.sync.v2_spentness_hints,
+            config.sync.v2_checkpoint_sync,
+        )?;
+        let (state_hints, spentness_hints_receiver) =
+            spentness_hints::StateHints::new(spentness_hints_mode).unzip();
+        let state_checkpoint_verify_concurrency_limit =
+            config.sync.checkpoint_verify_concurrency_limit
+                * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1);
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::init(
-                config.state.clone(),
-                &config.network.network,
-                max_checkpoint_height,
-                config.sync.checkpoint_verify_concurrency_limit
-                    * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
+            match spentness_hints_receiver {
+                Some(spentness_hints_receiver) => {
+                    zebra_state::init_with_spentness(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                        spentness_hints_receiver,
+                    )
+                    .await
+                }
+                None => {
+                    zebra_state::init(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                    )
+                    .await
+                }
+            };
+        let node_hints = state_hints.and_then(|state_hints| {
+            state_hints.for_state(
+                &latest_chain_tip,
+                read_only_state_service.has_incomplete_spentness_hints(),
             )
-            .await;
+        });
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
@@ -519,8 +555,13 @@ impl StartCmd {
         } else {
             (None, None)
         };
+        // With any hints mode, a node with version 2 enabled serves the saved
+        // spentness-hint artifact to its version 2 peers.
+        let (served_objects, object_source) =
+            spentness_hints::object_source(&config.network).unzip();
         let network_config = zebra_network::Config {
             v2_sync_peers,
+            object_source,
             ..config.network.clone()
         };
 
@@ -533,6 +574,33 @@ impl StartCmd {
                 zcashd_compat_block_gossip_peer_ips,
             )
             .await;
+
+        // Spentness hints need the checkpoint sync engine (`effective_mode`), so they
+        // share its peer registry, and the engine commits nothing above genesis until
+        // the hints task opens the gate.
+        let hints_gate = node_hints.as_ref().map(spentness_hints::NodeHints::gate);
+        let legacy_hints_gate = node_hints
+            .as_ref()
+            .map(spentness_hints::NodeHints::legacy_gate);
+        let mut spentness_hints_task_handle = match (node_hints, sync_peers.clone()) {
+            (Some(node_hints), Some(peers)) => node_hints.spawn(
+                config.network.network.clone(),
+                peers,
+                config.state.cache_dir.clone(),
+                served_objects,
+            ),
+            _ => {
+                // Without a hints task, a short task serves the saved artifact.
+                if let Some(served_objects) = served_objects {
+                    let _serving_task = spentness_hints::spawn_serving(
+                        config.network.network.clone(),
+                        config.state.cache_dir.clone(),
+                        served_objects,
+                    );
+                }
+                tokio::spawn(std::future::pending().in_current_span())
+            }
+        };
 
         // Start health server if configured (after sync_status is available)
 
@@ -575,6 +643,7 @@ impl StartCmd {
             state.clone(),
             latest_chain_tip.clone(),
             known_hashes,
+            hints_gate,
         );
 
         info!("initializing syncer");
@@ -588,8 +657,14 @@ impl StartCmd {
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );
-        let mut syncer = match legacy_ownership {
+        let syncer = match legacy_ownership {
             Some(ownership) => syncer.with_ownership(ownership),
+            None => syncer,
+        };
+        // The legacy syncer commits nothing above genesis either, until the hints
+        // task finishes: the engine claims block download only after genesis.
+        let mut syncer = match legacy_hints_gate {
+            Some((gate, timeout)) => syncer.with_hints_gate(gate, timeout),
             None => syncer,
         };
 
@@ -971,6 +1046,11 @@ impl StartCmd {
         let old_databases_task_handle_fused = (&mut old_databases_task_handle).fuse();
         pin!(old_databases_task_handle_fused);
 
+        // Spentness-hint acquisition finishes while Zebra is running, so its handle
+        // must be fused.
+        let spentness_hints_task_handle_fused = (&mut spentness_hints_task_handle).fuse();
+        pin!(spentness_hints_task_handle_fused);
+
         // The checkpoint sync engine can exit while Zebra keeps running, so its handle must be
         // fused.
         let checkpoint_sync_task_handle_fused = (&mut checkpoint_sync_task_handle).fuse();
@@ -1103,6 +1183,15 @@ impl StartCmd {
                     Ok(())
                 }
 
+                // Acquisition ends with or without hints. It fails only when hints
+                // are required, which stops Zebra.
+                spentness_hints_result = &mut spentness_hints_task_handle_fused => {
+                    exit_when_task_finishes = false;
+                    spentness_hints_result
+                        .expect("unexpected panic in the spentness hints task")
+                        .map(|()| info!("spentness hints task finished"))
+                }
+
                 block_template_result = &mut block_template_task_handle => {
                     block_template_result
                         .expect("unexpected panic in the block template updater task");
@@ -1153,6 +1242,7 @@ impl StartCmd {
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
         miner_task_handle.abort();
+        spentness_hints_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {
