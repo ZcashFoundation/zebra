@@ -22,6 +22,7 @@ macro_rules! assert_err {
     }};
 }
 
+mod hashes;
 mod prop;
 mod vectors;
 

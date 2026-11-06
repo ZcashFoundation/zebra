@@ -123,3 +123,43 @@ fn history_tree_parts_round_trips_current_width() {
     assert_eq!(parsed.current_height, Height(9));
     assert_eq!(parsed.as_bytes(), bytes);
 }
+
+/// A synchronization metadata record round-trips through its 64-byte disk
+/// format, with every field at its documented offset, and reading tolerates
+/// unknown trailing bytes.
+#[test]
+fn sync_metadata_round_trips_with_cumulative_output_count() {
+    let metadata = SyncMetadata {
+        size: 0x0102_0304,
+        tx_count: 5,
+        note_count: 6,
+        sapling_tx_count: 7,
+        orchard_tx_count: 8,
+        ironwood_tx_count: 9,
+        auth_data_root: [0xAA; 32],
+        cumulative_transparent_outputs: 0x1122_3344_5566_7788,
+    };
+
+    let bytes = metadata.as_bytes();
+    assert_eq!(bytes.len(), 64, "records are 64 bytes");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&[0x04, 0x03, 0x02, 0x01]);
+    for count in 5u32..=9 {
+        expected.extend_from_slice(&count.to_le_bytes());
+    }
+    expected.extend_from_slice(&[0xAA; 32]);
+    expected.extend_from_slice(&[0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]);
+    assert_eq!(
+        bytes.as_slice(),
+        expected.as_slice(),
+        "the layout is little-endian"
+    );
+
+    assert_eq!(SyncMetadata::from_bytes(bytes), metadata);
+
+    // Unknown appended fields are ignored when reading.
+    let mut extended = bytes.to_vec();
+    extended.extend_from_slice(&[0xFF; 8]);
+    assert_eq!(SyncMetadata::from_bytes(&extended), metadata);
+}

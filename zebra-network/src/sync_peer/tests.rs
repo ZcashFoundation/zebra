@@ -45,10 +45,10 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A [`SyncPeer`] whose connection task runs on one end of a loopback
 /// connection, and the raw other end, which answers requests by hand.
-struct Fixture {
-    peer: SyncPeer,
+pub(super) struct Fixture {
+    pub(super) peer: SyncPeer,
     /// The raw peer's connection.
-    raw: Connection,
+    pub(super) raw: Connection,
     /// The connection task's client, kept so the task keeps running.
     _client: Client,
     /// The raw peer's handshake streams, kept open for the connection's life.
@@ -59,7 +59,7 @@ struct Fixture {
 /// Connects a raw peer to a node, completes the handshake, and returns the
 /// node's [`SyncPeer`] for the connection. The raw peer dials, so the node
 /// does not send it a `get-addr` request.
-async fn fixture() -> Fixture {
+pub(super) async fn fixture() -> Fixture {
     let network = Network::Mainnet;
     let (raw, node, raw_ep, node_ep) = connected_pair(&network).await;
     let (raw_identity, node_identity) = (identity("/raw/"), identity("/node/"));
@@ -96,6 +96,7 @@ async fn fixture() -> Fixture {
             addr_relay: None,
             serve_block_ranges: true,
             block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
+            hashes_permits: crate::peer::v2::connection::global_hashes_permits(),
         },
         None,
     );

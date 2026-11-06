@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `get-hashes` serving to version 2 connections, bounded per peer and over all peers, with a response write deadline so that stalled readers release their slots, after which the stalled connection's `get-hashes` requests are refused for 60 seconds.
+time: 2026-11-06T03:43:22.000000000Z

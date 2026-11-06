@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added the `ReadRequest::SyncHashes` request and `ReadResponse::SyncHashes` response, which return best-chain `get-hashes` entries from the sync metadata, stopping `MAX_BLOCK_REORG_HEIGHT` below the best tip. `ReadRequest` and `ReadResponse` are not `#[non_exhaustive]`, so exhaustive matches on them need new arms.'
+time: 2026-11-06T03:43:23.000000000Z

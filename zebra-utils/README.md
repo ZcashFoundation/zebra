@@ -3,6 +3,7 @@
 Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
+- [known-hashes](#known-hashes)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
@@ -92,6 +93,61 @@ Then use the commands above to regenerate the checkpoints.
   of the existing checkpoint file. If you started from genesis, replace the entire file.
 - Open a pull request with the updated Mainnet and Testnet lists at:
   <https://github.com/ZcashFoundation/zebra/pulls>
+
+## known-hashes
+
+This command generates the known-hash list pins that v2 checkpoint sync uses.
+
+A known-hash list covers every block from genesis to a reviewed `max_height`,
+split into chunks of 50,000 heights. Each chunk is the canonical `get-hashes`
+response body for its heights: every block's hash, serialized size, and
+transaction, transparent output and note commitment counts. Nodes fetch
+chunks from their peers and check each chunk against its SHA-256 pin, which
+is compiled into `zebra-chain`. The chunks themselves are never shipped.
+
+`known-hashes` sweeps the entries from a synchronized `zebrad` or `zcashd`
+over JSON-RPC, checks every hash at a checkpointed height against the
+checkpoint list, and prints the `KnownHashListSpec` constant.
+
+Install it with:
+
+```sh
+cargo install --locked --features known-hashes --git https://github.com/ZcashFoundation/zebra zebra-utils
+```
+
+Make sure the node is [listening for RPC requests](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html#structfield.listen_addr)
+and synced past the height you want to pin. The list must end at or below the
+network's final checkpoint, so pin up to the last height in the checkpoint
+list:
+
+```sh
+END=$(tail -1 zebra-chain/src/parameters/checkpoint/main-checkpoints.txt | cut -d" " -f1)
+
+# Sweep every entry up to $END. The sweep is resumable: rerun it after an interruption.
+known-hashes --network mainnet --rpc-addr 127.0.0.1:8232 --out-dir sweep/ --end-height $END
+
+# Print the pins.
+known-hashes --network mainnet --out-dir sweep/ --end-height $END --emit-pins > mainnet-pins.rs
+```
+
+For Testnet, use `--network testnet`, `test-checkpoints.txt`, and the node's
+Testnet RPC port.
+
+`--emit-pins` computes the pins from the sweep file alone. It also asks the
+node at `--rpc-addr` for its tip, and warns if the list ends within 1,000
+blocks of it: Zebra nodes serve known hashes only up to 1,000 blocks below
+their tips, so no node could serve the end of such a list yet. This can only
+happen on Regtest or a custom testnet.
+
+#### Submit new pins as pull request
+
+- Generate the pins from two independently synced nodes, and check that the
+  two outputs are byte-identical.
+- Add the output as the `MAINNET_KNOWN_HASHES` or `TESTNET_KNOWN_HASHES`
+  constant in `zebra-chain/src/parameters/known_hashes.rs`, or replace the
+  existing one, and return it from `KnownHashListSpec::for_network`, in the same
+  pull request that updates the checkpoint lists.
+- Record the two-node comparison in the pull request description.
 
 ## zebrad-hash-lookup
 

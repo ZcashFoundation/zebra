@@ -19,12 +19,14 @@ pub mod ancestors;
 pub mod block;
 pub mod difficulty;
 pub mod find;
+pub mod sync_hashes;
 pub mod tree;
 
 #[cfg(test)]
 pub(in crate::service) mod tests;
 
 pub use ancestors::ancestor_blocks;
+pub use sync_hashes::sync_hashes;
 
 pub use address::{
     balance::transparent_balance,

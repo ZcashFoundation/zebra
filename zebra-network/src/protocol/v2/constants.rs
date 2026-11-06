@@ -47,6 +47,12 @@ pub const MAX_GET_BLOCK_RANGE_BYTES: u32 = 64 * 1024 * 1024;
 /// u32 ‖ max_bytes u32`.
 pub const GET_BLOCK_RANGE_REQUEST_LEN: usize = 32 + 4 + 4;
 
+/// The maximum `count` of a `get-hashes` request (draft, "`get-hashes`").
+pub const MAX_GET_HASHES_COUNT: u32 = 50_000;
+
+/// The length of a `get-hashes` request body: `start_height u32 ‖ count u32`.
+pub const GET_HASHES_REQUEST_LEN: usize = 4 + 4;
+
 /// The maximum number of transaction references in a `get-tx` request
 /// (draft, "`get-tx`").
 pub const MAX_TXS_PER_REQUEST: usize = 50_000;

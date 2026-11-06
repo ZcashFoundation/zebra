@@ -810,6 +810,7 @@ fn empty_requests_and_stream_type_handling() {
                 | StreamType::GetAddr
                 | StreamType::GetMempool
                 | StreamType::GetBlockRange
+                | StreamType::GetHashes
         );
         if served {
             assert!(max_body_len(stream_type).is_some());

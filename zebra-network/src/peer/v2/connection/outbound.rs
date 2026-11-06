@@ -446,7 +446,8 @@ async fn drive_inner(
         | Request::CheckCompactHeader(_)
         | Request::CompactBlockTransactions(_)
         | Request::CheckCompactBlock(_)
-        | Request::BlockRange { .. } => {
+        | Request::BlockRange { .. }
+        | Request::SyncHashes { .. } => {
             return Err(Failure::Refused(PeerError::InboundOnlyRequest))
         }
     };

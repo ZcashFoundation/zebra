@@ -2431,7 +2431,8 @@ where
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
             | Request::CheckCompactBlock(_)
-            | Request::BlockRange { .. } => {
+            | Request::BlockRange { .. }
+            | Request::SyncHashes { .. } => {
                 future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 

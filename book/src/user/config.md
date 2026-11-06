@@ -383,6 +383,7 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | `checkpoint_verify_concurrency_limit` | `usize` | `1000` | Blocks submitted concurrently to checkpoint verification. Values below `400` are raised to `400` with a warning. The old key `lookahead_limit` is an accepted alias. |
 | `full_verify_concurrency_limit` | `usize` | `20` | Blocks submitted concurrently to full verification. Values below `1` are raised to `1` with a warning. |
 | `parallel_cpu_threads` | `usize` | `0` | Rayon worker threads for CPU-intensive verification. Zero delegates thread-count selection to Rayon; a positive value overrides its automatic selection. |
+| `v2_known_hash_pins` | table | unset | Known-hash list pins for Regtest or a custom testnet, used by version 2 checkpoint sync to anchor downloads at every listed height: `max_height` (the highest height the list covers, at most the final checkpoint) and `chunk_hashes` (the SHA-256 of each 50,000-height chunk of `get-hashes` entries, as 64 hex digits, in chunk order, as printed by `zebra-utils`' `known-hashes` tool). Mainnet and the default Testnet use the pins compiled into Zebra and refuse this field: Zebra does not start if it is set for them, or if the pins do not cover exactly `0..=max_height`. |
 
 Do not supply both an alias and its current key: they deserialize as duplicate
 fields.

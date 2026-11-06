@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Version 2 checkpoint sync (`sync.v2_checkpoint_sync`) now anchors its downloads at every height of a known-hash list, which it fetches from version 2 peers with `get-hashes` and verifies against pinned chunk hashes, so it plans requests of exact sizes instead of whole checkpoint intervals, and still uses checkpoints wherever the list is not available yet. Mainnet and the default Testnet use the lists pinned in Zebra; Regtest and custom testnets can configure one with the new `sync.v2_known_hash_pins` setting, and Zebra does not start if that setting is invalid or set for Mainnet or the default Testnet.'
+time: 2026-11-06T03:59:13.000000000Z

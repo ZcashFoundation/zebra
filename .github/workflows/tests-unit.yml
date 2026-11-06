@@ -104,6 +104,11 @@ jobs:
       - name: Run unit tests
         run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
+      # The `known-hashes` tool's tests only build with its feature, which the run above leaves off.
+      # This uses the default profile, so it leaves the run above's JUnit report alone.
+      - name: Run known-hashes tool tests
+        run: cargo nextest run --locked --release -p zebra-utils --features known-hashes
+
       - name: Summarize flaky and failed unit tests
         if: always()
         continue-on-error: true

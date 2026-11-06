@@ -442,6 +442,9 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: DeferredPoolBalanceChange,
+    /// The block's authorizing data root, if the checkpoint verifier already
+    /// computed it from this block body.
+    pub(super) auth_data_root: Option<AuthDataRoot>,
 }
 
 impl FinalizedBlock {
@@ -451,10 +454,13 @@ impl FinalizedBlock {
         treestate: Treestate,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Self {
+        let auth_data_root = block.precomputed_auth_data_root();
+
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
             deferred_pool_balance_change,
+            auth_data_root,
         )
     }
 
@@ -468,6 +474,7 @@ impl FinalizedBlock {
             SemanticallyVerifiedBlock::from(block),
             treestate,
             deferred_pool_balance_change,
+            None,
         )
     }
 
@@ -476,6 +483,7 @@ impl FinalizedBlock {
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        auth_data_root: Option<AuthDataRoot>,
     ) -> Self {
         Self {
             block: block.block,
@@ -485,6 +493,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
+            auth_data_root,
         }
     }
 }
@@ -1766,6 +1775,25 @@ pub enum ReadRequest {
         max_bytes: u64,
     },
 
+    /// Returns best-chain sync-metadata entries for `count` heights from
+    /// `start`, for serving version 2 `get-hashes` requests.
+    ///
+    /// One range scan of the `sync_meta_by_height` column family plus the
+    /// hash-by-height index. `txouts` is `cum_txouts[h] - cum_txouts[h - 1]`.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::SyncHashes`]: entry `k` is height `start + k`; a
+    /// prefix of the request that stops at the best tip minus
+    /// `MAX_BLOCK_REORG_HEIGHT`, and at the first height whose metadata is
+    /// missing (an unfinished 29.1.0 upgrade).
+    SyncHashes {
+        /// The height of the first entry.
+        start: block::Height,
+        /// The most entries to return.
+        count: u32,
+    },
+
     /// Finds the fork point between the locator `known_blocks` and the best chain.
     ///
     /// `known_blocks` is a block locator. Returns the most recent locator entry that is
@@ -2054,6 +2082,7 @@ impl ReadRequest {
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::AncestorBlocks { .. } => "ancestor_blocks",
+            ReadRequest::SyncHashes { .. } => "sync_hashes",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
