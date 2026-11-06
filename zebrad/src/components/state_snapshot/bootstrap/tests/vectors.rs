@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures::TryFutureExt;
 use tokio::{sync::mpsc, task::JoinSet};
 
 use zebra_chain::{
@@ -624,6 +625,21 @@ fn successor_block_check_covers_hash_chain_height_and_merkle_root() {
         transactions: block.transactions[..1].to_vec(),
     };
     assert!(check_successor_block(hash_h, successor_hash, successor_height, &truncated).is_err());
+
+    // Duplicating the last of an odd number of transactions keeps the merkle root
+    // (CVE-2012-2459), so the hash still matches, but the node never commits such a block.
+    let mut duplicated = (*block).clone();
+    let last = duplicated
+        .transactions
+        .last()
+        .expect("blocks have a coinbase")
+        .clone();
+    duplicated.transactions.push(last);
+    let error = check_successor_block(hash_h, successor_hash, successor_height, &duplicated)
+        .expect_err("a block with a duplicate transaction is refused");
+    if block.transactions.len() % 2 == 1 {
+        assert!(error.contains("duplicated"), "{error}");
+    }
 }
 
 /// `hashBlockCommitments` is the ZIP 244 hash of the parent's history root
@@ -813,7 +829,8 @@ async fn chain_checks_pass_with_a_committing_successor() {
         ))]));
     };
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, snapshot_commitment(), &history_root),
+        check_chain(&mut peers, &network, snapshot_commitment(), &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
 
@@ -850,7 +867,8 @@ async fn chain_checks_abort_when_no_successor_copy_commits() {
     };
     let history_root = ChainHistoryMmrRootHash::from([0x42; 32]);
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, snapshot_commitment(), &history_root),
+        check_chain(&mut peers, &network, snapshot_commitment(), &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
 
@@ -886,7 +904,8 @@ async fn chain_checks_defer_what_no_peer_serves() {
             .respond(headers_response(&[]));
     };
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, snapshot_commitment(), &history_root),
+        check_chain(&mut peers, &network, snapshot_commitment(), &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
     assert_eq!(
@@ -903,7 +922,8 @@ async fn chain_checks_defer_what_no_peer_serves() {
             .respond(headers_response(&[]));
     };
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, snapshot_commitment(), &history_root),
+        check_chain(&mut peers, &network, snapshot_commitment(), &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
     assert_eq!(
@@ -926,7 +946,8 @@ async fn chain_checks_defer_what_no_peer_serves() {
         )]));
     };
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, snapshot_commitment(), &history_root),
+        check_chain(&mut peers, &network, snapshot_commitment(), &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
     assert_eq!(
@@ -1691,7 +1712,8 @@ async fn chain_checks_try_every_successor_copy_and_accept_one_commitment() {
             .respond(response(&successor));
     };
     let (result, ()) = tokio::join!(
-        check_chain(&mut peers, &network, commitment, &history_root),
+        check_chain(&mut peers, &network, commitment, &history_root)
+            .map_ok(|checks| checks.deferred_checks),
         drive
     );
 
@@ -1761,7 +1783,8 @@ async fn chain_checks_reach_a_valid_successor_after_bad_copy_and_misses() {
     };
     let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(
-            check_chain(&mut peers, &network, commitment, &history_root),
+            check_chain(&mut peers, &network, commitment, &history_root)
+                .map_ok(|checks| checks.deferred_checks),
             drive
         )
     })
@@ -1834,7 +1857,8 @@ async fn chain_checks_reach_a_valid_successor_after_three_bad_copies() {
     };
     let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(
-            check_chain(&mut peers, &network, commitment, &history_root),
+            check_chain(&mut peers, &network, commitment, &history_root)
+                .map_ok(|checks| checks.deferred_checks),
             drive
         )
     })

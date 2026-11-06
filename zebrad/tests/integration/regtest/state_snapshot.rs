@@ -683,6 +683,13 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // The stage lines appear in order, from the decision to the last checkpoint.
         for stage in EXPECTED_STAGES {
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
+            if stage == Stage::StateRenamed {
+                // The bootstrap's checked copy of `H + 1` is committed before sync starts, so B
+                // does not download it again.
+                node_b.expect_stdout_line_matches(
+                    "committed the block after the snapshot height that the bootstrap checked",
+                )?;
+            }
             if stage == Stage::StateInitialized {
                 // Capture transport counters before A's restart resets them. Bootstrap has finished,
                 // so these counts are stable and exclude ordinary block sync.

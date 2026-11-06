@@ -536,6 +536,7 @@ impl StartCmd {
             &config.network.network,
         );
         let mut bootstrapped_height = None;
+        let mut bootstrapped_successor = None;
         let snapshot_decision = decision::should_bootstrap(&config, &snapshot_store);
         Self::handle_rejected_snapshot(&config, &snapshot_decision)?;
         if let Decision::Bootstrap { commitment, peers } = snapshot_decision {
@@ -548,7 +549,10 @@ impl StartCmd {
                 Stage::BootstrapStarted
             );
             match bootstrap::bootstrap(&config, commitment, peers).await {
-                Ok(()) => bootstrapped_height = Some(commitment.height),
+                Ok(bootstrapped) => {
+                    bootstrapped_height = Some(commitment.height);
+                    bootstrapped_successor = bootstrapped.successor;
+                }
                 Err(error) => match config.sync.state_snapshot_fallback {
                     StateSnapshotFallback::Error => {
                         return Err(Report::new(error).wrap_err(
@@ -644,6 +648,13 @@ impl StartCmd {
                     .await
                 }
             };
+        // The bootstrap checked block `H + 1` against the headers to the next checkpoint and the
+        // snapshot's history tree, so commit it before the block verifier and sync start: they
+        // then start above it, and nothing downloads it again.
+        let mut state_service = state_service;
+        if let Some(successor) = bootstrapped_successor {
+            Self::commit_snapshot_successor(&mut state_service, successor).await;
+        }
         let node_hints = state_hints.and_then(|state_hints| {
             state_hints.for_state(
                 &latest_chain_tip,
@@ -1506,6 +1517,43 @@ impl StartCmd {
         );
 
         exit_status
+    }
+
+    /// Commits the checked block after the snapshot height, which the bootstrap fetched, as a
+    /// checkpoint-verified block. If the commit fails, block sync downloads the block instead.
+    async fn commit_snapshot_successor(
+        state: &mut BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+        successor: Arc<zebra_chain::block::Block>,
+    ) {
+        /// How long the commit of one checked block may take.
+        const SUCCESSOR_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        let hash = successor.hash();
+        let height = successor.coinbase_height().map(|height| height.0);
+        let request = zebra_state::Request::CommitCheckpointVerifiedBlock(
+            zebra_state::CheckpointVerifiedBlock::from(successor),
+        );
+        let commit = async { tower::Service::call(state.ready().await?, request).await };
+        match tokio::time::timeout(SUCCESSOR_COMMIT_TIMEOUT, commit).await {
+            Ok(Ok(_)) => info!(
+                ?height,
+                %hash,
+                "committed the block after the snapshot height that the bootstrap checked"
+            ),
+            Ok(Err(error)) => warn!(
+                ?height,
+                %hash,
+                %error,
+                "could not commit the block after the snapshot height that the bootstrap \
+                 checked: block sync downloads it instead"
+            ),
+            Err(_) => warn!(
+                ?height,
+                %hash,
+                "committing the block after the snapshot height that the bootstrap checked \
+                 timed out: block sync downloads it instead"
+            ),
+        }
     }
 
     /// Returns the bound for the state service buffer,

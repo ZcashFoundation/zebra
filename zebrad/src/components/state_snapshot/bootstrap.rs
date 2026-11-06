@@ -296,6 +296,15 @@ pub(crate) enum FetchError {
     Skip(String),
 }
 
+/// What a finished bootstrap hands to the node.
+#[derive(Clone, Debug, Default)]
+pub struct Bootstrapped {
+    /// The checked block `H + 1`, if a bootstrap peer served it. The node
+    /// commits it right after it opens the imported state, before block sync
+    /// starts, so sync starts above it.
+    pub successor: Option<Arc<Block>>,
+}
+
 /// Bootstraps the state from the snapshot `commitment` names, downloading
 /// from `peers`, and returns once the imported database has been renamed into
 /// place.
@@ -303,7 +312,7 @@ pub async fn bootstrap(
     config: &ZebradConfig,
     commitment: StateSnapshotCommitment,
     peers: Vec<String>,
-) -> Result<(), BootstrapError> {
+) -> Result<Bootstrapped, BootstrapError> {
     let network = config.network.network.clone();
     let store = ArtifactStore::new(&config.state, &network);
     let import_root = import_dir(&config.state);
@@ -357,7 +366,7 @@ pub async fn bootstrap(
         .await;
 
         match &result {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(BootstrapError::Rejected(reason)) => {
                 error!(
                     manifest = %commitment.manifest,
@@ -472,7 +481,7 @@ async fn run<S>(
     commitment: StateSnapshotCommitment,
     mut peers: Peers<S>,
     connected_at: Instant,
-) -> Result<(), BootstrapError>
+) -> Result<Bootstrapped, BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -527,7 +536,10 @@ where
     let history_root = history_tree.hash();
 
     // 4. The block-hash and successor-commitment checks.
-    let deferred_checks = check_chain(&mut peers, network, commitment, &history_root).await?;
+    let ChainChecks {
+        deferred_checks,
+        successor,
+    } = check_chain(&mut peers, network, commitment, &history_root).await?;
     if peers.is_empty() {
         return Err(BootstrapError::Aborted(
             "every bootstrap peer was excluded during the chain checks".to_string(),
@@ -592,7 +604,9 @@ where
         store,
         config.sync.serve_state_snapshots,
     )
-    .await
+    .await?;
+
+    Ok(Bootstrapped { successor })
 }
 
 /// The suffix of the lock file next to each import workspace. The attempt that uses the
@@ -1626,7 +1640,10 @@ where
 
 /// Checks that `block` is block `H + 1`: it hashes to the authenticated
 /// `successor_hash`, chains from `hash_h`, has the successor's coinbase
-/// height, and its merkle root covers its transactions.
+/// height, and passes the body checks the checkpoint verifier runs, because
+/// the node commits it as a checkpoint-verified block: the coinbase is first
+/// and only first, and the merkle root covers its transactions, with no
+/// duplicate transaction (CVE-2012-2459).
 pub(crate) fn check_successor_block(
     hash_h: block::Hash,
     successor_hash: block::Hash,
@@ -1652,9 +1669,20 @@ pub(crate) fn check_successor_block(
             successor_height.0
         ));
     }
-    let merkle_root: block::merkle::Root = block.transactions.iter().collect();
+    zebra_consensus::coinbase_is_first(block)
+        .map_err(|error| format!("the block's coinbase is invalid: {error}"))?;
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    let merkle_root: block::merkle::Root = transaction_hashes.iter().copied().collect();
     if block.header.merkle_root != merkle_root {
         return Err("the block's merkle root does not cover its transactions".to_string());
+    }
+    // A duplicate keeps the merkle root (CVE-2012-2459). The txids commit to each transaction's
+    // consensus branch ID, so a list with the authenticated root and no duplicate is the block's.
+    let unique: std::collections::HashSet<_> = transaction_hashes.iter().collect();
+    if unique.len() != transaction_hashes.len() {
+        return Err(
+            "the block's transactions are invalid: a transaction is duplicated".to_string(),
+        );
     }
 
     Ok(())
@@ -1673,8 +1701,21 @@ pub(crate) fn check_successor_commitment(
     block.header.commitment_bytes.0 == <[u8; 32]>::from(expected)
 }
 
-/// Runs the chain checks and returns the [`SnapshotBase`] `DEFERRED_*` bits of
-/// the checks no peer could serve.
+/// The results of the chain checks.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ChainChecks {
+    /// The [`SnapshotBase`] `DEFERRED_*` bits of the checks no peer could serve.
+    pub(crate) deferred_checks: u8,
+
+    /// The checked copy of block `H + 1`, if a peer served one. Its hash is
+    /// authenticated by the headers that chain it to the next checkpoint, and
+    /// its authorizing data by the snapshot's history tree, so the node commits
+    /// it right after the import instead of downloading it again.
+    pub(crate) successor: Option<Arc<Block>>,
+}
+
+/// Runs the chain checks and returns the deferred checks and the checked
+/// successor block.
 ///
 /// A snapshot whose `hash(H)` differs from the checkpoint at `H` is rejected.
 /// A successor check succeeds when any fetched copy commits to the history
@@ -1684,7 +1725,7 @@ pub(crate) async fn check_chain<S>(
     network: &Network,
     commitment: StateSnapshotCommitment,
     history_root: &ChainHistoryMmrRootHash,
-) -> Result<u8, BootstrapError>
+) -> Result<ChainChecks, BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -1743,7 +1784,10 @@ where
              tree roots instead"
         );
         deferred_checks |= SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            successor: None,
+        });
     };
 
     info!(
@@ -1773,7 +1817,7 @@ where
     )
     .await;
     let copy_count = copies.len();
-    let mut matching_copy = false;
+    let mut matching_copy = None;
     for (peer, block) in copies {
         let block = match block {
             Ok(block) => block,
@@ -1784,7 +1828,7 @@ where
         };
 
         if check_successor_commitment(history_root, &block) {
-            matching_copy = true;
+            matching_copy = Some(block);
         } else {
             peers.blame(
                 peer,
@@ -1794,13 +1838,16 @@ where
         }
     }
 
-    if matching_copy {
+    if let Some(successor) = matching_copy {
         info!(
             height = successor_height.0,
             hash = %successor_hash,
             "a copy of the block after the snapshot height commits to the snapshot's history tree"
         );
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            successor: Some(successor),
+        });
     }
 
     if copy_count == 0 {
@@ -1812,7 +1859,10 @@ where
              tree roots instead"
         );
         deferred_checks |= SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            successor: None,
+        });
     }
 
     Err(BootstrapError::Aborted(format!(
