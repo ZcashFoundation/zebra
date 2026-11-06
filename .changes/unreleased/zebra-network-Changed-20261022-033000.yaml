@@ -1,0 +1,6 @@
+project: zebra-network
+kind: Changed
+body: 'The `zebra.net.in.errors` `error` label uses the serialization error kind, and handshake
+  `remote_version` and `negotiated_version` labels use known protocol versions or `other`
+  ([#11874](https://github.com/ZcashFoundation/zebra/pull/11874)).'
+time: 2026-10-22T03:30:00+02:00

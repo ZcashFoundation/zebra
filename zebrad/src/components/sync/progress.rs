@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
 use num_integer::div_ceil;
 
 use tokio::sync::watch;
@@ -17,9 +17,16 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade},
 };
-use zebra_state::MAX_BLOCK_REORG_HEIGHT;
+use zebra_state::{ChainTipChange, TipAction, MAX_BLOCK_REORG_HEIGHT};
 
-use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
+use crate::components::{
+    health::ChainTipMetrics,
+    sync::{RestartReason, SyncStatus},
+};
+
+/// The tracing target of the sync progress logs.
+#[cfg_attr(not(feature = "sentry"), allow(dead_code))]
+pub(crate) const LOG_TARGET: &str = module_path!();
 
 /// The amount of time between progress logs.
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
@@ -59,6 +66,14 @@ const SYNC_PERCENT_FRAC_DIGITS: usize = 3;
 //
 // TODO: change to HeightDiff?
 const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: u32 = 10;
+
+/// How long before its parent became this node's tip a block can have been mined, and still have
+/// its tip delay recorded.
+///
+/// A block often arrives while its parent is still being verified, and a slower node sees that
+/// more often, so requiring the parent first would drop a slower node's largest delays. This is
+/// longer than a healthy node's block delay, and most of a restart's or a stall's backlog is older.
+const TIP_BLOCK_DELAY_BACKLOG_MARGIN: TimeDelta = TimeDelta::minutes(2);
 
 /// Logs Zebra's estimated progress towards the chain tip every minute or so, and
 /// updates a terminal progress bar every few seconds.
@@ -114,6 +129,11 @@ pub async fn show_block_chain_progress(
     // The last time we logged an update.
     let mut last_log_time = Instant::now();
 
+    let mut last_network_upgrade = None;
+
+    // Logs while waiting for the genesis block start immediately, then follow `LOG_INTERVAL`.
+    let mut last_genesis_wait_log: Option<Instant> = None;
+
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
     let mut is_chain_metrics_chan_closed = false;
@@ -124,6 +144,13 @@ pub async fn show_block_chain_progress(
 
         let is_syncer_stopped = sync_status.is_close_to_tip();
 
+        // Measured before the tip is known too, so a stalled genesis block download shows up, and
+        // measured here, so the age keeps growing while the syncer waits on that block.
+        let diagnostics = sync_status.diagnostics();
+        let oldest_in_flight_age = diagnostics.oldest_in_flight_age(instant_now);
+        metrics::gauge!("sync.downloads.oldest_age_seconds")
+            .set(oldest_in_flight_age.unwrap_or_default().as_secs_f64());
+
         if let Some(estimated_height) =
             latest_chain_tip.estimate_network_chain_tip_height(&network, now)
         {
@@ -133,6 +160,27 @@ pub async fn show_block_chain_progress(
                 .best_tip_height()
                 .expect("unexpected empty state: estimate requires a block height");
             let network_upgrade = NetworkUpgrade::current(&network, current_height);
+
+            #[cfg(feature = "sentry")]
+            {
+                crate::sentry::record_tip_height(current_height);
+                crate::sentry::record_close_to_tip(is_syncer_stopped);
+            }
+
+            if let Some(previous_network_upgrade) = last_network_upgrade
+                .replace(network_upgrade)
+                .filter(|previous| *previous != network_upgrade)
+            {
+                info!(
+                    ?current_height,
+                    ?network_upgrade,
+                    ?previous_network_upgrade,
+                    activation_height = network_upgrade
+                        .activation_height(&network)
+                        .map(|height| height.0),
+                    "best chain tip changed network upgrade",
+                );
+            }
 
             // Send progress reports for block height
             //
@@ -241,6 +289,10 @@ pub async fn show_block_chain_progress(
                     %target_block_spacing,
                     %max_block_spacing,
                     ?is_syncer_stopped,
+                    last_restart = diagnostics.last_restart.map(RestartReason::as_str),
+                    restarts_without_progress = diagnostics.restarts_without_progress,
+                    in_flight = diagnostics.in_flight,
+                    oldest_in_flight_secs = oldest_in_flight_age.map(|age| age.as_secs()),
                     "chain updates have stalled, \
                      state height has not increased for {} minutes. \
                      Hint: check your network connection, \
@@ -338,7 +390,14 @@ pub async fn show_block_chain_progress(
             #[cfg(feature = "progress-bar")]
             let network_upgrade = NetworkUpgrade::Genesis;
 
-            if is_syncer_stopped {
+            let should_log = last_genesis_wait_log.is_none_or(|last_log| {
+                instant_now.saturating_duration_since(last_log) >= LOG_INTERVAL
+            });
+            if should_log {
+                last_genesis_wait_log = Some(instant_now);
+            }
+
+            if is_syncer_stopped && should_log {
                 // We've stopped syncing blocks,
                 // but we haven't downloaded and verified the genesis block.
                 warn!(
@@ -348,10 +407,7 @@ pub async fn show_block_chain_progress(
                      Hint: check your network connection, \
                      and your computer clock and time zone",
                 );
-
-                #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{network_upgrade}: can't download genesis block"));
-            } else {
+            } else if should_log {
                 // We're waiting for the genesis block to be committed to the state,
                 // before we can estimate the best chain tip.
                 info!(
@@ -359,8 +415,12 @@ pub async fn show_block_chain_progress(
                     current_height = %"None",
                     "initial sync is waiting to download the genesis block",
                 );
+            }
 
-                #[cfg(feature = "progress-bar")]
+            #[cfg(feature = "progress-bar")]
+            if is_syncer_stopped {
+                block_bar.desc(format!("{network_upgrade}: can't download genesis block"));
+            } else {
                 block_bar.desc(format!(
                     "{network_upgrade}: waiting to download genesis block"
                 ));
@@ -368,5 +428,133 @@ pub async fn show_block_chain_progress(
         }
 
         tokio::time::sleep(min(LOG_INTERVAL, PROGRESS_BAR_INTERVAL)).await;
+    }
+}
+
+/// Records how long after its header time each new best chain tip block was committed.
+///
+/// A block is only recorded if it was mined at most [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its
+/// parent became this node's tip, so a node catching up after a restart or a stall doesn't record
+/// most of its backlog. The block before a network upgrade activation isn't recorded either,
+/// because [`ChainTipChange`] reports it as a reset so that the mempool is cleared, and a reset
+/// doesn't include the block's time.
+#[cfg_attr(not(feature = "sentry"), allow(unused_variables))]
+pub async fn record_tip_block_delay(mut chain_tip_change: ChainTipChange) {
+    let mut tip_block_delay = TipBlockDelay::new(Utc::now());
+
+    while let Ok(tip_action) = chain_tip_change.wait_for_tip_change().await {
+        if let Some((height, delay)) = tip_block_delay.observe(&tip_action, Utc::now()) {
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(delay);
+
+            #[cfg(feature = "sentry")]
+            crate::sentry::send_tip_block_delay(height, delay);
+        }
+    }
+}
+
+/// Measures tip block delays from the tip changes this node observes.
+struct TipBlockDelay {
+    /// When this node's current tip became its tip.
+    tip_since: DateTime<Utc>,
+}
+
+impl TipBlockDelay {
+    /// Starts measuring from the tip this node has at `now`.
+    fn new(now: DateTime<Utc>) -> Self {
+        Self { tip_since: now }
+    }
+
+    /// Returns the height of the block that `tip_action` added and the seconds from its header
+    /// time to `now`, if it grew the tip by a block mined at most
+    /// [`TIP_BLOCK_DELAY_BACKLOG_MARGIN`] before its parent became this node's tip.
+    ///
+    /// The delay is negative when the block's miner set its clock ahead of this node's.
+    fn observe(&mut self, tip_action: &TipAction, now: DateTime<Utc>) -> Option<(Height, f64)> {
+        let delay = match tip_action {
+            TipAction::Grow { block }
+                if block.time >= self.tip_since - TIP_BLOCK_DELAY_BACKLOG_MARGIN =>
+            {
+                Some((block.height, (now - block.time).as_seconds_f64()))
+            }
+            _ => None,
+        };
+        self.tip_since = now;
+
+        delay
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zebra_chain::{block, parameters::Network};
+    use zebra_state::{ChainTipBlock, ChainTipSender};
+
+    use super::*;
+
+    fn tip_block(height: u8, parent: u8, time: DateTime<Utc>) -> ChainTipBlock {
+        ChainTipBlock {
+            hash: block::Hash([height; 32]),
+            height: block::Height(height.into()),
+            time,
+            transactions: Vec::new(),
+            transaction_hashes: Vec::new().into(),
+            previous_block_hash: block::Hash([parent; 32]),
+        }
+    }
+
+    #[tokio::test]
+    async fn tip_block_delay_skips_the_backlog_after_a_restart() {
+        let start = Utc::now();
+        let at = |seconds| start + TimeDelta::seconds(seconds);
+
+        let (mut sender, _, mut change) =
+            ChainTipSender::new(tip_block(10, 9, at(-1_000)), &Network::Mainnet);
+        let mut tip_block_delay = TipBlockDelay::new(start);
+
+        // Each step sets a new tip, then observes it at the given time.
+        let steps = [
+            // The tip loaded from disk at startup.
+            (None, at(0), None),
+            // Blocks mined while the node was down, committed one at a time as it catches up.
+            (Some(tip_block(11, 10, at(-300))), at(1), None),
+            (Some(tip_block(12, 11, at(-225))), at(2), None),
+            (Some(tip_block(13, 12, at(-150))), at(3), None),
+            // Blocks mined after their parent was the tip.
+            (
+                Some(tip_block(14, 13, at(60))),
+                at(62),
+                Some((block::Height(14), 2.0)),
+            ),
+            (
+                Some(tip_block(15, 14, at(130))),
+                at(125),
+                Some((block::Height(15), -5.0)),
+            ),
+            (
+                Some(tip_block(16, 15, at(140))),
+                at(170),
+                Some((block::Height(16), 30.0)),
+            ),
+            // Mined while its parent was still being verified.
+            (
+                Some(tip_block(17, 16, at(160))),
+                at(175),
+                Some((block::Height(17), 15.0)),
+            ),
+            // A different chain.
+            (Some(tip_block(19, 18, at(200))), at(201), None),
+        ];
+
+        for (new_tip, now, expected) in steps {
+            if let Some(new_tip) = new_tip {
+                sender.set_best_non_finalized_tip(new_tip);
+            }
+            let tip_action = change
+                .wait_for_tip_change()
+                .await
+                .expect("the sender is still in scope");
+
+            assert_eq!(tip_block_delay.observe(&tip_action, now), expected);
+        }
     }
 }

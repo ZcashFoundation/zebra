@@ -776,7 +776,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book, _) = zebra_network::init(
+    let (mut peer_set, address_book, _, block_advertiser) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -855,7 +855,7 @@ async fn setup(
     let block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change,
-        peer_set.clone(),
+        block_advertiser,
         Some(submitblock_channel.receiver()),
     ));
 
@@ -914,22 +914,22 @@ async fn setup(
 mod submitblock_test {
     use std::io;
     use std::sync::{Arc, Mutex};
+    use tokio::sync::Notify;
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
     use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 
-    use crate::components::sync::PEER_GOSSIP_DELAY;
-
     // Custom in-memory writer to capture logs
-    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+    struct TestWriter(Arc<Mutex<Vec<u8>>>, Arc<Notify>);
 
     impl io::Write for TestWriter {
         #[allow(clippy::unwrap_in_result)]
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut logs = self.0.lock().unwrap();
             logs.extend_from_slice(buf);
+            self.1.notify_one();
             Ok(buf.len())
         }
 
@@ -941,12 +941,14 @@ mod submitblock_test {
     #[tokio::test]
     async fn submitblock_channel() -> Result<(), crate::BoxError> {
         let logs = Arc::new(Mutex::new(Vec::new()));
+        let log_written = Arc::new(Notify::new());
+        let writer_notify = log_written.clone();
         let log_sink = logs.clone();
 
         // Set up a tracing subscriber with a custom writer
         let subscriber = fmt()
             .with_max_level(Level::INFO)
-            .with_writer(move || TestWriter(log_sink.clone())) // Write logs to an in-memory buffer
+            .with_writer(move || TestWriter(log_sink.clone(), writer_notify.clone()))
             .finish();
 
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -981,7 +983,7 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
+        let (_peer_set, _address_book, _misbehavior_tx, block_advertiser) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),
@@ -1001,16 +1003,28 @@ mod submitblock_test {
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
                 chain_tip_change,
-                peer_set.clone(),
+                block_advertiser,
                 Some(submitblock_channel.receiver()),
             )
             .in_current_span(),
         );
 
-        // Wait for the block gossip task to process the block
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Wait for the gossip task's log instead of the unrelated periodic gossip delay.
+        tokio::time::timeout(Duration::from_secs(7), async {
+            loop {
+                let notified = log_written.notified();
+                if String::from_utf8_lossy(&logs.lock().unwrap())
+                    .contains("sending mined block broadcast")
+                {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("the gossip task must process the submitted block");
 
-        // Check that the block was processed as a mnined block by the gossip task
+        // Check that the block was processed as a mined block by the gossip task.
         let captured_logs = logs.lock().unwrap();
         let log_output = String::from_utf8(captured_logs.clone()).unwrap();
 

@@ -149,13 +149,8 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let expected_hash = block2.hash();
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state.commit_new_chain(block2.prepare(), &finalized_state)?;
     state.commit_new_chain(child.prepare(), &finalized_state)?;
@@ -187,13 +182,8 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let child = block1.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -233,13 +223,8 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     let block3 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -320,13 +305,8 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
 /// regression tests below.
 fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, FinalizedState) {
     let state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network)
+        .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
     (state, finalized_state)
 }
@@ -575,13 +555,8 @@ fn reconsider_block_inserts_block_and_descendants_into_chain_for_network(
     let block3 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -664,13 +639,8 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let child2 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -709,13 +679,8 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -755,13 +720,8 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -800,13 +760,8 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -849,13 +804,8 @@ fn history_tree_is_updated_for_network_upgrade(
     );
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
@@ -952,13 +902,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     );
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
@@ -1021,19 +966,14 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
 async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_cache() {
     let network = Network::Mainnet;
 
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
-    let backup_dir_path = tempfile::Builder::new()
+    let backup_dir = tempfile::Builder::new()
         .prefix("zebra-non-finalized-state-backup-cache")
         .tempdir()
-        .expect("temporary directory is created successfully")
-        .keep();
+        .expect("temporary directory is created successfully");
+    let backup_dir_path = backup_dir.path().to_path_buf();
 
     let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
         NonFinalizedState::new(&network)
@@ -1066,12 +1006,29 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         .send(non_finalized_state.clone())
         .expect("backup task should have a receiver, channel should be open");
 
-    // Wait for the minimum update time
-    tokio::time::sleep(Duration::from_secs(1) + MIN_DURATION_BETWEEN_BACKUP_UPDATES).await;
-
-    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
-        .with_backup(Some(backup_dir_path), &finalized_state.db, true, false)
-        .await;
+    // Poll restoration until the rate-limited writer has finished writing a readable backup.
+    let non_finalized_state = tokio::time::timeout(
+        MIN_DURATION_BETWEEN_BACKUP_UPDATES + Duration::from_secs(30),
+        async {
+            loop {
+                let (restored_state, _sender, _receiver) = NonFinalizedState::new(&network)
+                    .with_backup(
+                        Some(backup_dir_path.clone()),
+                        &finalized_state.db,
+                        true,
+                        // Only the original state should write backups while restoration is polled.
+                        true,
+                    )
+                    .await;
+                if restored_state.best_chain_len().is_some() {
+                    break restored_state;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        },
+    )
+    .await
+    .expect("the backup task should write a restorable non-finalized block");
 
     assert_eq!(
         non_finalized_state.best_chain_len(),
@@ -1388,12 +1345,7 @@ fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
         )
     };
 
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )?;
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)?;
 
     let parent_height = Height(ACTIVATION_HEIGHT - 1);
     let activation = Height(ACTIVATION_HEIGHT);
@@ -1603,6 +1555,192 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
             "more cumulative work must override receipt order"
         );
     }
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// At the fork limit, a newly inserted chain is kept even if it has the lowest work, and
+/// equal-work ties evict the earliest-received chain other than the best chain. So a late
+/// sibling survives both its own insertion and the insertion of another sibling after it.
+#[test]
+fn fork_limit_keeps_new_chains_and_evicts_earliest_received_ties() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let received = std::time::Instant::now();
+    let mut commit = |block: &Arc<Block>, secs: u64| {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(secs));
+        state.commit_block(prepared, &finalized_state)
+    };
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    let siblings: Vec<_> = (0..=max_forks + 1).map(sibling).collect();
+    for (secs, block) in (0..).zip(&siblings) {
+        commit(block, secs)?;
+    }
+    let late = &siblings[usize::from(max_forks)];
+
+    // A chain with strictly less work than all the others.
+    let low = block1.make_fake_child().set_work(1);
+    commit(&low, u64::from(max_forks) + 2)?;
+
+    let late_child = late.make_fake_child().set_work(10);
+    commit(&late_child, u64::from(max_forks) + 3)?;
+
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    for (i, block) in siblings.iter().enumerate() {
+        assert_eq!(
+            !(1..=3).contains(&i),
+            state.any_chain_contains(&block.hash()),
+            "only the earliest-received siblings after the best one are evicted, sibling {i}",
+        );
+    }
+    assert!(state.any_chain_contains(&low.hash()));
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        late_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// After a restart that restores 10 equal-work forks from the non-finalized backup, a live
+/// sibling is kept at the fork limit, and its child becomes the best chain tip. Restored
+/// blocks have no receipt time, so they rank as received first.
+#[test]
+fn fork_limit_keeps_live_sibling_after_backup_restore() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 0..max_forks {
+        state.commit_block(sibling(i).prepare(), &finalized_state)?;
+    }
+
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+    let mut state = super::super::backup::restore_backup(
+        NonFinalizedState::new(&network),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    assert!(state
+        .chain_iter()
+        .all(|chain| chain.tip_block().unwrap().received_time.is_none()));
+
+    let live = sibling(max_forks);
+    let mut prepared = live.clone().prepare();
+    prepared.received_time = Some(std::time::Instant::now());
+    state.commit_block(prepared, &finalized_state)?;
+    assert!(state.any_chain_contains(&live.hash()));
+
+    let live_child = live.make_fake_child().set_work(10);
+    state.commit_block(live_child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        live_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// Test networks keep more equal-work sibling forks than Mainnet before evicting any.
+#[test]
+fn fork_limit_is_higher_on_test_networks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let siblings = 30u8;
+    for (network, expected_forks) in [
+        (
+            Network::Mainnet,
+            crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        ),
+        (Network::new_default_testnet(), usize::from(siblings)),
+    ] {
+        let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+        for i in 0..siblings {
+            let sibling = block1
+                .make_fake_child()
+                .set_work(10)
+                .set_block_commitment([i; 32]);
+            state.commit_block(sibling.prepare(), &finalized_state)?;
+        }
+
+        assert_eq!(expected_forks, state.chain_count(), "{network}");
+    }
+
+    Ok(())
+}
+
+/// The backup task writes each block once, even when several chains share it.
+#[test]
+fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for i in 0..3u8 {
+        let sibling = block1.make_fake_child().set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    assert_eq!(3, state.chain_count());
+
+    // Claim every block is already backed up, so nothing should be written.
+    let backup_dir = tempfile::tempdir()?;
+    let backup_blocks = state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        .map(|block| (block.hash, backup_dir.path().join("unused")))
+        .collect();
+    super::super::backup::update_non_finalized_state_backup(
+        backup_dir.path(),
+        &state,
+        backup_blocks,
+    );
+
+    assert_eq!(0, std::fs::read_dir(backup_dir.path())?.count());
 
     Ok(())
 }

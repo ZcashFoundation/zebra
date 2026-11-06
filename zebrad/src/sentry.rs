@@ -1,15 +1,80 @@
 //! Integration with sentry.io for event reporting.
 
-use std::{collections::BTreeMap, env, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    env,
+    panic::PanicHookInfo,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        Mutex, MutexGuard, OnceLock, PoisonError,
+    },
+    thread,
+    time::{Duration, Instant, SystemTime},
+};
 
 use sentry::{
-    integrations::tracing::EventFilter,
-    protocol::{Context, Event, Exception, Log, LogAttribute, Map, Mechanism, Value},
-    ClientInitGuard, ClientOptions, Scope,
+    integrations::{backtrace::current_stacktrace, tracing::EventFilter},
+    protocol::{
+        Context, Envelope, Event, Exception, Frame, Log, LogAttribute, Map, Mechanism,
+        SessionAttributes, SessionStatus, SessionUpdate, Stacktrace, Value,
+    },
+    types::random_uuid,
+    ClientInitGuard, ClientOptions, Hub, Scope,
 };
 use tracing::Level;
+use zebra_chain::{
+    block::Height,
+    parameters::{Network, NetworkUpgrade},
+};
 
-use crate::application::{build_version, ZebradApp};
+use crate::{
+    application::{build_version, ZebradApp},
+    components::sync::progress,
+};
+
+mod distributions;
+mod periodic;
+
+pub(crate) use distributions::{send_tip_block_delay, SentryRecorder};
+
+/// Keeps the Sentry client open until [`end`] drops it.
+///
+/// `zebrad` exits with `process::exit`, which skips destructors, so the guard must be dropped
+/// explicitly to end the release health session and flush queued events and logs.
+static CLIENT_GUARD: Mutex<Option<ClientInitGuard>> = Mutex::new(None);
+
+/// The network this node runs on, used to find the network upgrade at the tip.
+static NETWORK: OnceLock<Network> = OnceLock::new();
+
+/// Whether the syncer was close to the chain tip when the progress task last checked.
+static CLOSE_TO_TIP: AtomicBool = AtomicBool::new(false);
+
+/// The best chain tip height, or [`UNKNOWN_TIP_HEIGHT`] until the progress task records one.
+///
+/// Events, logs, and metrics read this instead of the chain tip watch channel, because Sentry calls
+/// `before_send` and `before_send_log` from inside tracing, where instrumented chain tip reads
+/// would re-enter the tracing layers.
+static TIP_HEIGHT: AtomicU32 = AtomicU32::new(UNKNOWN_TIP_HEIGHT);
+
+/// Above `Height::MAX`, so it is never a real height.
+const UNKNOWN_TIP_HEIGHT: u32 = u32::MAX;
+
+/// The release health session in progress.
+///
+/// Zebra tracks sessions itself instead of through the SDK. The SDK keeps a session per hub, and
+/// a thread's hub keeps the session it copied when the thread first used Sentry, so a session
+/// the SDK started later, such as a daily one, would miss errors reported on other threads.
+static SESSION: Mutex<Option<SessionUpdate<'static>>> = Mutex::new(None);
+
+/// Errors reported from any thread since the session in progress started.
+static SESSION_ERRORS: AtomicU64 = AtomicU64::new(0);
+
+/// How long one release health session lasts before it is ended and replaced.
+///
+/// Sentry drops session updates for sessions that started more than five days earlier, so a
+/// longer session could never report how it ended.
+const SESSION_ROTATION_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Environment and CI metadata attached to all Sentry events.
 #[derive(Debug, Default)]
@@ -79,15 +144,39 @@ impl Metadata {
 
     fn client_options_with_release(&self, release: String) -> ClientOptions {
         let log_attributes = self.log_attributes();
-        ClientOptions {
-            release: Some(release.into()),
-            environment: self.environment.clone().map(Into::into),
-            enable_logs: true,
-            before_send_log: Some(Arc::new(move |mut log: Log| {
+        let network = self.tags.get("chain.network").cloned();
+        let started_at = Instant::now();
+        let options = ClientOptions::new()
+            .release(release)
+            // Suspect commits need in-app stack frames. Only ERROR events and panics are sent as
+            // events, so capturing the stack stays off the common paths.
+            .attach_stacktrace(true)
+            .before_send(|mut event| {
+                if event.level >= sentry::Level::Error {
+                    SESSION_ERRORS.fetch_add(1, Ordering::Relaxed);
+                }
+                mark_zebra_frames_in_app(&mut event);
+                add_chain_tags(&mut event, chain_position());
+                Some(event)
+            })
+            .before_send_log(move |mut log| {
                 merge_log_attributes(&mut log, &log_attributes);
+                merge_log_attributes(&mut log, &chain_log_attributes(chain_position()));
                 Some(log)
-            })),
-            ..Default::default()
+            })
+            .before_send_metric(move |mut metric| {
+                add_metric_attributes(
+                    &mut metric.attributes,
+                    network.as_deref(),
+                    chain_position().map(|(_, network_upgrade)| network_upgrade),
+                    started_at.elapsed(),
+                );
+                Some(metric)
+            });
+
+        match &self.environment {
+            Some(environment) => options.environment(environment.clone()),
+            None => options,
         }
     }
 
@@ -123,29 +212,269 @@ impl Metadata {
     }
 }
 
-pub(crate) fn init() -> ClientInitGuard {
-    let metadata = Metadata::from_env();
+/// Starts the Sentry client and its release health sessions, which are replaced daily.
+pub(crate) fn init(network: &Network) {
+    let _ = NETWORK.set(network.clone());
+
+    let mut metadata = Metadata::from_env();
+    metadata.tags.insert("chain.network", network.to_string());
+
     let guard = sentry::init(metadata.client_options());
     sentry::configure_scope(|scope| metadata.apply_to_scope(scope));
-    guard
+
+    if guard.is_enabled() {
+        start_run_sessions();
+    }
+
+    *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
+
+    let rotation = thread::Builder::new()
+        .name("sentry session rotation".to_owned())
+        .spawn(|| loop {
+            thread::sleep(SESSION_ROTATION_INTERVAL);
+            rotate_session();
+        });
+    if let Err(error) = rotation {
+        warn!(?error, "unable to start Sentry session rotation");
+    }
+
+    let metrics_flush = thread::Builder::new()
+        .name("sentry metrics flush".to_owned())
+        .spawn(|| loop {
+            thread::sleep(periodic::FLUSH_INTERVAL);
+            periodic::flush();
+        });
+    if let Err(error) = metrics_flush {
+        warn!(?error, "unable to start Sentry metrics flush");
+    }
 }
 
-pub(crate) fn tracing_layer<S>() -> impl tracing_subscriber::Layer<S>
+/// Starts the first release health session of this run.
+///
+/// Every session of the run reports the same random ID as its distinct ID, so Sentry's crash-free
+/// users rate is the share of runs without a crash.
+fn start_run_sessions() {
+    let Some(client) = Hub::current().client() else {
+        return;
+    };
+    let options = client.options();
+    let Some(release) = options.release.clone() else {
+        return;
+    };
+
+    let attributes = SessionAttributes {
+        release,
+        environment: options.environment.clone(),
+        ip_address: None,
+        user_agent: None,
+    };
+
+    start_session(attributes, random_uuid().to_string());
+}
+
+/// Starts a release health session and reports that it started.
+fn start_session(attributes: SessionAttributes<'static>, run_id: String) {
+    let session = SessionUpdate {
+        session_id: random_uuid(),
+        distinct_id: Some(run_id),
+        sequence: None,
+        timestamp: None,
+        started: SystemTime::now(),
+        init: true,
+        duration: None,
+        status: SessionStatus::Ok,
+        errors: 0,
+        attributes,
+    };
+
+    send_session(session.clone());
+    *lock_session() = Some(session);
+}
+
+/// Ends the session in progress with `status`, reports it, and returns it.
+fn end_session(status: SessionStatus) -> Option<SessionUpdate<'static>> {
+    let mut session = lock_session().take()?;
+
+    session.init = false;
+    session.status = status;
+    session.errors = SESSION_ERRORS.swap(0, Ordering::Relaxed);
+    session.timestamp = Some(SystemTime::now());
+    session.duration = session
+        .started
+        .elapsed()
+        .ok()
+        .map(|duration| duration.as_secs_f64());
+
+    send_session(session.clone());
+    Some(session)
+}
+
+/// Ends the session in progress as exited and starts the next session of the same run.
+fn rotate_session() {
+    if let Some(ended) = end_session(SessionStatus::Exited) {
+        let run_id = ended
+            .distinct_id
+            .expect("every session is started with the run ID");
+        start_session(ended.attributes, run_id);
+    }
+}
+
+fn send_session(session: SessionUpdate<'static>) {
+    if let Some(client) = Hub::current().client() {
+        let mut envelope = Envelope::new();
+        envelope.add_item(session);
+        client.send_envelope(envelope);
+    }
+}
+
+fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
+    SESSION.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Sends the counter totals and gauge values recorded since the last flush, ends the release
+/// health session with `status`, then closes the client.
+///
+/// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
+/// timeout.
+pub(crate) fn end(status: SessionStatus) -> bool {
+    periodic::flush();
+    end_session(status);
+
+    let guard = CLIENT_GUARD
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+
+    guard.is_none_or(|guard| guard.close(None))
+}
+
+/// Records the best chain tip height for the events, logs, and metrics sent after this call.
+pub(crate) fn record_tip_height(height: Height) {
+    TIP_HEIGHT.store(height.0, Ordering::Relaxed);
+}
+
+/// Records whether the syncer is close to the chain tip, which per-block metrics wait for.
+pub(crate) fn record_close_to_tip(close_to_tip: bool) {
+    CLOSE_TO_TIP.store(close_to_tip, Ordering::Relaxed);
+}
+
+fn is_close_to_tip() -> bool {
+    CLOSE_TO_TIP.load(Ordering::Relaxed)
+}
+
+/// Returns the best chain tip height and its network upgrade, once both are known.
+fn chain_position() -> Option<(Height, NetworkUpgrade)> {
+    let network = NETWORK.get()?;
+    let height = TIP_HEIGHT.load(Ordering::Relaxed);
+    let height = (height != UNKNOWN_TIP_HEIGHT).then_some(Height(height))?;
+
+    Some((height, NetworkUpgrade::current(network, height)))
+}
+
+/// Adds the chain position to `event`, keeping any tags the event already has.
+fn add_chain_tags(event: &mut Event<'static>, chain_position: Option<(Height, NetworkUpgrade)>) {
+    let Some((height, network_upgrade)) = chain_position else {
+        return;
+    };
+
+    event
+        .tags
+        .entry("chain.height".to_owned())
+        .or_insert_with(|| height.0.to_string());
+    event
+        .tags
+        .entry("chain.network_upgrade".to_owned())
+        .or_insert_with(|| network_upgrade.to_string());
+}
+
+/// Returns the chain position as log attributes, with the height as a number so that log
+/// queries can aggregate it.
+fn chain_log_attributes(
+    chain_position: Option<(Height, NetworkUpgrade)>,
+) -> Vec<(String, LogAttribute)> {
+    let Some((height, network_upgrade)) = chain_position else {
+        return Vec::new();
+    };
+
+    vec![
+        ("chain.height".to_owned(), LogAttribute::from(height.0)),
+        (
+            "chain.network_upgrade".to_owned(),
+            LogAttribute::from(network_upgrade.to_string()),
+        ),
+    ]
+}
+
+/// Adds the network, the network upgrade at the tip, and the process uptime to a metric's
+/// attributes, keeping any the metric already has.
+///
+/// Unlike events and logs, metrics don't get the tip height, because a block timing value is often
+/// for a block above the tip.
+fn add_metric_attributes(
+    attributes: &mut Map<Cow<'static, str>, LogAttribute>,
+    network: Option<&str>,
+    network_upgrade: Option<NetworkUpgrade>,
+    uptime: Duration,
+) {
+    if let Some(network) = network {
+        attributes
+            .entry("chain.network".into())
+            .or_insert_with(|| network.to_owned().into());
+    }
+    if let Some(network_upgrade) = network_upgrade {
+        attributes
+            .entry("chain.network_upgrade".into())
+            .or_insert_with(|| network_upgrade.to_string().into());
+    }
+    attributes
+        .entry("process.uptime_seconds".into())
+        .or_insert_with(|| uptime.as_secs().into());
+}
+
+/// Returns the Sentry tracing layer, or `None` if [`init`] has not bound an enabled client.
+///
+/// Without a client the layer sends nothing, but it still creates a Sentry span for every
+/// INFO-level span. Must be called after [`init`].
+pub(crate) fn tracing_layer<S>() -> Option<impl tracing_subscriber::Layer<S>>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
-        Level::ERROR => EventFilter::Event | EventFilter::Log,
-        Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
-        Level::INFO => EventFilter::Breadcrumb,
-        _ => EventFilter::Ignore,
+    is_client_enabled().then(|| {
+        sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
+            Level::ERROR => EventFilter::Event | EventFilter::Log,
+            Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
+            // Sync progress is logged once a minute, so sending it gives Sentry each node's
+            // height and network upgrade over time without the volume of all INFO logs.
+            Level::INFO if metadata.target() == progress::LOG_TARGET => {
+                EventFilter::Log | EventFilter::Breadcrumb
+            }
+            Level::INFO => EventFilter::Breadcrumb,
+            _ => EventFilter::Ignore,
+        })
     })
 }
 
-pub(crate) fn panic_event_from<T>(msg: T) -> Event<'static>
-where
-    T: ToString,
-{
+/// Returns the recorder that sends selected histograms to Sentry, or `None` if [`init`] has not
+/// bound an enabled client.
+pub(crate) fn metrics_recorder() -> Option<SentryRecorder> {
+    is_client_enabled().then_some(SentryRecorder)
+}
+
+fn is_client_enabled() -> bool {
+    Hub::current()
+        .client()
+        .is_some_and(|client| client.is_enabled())
+}
+
+/// Builds the Sentry event for a panic.
+///
+/// Like Sentry's panic integration, the panic message becomes the issue title and the current
+/// stack trace locates and groups it. Zebra's panic report is attached for its diagnostic
+/// metadata.
+pub(crate) fn panic_event_from(
+    panic_info: &PanicHookInfo<'_>,
+    panic_report: impl ToString,
+) -> Event<'static> {
     let exception = Exception {
         ty: "panic".into(),
         mechanism: Some(Mechanism {
@@ -153,15 +482,110 @@ where
             handled: Some(false),
             ..Default::default()
         }),
-        value: Some(msg.to_string()),
+        value: Some(
+            panic_info
+                .payload_as_str()
+                .unwrap_or("Box<dyn Any>")
+                .to_owned(),
+        ),
+        stacktrace: current_stacktrace().map(without_panic_handling_frames),
         ..Default::default()
     };
 
-    Event {
+    let mut panic_context = Map::new();
+    panic_context.insert("report".to_owned(), panic_report.to_string().into());
+    if let Some(location) = panic_info.location() {
+        panic_context.insert("location".to_owned(), location.to_string().into());
+    }
+
+    let mut event = Event {
         exception: vec![exception].into(),
         level: sentry::Level::Fatal,
         ..Default::default()
+    };
+    event
+        .contexts
+        .insert("panic".to_owned(), Context::Other(panic_context));
+
+    event
+}
+
+/// Removes the frames that handle the panic: the standard library's panic machinery and the
+/// panic hook that builds the event.
+///
+/// Sentry names an issue after its newest in-app frame, and the hook's frames are in-app, so
+/// without this every panic would point at the hook instead of the code that panicked.
+fn without_panic_handling_frames(mut stacktrace: Stacktrace) -> Stacktrace {
+    let starts_panic = |frame: &Frame| {
+        frame.function.as_deref().is_some_and(|function| {
+            function.starts_with("std::panicking::") || function.ends_with("rust_begin_unwind")
+        })
+    };
+    let is_runtime = |frame: &Frame| {
+        frame.function.as_deref().is_some_and(|function| {
+            function.starts_with("std::")
+                || function.starts_with("core::")
+                || function.ends_with("rust_begin_unwind")
+        })
+    };
+
+    // Frames are ordered from oldest to newest.
+    if let Some(mut first_panic_frame) = stacktrace.frames.iter().rposition(starts_panic) {
+        while first_panic_frame > 0 && is_runtime(&stacktrace.frames[first_panic_frame - 1]) {
+            first_panic_frame -= 1;
+        }
+        stacktrace.frames.truncate(first_panic_frame);
     }
+
+    stacktrace
+}
+
+/// Marks the stack frames from Zebra's crates as in-app, and every other frame as not in-app.
+///
+/// The SDK classifies frames by function name, but release builds keep only line tables, so
+/// inlined frames lose their module path. When no frame matches, the SDK marks every frame
+/// in-app. Zebra's frames keep their source file, so Zebra classifies frames by path instead, and
+/// frames without one are not in-app.
+fn mark_zebra_frames_in_app(event: &mut Event<'static>) {
+    let exception_stacktraces = event
+        .exception
+        .values
+        .iter_mut()
+        .filter_map(|exception| exception.stacktrace.as_mut());
+    let thread_stacktraces = event
+        .threads
+        .values
+        .iter_mut()
+        .filter_map(|thread| thread.stacktrace.as_mut());
+
+    for stacktrace in exception_stacktraces
+        .chain(thread_stacktraces)
+        .chain(event.stacktrace.as_mut())
+    {
+        for frame in &mut stacktrace.frames {
+            frame.in_app = Some(frame.abs_path.as_deref().is_some_and(is_zebra_source));
+        }
+    }
+}
+
+/// Returns whether `path` is a source file in one of Zebra's crates.
+///
+/// A crate's sources are in `<crate directory>/src/`. The directory is the crate name in a
+/// checkout, such as `/zebra/zebrad/src/` in the Docker images, and the crate name and version
+/// in the Cargo registry, such as `zebra-chain-14.0.0/src/`.
+fn is_zebra_source(path: &str) -> bool {
+    let is_zebra_crate = |dir: &str| {
+        dir == "zebrad"
+            || ["zebrad-", "zebra-", "tower-batch-control", "tower-fallback"]
+                .iter()
+                .any(|prefix| dir.starts_with(prefix))
+    };
+
+    let dirs = || path.split(['/', '\\']);
+
+    dirs()
+        .zip(dirs().skip(1))
+        .any(|(dir, next)| next == "src" && is_zebra_crate(dir))
 }
 
 /// Merge `attrs` into `log.attributes`, letting existing keys win.
@@ -227,40 +651,95 @@ fn context_map(values: &BTreeMap<&'static str, String>) -> Map<String, Value> {
 }
 
 fn release_name() -> String {
-    release_name_from(&env_var, ZebradApp::git_commit())
+    release_name_from(&env_var)
 }
 
-fn release_name_from<F>(lookup: &F, git_commit: Option<&str>) -> String
+fn release_name_from<F>(lookup: &F) -> String
 where
     F: Fn(&str) -> Option<String>,
 {
-    if let Some(release) = lookup_value(lookup, "SENTRY_RELEASE") {
-        return release;
-    }
-
-    let version = build_version();
-
-    if version.build.is_empty() {
-        if let Some(git_sha) = git_commit {
-            return format!("{version}+git.{git_sha}");
-        }
-    }
-
-    version.to_string()
+    lookup_value(lookup, "SENTRY_RELEASE").unwrap_or_else(|| build_version().to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
-        time::SystemTime,
+        panic,
+        sync::{Arc, Mutex},
+        time::{Duration, SystemTime},
     };
 
-    use sentry::protocol::{Log, LogAttribute, LogLevel};
+    use sentry::{
+        protocol::{
+            Context, EnvelopeItem, Event, Frame, ItemContainer, Log, LogAttribute, LogLevel, Map,
+            Metric, MetricType, SessionStatus, Stacktrace, Unit, Value,
+        },
+        test::{with_captured_envelopes_options, with_captured_events_options},
+        Client, ClientOptions, Hub, Scope,
+    };
+    use tracing_subscriber::{layer::SubscriberExt, Registry};
+    use zebra_chain::{
+        block::Height,
+        parameters::{Network, NetworkUpgrade},
+    };
 
     use crate::application::build_version;
 
-    use super::{merge_log_attributes, release_name_from, Metadata};
+    use super::distributions::tip_block_delay;
+    use super::{
+        add_chain_tags, add_metric_attributes, chain_log_attributes, end_session, is_zebra_source,
+        merge_log_attributes, panic_event_from, release_name_from, rotate_session,
+        start_run_sessions, tracing_layer, without_panic_handling_frames, Metadata, SentryRecorder,
+    };
+
+    /// Returns the metrics sent while `record` runs with [`SentryRecorder`] and a client built from
+    /// `metadata`.
+    fn sent_metrics(metadata: &Metadata, record: impl FnOnce()) -> Vec<Metric> {
+        with_captured_envelopes_options(
+            || metrics::with_local_recorder(&SentryRecorder, record),
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        )
+        .iter()
+        .flat_map(|envelope| envelope.items())
+        .filter_map(|item| match item {
+            EnvelopeItem::ItemContainer(ItemContainer::Metrics(metrics)) => Some(metrics),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    fn metric_attribute<'a>(metric: &'a Metric, key: &str) -> Option<&'a Value> {
+        metric.attributes.get(key).map(|attribute| &attribute.0)
+    }
+
+    fn tracing_layer_installed_with(client: Option<Client>) -> bool {
+        let hub = Hub::new(client.map(Arc::new), Arc::new(Scope::default()));
+        Hub::run(Arc::new(hub), || tracing_layer::<Registry>().is_some())
+    }
+
+    #[test]
+    fn tracing_layer_requires_a_client() {
+        assert!(!tracing_layer_installed_with(None));
+    }
+
+    #[test]
+    fn tracing_layer_requires_an_enabled_client() {
+        let disabled = Client::from(ClientOptions::default());
+
+        assert!(!tracing_layer_installed_with(Some(disabled)));
+    }
+
+    #[test]
+    fn tracing_layer_is_installed_with_an_enabled_client() {
+        let enabled = Client::from(sentry::apply_defaults(
+            ClientOptions::new().dsn("https://public@example.com/1"),
+        ));
+
+        assert!(tracing_layer_installed_with(Some(enabled)));
+    }
 
     #[test]
     fn metadata_ignores_empty_values() {
@@ -385,43 +864,28 @@ mod tests {
     fn release_name_prefers_sentry_release_override() {
         let env = HashMap::from([("SENTRY_RELEASE", "zebrad@4.4.0-rc.1".to_string())]);
 
-        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
+        let release = release_name_from(&|key| env.get(key).cloned());
 
         assert_eq!(release, "zebrad@4.4.0-rc.1");
     }
 
     #[test]
-    fn release_name_appends_git_sha_when_build_metadata_is_empty() {
+    fn release_name_defaults_to_build_version() {
         let env: HashMap<&str, String> = HashMap::new();
 
-        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
-
-        let version = build_version();
-        if version.build.is_empty() {
-            assert_eq!(release, format!("{version}+git.deadbeef"));
-        } else {
-            // Tagged build already carries +build metadata; do not double-append.
-            assert_eq!(release, version.to_string());
-        }
-    }
-
-    #[test]
-    fn release_name_falls_back_to_version_without_git_sha() {
-        let env: HashMap<&str, String> = HashMap::new();
-
-        let release = release_name_from(&|key| env.get(key).cloned(), None);
+        let release = release_name_from(&|key| env.get(key).cloned());
 
         assert_eq!(release, build_version().to_string());
     }
 
     #[test]
-    fn client_options_enables_logs_and_roundtrips_environment() {
+    fn client_options_leave_sessions_to_zebra_and_roundtrip_environment() {
         let env = HashMap::from([("SENTRY_ENVIRONMENT", "stage".to_string())]);
         let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
 
         let options = metadata.client_options_with_release("zebrad@test".to_string());
 
-        assert!(options.enable_logs);
+        assert!(!options.auto_session_tracking);
         assert_eq!(options.environment.as_deref(), Some("stage"));
         assert_eq!(options.release.as_deref(), Some("zebrad@test"));
     }
@@ -516,5 +980,463 @@ mod tests {
             Some("42"),
             "new attribute must be inserted",
         );
+    }
+
+    #[test]
+    fn chain_tags_keep_existing_event_tags() {
+        let mut event = Event::default();
+        event
+            .tags
+            .insert("chain.height".to_owned(), "event-height".to_owned());
+
+        add_chain_tags(&mut event, Some((Height(3_146_400), NetworkUpgrade::Nu7)));
+
+        assert_eq!(
+            event.tags.get("chain.height").map(String::as_str),
+            Some("event-height"),
+        );
+        assert_eq!(
+            event.tags.get("chain.network_upgrade").map(String::as_str),
+            Some("Nu7"),
+        );
+    }
+
+    #[test]
+    fn chain_tags_are_omitted_before_the_tip_is_known() {
+        let mut event = Event::default();
+
+        add_chain_tags(&mut event, None);
+
+        assert!(event.tags.is_empty());
+        assert!(chain_log_attributes(None).is_empty());
+    }
+
+    #[test]
+    fn chain_log_attributes_report_height_as_a_number() {
+        let attrs: BTreeMap<String, LogAttribute> =
+            chain_log_attributes(Some((Height(3_146_400), NetworkUpgrade::Nu7)))
+                .into_iter()
+                .collect();
+
+        assert_eq!(
+            attrs.get("chain.height").and_then(|attr| attr.0.as_u64()),
+            Some(3_146_400),
+        );
+        assert_eq!(
+            attrs
+                .get("chain.network_upgrade")
+                .and_then(|attr| attr.0.as_str()),
+            Some("Nu7"),
+        );
+    }
+
+    #[test]
+    fn listed_histograms_become_distributions_with_labels_and_network() {
+        let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+        metadata.tags.insert("chain.network", "Mainnet".to_owned());
+
+        let metrics = sent_metrics(&metadata, || {
+            let queue = metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue");
+
+            // Far from the tip, an initial sync would send a value for every block.
+            queue.record(9.0);
+            super::record_close_to_tip(true);
+            queue.record(0.25);
+            super::record_close_to_tip(false);
+            queue.record(8.0);
+
+            super::record_close_to_tip(true);
+            metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
+            metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected only the listed histogram near the tip, got {metrics:?}");
+        };
+        let attribute = |key: &str| metric_attribute(metric, key).and_then(Value::as_str);
+
+        assert_eq!(metric.name, "state.block_writer.phase.duration_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 0.25);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(attribute("phase"), Some("queue"));
+        assert_eq!(attribute("chain.network"), Some("Mainnet"));
+    }
+
+    #[test]
+    fn tip_block_delays_are_sent_once_with_their_block_height() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        // The Mainnet NU7 activation block, which the tip height read by other metrics often
+        // hasn't reached yet.
+        let height = Height(3_543_405);
+
+        let metrics = sent_metrics(&metadata, || {
+            // The progress task records the histogram for Prometheus and sends the value to
+            // Sentry, so the recorder must not send it again.
+            super::record_close_to_tip(true);
+            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(2.0);
+            tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected one tip block delay, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "zcash.chain.tip.block_delay_seconds");
+        assert_eq!(metric.r#type, MetricType::Distribution);
+        assert_eq!(metric.value, 2.0);
+        assert_eq!(metric.unit, Some(Unit::Second));
+        assert_eq!(
+            metric_attribute(metric, "chain.height").and_then(Value::as_u64),
+            Some(3_543_405),
+        );
+        assert_eq!(
+            metric_attribute(metric, "chain.network_upgrade").and_then(Value::as_str),
+            Some("Nu7"),
+        );
+    }
+
+    #[test]
+    fn metric_attributes_are_added_once_known_and_keep_existing_ones() {
+        let mut attributes = Map::new();
+        add_metric_attributes(&mut attributes, None, None, Duration::ZERO);
+        assert_eq!(
+            attributes.keys().collect::<Vec<_>>(),
+            ["process.uptime_seconds"],
+        );
+
+        let mut attributes = Map::new();
+        attributes.insert("chain.network_upgrade".into(), "metric-upgrade".into());
+        add_metric_attributes(
+            &mut attributes,
+            Some("Mainnet"),
+            Some(NetworkUpgrade::Nu7),
+            Duration::from_millis(90_500),
+        );
+        let attribute = |key: &str| attributes.get(key).map(|attr| &attr.0);
+
+        assert_eq!(
+            attribute("chain.network").and_then(|value| value.as_str()),
+            Some("Mainnet"),
+        );
+        assert_eq!(
+            attribute("chain.network_upgrade").and_then(|value| value.as_str()),
+            Some("metric-upgrade"),
+        );
+        assert_eq!(
+            attribute("process.uptime_seconds").and_then(|value| value.as_u64()),
+            Some(90),
+        );
+    }
+
+    #[test]
+    fn listed_counters_and_gauges_are_sent_once_per_flush() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            for _ in 0..3 {
+                metrics::counter!("sync.block.error.count", "kind" => "not_found").increment(1);
+            }
+            metrics::counter!("sync.downloaded.block.count").increment(1);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
+            metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
+
+            super::periodic::flush();
+            // No new errors, so only the gauge's latest value is sent again.
+            super::periodic::flush();
+        });
+
+        let mut metrics: Vec<_> = metrics
+            .iter()
+            .map(|metric| {
+                let kind = metric_attribute(metric, "kind")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                (metric.name.to_string(), metric.r#type, metric.value, kind)
+            })
+            .collect();
+        metrics.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let oldest_age = (
+            "sync.downloads.oldest_age_seconds".to_string(),
+            MetricType::Gauge,
+            90.0,
+            None,
+        );
+        assert_eq!(
+            metrics,
+            [
+                (
+                    "sync.block.error.count".to_string(),
+                    MetricType::Counter,
+                    3.0,
+                    Some("not_found".to_string()),
+                ),
+                oldest_age.clone(),
+                oldest_age,
+            ],
+        );
+    }
+
+    #[test]
+    fn counts_since_the_last_flush_are_sent_at_shutdown() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let metrics = sent_metrics(&metadata, || {
+            metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout").increment(1);
+
+            super::end(SessionStatus::Crashed);
+        });
+
+        let [metric] = metrics.as_slice() else {
+            panic!("expected the restart count, got {metrics:?}");
+        };
+
+        assert_eq!(metric.name, "sync.restart.count");
+        assert_eq!(metric.value, 1.0);
+    }
+
+    #[test]
+    fn errors_from_any_hub_count_toward_the_session_in_progress() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let envelopes = with_captured_envelopes_options(
+            || {
+                start_run_sessions();
+                // Hubs on other threads are copied once, before any later session starts.
+                let earlier_hub = Hub::new_from_top(Hub::current());
+
+                rotate_session();
+                earlier_hub.capture_event(Event {
+                    level: sentry::Level::Error,
+                    ..Default::default()
+                });
+                end_session(SessionStatus::Crashed);
+            },
+            metadata.client_options_with_release("zebrad@test".to_string()),
+        );
+
+        let sessions: Vec<_> = envelopes
+            .iter()
+            .flat_map(|envelope| envelope.items())
+            .filter_map(|item| match item {
+                EnvelopeItem::SessionUpdate(session) => Some(session),
+                _ => None,
+            })
+            .collect();
+
+        let summary: Vec<_> = sessions
+            .iter()
+            .map(|session| (session.init, session.status, session.errors))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (true, SessionStatus::Ok, 0),
+                (false, SessionStatus::Exited, 0),
+                (true, SessionStatus::Ok, 0),
+                (false, SessionStatus::Crashed, 1),
+            ],
+        );
+        assert_eq!(sessions[0].session_id, sessions[1].session_id);
+        assert_eq!(sessions[2].session_id, sessions[3].session_id);
+        assert_ne!(sessions[0].session_id, sessions[2].session_id);
+        assert!(
+            sessions.iter().all(|session| session.distinct_id.is_some()
+                && session.distinct_id == sessions[0].distinct_id),
+            "every session of a run reports the run ID",
+        );
+    }
+
+    #[test]
+    fn panic_events_use_the_panic_message_and_stack() {
+        static EVENT: Mutex<Option<Event<'static>>> = Mutex::new(None);
+
+        let previous_hook = panic::take_hook();
+        panic::set_hook(Box::new(|panic_info| {
+            *EVENT.lock().expect("only this hook locks it") =
+                Some(panic_event_from(panic_info, "full panic report"));
+        }));
+        let result = panic::catch_unwind(|| panic!("listener failed"));
+        panic::set_hook(previous_hook);
+        assert!(result.is_err());
+
+        let event = EVENT
+            .lock()
+            .expect("the hook has returned")
+            .take()
+            .expect("the hook captured the panic");
+        let exception = &event.exception.values[0];
+
+        assert_eq!(exception.value.as_deref(), Some("listener failed"));
+        assert_eq!(
+            exception.mechanism.as_ref().and_then(|m| m.handled),
+            Some(false)
+        );
+        // Optimized builds can inline the panicking closure and shorten function names, so check
+        // that no frame that handles the panic remains, rather than naming the newest frame. Older
+        // frames, such as the test's own `catch_unwind`, are expected to remain.
+        let frames = &exception
+            .stacktrace
+            .as_ref()
+            .expect("panic events carry a stack trace")
+            .frames;
+        let panic_handling = [
+            "current_stacktrace",
+            "panic_event_from",
+            "rust_begin_unwind",
+            "begin_panic_handler",
+            "rust_panic_with_hook",
+            "panic_with_hook",
+            "panic_fmt",
+        ];
+        assert!(!frames.is_empty(), "the stack keeps the code that panicked");
+        for function in frames.iter().filter_map(|frame| frame.function.as_deref()) {
+            assert!(
+                !panic_handling.iter().any(|name| function.contains(name)),
+                "the stack ends at the code that panicked, without the panic handling: {function}",
+            );
+        }
+
+        let Some(Context::Other(panic_context)) = event.contexts.get("panic") else {
+            panic!("panic events carry the panic report");
+        };
+        assert_eq!(
+            panic_context
+                .get("report")
+                .and_then(|report| report.as_str()),
+            Some("full panic report"),
+        );
+        assert!(panic_context
+            .get("location")
+            .and_then(|location| location.as_str())
+            .is_some_and(|location| location.contains("sentry.rs")));
+    }
+
+    #[test]
+    fn panic_stacks_end_at_the_code_that_panicked() {
+        let frame = |function: &str| Frame {
+            function: Some(function.to_owned()),
+            ..Default::default()
+        };
+        // Oldest first, as Sentry orders frames.
+        let stacktrace = Stacktrace {
+            frames: vec![
+                frame("std::rt::lang_start"),
+                frame("std::panicking::catch_unwind"),
+                frame("zebrad::components::start"),
+                frame("zebra_network::open_listener"),
+                frame("core::panicking::panic_fmt"),
+                frame("__rustc::rust_begin_unwind"),
+                frame("std::panicking::panic_with_hook"),
+                frame("zebrad::application::panic_hook"),
+                frame("zebrad::sentry::panic_event_from"),
+            ],
+            ..Default::default()
+        };
+
+        let functions: Vec<_> = without_panic_handling_frames(stacktrace)
+            .frames
+            .into_iter()
+            .filter_map(|frame| frame.function)
+            .collect();
+
+        assert_eq!(
+            functions,
+            [
+                "std::rt::lang_start",
+                "std::panicking::catch_unwind",
+                "zebrad::components::start",
+                "zebra_network::open_listener",
+            ],
+        );
+    }
+
+    /// Returns the frames Sentry uses for suspect commits: the exception stack traces, or the
+    /// current thread's stack trace when no exception has one.
+    fn suspect_commit_stacktrace<'a>(event: &'a Event<'static>) -> Option<&'a Stacktrace> {
+        event
+            .exception
+            .iter()
+            .find_map(|exception| exception.stacktrace.as_ref())
+            .or_else(|| {
+                event
+                    .threads
+                    .iter()
+                    .find(|thread| thread.current)
+                    .and_then(|thread| thread.stacktrace.as_ref())
+            })
+    }
+
+    #[test]
+    fn error_events_carry_in_app_frames_for_suspect_commits() {
+        let metadata = Metadata::default();
+
+        let events = with_captured_events_options(
+            || {
+                let layer = tracing_layer().expect("the test client is enabled");
+                let subscriber = Registry::default().with(layer);
+
+                tracing::subscriber::with_default(subscriber, || {
+                    tracing::error!("block commit failed");
+
+                    let error = std::io::Error::other("disk full");
+                    tracing::error!(
+                        error = &error as &dyn std::error::Error,
+                        "block commit failed"
+                    );
+                });
+            },
+            // `sentry::init` adds the default integrations, which capture and classify stacks.
+            sentry::apply_defaults(metadata.client_options_with_release("zebrad@test".to_string())),
+        );
+
+        assert_eq!(events.len(), 2, "both ERROR events are sent: {events:?}");
+
+        for event in &events {
+            let frames = &suspect_commit_stacktrace(event)
+                .expect("ERROR events carry a stack trace")
+                .frames;
+            let in_app_frames: Vec<_> = frames
+                .iter()
+                .filter(|frame| frame.in_app == Some(true))
+                .collect();
+
+            assert!(
+                in_app_frames.iter().any(|frame| frame
+                    .abs_path
+                    .as_deref()
+                    .is_some_and(|path| path.ends_with("zebrad/src/sentry.rs"))),
+                "the code that logged the error is an in-app frame with its source path: {frames:?}",
+            );
+            assert!(
+                in_app_frames.iter().all(|frame| frame
+                    .abs_path
+                    .as_deref()
+                    .is_some_and(|path| path.contains("zebrad/src/"))),
+                "dependency frames are not in-app: {in_app_frames:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn zebra_sources_are_recognized_in_checkouts_and_the_registry() {
+        for zebra_path in [
+            "/zebra/zebrad/src/components/sync.rs",
+            "/home/user/zebra/zebra-network/src/peer_set/initialize.rs",
+            "/root/.cargo/registry/src/index.crates.io-0000/zebra-chain-14.0.0/src/block.rs",
+            "/zebra/tower-batch-control/src/service.rs",
+        ] {
+            assert!(is_zebra_source(zebra_path), "{zebra_path} is Zebra's");
+        }
+
+        for other_path in [
+            "/root/.cargo/registry/src/index.crates.io-0000/tokio-1.47.0/src/runtime/task.rs",
+            "/rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs",
+            "/zebra/zebrad/build.rs",
+        ] {
+            assert!(!is_zebra_source(other_path), "{other_path} is not Zebra's");
+        }
     }
 }

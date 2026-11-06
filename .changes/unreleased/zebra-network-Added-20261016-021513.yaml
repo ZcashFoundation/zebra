@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Added
-body: Expose `constants::FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`, the serving-peer preference timeout for `FindBlocks` and `FindHeaders` requests ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
-time: 2026-10-16T02:15:13.239922754+02:00

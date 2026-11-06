@@ -39,7 +39,8 @@ allow = [
     "CDLA-Permissive-2.0",
     "CDDL-1.0",
 ]
-exceptions = []
+# The fuzz-only libFuzzer runtime includes LLVM's NCSA-licensed sources.
+exceptions = [{ name = "libfuzzer-sys", allow = ["NCSA"] }]
 
 # rustls-webpki uses a custom ISC-style license
 [[licenses.clarify]]

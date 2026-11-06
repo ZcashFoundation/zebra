@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Check an empty inventory registry works as expected.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_registry_empty_ok() {
     let fake_hash = InventoryHash::Error;
 

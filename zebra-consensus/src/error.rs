@@ -360,6 +360,14 @@ impl From<BoxError> for TransactionError {
         // Halo2 proof, Orchard binding signature, or Sprout JoinSplit signature would collapse to
         // `InternalDowncastError` (score 0), letting a peer force verification without being banned.
         // See <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2p4c-3q4q-p463>.
+        //
+        // Transparent script failures need the same treatment, see
+        // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x>.
+        match err.downcast::<zebra_script::Error>() {
+            Ok(e) => return TransactionError::Script(*e),
+            Err(e) => err = e,
+        }
+
         match err.downcast::<zebra_chain::primitives::ed25519::Error>() {
             Ok(e) => return TransactionError::Ed25519(*e),
             Err(e) => err = e,

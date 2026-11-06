@@ -10,6 +10,7 @@ use tokio::time::timeout;
 use tracing_futures::Instrument;
 
 use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
+use zebra_test::mock_service::MockService;
 
 use super::*;
 
@@ -866,4 +867,283 @@ fn state_auth_commitment_errors_score_the_serving_peer() {
         100,
         "an authorizing-data commitment mismatch must score the peer that served the body"
     );
+}
+
+/// A checkpoint block that fails to commit must reset the verifier to the state
+/// tip, even if the caller dropped its verify future before the commit failed.
+///
+/// The syncer drops in-flight verify futures when it cancels its downloads.
+/// If the reset depended on that future, the verifier would stay ahead of the
+/// state, and reject the honest block as `Finished`.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_failure_resets_progress_after_dropped_future() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let genesis =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let block_1 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
+    let genesis_tip = (block::Height(0), genesis.hash());
+    let block_1_hash = block_1.hash();
+
+    let mut state_service = MockService::build().for_unit_tests();
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(
+        [genesis_tip, (block::Height(1), block_1_hash)],
+        &Mainnet,
+        Some(genesis_tip),
+        state_service.clone(),
+    )
+    .map_err(|e| eyre!(e))?;
+
+    // Verify the final checkpoint, then drop the verify future before it commits.
+    let verify_future = checkpoint_verifier
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(block_1.clone());
+    drop(verify_future);
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    // The state rejects the block, and its tip is still the genesis block.
+    state_service
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == block_1_hash
+            )
+        })
+        .await
+        .respond_error("forged block body".into());
+    state_service
+        .expect_request(zs::Request::Tip)
+        .await
+        .respond(zs::Response::Tip(Some(genesis_tip)));
+
+    // Once the reset arrives, the verifier accepts the block again.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(VERIFY_TIMEOUT_SECONDS);
+    let mut verify_future = loop {
+        let mut verify_future = checkpoint_verifier
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(block_1.clone());
+
+        match (&mut verify_future).now_or_never() {
+            Some(Err(VerifyCheckpointError::Finished)) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "the verifier was not reset to the state tip"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Some(result) => panic!("unexpected verify result before commit: {result:?}"),
+            None => break verify_future,
+        }
+    };
+
+    state_service
+        .expect_request_that(|request| {
+            matches!(
+                request,
+                zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == block_1_hash
+            )
+        })
+        .await
+        .respond(zs::Response::Committed(block_1_hash));
+
+    let verified_hash = timeout(
+        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+        &mut verify_future,
+    )
+    .await??;
+    assert_eq!(verified_hash, block_1_hash);
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    Ok(())
+}
+
+/// When a checkpoint block fails to commit, its children in the same range are
+/// queued again, so only the invalid block needs to be submitted again.
+///
+/// A peer can serve a body with the right hash but forged authorizing data.
+/// The state rejects it, and drops its children, even if their bodies are valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let genesis =
+        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?;
+    let block_1 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])?;
+    let block_2 = Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..])?;
+    let genesis_tip = (block::Height(0), genesis.hash());
+    let block_1_hash = block_1.hash();
+    let block_2_hash = block_2.hash();
+
+    let mut state_service = MockService::build().for_unit_tests();
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(
+        [genesis_tip, (block::Height(2), block_2_hash)],
+        &Mainnet,
+        Some(genesis_tip),
+        state_service.clone(),
+    )
+    .map_err(|e| eyre!(e))?;
+
+    // Verify the range, and drop the verify futures like a cancelled syncer.
+    for block in [&block_1, &block_2] {
+        drop(
+            checkpoint_verifier
+                .ready()
+                .await
+                .map_err(|e| eyre!(e))?
+                .call(block.clone()),
+        );
+    }
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    // The state rejects block 1, so it drops block 2. The failure responses
+    // and tip requests can arrive in any order.
+    for _ in 0..4 {
+        let responder = state_service.expect_request_that(|_| true).await;
+        match responder.request().clone() {
+            zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == block_1_hash => {
+                responder.respond_error("forged block body".into())
+            }
+            // The state drops the children of a block that failed to commit.
+            zs::Request::CommitCheckpointVerifiedBlock(_) => {
+                responder.respond_error(Box::new(zs::CommitCheckpointVerifiedError::from(
+                    zs::CommitBlockError::new_write_task_exited(),
+                )))
+            }
+            zs::Request::Tip => responder.respond(zs::Response::Tip(Some(genesis_tip))),
+            request => panic!("unexpected state request: {request:?}"),
+        }
+    }
+
+    // Wait for both failures, then put them back for the verifier to apply.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(VERIFY_TIMEOUT_SECONDS);
+    let mut failures = Vec::new();
+    while failures.len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "commit tasks did not report both failures"
+        );
+        match checkpoint_verifier.reset_receiver.try_recv() {
+            Ok(failure) => failures.push(failure),
+            Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+    // The child is sent back with all its precalculated data, so it doesn't
+    // need to be checked again.
+    let checked_block_2 = zs::CheckpointVerifiedBlock::new(block_2.clone(), None);
+    assert!(
+        !checked_block_2.new_outputs.is_empty(),
+        "block 2 has outputs, so this test checks they are rebuilt"
+    );
+    let children: Vec<_> = failures
+        .iter()
+        .map(|failure| {
+            assert_eq!(failure.tip, Some(genesis_tip));
+            failure.child.as_ref().map(|child| &child.block)
+        })
+        .collect();
+    assert!(
+        children.contains(&None),
+        "the invalid block is not queued again"
+    );
+    assert!(
+        children.contains(&Some(&checked_block_2)),
+        "its child is queued again"
+    );
+    for failure in failures {
+        checkpoint_verifier
+            .reset_sender
+            .send(failure)
+            .expect("the verifier holds the receiver");
+    }
+
+    // Submitting only an honest block 1 completes the range again.
+    let mut verify_future = checkpoint_verifier
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(block_1.clone());
+    assert!(
+        (&mut verify_future).now_or_never().is_none(),
+        "block 1 is verified, and waiting for its commit"
+    );
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+
+    // The blocks are sent to the state in height order.
+    for hash in [block_1_hash, block_2_hash] {
+        state_service
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    zs::Request::CommitCheckpointVerifiedBlock(block) if block.hash == hash
+                )
+            })
+            .await
+            .respond(zs::Response::Committed(hash));
+    }
+
+    let verified_hash = timeout(
+        Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
+        &mut verify_future,
+    )
+    .await??;
+    assert_eq!(verified_hash, block_1_hash);
+
+    // A late failure from the first epoch doesn't rewind the verifier,
+    // and its child isn't queued below the verifier's progress.
+    let (tx, mut late_child_rx) = tokio::sync::oneshot::channel();
+    checkpoint_verifier
+        .reset_sender
+        .send(CommitFailure {
+            epoch: 0,
+            tip: Some(genesis_tip),
+            child: Some(QueuedBlock {
+                block: checked_block_2,
+                tx,
+            }),
+        })
+        .expect("the verifier holds the receiver");
+    // If the verifier was rewound, it would queue the block, and wait for its commit.
+    let result = checkpoint_verifier
+        .ready()
+        .await
+        .map_err(|e| eyre!(e))?
+        .call(block_1.clone())
+        .now_or_never();
+    assert!(
+        matches!(result, Some(Err(VerifyCheckpointError::Finished))),
+        "unexpected result: {result:?}"
+    );
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        FinalCheckpoint
+    );
+    assert!(
+        checkpoint_verifier.queued.is_empty(),
+        "the late child is dropped"
+    );
+    assert!(
+        matches!(
+            late_child_rx.try_recv(),
+            Ok(Err(VerifyCheckpointError::Finished))
+        ),
+        "the late child's commit task gets an error"
+    );
+
+    Ok(())
 }

@@ -71,15 +71,7 @@ fn custom_genesis_unspendable_outputs_survive_reopen() {
         cache_dir: cache.path().to_path_buf(),
         ..Config::default()
     };
-    let open = || {
-        FinalizedState::new(
-            &config,
-            &network,
-            #[cfg(feature = "elasticsearch")]
-            false,
-        )
-        .unwrap()
-    };
+    let open = || FinalizedState::new(&config, &network).unwrap();
     let mut state = open();
     state
         .commit_finalized_direct(
@@ -105,6 +97,52 @@ fn custom_genesis_unspendable_outputs_survive_reopen() {
             .value_pools(),
         expected,
     );
+}
+
+/// An ephemeral config has no database on disk before one is opened, and an open ephemeral database
+/// reads back the format version it writes.
+#[test]
+fn ephemeral_database_reads_back_its_format_version() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{
+        config::database_format_version_on_disk,
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let config = Config::ephemeral();
+    let version = state_database_format_version_in_code();
+
+    assert_eq!(
+        database_format_version_on_disk(&config, STATE_DATABASE_KIND, version.major, &network)
+            .unwrap(),
+        None,
+    );
+
+    let mut db = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &version,
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+
+    // An unversioned database directory reads as `major.0.0`, so write a different version.
+    let written = Version::new(version.major, 99, 0);
+    db.update_format_version_on_disk(&written).unwrap();
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(written));
+
+    db.shutdown(true);
 }
 
 /// A pre-NU7 v28 cache is reused without rewriting legacy records, then accepts new v29 blocks.
@@ -153,10 +191,6 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
         )
         .unwrap(),
         debug_stop_at_height: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_db: None,
-        #[cfg(feature = "elasticsearch")]
-        elastic_blocks: vec![],
     };
     state
         .db
@@ -221,13 +255,7 @@ async fn v28_cache_is_reused_with_legacy_value_pools() {
 
     // Disabling cleanup is not a rollback backup: startup moves the v28 directory to v29.
     config.delete_old_database = false;
-    let mut state = FinalizedState::new(
-        &config,
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .unwrap();
+    let mut state = FinalizedState::new(&config, &network).unwrap();
     timeout(Duration::from_secs(30), async {
         while !state.db.finished_format_upgrades() {
             state.db.check_for_panics();

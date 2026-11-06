@@ -100,11 +100,12 @@ async fn spawn_notify_command_runs_shell_with_substituted_hash() {
 
     spawn_notify_command(&command, hash, height);
 
-    // The command runs detached, so poll for its side effect rather than awaiting it.
+    // The command runs detached, so poll for its side effect rather than awaiting it. The shell
+    // creates the file before `printf` writes to it, so an empty file means it has not run yet.
     let mut contents = None;
     for _ in 0..100 {
-        if let Ok(read) = tokio::fs::read_to_string(&out_path).await {
-            contents = Some(read);
+        contents = tokio::fs::read_to_string(&out_path).await.ok();
+        if contents.as_deref().is_some_and(|read| !read.is_empty()) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;

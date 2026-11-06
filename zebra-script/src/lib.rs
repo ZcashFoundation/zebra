@@ -119,6 +119,17 @@ impl CachedFfiTransaction {
             .unwrap_or_default()
     }
 
+    /// Returns the number of transparent outputs of this transaction, read from the underlying
+    /// `zcash_primitives` transaction.
+    ///
+    /// `Transaction::outputs()` rebuilds and converts the whole output vector, which is far too
+    /// expensive for the per-signature-check sighash callback.
+    fn vout_len(&self) -> usize {
+        self.transaction
+            .transparent_bundle()
+            .map_or(0, |bundle| bundle.vout.len())
+    }
+
     /// Returns the outputs from previous transactions that match each input in the transaction
     /// being verified.
     pub fn all_previous_outputs(&self) -> &Vec<transparent::Output> {
@@ -202,7 +213,7 @@ impl CachedFfiTransaction {
                     if self.transaction.version() >= 5
                         && hash_type.signed_outputs()
                             == zcash_script::signature::SignedOutputs::Single
-                        && input_index >= self.transaction.outputs().len()
+                        && input_index >= self.vout_len()
                     {
                         return None;
                     }

@@ -168,6 +168,7 @@ Three rules keep the quota usable:
    it does not build `zebrad` and `zebra-rpc` is second widest option).
 3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
    crate-matrix generator in `test-crates.yml` set `cache: false`.
+   The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
 
 To inspect the current state:
 
@@ -216,21 +217,28 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 ### Main Workflows
 
 - **Unit Tests** (`tests-unit.yml`): OS matrix unit tests via nextest
+  Source PRs targeting upstream `main` use workspace optimisation level 0; dependencies keep their
+  configured profiles. The merge queue validates level 3 before merge. Other contexts, including
+  `next` PRs and forks' own repositories, retain the unmodified release command.
 - **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
+  The local builder is cleaned up on self-hosted runners; hosted VMs discard it with the job.
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
+- **Sync main to next** (`sync-next.yml`): Keeps the `sync/main-to-next` branch at `main` and opens its pull request into the [`next` branch](../../book/src/dev/next-branch.md)
 
 ### Supporting/Reusable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+  Hosted VMs discard local builders; self-hosted runners and remote drivers retain cleanup.
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests

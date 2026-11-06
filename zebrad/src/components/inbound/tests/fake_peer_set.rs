@@ -4,7 +4,7 @@
 
 use std::{collections::HashSet, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
-use futures::FutureExt;
+use futures::{FutureExt, Stream};
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
 use tracing::{Instrument, Span};
@@ -15,7 +15,7 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::Network::{self, *},
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{Hash as TxHash, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 use zebra_consensus::{
     error::TransactionError, router::RouterError, transaction, Config as ConsensusConfig,
@@ -40,13 +40,13 @@ use crate::{
     components::{
         inbound::{
             downloads::{HeightLimitError, MAX_INBOUND_CONCURRENCY},
-            Inbound, InboundSetupData,
+            Inbound, InboundSetupData, Setup, GETDATA_MAX_TRANSACTION_COUNT,
         },
         mempool::{
             gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
             SameEffectsChainRejectionError, UnboxMempoolError,
         },
-        sync::{self, BlockGossipError, SyncStatus, BLOCK_VERIFY_TIMEOUT, PEER_GOSSIP_DELAY},
+        sync::{self, BlockGossipError, SyncStatus, BLOCK_VERIFY_TIMEOUT},
     },
     BoxError,
 };
@@ -60,6 +60,35 @@ use InventoryResponse::*;
 ///
 /// Increasing this value causes the tests to take longer to complete, so it can't be too large.
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_mempool_requests_return_empty_inventory() {
+    let (
+        inbound_service,
+        _mempool_guard,
+        _committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+
+    let response = timeout(
+        Duration::from_secs(1),
+        inbound_service.oneshot(Request::MempoolTransactionIds),
+    )
+    .await
+    .expect("the empty mempool must answer promptly")
+    .expect("the initialized mempool answers transaction ID requests");
+    // A nil response sends nothing on the wire and leaves the peer waiting for its timeout.
+    assert_eq!(response, Response::TransactionIds(Vec::new()));
+    peer_set.expect_no_requests().await;
+    sync_gossip_task_handle.abort();
+    tx_gossip_task_handle.abort();
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_requests_for_transactions() {
@@ -87,17 +116,11 @@ async fn mempool_requests_for_transactions() {
         .clone()
         .oneshot(Request::MempoolTransactionIds)
         .await;
+    // Even an empty mempool must produce an inventory reply, not leave the peer waiting.
     match response {
         Ok(Response::TransactionIds(response)) => assert_eq!(response, added_transaction_ids),
-        Ok(Response::Nil) => assert!(
-            added_transaction_ids.is_empty(),
-            "`MempoolTransactionIds` request should match added_transaction_ids {added_transaction_ids:?}, got Ok(Nil)"
-        ),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`, got {:?}",
-            response
-        ),
-    };
+        response => panic!("Mempool requests must return transaction IDs, got {response:?}"),
+    }
 
     // Test `Request::TransactionsById`
     let hash_set = added_transaction_ids
@@ -121,6 +144,79 @@ async fn mempool_requests_for_transactions() {
             )
         }
         _ => unreachable!("`TransactionsById` requests should always respond `Ok(Vec<UnminedTx>)`"),
+    };
+
+    // check that nothing unexpected happened
+    peer_set.expect_no_requests().await;
+
+    let sync_gossip_result = sync_gossip_task_handle.now_or_never();
+    assert!(
+        sync_gossip_result.is_none(),
+        "unexpected error or panic in sync gossip task: {sync_gossip_result:?}",
+    );
+
+    let tx_gossip_result = tx_gossip_task_handle.now_or_never();
+    assert!(
+        tx_gossip_result.is_none(),
+        "unexpected error or panic in transaction gossip task: {tx_gossip_result:?}",
+    );
+}
+
+/// Check that a transaction request with more IDs than [`GETDATA_MAX_TRANSACTION_COUNT`] is
+/// capped before the mempool lookup, so the response (including `Missing` entries) covers only
+/// the capped set, matching the block path.
+///
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/10566>.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_transactions_by_id_request_is_capped() {
+    let (
+        inbound_service,
+        _mempool_guard,
+        _committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+
+    // A request for twice the cap, all for transactions the mempool doesn't have.
+    let req_tx_ids: HashSet<UnminedTxId> = (0..2 * GETDATA_MAX_TRANSACTION_COUNT as u32)
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[..4].copy_from_slice(&i.to_le_bytes());
+            UnminedTxId::from_legacy_id(TxHash(bytes))
+        })
+        .collect();
+    assert_eq!(req_tx_ids.len(), 2 * GETDATA_MAX_TRANSACTION_COUNT);
+
+    let response = inbound_service
+        .clone()
+        .oneshot(Request::TransactionsById(req_tx_ids.clone()))
+        .await;
+
+    match response {
+        Ok(Response::Transactions(response)) => {
+            // Only the capped set is looked up and reported missing;
+            // the rest of the request is ignored.
+            assert_eq!(response.len(), GETDATA_MAX_TRANSACTION_COUNT);
+            for tx in &response {
+                match tx {
+                    Missing(id) => assert!(
+                        req_tx_ids.contains(id),
+                        "every reported ID must come from the request"
+                    ),
+                    Available(_) => {
+                        panic!("the mempool has none of the requested transactions")
+                    }
+                }
+            }
+        }
+        _ => unreachable!(
+            "`TransactionsById` requests should always respond `Ok(Vec<InventoryResponse>)`, got {response:?}"
+        ),
     };
 
     // check that nothing unexpected happened
@@ -192,19 +288,13 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let mempool_response = inbound_service
-        .clone()
-        .oneshot(Request::MempoolTransactionIds)
-        .await;
+    let mempool_response =
+        wait_for_mempool_transaction(&inbound_service, test_transaction_id).await;
 
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -410,19 +500,13 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         "`AdvertiseTransactionIds` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let mempool_response = inbound_service
-        .clone()
-        .oneshot(Request::MempoolTransactionIds)
-        .await;
+    let mempool_response =
+        wait_for_mempool_transaction(&inbound_service, test_transaction_id).await;
 
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![test_transaction_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Make sure there is an additional request broadcasting the
@@ -511,19 +595,12 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let mempool_response = inbound_service
-        .clone()
-        .oneshot(Request::MempoolTransactionIds)
-        .await;
+    let mempool_response = wait_for_mempool_transaction(&inbound_service, tx1_id).await;
 
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx1_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Add a new block to the state (make the chain tip advance)
@@ -542,8 +619,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     let mut hs = HashSet::new();
     hs.insert(tx1_id);
 
-    // Transaction and Block IDs are gossipped, in any order, after waiting for the gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Transaction and block IDs are gossiped in either order.
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs, None),
         Request::AdvertiseBlock(block_two.hash(), None),
@@ -586,18 +662,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .oneshot(Request::MempoolTransactionIds)
         .await;
 
-    match request {
-        Ok(Response::TransactionIds(response)) => {
-            assert_eq!(response, vec![tx1_id])
-        }
-        Ok(Response::Nil) => panic!(
-            "response to `MempoolTransactionIds` request should match {:?}",
-            vec![tx1_id]
-        ),
-        _ => unreachable!(
-            "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
-        ),
-    };
+    assert_eq!(
+        request.expect("the initialized mempool answers transaction ID requests"),
+        Response::TransactionIds(vec![tx1_id]),
+    );
 
     // As our test transaction will expire at a block height greater or equal to 3 we need to push block 3.
     let block_three: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
@@ -611,8 +679,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
-    // Test the block is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Wait for the block gossip request.
     peer_set
         .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
@@ -649,20 +716,13 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         "`PushTransaction` requests should always respond `Ok(Nil)`",
     );
 
-    // Wait for the mempool to store the transaction
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Use `Request::MempoolTransactionIds` to check the transaction was inserted to mempool
-    let mempool_response = inbound_service
-        .clone()
-        .oneshot(Request::MempoolTransactionIds)
-        .await;
+    let mempool_response = wait_for_mempool_transaction(&inbound_service, tx2_id).await;
 
     // Only tx2 will be in the mempool while tx1 was expired
     assert_eq!(
         mempool_response.expect("unexpected error response from mempool"),
         Response::TransactionIds(vec![tx2_id]),
-        "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`",
+        "Mempool requests should always return transaction IDs, including an empty list",
     );
 
     // Check if tx1 was added to the rejected list as well
@@ -687,8 +747,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::Expired)
     );
 
-    // Test transaction 2 is gossiped, after waiting for the multi-gossip delay
-    tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+    // Wait for transaction 2 to be gossiped.
 
     let mut hs = HashSet::new();
     hs.insert(tx2_id);
@@ -718,8 +777,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await
             .unwrap();
 
-        // Test the block is gossiped, after waiting for the multi-gossip delay
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Wait for the block gossip request.
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
@@ -731,18 +789,10 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
             .await;
 
         // tx2 is still in the mempool as the blockchain progress because the zero expiration height
-        match request {
-            Ok(Response::TransactionIds(response)) => {
-                assert_eq!(response, vec![tx2_id])
-            }
-            Ok(Response::Nil) => panic!(
-                "response to `MempoolTransactionIds` request should match {:?}",
-                vec![tx2_id]
-            ),
-            _ => unreachable!(
-                "`MempoolTransactionIds` requests should always respond `Ok(Vec<UnminedTxId> | Nil)`"
-            ),
-        };
+        assert_eq!(
+            request.expect("the initialized mempool answers transaction ID requests"),
+            Response::TransactionIds(vec![tx2_id]),
+        );
     }
 
     // check that nothing unexpected happened
@@ -978,6 +1028,27 @@ async fn caches_getaddr_response() {
     }
 }
 
+/// Wait for verification results to enter the mempool before checking its exact inventory.
+async fn wait_for_mempool_transaction(
+    inbound: &Buffer<BoxService<Request, Response, BoxError>, Request>,
+    transaction_id: UnminedTxId,
+) -> Result<Response, BoxError> {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let response = inbound
+                .clone()
+                .oneshot(Request::MempoolTransactionIds)
+                .await?;
+            if matches!(&response, Response::TransactionIds(ids) if ids == &[transaction_id]) {
+                return Ok(response);
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the verified transaction must reach the mempool")
+}
+
 /// Setup a fake Zebra network stack, with fake peer set.
 ///
 /// Adds some initial state blocks, and mempool transactions if `add_transactions` is true.
@@ -1132,8 +1203,6 @@ async fn setup(
     //
     // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
     for block in committed_blocks.iter().skip(1) {
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
-
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
@@ -1310,31 +1379,44 @@ async fn setup_gossiped_block_misbehavior_with_state(
     (inbound, peer_set, misbehavior_rx)
 }
 
-/// Repeatedly polls the [`Inbound`] service, so its gossiped block download cleanup loop
-/// drains any finished downloads, and returns the first misbehaviour report, if any.
+/// Drain completed downloads before checking their misbehaviour reports.
 ///
-/// Asserts that the report has a reason, so the ban can be explained in the logs.
+/// Once the stream is empty, its synchronous cleanup cannot emit any more reports.
 async fn poll_for_misbehavior_report(
     inbound: &mut Inbound,
     misbehavior_rx: &mut tokio::sync::mpsc::Receiver<MisbehaviorReport>,
 ) -> Option<MisbehaviorReport> {
-    for _ in 0..60 {
-        let _ = std::future::poll_fn(|cx| inbound.poll_ready(cx)).await;
+    timeout(
+        Duration::from_secs(3),
+        std::future::poll_fn(|cx| {
+            futures::ready!(inbound.poll_ready(cx))
+                .expect("the initialized inbound service must remain ready");
+            let Setup::Initialized {
+                block_downloads, ..
+            } = &inbound.setup
+            else {
+                panic!("the inbound service must be initialized after serving the block");
+            };
 
-        if let Ok(report) = misbehavior_rx.try_recv() {
-            assert!(
-                report.reason.starts_with("invalid gossiped block: "),
-                "misbehaviour reports must explain why the peer was scored, got: {:?}",
-                report.reason,
-            );
+            if block_downloads.size_hint() == (0, Some(0)) {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        }),
+    )
+    .await
+    .expect("the served block download must finish");
 
-            return Some(report);
-        }
-
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    let report = misbehavior_rx.try_recv().ok();
+    if let Some(report) = &report {
+        assert!(
+            report.reason.starts_with("invalid gossiped block: "),
+            "misbehaviour reports must explain why the peer was scored, got: {:?}",
+            report.reason,
+        );
     }
-
-    None
+    report
 }
 
 /// Sends the gossiped block advertisement, and serves the block to the download task.

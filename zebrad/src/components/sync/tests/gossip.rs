@@ -1,8 +1,7 @@
 //! Tests for the block hash gossip task.
 //!
-//! These tests use a peer service with controllable readiness, because the bug they cover
-//! (<https://github.com/ZcashFoundation/zebra/issues/11475>) only happens when `poll_ready()`
-//! stays pending, which `tower::timeout::Timeout` doesn't bound.
+//! These tests cover mined-block coalescing while service readiness waits for eligible peers,
+//! including backpressure (<https://github.com/ZcashFoundation/zebra/issues/11475>).
 
 use std::{
     sync::{Arc, Mutex},
@@ -207,6 +206,48 @@ async fn gossip_broadcasts_latest_mined_block_when_peers_become_ready() {
     assert!(!gossip_task.is_finished());
 
     gossip_task.abort();
+}
+
+/// Real advertiser readiness retains the latest mined block until a peer connects.
+#[tokio::test(start_paused = true)]
+async fn gossip_broadcasts_latest_mined_block_when_an_eligible_peer_connects() {
+    let _init_guard = zebra_test::init();
+    for supersede in [false, true] {
+        let mut peers = zn::test_support::PeerSetHarness::new(&[], None).await;
+        let (_chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+            ChainTipSender::new(None, &Network::Mainnet);
+        let (sync_status, _recent_syncs) = SyncStatus::new();
+        let channel = SubmitBlockChannel::new();
+        let mined_block_sender = channel.sender();
+        let gossip_task = tokio::spawn(gossip_best_tip_block_hashes(
+            sync_status,
+            chain_tip_change,
+            peers.block_advertiser.clone(),
+            Some(channel.receiver()),
+        ));
+
+        let mut latest_block = mined_block(1);
+        mined_block_sender.try_send(latest_block).unwrap();
+        tokio::time::sleep(TIPS_RESPONSE_TIMEOUT * 2).await;
+        assert!(!gossip_task.is_finished());
+        if supersede {
+            latest_block = mined_block(2);
+            mined_block_sender.try_send(latest_block).unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+
+        let peer = peers.connect_peer(zn::types::PeerServices::NODE_NETWORK);
+        let (hash, write) = peers.next_block_advert(peer).await.unwrap();
+        assert_eq!(hash, latest_block.0);
+        write.send(Ok(())).unwrap();
+        tokio::time::sleep(PEER_GOSSIP_DELAY * 2).await;
+        assert!(
+            peers.next_block_advert(peer).await.is_none(),
+            "only the latest mined block is advertised, exactly once"
+        );
+        assert!(!gossip_task.is_finished());
+        gossip_task.abort();
+    }
 }
 
 /// A chain tip change that happens while there are no ready peers is broadcast when peers

@@ -41,6 +41,8 @@ mod vectors;
 /// A harness with mocked channels for testing a [`Client`] instance.
 pub struct ClientTestHarness {
     client_request_receiver: Option<mpsc::Receiver<ClientRequest>>,
+    /// Receives response-free block adverts from the mocked connection.
+    pub(crate) block_advert_receiver: tokio::sync::mpsc::Receiver<crate::peer_set::BlockAdvert>,
     shutdown_receiver: Option<oneshot::Receiver<CancelHeartbeatTask>>,
     #[allow(dead_code)]
     inv_receiver: Option<broadcast::Receiver<InventoryChange>>,
@@ -87,6 +89,19 @@ impl ClientTestHarness {
     /// Gets the remote peer protocol version reported by the [`Client`].
     pub fn remote_version(&self) -> Version {
         self.remote_version
+    }
+
+    /// Acknowledge a mock connection's queued advert; real-write tests use `Connection::run`.
+    pub(crate) fn receive_block_advert(&mut self) -> zebra_chain::block::Hash {
+        let advert = self
+            .block_advert_receiver
+            .try_recv()
+            .expect("an advert was queued");
+        advert
+            .result
+            .send(Ok(()))
+            .expect("the advertiser is awaiting delivery");
+        advert.hash
     }
 
     /// Returns true if the [`Client`] instance still wants connection heartbeats to be sent.
@@ -349,6 +364,7 @@ where
     pub fn finish(self) -> (Client, ClientTestHarness) {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let (client_request_sender, client_request_receiver) = mpsc::channel(1);
+        let (block_advert_tx, block_advert_receiver) = tokio::sync::mpsc::channel(4);
         let (inv_sender, inv_receiver) = broadcast::channel(5);
 
         let error_slot = ErrorSlot::default();
@@ -390,6 +406,7 @@ where
             connection_info,
             shutdown_tx: Some(shutdown_sender),
             server_tx: client_request_sender,
+            block_advert_tx,
             inv_collector: inv_sender,
             error_slot: error_slot.clone(),
             connection_task,
@@ -398,6 +415,7 @@ where
 
         let harness = ClientTestHarness {
             client_request_receiver: Some(client_request_receiver),
+            block_advert_receiver,
             shutdown_receiver: Some(shutdown_receiver),
             inv_receiver: Some(inv_receiver),
             error_slot,

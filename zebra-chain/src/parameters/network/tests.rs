@@ -475,11 +475,17 @@ fn check_nsm_block_subsidy_fraction_follows_halving_interval() -> Result<(), Rep
 
     let _init_guard = zebra_test::init();
 
-    // Mainnet's post-Blossom halving interval is 1,680,000 blocks at 75-second spacing.
+    // Mainnet's post-Blossom halving interval is 1,680,000 blocks at 75-second spacing, and NU7's
+    // 25-second spacing triples it.
+    let mainnet_nu7 = Height(3_543_405);
     assert_eq!(Network::Mainnet.post_blossom_halving_interval(), 1_680_000);
     assert_eq!(
-        block_subsidy_fraction_numerator(Height(4_000_000), &Network::Mainnet),
+        block_subsidy_fraction_numerator(mainnet_nu7.previous()?, &Network::Mainnet),
         4126
+    );
+    assert_eq!(
+        block_subsidy_fraction_numerator(mainnet_nu7, &Network::Mainnet),
+        1375
     );
 
     // ZIP 218's 25-second target spacing triples the number of blocks in a halving period.
@@ -583,10 +589,27 @@ fn check_nsm_block_subsidy_with_parent_pools() -> Result<(), Report> {
     let network = nsm_mainnet_like_testnet(activation.0);
     let initial = network.initial_nsm_value_balance();
 
-    // Mainnet has no NU7 activation or deployment height, so it never tracks or reissues the balance.
-    assert!(!nsm_value_balance_is_tracked(activation, &Network::Mainnet));
-    assert!(!nsm_reissuance_is_active(activation, &Network::Mainnet));
-    assert_eq!(Network::Mainnet.nsm_reissuance_height(), None);
+    // Mainnet tracks the balance from NU7 activation, but only reissues it from the ZIP 237
+    // crossover after the third halving.
+    let mainnet_nu7 = Height(3_543_405);
+    let mainnet_reissuance = Height(8_939_664);
+    assert!(!nsm_value_balance_is_tracked(
+        mainnet_nu7.previous()?,
+        &Network::Mainnet
+    ));
+    assert!(nsm_value_balance_is_tracked(mainnet_nu7, &Network::Mainnet));
+    assert_eq!(
+        Network::Mainnet.nsm_reissuance_height(),
+        Some(mainnet_reissuance)
+    );
+    assert!(!nsm_reissuance_is_active(
+        mainnet_reissuance.previous()?,
+        &Network::Mainnet
+    ));
+    assert!(nsm_reissuance_is_active(
+        mainnet_reissuance,
+        &Network::Mainnet
+    ));
 
     // This fixture explicitly accelerates reissuance to NU7 activation.
     assert_eq!(network.nsm_reissuance_height(), Some(activation));

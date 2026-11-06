@@ -3,6 +3,7 @@
 # One zonal MIG per (environment, branch, network, zone). MIG names:
 #   - prod:  zebrad-${network}-${zone-letter}
 #   - stage: zebrad-main-${network}-${zone-letter}
+#   - next:  zebrad-next-${network}-${zone-letter}
 #   - dev:   zebrad-${branch}-${network}-${zone-letter}
 #
 # Design rationale: docs/decisions/devops/0006-gcp-deployment-naming.md
@@ -21,7 +22,7 @@ on:
         required: true
         type: string
       environment:
-        description: The target environment, dev, stage, or prod
+        description: The target environment, dev, stage, next, or prod
         required: true
         type: string
       created_by:
@@ -56,6 +57,10 @@ on:
         description: Whether to bind the environment's reserved external address
         required: true
         type: boolean
+    secrets:
+      SENTRY_AUTH_TOKEN:
+        description: Sentry organization token used to record releases and deploys. Without it, nothing is recorded.
+        required: false
 
 permissions:
   contents: read
@@ -85,8 +90,8 @@ jobs:
             exit 1
           fi
           case "${ENVIRONMENT}" in
-            dev|stage|prod) ;;
-            *) echo "::error::environment must be dev, stage, or prod"; exit 1 ;;
+            dev|stage|next|prod) ;;
+            *) echo "::error::environment must be dev, stage, next, or prod"; exit 1 ;;
           esac
           # The network and zone allow-lists below are deliberately hard-coded rather
           # than derived from the caller. They duplicate the wrapper's matrix source,
@@ -162,6 +167,9 @@ jobs:
       environment: ${{ inputs.environment }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type }}
+      # Zones that already have a disk don't need an image; "Ensure zonal disk exists"
+      # rejects the zones that do.
+      allow_missing: true
 
   get-disk-name-testnet:
     name: Get Testnet cached disk
@@ -177,6 +185,7 @@ jobs:
       environment: ${{ inputs.environment }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type }}
+      allow_missing: true
 
   # Create or update one zonal MIG per matrix cell. Each cell is a
   # (network, zone) tuple. MIG identity is the tuple plus environment +
@@ -191,20 +200,17 @@ jobs:
     # Serialize by the MIG this cell actually updates, not by environment. Those are
     # not the same key: `stage` and a `dev` deploy running from `main` both resolve to
     # the `main-` prefix, so keying on environment hands them separate locks while they
-    # roll the same MIG and the same stateful disk.
+    # roll the same MIG and the same stateful disk. `next` and a `dev` deploy from
+    # `next` share the `next-` prefix the same way.
     concurrency:
       group: >-
         zebra-gcp-${{ inputs.environment == 'prod' && 'prod'
-          || (inputs.environment == 'stage' && 'main' || github.ref_name) }}-${{ matrix.network }}-${{ matrix.zone }}
+          || (inputs.environment == 'stage' && 'main'
+          || (inputs.environment == 'next' && 'next' || github.ref_name)) }}-${{ matrix.network }}-${{ matrix.zone }}
       cancel-in-progress: false
     needs: [validate, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
     runs-on: ubuntu-26.04
     timeout-minutes: 120
-    env:
-      CACHED_DISK_NAME: >-
-        ${{ matrix.network == 'Mainnet'
-            && needs.get-disk-name-mainnet.outputs.cached_disk_name
-            || needs.get-disk-name-testnet.outputs.cached_disk_name }}
     environment: ${{ inputs.environment }}
     permissions:
       contents: read
@@ -258,18 +264,26 @@ jobs:
           case "${ENVIRONMENT}" in
             prod)  PREFIX="" ;;
             stage) PREFIX="main-" ;;
+            next)  PREFIX="next-" ;;
             dev)   PREFIX="${REF_SLUG}-" ;;
             # An unmatched environment would leave PREFIX empty, which is the
             # production MIG name. Fail instead.
             *)     echo "::error::unsupported environment ${ENVIRONMENT}"; exit 1 ;;
           esac
           SOURCE_SHA_SHORT="${SOURCE_SHA:0:7}"
+          # Stage and prod share the unprefixed address names because they live in
+          # different projects. Next shares stage's project, so it needs its own.
+          case "${PREFIX}" in
+            next-) IP_NAME_PREFIX="zebra-next-" ;;
+            *)     IP_NAME_PREFIX="zebra-" ;;
+          esac
           # TEMPLATE_NAME is not derivable here: it digests the template's full
           # contents, and the reserved address is not resolved until a later step.
           # It is computed in "Create instance template".
           {
             echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
             echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+            echo "IP_NAME_PREFIX=${IP_NAME_PREFIX}"
             echo "SOURCE_SHA_SHORT=${SOURCE_SHA_SHORT}"
           } >> "$GITHUB_ENV"
 
@@ -294,12 +308,22 @@ jobs:
         env:
           CREATED_BY: ${{ inputs.created_by }}
           ENVIRONMENT: ${{ inputs.environment }}
+          MAINNET_CACHED_DISK_NAME: ${{ needs.get-disk-name-mainnet.outputs.cached_disk_name }}
+          MATRIX_NETWORK: ${{ matrix.network }}
+          TESTNET_CACHED_DISK_NAME: ${{ needs.get-disk-name-testnet.outputs.cached_disk_name }}
         run: |
           if gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" &>/dev/null; then
             exit 0
           fi
+          # A lookup that finds no image leaves its network's name empty, so never fall
+          # back to the other network's image.
+          if [ "${MATRIX_NETWORK}" = "Mainnet" ]; then
+            CACHED_DISK_NAME="${MAINNET_CACHED_DISK_NAME}"
+          else
+            CACHED_DISK_NAME="${TESTNET_CACHED_DISK_NAME}"
+          fi
           if [ -z "${CACHED_DISK_NAME}" ]; then
-            echo "::error::No ${DISK_NAME} and no cache image. Seed via integration-tests or manual snapshot."
+            echo "::error::No ${DISK_NAME} and no cache image for this state version. See \"Bootstrap a disk without a cache image\" in gcp-deployment-operations.md."
             exit 1
           fi
           gcloud compute disks create "${DISK_NAME}" --zone="${ZONE}" \
@@ -324,7 +348,7 @@ jobs:
             # primary address. Fail instead.
             *) echo "::error::unsupported zone ${ZONE}"; exit 1 ;;
           esac
-          IP_NAME="zebra-${NETWORK}${SUFFIX}"
+          IP_NAME="${IP_NAME_PREFIX}${NETWORK}${SUFFIX}"
           IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
             --region="${GCP_REGION}" --format='value(address)' 2>/dev/null || true)
           echo "IP_NAME=${IP_NAME}" >> "$GITHUB_ENV"
@@ -447,7 +471,7 @@ jobs:
         if: ${{ steps.does-group-exist.outcome == 'failure' && inputs.use_reserved_ip }}
         run: |
           if [ -z "${IP_ADDRESS:-}" ]; then
-            echo "::warning::${IP_NAME:-zebra-${NETWORK}} not reserved; skipping"
+            echo "::warning::${IP_NAME:-${IP_NAME_PREFIX}${NETWORK}} not reserved; skipping"
             exit 0
           fi
           for _ in $(seq 1 30); do
@@ -520,6 +544,101 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: get-disk-name-mainnet, get-disk-name-testnet
+
+  # Sentry only creates bare releases from events, and its GitHub integration never
+  # records deploys or release commits, so record both here. Dev deploys come from
+  # arbitrary branches and are not recorded.
+  #
+  # Reading the release name needs Google Cloud credentials, so it runs apart from the
+  # Sentry action, which runs a container image that Sentry publishes by tag.
+  sentry-release-name:
+    name: Read Sentry release name
+    needs: [deploy-nodes]
+    if: >-
+      ${{
+        !cancelled() &&
+        needs.deploy-nodes.result == 'success' &&
+        inputs.environment != 'dev'
+      }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # The Google Cloud identity provider and service accounts are environment variables.
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # pull the deployed image from Artifact Registry
+    outputs:
+      name: ${{ steps.release-name.outputs.name }}
+    steps:
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
+          token_format: access_token
+          access_token_lifetime: 600s
+
+      # Ask the deployed image itself, so the release recorded is the one its nodes report.
+      - name: Read Sentry release name from the image
+        id: release-name
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          IMAGE: ${{ inputs.image }}
+        run: |
+          docker login --username oauth2accesstoken --password-stdin "${IMAGE%%/*}" <<< "${ACCESS_TOKEN}"
+          # Nodes use the build version that `zebrad --version` prints as their release.
+          VERSION_OUTPUT=$(docker run --rm --entrypoint zebrad "${IMAGE}" --version)
+          if [[ ! "${VERSION_OUTPUT}" =~ ^zebrad\ ([^[:space:]]+)$ ]]; then
+            echo "::error::zebrad --version printed unexpected output: ${VERSION_OUTPUT}"
+            exit 1
+          fi
+          echo "name=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+  sentry-release:
+    name: Record Sentry release and deploy
+    needs: [sentry-release-name]
+    if: ${{ !cancelled() && needs.sentry-release-name.result == 'success' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      deployments: read # find the previous successful deploy to this environment
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      # Without an explicit range, Sentry starts from its newest release in any
+      # environment, which is often a dev or test build without commits.
+      - name: Find the previously deployed commit
+        id: previous
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          gh api "repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=50" \
+            --jq ".[] | select(.sha != \"${SOURCE_SHA}\") | \"\(.id) \(.sha)\"" |
+          while read -r ID SHA; do
+            STATE=$(gh api "repos/${REPOSITORY}/deployments/${ID}/statuses?per_page=1" --jq '.[0].state')
+            if [ "${STATE}" = "success" ]; then
+              echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+
+      - uses: getsentry/action-release@6fb9aeade7061441cf3864e34fbe11a1457ad7dc #v3.7.1
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          SENTRY_ORG: zfnd
+          SENTRY_PROJECT: zebrad
+        with:
+          release: ${{ needs.sentry-release-name.outputs.name }}
+          environment: ${{ inputs.environment }}
+          set_commits: manual
+          repo: ${{ github.repository }}
+          commit: ${{ inputs.source_sha }}
+          previous_commit: ${{ steps.previous.outputs.commit }}
+          disable_telemetry: true
 
   failure-issue:
     name: Open or update issues for deploy failures

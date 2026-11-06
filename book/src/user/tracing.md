@@ -43,6 +43,28 @@ until you configure an OpenTelemetry endpoint using the tracing config or the
 Official Zebra release builds include Sentry support. Sentry is only activated
 when the `SENTRY_DSN` environment variable is set.
 
+When Sentry is active, Zebra sends:
+
+- errors and panics as Sentry issues;
+- warnings, errors, and the once-a-minute sync progress logs as Sentry Logs,
+  including a log each time the best chain tip enters a different network upgrade;
+- release health sessions: each `zebrad` run is split into daily sessions, and
+  the last one ends as exited on a clean shutdown and as crashed on a panic or a
+  fatal error. Every session of a run has the same user ID, so Sentry's
+  crash-free users rate is the share of runs without a crash;
+- the [block timing](metrics.md#block-timing) and
+  [sync stall](metrics.md#sync-stall-metrics) metrics as Sentry metrics, along
+  with these metrics once a minute, which help compare nodes:
+  `sync.verified.block.count`, `gossip.verified.block.count`,
+  `zcash.mempool.size.transactions`, and
+  `zebra.state.rocksdb.total_disk_size_bytes`.
+
+Events, logs, and metrics carry the `chain.network` tag. Once the node has a
+chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`,
+and metrics carry `chain.network_upgrade`. Metrics also carry
+`process.uptime_seconds`, the whole seconds since `zebrad` started, so queries can
+leave out the values recorded just after a restart.
+
 You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
 attached to Sentry events. Zebra also tags events with the git SHA when
 available, preferring the runtime `GITHUB_SHA` (full commit SHA on GitHub
@@ -54,6 +76,18 @@ can pass `CI_PR_NUMBER` and `CI_TEST_ID` for additional correlation. These
 values are read at runtime, so container images do not need CI-specific build
 arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
 configuration.
+
+Zebra names its Sentry release after its build version, which `zebrad --version`
+prints, for example `7.0.0-rc.0+git.6d1e414`. Set `SENTRY_RELEASE` to use a
+different name.
+
+Errors and panics include stack traces, with Zebra's own frames marked in-app.
+In the official Docker images, Zebra's source files appear under `/zebra/`.
+Sentry doesn't create code mappings for Rust, so to show suspect commits, connect
+Sentry to GitHub and add a code mapping with the stack trace root `/zebra/`, an
+empty source code root, the `ZcashFoundation/zebra` repository, and the `main`
+branch. The release binaries on GitHub are stripped, so their stack frames have
+no function names or source locations.
 
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter

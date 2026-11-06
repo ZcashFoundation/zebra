@@ -86,6 +86,14 @@ pub enum PeerError {
     #[error("No ready peers available")]
     NoReadyPeers,
 
+    /// Block inventory must use the separately bounded advertiser.
+    #[error("block adverts require the dedicated advertiser")]
+    AdvertRequiresDedicatedService,
+
+    /// A queued advert lost authorization before its local write started.
+    #[error("peer authorization was revoked before advert delivery")]
+    AdvertAuthorizationRevoked,
+
     /// This peer request's caused an internal service timeout, so the connection was dropped
     /// to shed load or prevent attacks.
     #[error("Internal services timed out")]
@@ -152,6 +160,8 @@ impl PeerError {
             PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
             PeerError::Overloaded => "Overloaded".into(),
             PeerError::NoReadyPeers => "NoReadyPeers".into(),
+            PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
+            PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),

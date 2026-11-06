@@ -513,6 +513,11 @@ impl Block {
 
                 // fix commitment (must be done after finishing changing the block)
                 if generate_valid_commitments {
+                    // The history tree commits to the block hash, so the merkle root must
+                    // already match the fixed transactions.
+                    Arc::make_mut(&mut block.header).merkle_root =
+                        block.transactions.iter().collect();
+
                     let current_height = block.coinbase_height().unwrap();
                     let heartwood_height = NetworkUpgrade::Heartwood
                         .activation_height(&current.network)

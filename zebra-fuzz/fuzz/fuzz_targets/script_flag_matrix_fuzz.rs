@@ -84,10 +84,7 @@ use std::panic::{self, AssertUnwindSafe};
 use libfuzzer_sys::fuzz_target;
 
 use libzcash_script::{CxxInterpreter, RustInterpreter, ZcashScript};
-use zcash_script::{
-    interpreter::Flags,
-    script,
-};
+use zcash_script::{interpreter::Flags, script};
 
 /// Strict flags that, when added, MUST NOT turn an `Err` into `Ok(true)`.
 /// `P2SH` and `CHECKLOCKTIMEVERIFY` are *not* in this set because they
@@ -130,7 +127,9 @@ fuzz_target!(|data: &[u8]| {
     };
     cur += 4;
     let sig_len = u32::from_le_bytes(sig_len_bytes) as usize;
-    let sig_take = sig_len.min(MAX_SCRIPT_SIZE).min(data.len().saturating_sub(cur));
+    let sig_take = sig_len
+        .min(MAX_SCRIPT_SIZE)
+        .min(data.len().saturating_sub(cur));
     if cur + sig_take > data.len() {
         return;
     }
@@ -146,7 +145,9 @@ fuzz_target!(|data: &[u8]| {
     };
     cur += 4;
     let pk_len = u32::from_le_bytes(pk_len_bytes) as usize;
-    let pk_take = pk_len.min(MAX_SCRIPT_SIZE).min(data.len().saturating_sub(cur));
+    let pk_take = pk_len
+        .min(MAX_SCRIPT_SIZE)
+        .min(data.len().saturating_sub(cur));
     if cur + pk_take > data.len() {
         return;
     }

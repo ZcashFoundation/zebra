@@ -282,21 +282,33 @@ async fn send_addrs(
         return;
     }
 
-    // Extend handles duplicate addresses internally.
-    //
-    // Correctness: box the request future, so its captured types don't
-    // leak into generic callers (rustc's async Send inference struggles
-    // with boxed trait objects inside generic spawned tasks).
-    let result = address_book_service
-        .oneshot(AddressBookRequest::ExtendGossiped(addrs))
-        .boxed()
-        .await;
+    // Send the batch in chunks, one at a time, so the address book mutex is
+    // released between chunks instead of being held for the whole batch (#11618).
+    let mut addrs = addrs.into_iter();
+    while !addrs.as_slice().is_empty() {
+        let chunk: Vec<MetaAddrChange> = addrs
+            .by_ref()
+            .take(constants::GOSSIPED_ADDRS_PER_REQUEST)
+            .collect();
 
-    if let Err(error) = result {
-        debug!(
-            ?error,
-            "error sending gossiped addresses to the address book, is Zebra shutting down?"
-        );
+        // Extend handles duplicate addresses internally.
+        //
+        // Correctness: box the request future, so its captured types don't
+        // leak into generic callers (rustc's async Send inference struggles
+        // with boxed trait objects inside generic spawned tasks).
+        let result = address_book_service
+            .clone()
+            .oneshot(AddressBookRequest::ExtendGossiped(chunk))
+            .boxed()
+            .await;
+
+        if let Err(error) = result {
+            debug!(
+                ?error,
+                "error sending gossiped addresses to the address book, is Zebra shutting down?"
+            );
+            return;
+        }
     }
 }
 

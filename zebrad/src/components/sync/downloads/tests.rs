@@ -1,25 +1,46 @@
 //! Fixed test vectors for the syncer's block download stream.
 
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::{stream::StreamExt, FutureExt};
-use tokio::sync::watch;
-use tower::{Service, ServiceExt};
+use proptest::{
+    strategy::{Strategy, ValueTree},
+    test_runner::TestRunner,
+};
+use tokio::{
+    sync::{oneshot, watch},
+    time::timeout,
+};
+use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
+use tracing::Span;
 
 use zebra_chain::{
-    block::{self, Block, Height},
-    chain_tip::mock::MockChainTip,
-    serialization::ZcashDeserializeInto,
+    block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block, Height},
+    chain_tip::{mock::MockChainTip, ChainTip},
+    parameters::{
+        testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, ParametersBuilder},
+        NetworkUpgrade,
+    },
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transaction as chain_transaction,
+    work::difficulty::U256,
+    LedgerState,
 };
-use zebra_network::{InventoryResponse, PeerSocketAddr};
-use zebra_state::MAX_BLOCK_REORG_HEIGHT;
+use zebra_network::{
+    constants::DEFAULT_MAX_CONNS_PER_IP, AddressBook, InventoryResponse, PeerSocketAddr,
+};
+use zebra_node_services::mempool;
+use zebra_state::{Config as StateConfig, MAX_BLOCK_REORG_HEIGHT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use zebra_network as zn;
 use zebra_state as zs;
 
-use crate::components::sync::{
-    ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, MIN_CHECKPOINT_CONCURRENCY_LIMIT, SYNC_RESTART_DELAY,
+use crate::components::{
+    inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
+    sync::{
+        ChainSync, BLOCK_DOWNLOAD_RETRY_LIMIT, MIN_CHECKPOINT_CONCURRENCY_LIMIT, SYNC_RESTART_DELAY,
+    },
 };
 
 use super::{BlockDownloadVerifyError, Downloads};
@@ -30,7 +51,13 @@ use InventoryResponse::*;
 ///
 /// These tests run the download task in parallel with the test, so machines under heavy load need a
 /// longer delay.
+///
+/// Mock-only tests pause Tokio time to retain this window without idle wall time.
 const MAX_SERVICE_REQUEST_DELAY: Duration = Duration::from_millis(1000);
+
+/// Upper bound on a real state commit finishing, for tests that use a real state and verifier.
+/// It only caps failures, so it is generous for slow CI runners.
+const MAX_STATE_COMMIT_DELAY: Duration = Duration::from_secs(10);
 
 /// A peer address used to check whether the supplying peer can be scored.
 const ADVERTISER: &str = "127.0.0.1:8233";
@@ -38,6 +65,335 @@ const ADVERTISER: &str = "127.0.0.1:8233";
 type MockNetwork = MockService<zn::Request, zn::Response, PanicAssertion>;
 type MockVerifier = MockService<zebra_consensus::Request, block::Hash, PanicAssertion>;
 type MockState = MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>;
+
+/// Returns a copy of `block` with one byte of its coinbase miner data flipped.
+///
+/// ZIP-244 excludes scriptSigs from v5 transaction IDs, so the block hash is unchanged,
+/// but the authorizing data commitment is not.
+fn coinbase_authorization_twin(block: &Arc<Block>) -> Arc<Block> {
+    let mut coinbase = block.transactions[0]
+        .zcash_serialize_to_vec()
+        .expect("coinbase serializes");
+
+    // A v5 header is 20 bytes, followed by the input count and the 36-byte null prevout.
+    const SCRIPT_LEN_OFFSET: usize = 20 + 1 + 36;
+    assert_eq!(
+        coinbase[SCRIPT_LEN_OFFSET - 4..SCRIPT_LEN_OFFSET],
+        [0xff; 4]
+    );
+    let script_end = SCRIPT_LEN_OFFSET + 1 + usize::from(coinbase[SCRIPT_LEN_OFFSET]);
+    coinbase[script_end - 1] ^= 0x01;
+
+    let coinbase: chain_transaction::Transaction = coinbase
+        .zcash_deserialize_into()
+        .expect("mutated coinbase parses");
+
+    let mut twin = block.clone();
+    Arc::make_mut(&mut twin).transactions[0] = Arc::new(coinbase);
+    twin
+}
+
+/// Checks that a checkpoint block whose body is replaced by a same-hash authorization twin
+/// (served through the inbound downloader while the syncer's copy is queued) is downloadable
+/// again after the state rejects the twin, and that the honest block then commits without a
+/// restart.
+///
+/// Regression test for GHSA-9hq5-pfgc-cx5h.
+#[tokio::test(flavor = "multi_thread")]
+async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+
+    // Keep this early-upgrade schedule within the monetary cap.
+    let network_builder = ParametersBuilder::default()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            nu6: None,
+            nu6_1: None,
+            nu6_2: None,
+            nu6_3: None,
+            nu7: None,
+        })
+        .expect("valid activation heights")
+        .with_target_difficulty_limit(U256::MAX)
+        .expect("valid permissive test difficulty limit")
+        .with_disable_pow(true)
+        .extend_funding_streams()
+        .expect("valid funding streams");
+    let generation_network = network_builder
+        .clone()
+        .to_network()
+        .expect("valid generation network");
+
+    let mut runner = TestRunner::deterministic();
+    let ledger =
+        LedgerState::genesis_strategy(Some(generation_network), NetworkUpgrade::Nu5, Some(5), true)
+            .new_tree(&mut runner)
+            .expect("ledger strategy generates")
+            .current();
+    let chain =
+        Block::partial_chain_strategy(ledger, 10, allow_all_transparent_coinbase_spends, true)
+            .new_tree(&mut runner)
+            .expect("chain strategy generates")
+            .current()
+            .0;
+
+    let target_index = chain
+        .iter()
+        .position(|block| block.coinbase_height() == Some(Height(7)))
+        .expect("generated chain reaches NU5");
+    let honest = chain[target_index].clone();
+    let child = chain[target_index + 1].clone();
+    let twin = coinbase_authorization_twin(&honest);
+    assert_eq!(twin.hash(), honest.hash());
+    assert_eq!(twin.transactions[0].hash(), honest.transactions[0].hash());
+    assert_ne!(twin.auth_data_root(), honest.auth_data_root());
+
+    let network = network_builder
+        .with_genesis_hash(chain[0].hash())
+        .expect("generated genesis hash is valid")
+        .with_checkpoints(ConfiguredCheckpoints::HeightsAndHashes(vec![
+            (Height(0), chain[0].hash()),
+            (Height(8), child.hash()),
+        ]))
+        .expect("valid generated checkpoint list")
+        .to_network()
+        .expect("valid final test network");
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), &network, Height(8), 1_000).await;
+    let mut state_service = ServiceBuilder::new().buffer(100).service(state);
+    for prefix in chain.iter().take(target_index) {
+        state_service
+            .clone()
+            .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
+                prefix.clone().into(),
+            ))
+            .await
+            .expect("valid prefix checkpoint commits");
+    }
+
+    let (block_verifier, _tx_verifier, consensus_handles, max_checkpoint_height) =
+        zebra_consensus::router::init_test(
+            zebra_consensus::Config::default(),
+            &network,
+            state_service.clone(),
+        )
+        .await;
+    assert_eq!(max_checkpoint_height, Height(8));
+
+    let peer_set = MockService::build()
+        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+        .for_unit_tests();
+    let mut peer_set_handle = peer_set.clone();
+    let buffered_peer_set = Buffer::new(BoxService::new(peer_set), 10);
+
+    let (past_lookahead_limit_sender, _past_lookahead_limit_receiver) = watch::channel(false);
+    let mut sync_downloads = Downloads::new(
+        buffered_peer_set.clone(),
+        block_verifier.clone(),
+        read_state,
+        latest_chain_tip.clone(),
+        past_lookahead_limit_sender,
+        1_000,
+        Height(8),
+    );
+
+    let mempool_service: MockService<mempool::Request, mempool::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
+    let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        &network,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    )));
+    let (setup_tx, setup_rx) = oneshot::channel();
+    let (misbehavior_sender, mut misbehavior_rx) = tokio::sync::mpsc::channel(10);
+    let mut inbound = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+    setup_tx
+        .send(InboundSetupData {
+            address_book,
+            block_download_peer_set: buffered_peer_set,
+            block_verifier,
+            mempool: buffered_mempool,
+            state: state_service.clone(),
+            latest_chain_tip: latest_chain_tip.clone(),
+            misbehavior_sender,
+        })
+        .map_err(|_| "inbound setup receiver remains open")?;
+    inbound.ready().await?;
+
+    // The production sync downloader owns the first request and keeps it pending in the shared
+    // checkpoint verifier after the canonical body is downloaded.
+    sync_downloads
+        .download_and_verify(honest.hash())
+        .await
+        .expect("sync download is queued");
+    let sync_request = peer_set_handle
+        .expect_request(zn::Request::BlockDownload {
+            hash: honest.hash(),
+            advertiser: None,
+        })
+        .await;
+    let attacker_h: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
+    sync_request.respond(zn::Response::Blocks(vec![Available((
+        honest.clone(),
+        Some(attacker_h),
+    ))]));
+    // The honest body must reach the checkpoint verifier before the twin, so the twin is the
+    // newer request that replaces it. Give the spawned download task time to run.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // The same hash is absent from state, so Inbound's separate downloader accepts the later
+    // advertisement and delivers the authorization twin to the same verifier.
+    assert_eq!(
+        inbound
+            .ready()
+            .await?
+            .call(zn::Request::AdvertiseBlock(honest.hash(), Some(attacker_h),))
+            .await?,
+        zn::Response::Nil
+    );
+    peer_set_handle
+        .expect_request(zn::Request::BlockDownload {
+            hash: honest.hash(),
+            advertiser: Some(attacker_h),
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            twin.clone(),
+            Some(attacker_h),
+        ))]));
+    tokio::time::sleep(Duration::from_millis(25)).await;
+
+    // A different attacker IP provides the withheld range-completing body immediately after the
+    // twin is queued, satisfying the inbound one-download-per-IP cap.
+    let attacker_b: PeerSocketAddr = "192.168.180.29:10001".parse().unwrap();
+    assert_eq!(
+        inbound
+            .ready()
+            .await?
+            .call(zn::Request::AdvertiseBlock(child.hash(), Some(attacker_b),))
+            .await?,
+        zn::Response::Nil
+    );
+    peer_set_handle
+        .expect_request(zn::Request::BlockDownload {
+            hash: child.hash(),
+            advertiser: Some(attacker_b),
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            child.clone(),
+            Some(attacker_b),
+        ))]));
+
+    let sync_error = timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next())
+        .await
+        .expect("replaced sync request resolves")
+        .expect("sync downloads is non-empty")
+        .expect_err("the later inbound twin replaces the canonical sync body");
+    assert!(matches!(
+        sync_error,
+        BlockDownloadVerifyError::Invalid {
+            error: zebra_consensus::RouterError::Checkpoint { source },
+            ..
+        } if matches!(source.as_ref(), zebra_consensus::VerifyCheckpointError::NewerRequest { .. })
+    ));
+
+    // The inbound downloader reports the peer that served the twin once its verifier future
+    // has finished, so the state has already rejected the twin, and the verifier has been reset.
+    let report = timeout(MAX_STATE_COMMIT_DELAY, async {
+        loop {
+            inbound.ready().await?;
+            if let Ok(report) = misbehavior_rx.try_recv() {
+                return Ok::<_, crate::BoxError>(report);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the twin's peer is reported")?;
+    assert_eq!((report.addr, report.score), (attacker_h, 100));
+
+    // The honest block and its dropped child must not be reported as known any more.
+    for hash in [honest.hash(), child.hash()] {
+        let mut known = None;
+        for _ in 0..20 {
+            known = Some(
+                state_service
+                    .ready()
+                    .await?
+                    .call(zs::Request::KnownBlock(hash))
+                    .await?,
+            );
+            if known == Some(zs::Response::KnownBlock(None)) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(known, Some(zs::Response::KnownBlock(None)));
+    }
+
+    // The syncer downloads the honest block and its child again, and they commit.
+    for block in [&honest, &child] {
+        sync_downloads
+            .download_and_verify(block.hash())
+            .await
+            .expect("sync download is queued");
+        peer_set_handle
+            .expect_request(zn::Request::BlockDownload {
+                hash: block.hash(),
+                advertiser: None,
+            })
+            .await
+            .respond(zn::Response::Blocks(vec![Available((block.clone(), None))]));
+    }
+    // The honest block commits. The verifier queued the child's dropped copy again, so the
+    // re-downloaded child either commits, or arrives after the queued copy completed the final
+    // checkpoint range. If the child's first copy reached the state after the reset, the state
+    // failed it instead of queueing it, so it can't hold up the re-downloaded copy.
+    let mut committed = Vec::new();
+    for _ in 0..2 {
+        let result = timeout(MAX_STATE_COMMIT_DELAY, sync_downloads.next())
+            .await
+            .expect("re-downloaded block resolves")
+            .expect("sync downloads is non-empty");
+        match result {
+            Ok((height, _)) => committed.push(height),
+            Err(BlockDownloadVerifyError::Invalid {
+                error: zebra_consensus::RouterError::Checkpoint { source },
+                hash,
+                ..
+            }) if hash == child.hash()
+                && matches!(
+                    source.as_ref(),
+                    zebra_consensus::VerifyCheckpointError::Finished
+                ) => {}
+            Err(error) => panic!("re-downloaded block commits: {error:?}"),
+        }
+    }
+    assert!(committed.contains(&honest.coinbase_height().unwrap()));
+    timeout(MAX_STATE_COMMIT_DELAY, async {
+        while latest_chain_tip.best_tip_height() != child.coinbase_height() {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the tip reaches the child");
+
+    peer_set_handle.expect_no_requests().await;
+    consensus_handles.state_checkpoint_verify_handle.abort();
+
+    Ok(())
+}
 
 /// Build a downloader whose state tip is at `tip_height`, returning the mock network, verifier, and
 /// state services so a test can drive and assert on them.
@@ -208,7 +564,7 @@ async fn logical_download_limit_holds_until_completion_or_cancellation() {
 /// A peer can answer with a canonical header and rewritten coinbase height because the initial hash
 /// check does not recompute the header's commitment to the body's authorizing data. The parent is
 /// the proof: a block's height is one more than its parent's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
     let _init_guard = zebra_test::init();
 
@@ -297,7 +653,7 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
 /// The syncer tolerates an out-of-order first hash in `FindBlocks` responses, so a requested hash
 /// can resolve to an old block that an honest peer still holds. Its height agrees with its parent's,
 /// so there is no proof of misbehaviour and the drop must stay anonymous.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn genuinely_old_block_is_dropped_without_attribution() {
     let _init_guard = zebra_test::init();
 
@@ -365,7 +721,7 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
 
 /// A peer whose old block has a parent we do not hold is not attributed either: without the parent
 /// there is no proof the height was rewritten.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
     let _init_guard = zebra_test::init();
 
@@ -477,7 +833,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
 /// exactly on it is a normal download and the state is never consulted.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
 
@@ -578,7 +934,16 @@ async fn download_deadline_includes_readiness_and_response() {
         } else {
             queued
         };
-        assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        // Readiness timeouts are returned by `download_and_verify` itself, but response timeouts
+        // are re-requestable download failures.
+        if release_capacity {
+            assert!(matches!(
+                result,
+                Err(BlockDownloadVerifyError::DownloadTimedOut { hash: timed_out }) if timed_out == hash
+            ));
+        } else {
+            assert!(matches!(result, Err(BlockDownloadVerifyError::Timeout)));
+        }
         assert_eq!(Instant::now() - started, budget);
     }
 }

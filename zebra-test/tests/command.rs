@@ -1,6 +1,10 @@
 //! Tests for the [`zebra_test::command`] module.
 
-use std::{process::Command, time::Duration};
+use std::{
+    io::ErrorKind,
+    process::Command,
+    time::{Duration, Instant},
+};
 
 use color_eyre::eyre::{eyre, Result};
 use regex::RegexSet;
@@ -12,30 +16,82 @@ use zebra_test::{
     prelude::Stdio,
 };
 
-/// Returns true if `cmd` with `args` runs successfully.
+/// Returns true if `cmd` with `args` can be spawned, regardless of its exit status.
 ///
-/// On failure, prints an error message to stderr.
-/// (This message is captured by the test runner, use `cargo test -- --nocapture` to see it.)
-///
-/// The command's stdout and stderr are ignored.
+/// Only a missing executable skips a test; other spawn or wait errors panic.
+/// Missing commands are reported to stderr, which is captured by the test runner.
+/// The command's stdout and stderr are ignored, and the probe child is reaped.
 #[allow(clippy::print_stderr)]
 fn is_command_available(cmd: &str, args: &[&str]) -> bool {
-    let status = Command::new(cmd)
+    let spawn_result = Command::new(cmd)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .spawn();
 
-    match status {
-        Err(e) => {
-            eprintln!("Skipping test because '{cmd} {args:?}' returned error {e:?}");
+    match spawn_result {
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            eprintln!("Skipping test because '{cmd} {args:?}' was not found: {error:?}");
             false
         }
-        Ok(status) if !status.success() => {
-            eprintln!("Skipping test because '{cmd} {args:?}' returned status {status:?}");
-            false
+        Err(error) => panic!("could not spawn availability probe '{cmd} {args:?}': {error:?}"),
+        Ok(mut child) => {
+            child.wait().unwrap_or_else(|error| {
+                panic!("could not reap availability probe '{cmd}': {error:?}")
+            });
+            true
         }
-        _ => true,
+    }
+}
+
+/// Missing executables are reported as unavailable.
+#[test]
+fn missing_command_is_unavailable() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let dir = tempdir()?;
+    let missing = dir.path().join("missing-command");
+
+    assert!(!is_command_available(missing.to_str().unwrap(), &[]));
+    Ok(())
+}
+
+/// Invalid command paths fail instead of being reported as unavailable.
+#[test]
+#[should_panic(expected = "could not spawn availability probe")]
+fn invalid_command_path_panics() {
+    let _init_guard = zebra_test::init();
+
+    is_command_available("\0", &[]);
+}
+
+/// A command that exits unsuccessfully is still available.
+#[test]
+fn nonzero_exit_command_is_available() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // An unknown libtest option exits unsuccessfully without running any tests.
+    let executable = std::env::current_exe()?;
+
+    assert!(is_command_available(
+        executable.to_str().unwrap(),
+        &["--zebra-test-invalid-option"],
+    ));
+    Ok(())
+}
+
+/// Wait for a short-lived fixture to exit without consuming its output.
+fn wait_for_fixture_exit(child: &mut zebra_test::command::TestChild<tempfile::TempDir>) {
+    let deadline = child
+        .deadline()
+        .expect("fixtures set a timeout before waiting for exit");
+    while child.is_running() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the fixture must exit before its deadline"
+        );
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
     }
 }
 
@@ -57,9 +113,8 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
     // in this test.
     let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, args!["-v", "-n", "1024", "/dev/zero"])?
-        .with_timeout(Duration::from_secs(2));
+        .with_timeout(Duration::from_secs(2))?;
 
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
     assert!(child
         .expect_stdout_line_matches("this regex should not match")
@@ -70,8 +125,6 @@ fn kill_on_timeout_output_continuous_lines() -> Result<()> {
 
 /// Test if the tests pass for a process that produces a single line of output,
 /// then exits before the timeout.
-//
-// TODO: create a similar test that pauses after output (#1140)
 #[test]
 fn finish_before_timeout_output_single_line() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -84,9 +137,8 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
 
     let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, args!["zebra_test_output"])?
-        .with_timeout(Duration::from_secs(2));
+        .with_timeout(Duration::from_secs(2))?;
 
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
     assert!(child
         .expect_stdout_line_matches("this regex should not match")
@@ -101,64 +153,24 @@ fn finish_before_timeout_output_single_line() -> Result<()> {
 fn wait_with_output_drains_taken_output() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let mut child = tempdir()?.spawn_child_with_command(
-        "sh",
-        args![
-            "-c",
-            "printf 'ready\\n'; i=0; while [ \"$i\" -lt 8192 ]; do \
-             printf '%0128d\\n' \"$i\"; printf '%0128d\\n' \"$i\" >&2; i=$((i + 1)); done"
-        ],
-    )?;
-    child.expect_stdout_line_matches("^ready$")?;
-
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let waiter = std::thread::spawn(move || {
-        let _ = sender.send(child.wait_with_output());
-    });
-    let output = receiver
-        .recv_timeout(Duration::from_secs(30))
-        .map_err(|_| eyre!("wait_with_output timed out"))??;
-    waiter
-        .join()
-        .map_err(|_| eyre!("child waiter must not panic"))?;
-    output.assert_success()?;
-
-    Ok(())
-}
-
-/// Test if a process that keeps on producing output, but doesn't produce any newlines,
-/// is killed after the timeout.
-///
-/// This test fails due to bugs in TestDirExt, see #1140 for details.
-//#[test]
-//#[ignore]
-#[allow(dead_code)]
-fn kill_on_timeout_continuous_output_no_newlines() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    const TEST_CMD: &str = "head";
-    // Skip the test if the test system does not have the command
-    if !is_command_available(TEST_CMD, &["/dev/null"]) {
-        return Ok(());
-    }
-
     let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, args!["-c", "1024", "/dev/zero"])?
-        .with_timeout(Duration::from_secs(2));
-
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
-    // We use a non-matching regex, to trigger the timeout.
-    assert!(child
-        .expect_stdout_line_matches("this regex should not match")
-        .is_err());
+        .spawn_child_with_command(
+            "sh",
+            args![
+                "-c",
+                "printf 'ready\\n'; i=0; while [ \"$i\" -lt 8192 ]; do \
+                 printf '%0128d\\n' \"$i\"; printf '%0128d\\n' \"$i\" >&2; i=$((i + 1)); done"
+            ],
+        )?
+        .with_timeout(Duration::from_secs(30))?;
+    child.expect_stdout_line_matches("^ready$")?;
+    child.wait_with_output()?.assert_success()?;
 
     Ok(())
 }
 
 /// Test if tests pass for a process that produces a small amount of output,
 /// with no newlines, then exits before the timeout.
-//
-// TODO: create a similar test that pauses after output (#1140)
 #[test]
 fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -172,37 +184,8 @@ fn finish_before_timeout_short_output_no_newlines() -> Result<()> {
 
     let mut child = tempdir()?
         .spawn_child_with_command(TEST_CMD, args!["zebra_test_output"])?
-        .with_timeout(Duration::from_secs(2));
+        .with_timeout(Duration::from_secs(2))?;
 
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
-    // We use a non-matching regex, to trigger the timeout.
-    assert!(child
-        .expect_stdout_line_matches("this regex should not match")
-        .is_err());
-
-    Ok(())
-}
-
-/// Test if the timeout works for a process that produces no output.
-///
-/// This test fails due to bugs in TestDirExt, see #1140 for details.
-// #[test]
-// #[ignore]
-#[allow(dead_code)]
-fn kill_on_timeout_no_output() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    const TEST_CMD: &str = "sleep";
-    // Skip the test if the test system does not have the command
-    if !is_command_available(TEST_CMD, &["0"]) {
-        return Ok(());
-    }
-
-    let mut child = tempdir()?
-        .spawn_child_with_command(TEST_CMD, args!["120"])?
-        .with_timeout(Duration::from_secs(2));
-
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout.
     assert!(child
         .expect_stdout_line_matches("this regex should not match")
@@ -228,6 +211,7 @@ fn failure_regex_matches_stdout_failure_message() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
     // Any method that reads output should work here.
@@ -244,28 +228,29 @@ fn failure_regex_matches_stdout_failure_message() {
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stderr,
-/// and panic with a test failure message.
+/// and fail with a test failure message.
 #[test]
 fn failure_regex_matches_stderr_failure_message() {
     let _init_guard = zebra_test::init();
 
-    // The read command prints its prompt to stderr.
-    //
-    // This is tricky to get right, because:
-    // - some read command versions only accept integer timeouts
-    // - some installs only have read as a shell builtin
-    // - some `sh` shells don't allow the `-t` option for read
     const TEST_CMD: &str = "bash";
-    // Skip the test if the test system does not have the command
-    if !is_command_available(TEST_CMD, &["-c", "read -t 1 -p failure_message"]) {
+    // Skip the test if the test system does not have a working shell. On Windows, `bash` can be
+    // the WSL launcher, which fails when no Linux distribution is installed.
+    if !is_command_available(TEST_CMD, &["-c", ":"])
+        || !Command::new(TEST_CMD)
+            .args(["-c", ":"])
+            .status()
+            .is_ok_and(|status| status.success())
+    {
         return;
     }
 
     let mut child = tempdir()
         .unwrap()
-        .spawn_child_with_command(TEST_CMD, args![ "-c": "read -t 1 -p failure_message" ])
+        .spawn_child_with_command(TEST_CMD, args![ "-c": "echo failure_message >&2" ])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
     // Any method that reads output should work here.
@@ -294,15 +279,15 @@ fn failure_regex_matches_stdout_failure_message_drop() {
         return;
     }
 
-    let _child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Drop should read all unread output.
 }
@@ -331,6 +316,7 @@ fn failure_regex_reads_multi_line_output_on_expect_line() {
         )
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("failure_message", RegexSet::empty());
 
     // Any method that reads output should work here.
@@ -340,22 +326,13 @@ fn failure_regex_reads_multi_line_output_on_expect_line() {
         .unwrap_err();
 
     let expected_error = format!("{expected_error:?}");
-    assert!(
-        expected_error.contains(
-            "\
-Unread Stdout:
-   multi-line failure message\
-            "
-        ),
-        "error did not contain expected failure message: {expected_error}",
-    );
+    assert!(expected_error.contains("failure_message"));
+    assert!(expected_error.contains("multi-line failure message"));
 }
 
 /// On drop, make sure failure regexes detect when a child process prints a failure message.
 /// then they fail the test, and read any extra multi-line output from the child process.
 #[test]
-#[should_panic(expected = "Unread Stdout:
-   multi-line failure message")]
 fn failure_regex_reads_multi_line_output_on_drop() {
     let _init_guard = zebra_test::init();
 
@@ -365,23 +342,31 @@ fn failure_regex_reads_multi_line_output_on_drop() {
         return;
     }
 
-    let _child = tempdir()
-        .unwrap()
-        .spawn_child_with_command(
-            TEST_CMD,
-            args![
-                "failure_message\n\
+    let panic = std::panic::catch_unwind(|| {
+        let mut child = tempdir()
+            .unwrap()
+            .spawn_child_with_command(
+                TEST_CMD,
+                args![
+                    "failure_message\n\
                  multi-line failure message"
-            ],
-        )
-        .unwrap()
-        .with_timeout(Duration::from_secs(5))
-        .with_failure_regex_set("failure_message", RegexSet::empty());
+                ],
+            )
+            .unwrap()
+            .with_timeout(Duration::from_secs(5))
+            .expect("short test timeout fits in Instant")
+            .with_failure_regex_set("failure_message", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+        wait_for_fixture_exit(&mut child);
 
-    // Drop should read all unread output.
+        // Drop should read all unread output.
+    })
+    .expect_err("failure regex must reject the child's output on drop");
+    let diagnostic = panic
+        .downcast_ref::<String>()
+        .expect("Drop formats its diagnostic as a String");
+    assert!(diagnostic.contains("failure_message"));
+    assert!(diagnostic.contains("multi-line failure message"));
 }
 
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
@@ -402,10 +387,10 @@ fn failure_regex_matches_stdout_failure_message_kill() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -425,15 +410,15 @@ fn failure_regex_matches_stdout_failure_message_kill_on_error() {
         return;
     }
 
-    let child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill on error should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -454,15 +439,15 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
         return;
     }
 
-    let child = tempdir()
+    let mut child = tempdir()
         .unwrap()
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
+    wait_for_fixture_exit(&mut child);
 
     // Kill on error should read all unread output to generate the error context,
     // or the output should be read on drop.
@@ -472,8 +457,6 @@ fn failure_regex_matches_stdout_failure_message_no_kill_on_error() {
 
 /// Make sure failure regexes detect when a child process prints a failure message to stdout,
 /// then times out waiting for a specific output line.
-///
-/// TODO: test the failure regex on timeouts with no output (#1140)
 #[test]
 fn failure_regex_timeout_continuous_output() {
     let _init_guard = zebra_test::init();
@@ -494,9 +477,9 @@ fn failure_regex_timeout_continuous_output() {
         .spawn_child_with_command(TEST_CMD, args!["-v", "/dev/zero"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("0", RegexSet::empty());
 
-    // We need to use expect_stdout_line_matches, because wait_with_output ignores timeouts.
     // We use a non-matching regex, to trigger the timeout and the failure panic.
     let expected_error = child
         .expect_stdout_line_matches("this regex should not match")
@@ -514,7 +497,6 @@ fn failure_regex_timeout_continuous_output() {
 ///
 /// This is an error, but we still want to check failure logs.
 #[test]
-#[should_panic(expected = "Logged a failure message")]
 fn failure_regex_matches_stdout_failure_message_wait_for_output() {
     let _init_guard = zebra_test::init();
 
@@ -529,14 +511,11 @@ fn failure_regex_matches_stdout_failure_message_wait_for_output() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", RegexSet::empty());
 
-    // Give the child process enough time to print its output.
-    std::thread::sleep(Duration::from_secs(1));
-
-    // Wait with output should read all unread output to generate the error context,
-    // or the output should be read on drop. We don't care what the exact error is here.
-    let _ = child.wait_with_output().unwrap_err();
+    let error = child.wait_with_output().unwrap_err();
+    assert!(format!("{error:?}").contains("Logged a failure message"));
 }
 
 /// Make sure failure regex iters detect when a child process prints a failure message to stdout,
@@ -556,6 +535,7 @@ fn failure_regex_iter_matches_stdout_failure_message() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_iter(
             ["fail"].iter().cloned(),
             NO_MATCHES_REGEX_ITER.iter().cloned(),
@@ -590,6 +570,7 @@ fn ignore_regex_ignores_stdout_failure_message() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message ignore_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_set("fail", "ignore");
 
     // Any method that reads output should work here.
@@ -612,8 +593,528 @@ fn ignore_regex_iter_ignores_stdout_failure_message() {
         .spawn_child_with_command(TEST_CMD, args!["failure_message ignore_message"])
         .unwrap()
         .with_timeout(Duration::from_secs(2))
+        .expect("short test timeout fits in Instant")
         .with_failure_regex_iter(["fail"].iter().cloned(), ["ignore"].iter().cloned());
 
     // Any method that reads output should work here.
     child.expect_stdout_line_matches("ignore_message").unwrap();
+}
+
+#[cfg(unix)]
+fn shell_child(script: &str) -> Result<zebra_test::command::TestChild<tempfile::TempDir>> {
+    tempdir()?.spawn_child_with_command("sh", args!["-c": script])
+}
+
+/// A killed child's temporary files are removed with its `TestChild`.
+#[cfg(unix)]
+#[test]
+fn killed_child_tmpdir_is_removed() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child =
+        shell_child(r#"mkdir "$TMPDIR/state" && echo "tmpdir=$TMPDIR"; exec sleep 120"#)?
+            .with_timeout(Duration::from_secs(30))?;
+    let line = child.expect_stdout_line_matches("^tmpdir=")?;
+    let tmp_dir = std::path::PathBuf::from(line.trim_end().trim_start_matches("tmpdir="));
+    assert!(tmp_dir.join("state").is_dir());
+
+    child.kill(false)?;
+    drop(child);
+    assert!(!tmp_dir.exists(), "{tmp_dir:?} outlived its killed child");
+
+    Ok(())
+}
+
+/// Quiet pipes and incomplete lines on either stream must not defeat the child deadline.
+#[cfg(unix)]
+#[test]
+fn child_deadline_quiet_and_partial_lines() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for stderr in [false, true] {
+        for partial in [false, true] {
+            let script = match (stderr, partial) {
+                (_, false) => "exec sleep 120",
+                (false, true) => "printf partial; exec sleep 120",
+                (true, true) => "printf partial >&2; exec sleep 120",
+            };
+            let mut child = shell_child(script)?.with_timeout(Duration::from_secs(1))?;
+            let start = Instant::now();
+            let error = if stderr {
+                child.expect_stderr_line_matches("never")
+            } else {
+                child.expect_stdout_line_matches("never")
+            }
+            .unwrap_err();
+            assert!(start.elapsed() < Duration::from_secs(5));
+            assert!(!child.is_running(), "deadline must kill and reap the child");
+            if partial {
+                assert!(format!("{error:?}").contains("partial"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The non-matching line-reader APIs must also interrupt quiet pipes and clean up before panic.
+#[cfg(unix)]
+#[test]
+fn child_deadline_wait_for_line() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for stderr in [false, true] {
+        let mut child = shell_child("exec sleep 120")?.with_timeout(Duration::from_secs(1))?;
+        let start = Instant::now();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if stderr {
+                child.wait_for_stderr_line(None)
+            } else {
+                child.wait_for_stdout_line(None)
+            }
+        }));
+        assert!(result.is_err(), "deadline is an error, not end-of-stream");
+        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(!child.is_running());
+    }
+    Ok(())
+}
+
+/// A ready log is not a successful exit; the same deadline must still bound the process wait.
+#[cfg(unix)]
+#[test]
+fn child_deadline_wait_for_exit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child =
+        shell_child("printf 'ready\\n'; exec sleep 120")?.with_timeout(Duration::from_secs(1))?;
+    child.expect_stdout_line_matches("^ready$")?;
+    let start = Instant::now();
+    let error = child.wait_with_output().unwrap_err();
+    assert!(start.elapsed() < Duration::from_secs(5));
+    assert!(format!("{error:?}").contains("deadline"));
+    Ok(())
+}
+/// Cleanup must terminate quiet descendants, not merely stop their inherited pipe readers.
+#[cfg(target_os = "linux")]
+#[test]
+fn child_cleanup_terminates_owned_descendants() -> Result<()> {
+    use std::os::unix::process::ExitStatusExt;
+
+    fn is_alive(pid: u32) -> std::io::Result<bool> {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => {
+                let (_, state) = stat
+                    .rsplit_once(") ")
+                    .expect("Linux process status includes its command and state");
+                Ok(!matches!(state.as_bytes()[0], b'Z' | b'X'))
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(nix::libc::ESRCH) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let realtime_signal = nix::libc::SIGRTMIN();
+    for cleanup in [
+        "deadline",
+        "matcher",
+        "kill",
+        "drop",
+        "natural_exit",
+        "realtime_exit",
+    ] {
+        // A failing cleanup leaves only a short-lived fixture, never a persistent orphan.
+        let script = match cleanup {
+            "natural_exit" => {
+                "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; exit 7".to_owned()
+            }
+            "realtime_exit" => format!(
+                "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; \
+                 kill -{realtime_signal} $$"
+            ),
+            _ => "sleep 10 & descendant=$!; printf '%s\\n' \"$descendant\"; wait \"$descendant\""
+                .to_owned(),
+        };
+        let mut child = shell_child(&script)?.with_timeout(Duration::from_secs(3))?;
+        let pid: u32 = child
+            .expect_stdout_line_matches("^[0-9]+$")?
+            .trim()
+            .parse()?;
+        assert!(
+            is_alive(pid)?,
+            "the descendant must be alive before cleanup"
+        );
+        child = child.with_timeout(Duration::from_secs(1))?;
+        let start = Instant::now();
+        match cleanup {
+            "deadline" => assert!(child.wait_with_output().is_err()),
+            "matcher" => assert!(child.expect_stdout_line_matches("never").is_err()),
+            "kill" => child.kill_and_consume_output(false)?,
+            "drop" => drop(child),
+            "natural_exit" => assert_eq!(child.wait_with_output()?.output.status.code(), Some(7)),
+            "realtime_exit" => assert_eq!(
+                child.wait_with_output()?.output.status.signal(),
+                Some(realtime_signal)
+            ),
+            _ => unreachable!("all cleanup paths are listed above"),
+        }
+        while is_alive(pid)? && start.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !is_alive(pid)?,
+            "{cleanup} must terminate the owned descendant before its natural exit"
+        );
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+    Ok(())
+}
+
+/// Matchers take both pipe handles, but exit waiting must still drain more than pipe capacity.
+#[cfg(unix)]
+#[test]
+fn child_output_drains_both_pipes_after_matches() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child = shell_child(
+        "printf 'ready\\n'; printf 'ready\\n' >&2; \
+         i=0; while [ \"$i\" -lt 4096 ]; do \
+         printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n'; \
+         printf 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210\\n' >&2; \
+         i=$((i + 1)); done",
+    )?
+    .with_timeout(Duration::from_secs(10))?;
+    child.expect_stdout_line_matches("^ready$")?;
+    child.expect_stderr_line_matches("^ready$")?;
+    let output = child.wait_with_output()?.assert_success()?;
+    output.assert_was_not_killed()?;
+    assert_eq!(
+        output.output.stdout,
+        format!("{}\n", "0123456789abcdef".repeat(4))
+            .repeat(4096)
+            .as_bytes()
+    );
+    assert_eq!(
+        output.output.stderr,
+        format!("{}\n", "fedcba9876543210".repeat(4))
+            .repeat(4096)
+            .as_bytes()
+    );
+    Ok(())
+}
+
+/// Preserve exact raw bytes and the real exit code, including a normal unsuccessful exit.
+#[cfg(unix)]
+#[test]
+fn child_output_preserves_natural_exit_and_raw_bytes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for code in [0, 7] {
+        let output = shell_child(&format!(
+            "printf 'out\\377'; printf 'err\\376' >&2; exit {code}"
+        ))?
+        .with_timeout(Duration::from_secs(5))?
+        .wait_with_output()?;
+        assert_eq!(output.output.status.code(), Some(code));
+        assert_eq!(output.output.stdout, b"out\xff");
+        assert_eq!(output.output.stderr, b"err\xfe");
+        output.assert_was_not_killed()?;
+    }
+    Ok(())
+}
+
+/// Like `std::process::Child::wait_with_output`, waiting must deliver EOF to piped stdin.
+#[cfg(unix)]
+#[test]
+fn child_output_closes_stdin_before_waiting() -> Result<()> {
+    use std::io::Write as _;
+    use zebra_test::command::CommandExt;
+
+    let _init_guard = zebra_test::init();
+    let mut child = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn2(tempdir()?, "cat")?
+        .with_timeout(Duration::from_secs(2))?;
+    child
+        .stdin_mut()
+        .expect("stdin was piped")
+        .write_all(b"input until EOF")?;
+
+    let output = child.wait_with_output()?.assert_success()?;
+    assert_eq!(output.output.stdout, b"input until EOF");
+    output.assert_was_not_killed()?;
+    Ok(())
+}
+
+/// Changing the timeout must update readers already used by a matcher.
+#[cfg(unix)]
+#[test]
+fn child_deadline_can_be_reset_after_matching() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child = shell_child("printf 'ready\\n'; sleep 1; printf 'done\\n'")?
+        .with_timeout(Duration::from_millis(500))?;
+    child.expect_stdout_line_matches("^ready$")?;
+    child = child.with_timeout(Duration::from_secs(5))?;
+    assert_eq!(child.expect_stdout_line_matches("^done$")?, "done");
+    child
+        .wait_with_output()?
+        .assert_success()?
+        .assert_was_not_killed()?;
+    Ok(())
+}
+
+/// Produce unread bytes on both streams before publishing a filesystem readiness barrier.
+fn child_with_retained_output(
+    keep_running: bool,
+) -> Result<zebra_test::command::TestChild<tempfile::TempDir>> {
+    let dir = tempdir()?;
+    let ready = dir.path().join("ready");
+    #[cfg(unix)]
+    let child = {
+        let finish = if keep_running {
+            "exec sleep 120"
+        } else {
+            "exit 7"
+        };
+        dir.spawn_child_with_command(
+            "sh",
+            args!["-c": format!("printf out-tail; printf err-tail >&2; : > ready; {finish}")],
+        )?
+    };
+    #[cfg(windows)]
+    let child = {
+        let finish = if keep_running {
+            "Start-Sleep -Seconds 120"
+        } else {
+            "exit 7"
+        };
+        dir.spawn_child_with_command(
+            "powershell.exe",
+            args!["-NoProfile", "-NonInteractive", "-Command": format!(
+                "[Console]::Out.Write('out-tail'); [Console]::Out.Flush(); \
+                 [Console]::Error.Write('err-tail'); [Console]::Error.Flush(); \
+                 [IO.File]::WriteAllText('ready', ''); {finish}"
+            )],
+        )?
+    };
+    let child = child.with_timeout(Duration::from_secs(30))?;
+    let start = Instant::now();
+    while !ready.try_exists()? {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the child must publish readiness after writing both streams"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(child)
+}
+
+/// Intentional termination must retain both streams after the observation budget expires.
+#[test]
+fn child_cleanup_after_expired_deadline_killed() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child = child_with_retained_output(true)?.with_timeout(Duration::ZERO)?;
+    assert!(
+        child.is_running(),
+        "the fixture must await intentional termination"
+    );
+    child.kill(false)?;
+    let start = Instant::now();
+    let output = child.wait_with_output()?;
+    assert!(start.elapsed() < Duration::from_secs(5));
+    output.assert_was_killed()?;
+    assert_eq!(output.output.stdout, b"out-tail");
+    assert_eq!(output.output.stderr, b"err-tail");
+    Ok(())
+}
+
+/// A previously observed natural exit must not turn retained output into a timeout.
+#[test]
+fn child_cleanup_after_expired_deadline_natural_exit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut child = child_with_retained_output(false)?;
+    let start = Instant::now();
+    while child.is_running() {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the fixture must exit without being killed"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let start = Instant::now();
+    let output = child.with_timeout(Duration::ZERO)?.wait_with_output()?;
+    assert!(start.elapsed() < Duration::from_secs(5));
+    assert_eq!(output.output.status.code(), Some(7));
+    output.assert_was_not_killed()?;
+    assert_eq!(output.output.stdout, b"out-tail");
+    assert_eq!(output.output.stderr, b"err-tail");
+    Ok(())
+}
+
+/// Timeout changes must immediately reach existing readers, without a matcher refreshing them.
+#[test]
+fn child_timeout_reset_updates_existing_output() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for extend in [true, false] {
+        let (initial, replacement) = if extend {
+            (Duration::ZERO, Duration::from_secs(30))
+        } else {
+            (Duration::from_secs(30), Duration::ZERO)
+        };
+        let mut child = child_with_retained_output(false)?.with_timeout(initial)?;
+        child.apply_failure_regexes_to_outputs();
+        child = child.with_timeout(replacement)?;
+        for (reader, expected) in [
+            (&mut child.stdout, "out-tail"),
+            (&mut child.stderr, "err-tail"),
+        ] {
+            let line = reader
+                .as_mut()
+                .expect("the fixture pipes both streams")
+                .next()
+                .expect("each stream has unread output or a timeout");
+            if extend {
+                assert_eq!(line?, expected);
+            } else {
+                assert_eq!(line.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An unrepresentable timeout must be rejected explicitly rather than panicking in Instant addition.
+#[test]
+fn child_timeout_handles_unrepresentable_duration() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    assert!(Instant::now().checked_add(Duration::MAX).is_none());
+    let child = child_with_retained_output(false)?;
+    let error = child
+        .with_timeout(Duration::MAX)
+        .expect_err("an unrepresentable timeout must be rejected, not become unlimited");
+    assert_eq!(
+        error
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind),
+        Some(std::io::ErrorKind::InvalidInput),
+    );
+    Ok(())
+}
+
+/// Observation and intentional shutdown can outlive a bounded startup phase.
+#[cfg(unix)]
+#[test]
+fn child_startup_deadline_preserves_long_observation_and_kill() -> Result<()> {
+    use std::io::Write as _;
+    use zebra_test::command::CommandExt;
+
+    let _init_guard = zebra_test::init();
+    let mut child = Command::new("sh")
+        .args([
+            "-c",
+            "printf 'ready\\n'; read gate; printf 'observed\\ntail\\n'; \
+             printf 'observation complete\\n' >&2; read stop",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn2(tempdir()?, "sh")?
+        .with_timeout(Duration::from_secs(5))?;
+    let startup_deadline = child
+        .deadline()
+        .expect("a timeout establishes the child deadline");
+    child.expect_stdout_line_matches("^ready$")?;
+    child = child.with_timeout(Duration::from_secs(15))?;
+
+    // The stdin barrier holds the child alive while the startup budget expires.
+    std::thread::sleep(
+        startup_deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(50),
+    );
+    child
+        .stdin_mut()
+        .expect("stdin was piped")
+        .write_all(b"observe\n")?;
+    child.expect_stdout_line_matches("^observed$")?;
+    child.expect_stderr_line_matches("^observation complete$")?;
+    assert!(Instant::now() > startup_deadline);
+    assert!(
+        child.is_running(),
+        "the child must await intentional shutdown"
+    );
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?.assert_failure()?;
+    output.assert_was_killed()?;
+    assert_eq!(output.output.stdout, b"tail\n");
+    Ok(())
+}
+
+#[cfg(windows)]
+fn quiet_windows_child(script: &str) -> Result<zebra_test::command::TestChild<tempfile::TempDir>> {
+    let script = format!("[Console]::Out.WriteLine('ready'); {script}; Start-Sleep -Seconds 120");
+    let mut child = tempdir()?
+        .spawn_child_with_command(
+            "powershell.exe",
+            args!["-NoProfile", "-NonInteractive", "-Command": script],
+        )?
+        .with_timeout(Duration::from_secs(30))?;
+    child.expect_stdout_line_matches("^ready$")?;
+    child.with_timeout(Duration::from_secs(1))
+}
+
+/// Windows pipe polling must interrupt quiet and partial output on either stream.
+#[cfg(windows)]
+#[test]
+fn child_deadline_quiet_and_partial_lines_windows() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    for stderr in [false, true] {
+        for partial in [false, true] {
+            let stream = if stderr { "Error" } else { "Out" };
+            let script = if partial {
+                format!("[Console]::{stream}.Write('partial'); [Console]::{stream}.Flush()")
+            } else {
+                "$null".to_owned()
+            };
+            let mut child = quiet_windows_child(&script)?;
+            let start = Instant::now();
+            let error = if stderr {
+                child.expect_stderr_line_matches("never")
+            } else {
+                child.expect_stdout_line_matches("never")
+            }
+            .unwrap_err();
+            assert!(start.elapsed() < Duration::from_secs(5));
+            assert!(!child.is_running(), "deadline must kill and reap the child");
+            assert_eq!(
+                error
+                    .downcast_ref::<std::io::Error>()
+                    .map(std::io::Error::kind),
+                Some(std::io::ErrorKind::TimedOut),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A Windows exit deadline must clean up the process even after its ready log was consumed.
+#[cfg(windows)]
+#[test]
+#[allow(unsafe_code)]
+fn child_deadline_wait_for_exit_windows() -> Result<()> {
+    use std::os::windows::io::{AsHandle, AsRawHandle};
+    use windows_sys::Win32::{Foundation::WAIT_OBJECT_0, System::Threading::WaitForSingleObject};
+
+    let _init_guard = zebra_test::init();
+    let child = quiet_windows_child("$null")?;
+    let process = child.as_handle().try_clone_to_owned()?;
+    let start = Instant::now();
+    assert!(child.wait_with_output().is_err());
+    assert!(start.elapsed() < Duration::from_secs(5));
+    // SAFETY: the owned process handle remains valid, and a zero timeout never blocks.
+    assert_eq!(
+        unsafe { WaitForSingleObject(process.as_raw_handle(), 0) },
+        WAIT_OBJECT_0,
+    );
+    Ok(())
 }

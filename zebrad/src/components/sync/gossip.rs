@@ -37,7 +37,7 @@ pub enum BlockGossipError {
 /// Run continuously, gossiping newly verified [`block::Hash`]es to peers.
 ///
 /// Once the state has reached the chain tip, broadcast the [`block::Hash`]es
-/// of newly verified blocks to all ready peers.
+/// of newly verified blocks to eligible connected peers, including busy peers.
 ///
 /// Blocks are only gossiped if they are:
 /// - on the best chain, and
@@ -129,13 +129,13 @@ where
         info!(?height, ?hash, is_block_submission, log_msg);
 
         // `tower::timeout::Timeout` only bounds the response future, not `poll_ready()`.
-        // If there are no ready peers, only waiting for readiness would stop this task from
+        // If there are no eligible peers, only waiting for readiness would stop this task from
         // consuming the mined block channel, and `submitblock` would eventually fail with a full
         // channel even though the block was committed.
         //
         // So we keep receiving mined blocks while we wait, and only broadcast the latest one.
-        // The pending broadcast is kept until peers are ready, so the latest block is still
-        // advertised after a temporary lack of ready peers.
+        // The pending broadcast is kept until an eligible peer connects, even if it is busy with
+        // an ordinary request.
         //
         // A chain tip broadcast that is replaced by a mined block is sent after the mined block,
         // unless the mined block is the new best tip. Mined blocks can be on side chains, and the
@@ -186,9 +186,8 @@ where
 
             let broadcast_fut = broadcast_network.call(request);
 
-            // Await the broadcast future in a spawned task to avoid waiting on
-            // `AdvertiseBlockToAll` requests when there are unready peers.
-            // Broadcast requests don't return errors, and we'd just want to ignore them anyway.
+            // Await bounded local writes in a spawned task so they don't delay later broadcasts.
+            // Errors can represent partial delivery; don't retry and duplicate successful writes.
             tokio::spawn(broadcast_fut);
 
             // TODO: Move this logic for marking the last change hash as seen to its own method.
