@@ -116,8 +116,9 @@ before testing a state-format change.
 ## Read the `next` book
 
 The book from `next` is published at [zebra.zfnd.org/next](https://zebra.zfnd.org/next/),
-beside the book from `main` at [zebra.zfnd.org](https://zebra.zfnd.org/).
-Compare the same page in both, for example `/dev/next-branch.html` and
+beside the book from `main` at [zebra.zfnd.org/main](https://zebra.zfnd.org/main/).
+The site root documents the latest release. Compare the same page in both
+development books, for example `/main/dev/next-branch.html` and
 `/next/dev/next-branch.html`.
 
 `/next` updates after each push to `next` that changes the book. If the `next`
