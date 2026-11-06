@@ -489,3 +489,56 @@ async fn side_fork_child_authenticates_and_remembers_rejection() {
     .await
     .expect("side-fork authentication finishes without retries");
 }
+
+/// A mining candidate's note commitment trees are reused when the same block is committed.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_reuses_the_mining_candidates_trees() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        use crate::service::{non_finalized_state::REUSED_TREES, precomputed_trees::TreeSlot};
+
+        // A non-finalized parent, so the candidate's trees match the commit's.
+        let (mut state, read) = state(false).await;
+        let block = candidate(&read, false, 0).await;
+        let mut changes = subscribe(&read).await;
+        let Response::MiningCandidate(Some(guard)) = state
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::MiningCandidate(block.clone()))
+            .await
+            .unwrap()
+        else {
+            panic!("the subscription enables a mining candidate");
+        };
+        guard.body_bound();
+        changes.changed().await;
+        assert!(changes.is_current(block.hash()));
+
+        let reused = REUSED_TREES.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            state
+                .ready()
+                .await
+                .unwrap()
+                .call(Request::CommitSemanticallyVerifiedBlock(
+                    CheckpointVerifiedBlock::from(block.clone()).into(),
+                ))
+                .await
+                .unwrap(),
+            Response::Committed(block.hash()),
+        );
+        assert_eq!(
+            REUSED_TREES.load(std::sync::atomic::Ordering::SeqCst),
+            reused + 1,
+            "the commit reuses the candidate's trees instead of computing them again",
+        );
+        assert!(
+            matches!(*read.precomputed_trees.borrow(), TreeSlot::Empty),
+            "the reused trees aren't retained after the commit",
+        );
+        drop(guard);
+    })
+    .await
+    .expect("the candidate and its commit finish");
+}

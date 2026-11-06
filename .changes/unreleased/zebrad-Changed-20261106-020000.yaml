@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mining nodes now reuse the early mining candidate's note commitment trees when they commit the same block, instead of computing them again at the same time.
+time: 2026-11-06T02:00:00.000000000-05:00
