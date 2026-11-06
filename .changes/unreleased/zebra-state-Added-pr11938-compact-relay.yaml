@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ReadRequest::{CheckBestTipHeader, CheckBestTipBlockCommitments}` and `ReadResponse::{ValidBestTipHeader, ValidBestTipBlockCommitments}` for compact admission against the published best-chain snapshot ([#12291](https://github.com/ZcashFoundation/zebra/pull/12291)).
+time: 2026-11-05T06:30:56.654490872+01:00

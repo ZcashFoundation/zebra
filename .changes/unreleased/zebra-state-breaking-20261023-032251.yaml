@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added read-only committed-tip header and authorization-commitment checks for compact reconstruction; update exhaustive matches on ReadRequest and ReadResponse.
+time: 2026-10-23T03:22:51.911380151+02:00
