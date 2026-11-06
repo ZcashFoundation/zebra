@@ -1122,7 +1122,8 @@ pub(super) struct Discovery {
     /// The most discovered peers dialled or connected at once.
     pub limit: usize,
 
-    /// The number of dialable addresses below which the DNS seeders are asked for more.
+    /// The number of discovered peers holding a slot below which the DNS seeders are asked for
+    /// more, when the segment has no candidate for a free slot.
     pub target: usize,
 
     /// The configured peers' addresses, which the configured peer dialer owns, and updates at
@@ -1237,8 +1238,8 @@ where
 /// that ends with the connection, which keeps its entry fresh until then. A slot is free again as
 /// soon as its connection fails or ends: the segment's reconnection delays space out redials.
 ///
-/// When the segment runs out of candidates and has fewer than `discovery.target` dialable
-/// addresses, the DNS seeders are asked for more with `resolve_seeds`, at most once per
+/// When the segment has no candidate for a free slot, and fewer than `discovery.target`
+/// discovered peers hold a slot, the DNS seeders are asked for more with `resolve_seeds`, at most once per
 /// [`V2_DNS_RESEED_INTERVAL`].
 pub(super) async fn keep_discovered_peers_connected<N, D, DF, R, RF>(
     mut discovery: Discovery,
@@ -1329,8 +1330,10 @@ pub(super) async fn keep_discovered_peers_connected<N, D, DF, R, RF>(
             tokio::time::sleep(discovery.dial_interval).await;
         }
 
-        // Ask the DNS seeders when the segment has too few addresses to dial.
-        let short = discovery.stats.borrow().dialable < discovery.target;
+        // Ask the DNS seeders when the segment has too few addresses to dial. Out of
+        // candidates, every address this dialer can use holds a slot: the segment's other
+        // entries are busy, excluded, or waiting for their reconnection delay.
+        let short = in_slots.len() < discovery.target;
         let reseed_due =
             last_dns_seed.is_none_or(|seeded_at| seeded_at.elapsed() >= V2_DNS_RESEED_INTERVAL);
         if out_of_candidates && short && reseed_due {
