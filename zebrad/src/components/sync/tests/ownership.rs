@@ -151,7 +151,7 @@ fn v2_checkpoint_sync_config_maps_to_the_engine() {
         r#"
         v2_checkpoint_sync = true
         v2_lookahead_bytes = 4194304
-        v2_min_peer_rate = 1024
+        v2_min_peer_rate = 65536
         v2_target_peers = 3
         "#,
     )
@@ -162,7 +162,7 @@ fn v2_checkpoint_sync_config_maps_to_the_engine() {
         config.v2_engine_config(),
         EngineConfig {
             lookahead_bytes: 4_194_304,
-            min_peer_rate: 1024,
+            min_peer_rate: 65536,
             target_peers: 3,
         }
     );
@@ -173,8 +173,8 @@ fn v2_checkpoint_sync_config_maps_to_the_engine() {
     );
 }
 
-/// `v2_target_peers` and `v2_lookahead_bytes` values that would stall the
-/// engine are raised to their floors.
+/// `v2_target_peers`, `v2_lookahead_bytes` and `v2_min_peer_rate` values
+/// that would stall the engine are raised to their floors.
 #[test]
 fn v2_checkpoint_sync_config_raises_low_values() {
     let _init_guard = zebra_test::init();
@@ -193,12 +193,25 @@ fn v2_checkpoint_sync_config_raises_low_values() {
         config.v2_engine_config(),
         EngineConfig {
             lookahead_bytes: sync::MIN_V2_LOOKAHEAD_BYTES,
-            min_peer_rate: 0,
+            min_peer_rate: sync::MIN_V2_MIN_PEER_RATE,
             target_peers: sync::MIN_V2_TARGET_PEERS,
         }
     );
     assert_eq!(sync::MIN_V2_TARGET_PEERS, 1);
     assert_eq!(sync::MIN_V2_LOOKAHEAD_BYTES, 2_000_000);
+    assert_eq!(
+        sync::MIN_V2_MIN_PEER_RATE,
+        16 * 1024,
+        "a zero rate floor never cancels a trickling peer"
+    );
+
+    // A tiny rate is as bad as none.
+    let config: Config =
+        toml::from_str("v2_min_peer_rate = 1").expect("the v2 fields are valid sync config");
+    assert_eq!(
+        config.v2_engine_config().min_peer_rate,
+        sync::MIN_V2_MIN_PEER_RATE
+    );
 }
 
 /// A syncer without the engine owns block download, and its gate never waits.
