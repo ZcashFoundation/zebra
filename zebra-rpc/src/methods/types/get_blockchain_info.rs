@@ -92,6 +92,15 @@ impl GetBlockchainInfoBalance {
         Self::new_internal("ironwood", amount, delta)
     }
 
+    /// Creates a [`GetBlockchainInfoBalance`] for the Network Sustainability Mechanism (NSM)
+    /// value balance, `NSMValueBalance` (NU7).
+    ///
+    /// The NSM value balance is not part of the issued supply, so it is not a value pool and
+    /// is not counted in [`Self::chain_supply`].
+    pub fn nsm(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
+        Self::new_internal("nsm", amount, delta)
+    }
+
     /// Converts a [`ValueBalance`] to a list of [`GetBlockchainInfoBalance`]s.
     pub fn value_pools(
         value_balance: ValueBalance<NonNegative>,
@@ -126,8 +135,8 @@ impl GetBlockchainInfoBalance {
         ]
     }
 
-    // The NU7 NSM reserve is deliberately not a pool here: it is not part of the Issued Supply,
-    // so `chain_supply()` correctly falls as fees are burned.
+    // The NU7 NSM value balance is deliberately not a pool here: it is not part of the Issued
+    // Supply, so `chain_supply()` correctly falls as fees are burned. `nsm()` reports it.
 
     /// Converts a [`ValueBalance`] to a [`GetBlockchainInfoBalance`] representing the total chain supply.
     pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {

@@ -533,6 +533,10 @@ async fn rpc_getblock() {
                 value_pools: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
             }))
         );
     }
@@ -588,6 +592,10 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -635,6 +643,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -667,6 +676,13 @@ async fn rpc_getblock() {
                 block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
             );
             assert_eq!(
                 *value_pools,
@@ -735,6 +751,7 @@ async fn rpc_getblock() {
                 solution,
                 chain_supply,
                 value_pools,
+                nsm_value_balance,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
@@ -767,6 +784,13 @@ async fn rpc_getblock() {
                 block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *nsm_value_balance,
+                block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                ))
             );
             assert_eq!(
                 *value_pools,
@@ -874,6 +898,10 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
@@ -931,6 +959,10 @@ async fn rpc_getblock() {
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    d.value_pools().nsm_amount(),
+                    delta.map(|delta| delta.nsm_amount())
+                )),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: '`getblockchaininfo` and verbose `getblock` responses include `nsmValueBalance`, the Network Sustainability Mechanism (NSM) value balance from NU7, with the block''s change to it in `getblock`. It is not part of `chainSupply` or `valuePools`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))'
+time: 2026-11-05T20:14:42.442976219-07:00
