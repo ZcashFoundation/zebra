@@ -82,7 +82,7 @@ version 2 peers are recorded in a separate version 2 address book.
   2, and its own version 2 address when it has a specific one
   (`v2_listen_addr`, or the IP address of `external_addr` with the
   `v2_listen_addr` port). It keeps the version 2 peers it connected to most
-  recently in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
+  recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
   cache, and tries them at startup. It never caches an address it only heard
   of. Zebra dials the peers it connected to before first, then picks at random
   among the others, giving seeded and cached addresses even odds against
