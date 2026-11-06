@@ -199,7 +199,7 @@ fn verified_set_metrics_randomized_mutations() {
                         .expect("a fresh set has no spend conflicts");
                     assert_metrics_match_rescan(&set);
                 }
-                assert!(set.evict_one().is_some());
+                assert_eq!(set.evict_one().len(), 1);
                 assert_eq!(set.transaction_count(), 0);
                 operation_counts[3] += 1;
             }
@@ -326,4 +326,45 @@ fn verified_set_mined_v5_removes_all_output_indexes() {
             assert_eq!(set.has_spent_outpoint(&outpoint), present);
         }
     }
+}
+
+/// Storage reports every removal, including dependents evicted with their parent.
+#[test]
+fn storage_reports_all_evicted_membership_ids() {
+    let _init_guard = zebra_test::init();
+    let template = Network::Mainnet
+        .unmined_transactions_in_blocks(..=10)
+        .find(|tx| {
+            let outputs = tx.transaction.transaction.outputs();
+            !outputs.is_empty() && outputs.iter().all(|output| !output.is_dust())
+        })
+        .expect("early mainnet fixtures contain a non-dust transaction");
+    let parent = transaction(&template, 1, None);
+    let parent_id = parent.transaction.id;
+    let child = transaction(&template, 2, Some(parent_id.mined_id()));
+    let child_id = child.transaction.id;
+    let outpoint = transparent::OutPoint::from_usize(parent_id.mined_id(), 0);
+    assert_eq!(parent.eviction_weight(), child.eviction_weight());
+
+    // Retry until the equal-weight parent is selected.
+    for _ in 0..64 {
+        let mut storage = super::super::Storage::new(&crate::components::mempool::config::Config {
+            tx_cost_limit: parent.cost(),
+            ..Default::default()
+        });
+        let mut evicted = HashSet::new();
+        storage
+            .insert(parent.clone(), vec![], None, &mut evicted)
+            .expect("the parent has no conflicts and the mempool has room");
+        assert!(evicted.is_empty());
+        let _ = storage.insert(child.clone(), vec![outpoint], None, &mut evicted);
+        assert!(!storage.contains_transaction_exact(&child_id.mined_id()));
+
+        if !storage.contains_transaction_exact(&parent_id.mined_id()) {
+            assert_eq!(evicted, HashSet::from([parent_id, child_id]));
+            return;
+        }
+        assert_eq!(evicted, HashSet::from([child_id]));
+    }
+    panic!("equal-weight random eviction should select the parent within 64 attempts");
 }

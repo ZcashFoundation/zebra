@@ -23,7 +23,7 @@ use std::{
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::ErrorObjectOwned;
 use tokio::{
-    sync::{broadcast, watch},
+    sync::{broadcast, watch, Notify},
     task::JoinHandle,
     time::{sleep, sleep_until, Instant},
 };
@@ -85,11 +85,18 @@ pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
 pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Maximum pause for coalescing a burst; slow builds still wait at least their own duration.
+/// Background burst pause, extended to the previous build's duration when it was slower.
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_secs(1);
 
-/// Pause for coalescing steady arrivals, unless the previous build took longer.
-const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(50);
+/// Background steady-arrival pause, extended to the previous build's duration.
+///
+/// Keep work ahead of mining demand without spinning on expensive coinbase proofs.
+const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(10);
+
+/// Bounds a request's mempool freshness check and wait for the sole updater.
+///
+/// Slow refreshes leave cached work usable without starting a competing foreground build.
+pub(crate) const DEMAND_REFRESH_TIMEOUT: Duration = Duration::from_millis(5);
 
 /// Additions in the pending window that extend the short pause to the burst deadline.
 const MEMPOOL_BURST_ADDITIONS: usize = 50;
@@ -107,17 +114,33 @@ const BUILD_STARTED: u8 = 2;
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
-pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
+pub(crate) struct TemplateCache {
+    /// Work served by `getblocktemplate`.
+    served: Arc<watch::Sender<Option<TemplateState>>>,
+    /// Whether [`run()`] owns template construction.
+    updater: Arc<AtomicBool>,
+    /// Coalesces explicit mining demand for the sole updater.
+    refresh: Arc<Notify>,
+    /// Acknowledges demand that does not need another build, without waking long polls.
+    refresh_checked: Arc<watch::Sender<()>>,
+}
 
 struct TemplateState {
     template: Option<Arc<BlockTemplateResponse>>,
+    /// Served new-parent work built without reading the mempool, not an empty full snapshot.
+    first_work: bool,
     published_at: Instant,
     error: Option<(Option<block::Hash>, ErrorObjectOwned)>,
 }
 
 impl Default for TemplateCache {
     fn default() -> Self {
-        Self(Arc::new(watch::Sender::new(None)), Arc::default())
+        Self {
+            served: Arc::new(watch::Sender::new(None)),
+            updater: Arc::default(),
+            refresh: Arc::default(),
+            refresh_checked: Arc::new(watch::Sender::new(())),
+        }
     }
 }
 
@@ -126,8 +149,8 @@ struct UpdaterGuard(TemplateCache);
 
 impl Drop for UpdaterGuard {
     fn drop(&mut self) {
-        self.0 .1.store(false, Ordering::Release);
-        self.0 .0.send_modify(|_| {});
+        self.0.updater.store(false, Ordering::Release);
+        self.0.served.send_modify(|_| {});
     }
 }
 
@@ -162,11 +185,51 @@ impl TemplateChanges {
 impl TemplateCache {
     /// Whether the updater, rather than an individual request, owns template construction.
     pub(crate) fn updater_is_running(&self) -> bool {
-        self.1.load(Ordering::Acquire)
+        self.updater.load(Ordering::Acquire)
+    }
+
+    /// Asks the sole updater to refresh changed membership, then waits briefly.
+    ///
+    /// Requests do not scan the mempool: the updater shares checks and can build immediately from
+    /// verified change notifications. Slow checks or builds leave existing work usable.
+    /// The caller must recheck served work and its parent after this wait.
+    pub(crate) async fn refresh_if_changed(&self, template: &BlockTemplateResponse) {
+        let mut changes = self.subscribe();
+        let mut checked = self.refresh_checked.subscribe();
+        self.refresh.notify_one();
+        let _ = tokio::time::timeout(DEMAND_REFRESH_TIMEOUT, async {
+            loop {
+                let unchanged = self
+                    .served
+                    .borrow()
+                    .as_ref()
+                    .and_then(|state| state.template.as_ref())
+                    .is_some_and(|served| served.long_poll_id == template.long_poll_id);
+                if !unchanged || !self.updater_is_running() {
+                    return;
+                }
+                tokio::select! {
+                    _ = changes.changed() => {}
+                    _ = checked.changed() => return,
+                }
+            }
+        })
+        .await;
+    }
+
+    /// Whether `template` is still the explicitly published new-parent first work.
+    pub(crate) fn is_first_work(&self, template: &BlockTemplateResponse) -> bool {
+        self.served.borrow().as_ref().is_some_and(|state| {
+            state.first_work
+                && state.template.as_ref().is_some_and(|served| {
+                    served.previous_block_hash == template.previous_block_hash
+                        && served.long_poll_id == template.long_poll_id
+                })
+        })
     }
 
     fn claim_updater(&self) -> Option<UpdaterGuard> {
-        self.1
+        self.updater
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| UpdaterGuard(self.clone()))
@@ -174,7 +237,7 @@ impl TemplateCache {
 
     /// Returns `true` if the precomputed template extends `tip_hash`.
     fn holds_tip(&self, tip_hash: block::Hash) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.template.as_ref())
@@ -183,13 +246,13 @@ impl TemplateCache {
 
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
-        self.0.borrow().is_none()
+        self.served.borrow().is_none()
     }
 
     /// Returns `true` if no template is currently available.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .is_none_or(|state| state.template.is_none())
@@ -200,7 +263,7 @@ impl TemplateCache {
         if self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .map(|state| state.published_at + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL))
@@ -211,16 +274,17 @@ impl TemplateCache {
         if !self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.error.clone())
     }
 
     fn record_error(&self, error: (Option<block::Hash>, ErrorObjectOwned)) {
-        self.0.send_modify(|state| {
+        self.served.send_modify(|state| {
             let state = state.get_or_insert_with(|| TemplateState {
                 template: None,
+                first_work: false,
                 published_at: Instant::now(),
                 error: None,
             });
@@ -235,7 +299,7 @@ impl TemplateCache {
     /// after it as unseen, so a template published while the caller decides what to do with the
     /// one it just read still wakes it.
     pub(crate) fn subscribe(&self) -> TemplateChanges {
-        TemplateChanges(self.0.subscribe())
+        TemplateChanges(self.served.subscribe())
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
@@ -244,7 +308,7 @@ impl TemplateCache {
     /// subset of the new one. A Testnet difficulty transition changes difficulty or the lower
     /// bound, so it must retain the new identity instead.
     pub(crate) fn preserve_work_identity(&self, template: &mut BlockTemplateResponse) {
-        let cached = self.0.borrow();
+        let cached = self.served.borrow();
         if let Some(previous) = cached.as_ref().and_then(|state| state.template.as_ref()) {
             if previous.previous_block_hash == template.previous_block_hash
                 && previous.height == template.height
@@ -258,10 +322,24 @@ impl TemplateCache {
     }
 
     /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
-    pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
+    pub(crate) fn publish(&self, template: BlockTemplateResponse) {
+        self.publish_work(template, false);
+    }
+
+    /// Publishes coinbase-only new-parent work without claiming a full mempool snapshot.
+    pub(crate) fn publish_first_work(&self, template: BlockTemplateResponse) {
+        debug_assert!(
+            template.transactions.is_empty(),
+            "first work is built without mempool transactions"
+        );
+        self.publish_work(template, true);
+    }
+
+    fn publish_work(&self, mut template: BlockTemplateResponse, first_work: bool) {
         self.preserve_work_identity(&mut template);
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: Some(Arc::new(template)),
+            first_work,
             published_at: Instant::now(),
             error: None,
         }));
@@ -269,8 +347,9 @@ impl TemplateCache {
 
     /// Withdraws cached work and wakes long polls.
     pub(crate) fn clear(&self) {
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: None,
+            first_work: false,
             published_at: Instant::now(),
             error: None,
         }));
@@ -284,7 +363,7 @@ impl TemplateCache {
         network: &Network,
         now: DateTime32,
     ) -> Option<Arc<BlockTemplateResponse>> {
-        let cached = self.0.borrow();
+        let cached = self.served.borrow();
         let template = cached.as_ref()?.template.as_ref()?;
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.
@@ -314,8 +393,8 @@ impl TemplateCache {
 /// Publishes a coinbase-only template as soon as the chain tip changes, then replaces it with a
 /// template that contains mempool transactions. Rebuilds after throttled mempool changes, with a
 /// backstop for missed events and clock changes after at least [`MEMPOOL_LONG_POLL_INTERVAL`]
-/// seconds. Both waits respect the previous build's duration. A candidate under verification
-/// takes priority and receives only coinbase-only work.
+/// seconds. Both background waits respect the previous build's duration; explicit demand for changed
+/// membership bypasses them. A candidate under verification takes priority and gets coinbase-only work.
 ///
 /// Runs until the task is aborted.
 #[allow(clippy::too_many_arguments)]
@@ -440,7 +519,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     let until_boundary = template.max_time.saturating_duration_since(now).to_std()
                         + Duration::from_secs(1);
                     let boundary = Instant::now() + until_boundary;
-                    cache.publish(template);
+                    cache.publish_first_work(template);
                     let mut started_fee_proof = false;
                     loop {
                         while fee_coinbase.try_join_next().is_some() {}
@@ -517,7 +596,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                 )
                 .await
                 {
-                    Ok(Some((template, _))) => cache.publish(template),
+                    Ok(Some((template, _))) => cache.publish_first_work(template),
                     // A coinbase-only template doesn't read the mempool, so it can't be out of
                     // sync with the state.
                     Ok(None) => {}
@@ -635,8 +714,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             continue;
         };
 
-        // Pace mempool work by its cost, including proofs, rather than allowing slow builds to
-        // run back-to-back. Tip changes still bypass this pause.
+        // Pace background mempool work by its cost. Explicit demand for changed membership can
+        // bypass this pause, but still shares this sole builder and its latest snapshot.
         let build_finished = Instant::now();
         let next_mempool_build = build_finished + MEMPOOL_THROTTLE.max(build_duration);
 
@@ -674,122 +753,205 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             _ = wait_for_mempool_change(
                 &mut mempool_changes, mempool.clone(), &mempool_tx_ids,
                 build_finished + MEMPOOL_SHORT_PAUSE.max(build_duration), next_mempool_build,
+                &cache,
             ) => {}
         }
     }
 }
 
-/// Waits for a changed verified set, not merely a rejected transaction or an overflowed channel.
+/// Net membership changes relative to the latest build, with arrival counts for background pacing.
+#[derive(Default)]
+struct MempoolChanges {
+    added: HashSet<UnminedTxId>,
+    removed: HashSet<UnminedTxId>,
+    additions: usize,
+    unknown: bool,
+}
+
+impl MempoolChanges {
+    fn observe(&mut self, change: &MempoolChange, template_ids: &HashSet<UnminedTxId>) {
+        if change.is_added() {
+            self.additions = self.additions.saturating_add(change.tx_ids().len());
+        }
+        if self.unknown {
+            return;
+        }
+        for id in change.tx_ids() {
+            if template_ids.contains(id) {
+                if change.is_added() {
+                    self.removed.remove(id);
+                } else {
+                    self.removed.insert(*id);
+                }
+            } else if change.is_added() {
+                self.added.insert(*id);
+            } else {
+                self.added.remove(id);
+            }
+        }
+    }
+
+    fn mark_unknown(&mut self) {
+        self.clear();
+        self.unknown = true;
+        self.additions = MEMPOOL_BURST_ADDITIONS;
+    }
+
+    fn is_changed(&self) -> bool {
+        !self.unknown && (!self.added.is_empty() || !self.removed.is_empty())
+    }
+
+    fn clear(&mut self) {
+        self.added.clear();
+        self.removed.clear();
+        self.additions = 0;
+        self.unknown = false;
+    }
+
+    /// Drains only the buffered backlog, stopping if notification loss makes its length unknown.
+    fn drain(
+        &mut self,
+        changes: &mut broadcast::Receiver<MempoolChange>,
+        template_ids: &HashSet<UnminedTxId>,
+        mut during_check: Option<&mut Self>,
+    ) -> bool {
+        let mut pending = false;
+        for _ in 0..=changes.len() {
+            match changes.try_recv() {
+                Ok(change) => {
+                    self.observe(&change, template_ids);
+                    if let Some(during_check) = during_check.as_deref_mut() {
+                        during_check.observe(&change, template_ids);
+                    }
+                    pending = true;
+                }
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                    self.mark_unknown();
+                    if let Some(during_check) = during_check.as_deref_mut() {
+                        during_check.mark_unknown();
+                    }
+                    return true;
+                }
+                Err(
+                    broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed,
+                ) => break,
+            }
+        }
+        pending
+    }
+}
+
+/// Waits for changed verified membership, coalescing background arrivals and explicit demand.
+///
+/// Demand bypasses pacing only for notifications not included in the latest build.
+/// Stale demand permits cannot rebuild that same snapshot.
 async fn wait_for_mempool_change<Mempool: MempoolService>(
     changes: &mut broadcast::Receiver<MempoolChange>,
     mempool: Mempool,
     template_ids: &HashSet<UnminedTxId>,
     next_build: Instant,
     burst_build: Instant,
+    cache: &TemplateCache,
 ) {
     let mut next_check = next_build;
-    let mut additions = 0usize;
+    // The build just took a full snapshot. Unknown changes share at most one check per short pause.
+    let mut next_demand_check = Instant::now() + MEMPOOL_SHORT_PAUSE;
+    let mut delta = MempoolChanges::default();
+    let mut during_check = MempoolChanges::default();
+    let mut pending = false;
+    let mut open = true;
     loop {
-        let change = changes.recv().await;
-        if matches!(&change, Err(broadcast::error::RecvError::Closed)) {
-            std::future::pending::<()>().await;
-        }
-
-        additions = additions.saturating_add(match &change {
-            Ok(change) if change.is_added() => change.tx_ids().len(),
-            // Lost messages can contain entire batches or no additions. Coalesce conservatively.
-            Err(broadcast::error::RecvError::Lagged(_)) => MEMPOOL_BURST_ADDITIONS,
-            _ => 0,
-        });
-
-        // Rejection-only reads are bounded separately; an addition bypasses that deadline.
-        if !change.is_ok_and(|change| change.is_added()) {
-            tokio::select! {
-                biased;
-                _ = sleep_until(next_check) => {}
-                _ = async {
-                    loop {
-                        match changes.recv().await {
-                            Ok(change) if change.is_added() => {
-                                additions = additions.saturating_add(change.tx_ids().len());
-                                break;
-                            }
-                            Err(broadcast::error::RecvError::Lagged(_)) => {
-                                additions = MEMPOOL_BURST_ADDITIONS;
-                            }
-                            Err(broadcast::error::RecvError::Closed) =>
-                                std::future::pending::<()>().await,
-                            _ => {}
-                        }
-                    }
-                } => {}
+        // Deadlines do not slide with arrivals, and a lost batch selects the burst deadline.
+        let deadline = if delta.additions >= MEMPOOL_BURST_ADDITIONS {
+            burst_build
+        } else if delta.additions > 0 {
+            next_build
+        } else {
+            next_check
+        };
+        let demand = tokio::select! {
+            biased;
+            _ = cache.refresh.notified() => true,
+            _ = sleep_until(deadline.max(next_demand_check)), if pending => false,
+            change = changes.recv(), if open => {
+                match change {
+                    Ok(change) => delta.observe(&change, template_ids),
+                    Err(broadcast::error::RecvError::Lagged(_)) => delta.mark_unknown(),
+                    Err(broadcast::error::RecvError::Closed) => open = false,
+                }
+                pending = true;
+                continue;
             }
+        };
+
+        // Demand can arrive before admissions are observed, or with an elapsed timer. Observe
+        // queued opposite events before deciding whether the net membership actually changed.
+        pending |= delta.drain(changes, template_ids, None);
+        if demand {
+            if delta.is_changed() {
+                return;
+            }
+            if Instant::now() < next_demand_check {
+                cache.refresh_checked.send_replace(());
+                continue;
+            }
+        } else if delta.additions >= MEMPOOL_BURST_ADDITIONS && Instant::now() < burst_build {
+            continue;
         }
 
-        // Count additions in the pending window rather than estimating a moving rate. Bursts
-        // extend the short pause to the throttle deadline. Both deadlines include the previous
-        // build's duration, and neither slides with arrivals.
-        loop {
-            let deadline = if additions >= MEMPOOL_BURST_ADDITIONS {
-                burst_build
-            } else {
-                next_build
-            };
+        // Verified notifications already establish changed membership. Only an unknown or
+        // cancelled delta needs a second mempool snapshot before rebuilding.
+        if delta.is_changed() {
+            return;
+        }
+
+        let snapshot = mempool.clone().oneshot(mempool::Request::TransactionIds);
+        // Keep pre-query evidence usable while the read is pending, but separately track events
+        // that may postdate its snapshot. An unchanged result resolves only the older generation.
+        // Retain the receiver: cancellations queued after the drain must reach both generations.
+        next_check = Instant::now() + MEMPOOL_THROTTLE;
+        next_demand_check = Instant::now() + MEMPOOL_SHORT_PAUSE;
+        pending = false;
+        during_check.clear();
+        tokio::pin!(snapshot);
+        let mut demanded = demand;
+        let result = loop {
             tokio::select! {
                 biased;
-                _ = sleep_until(deadline) => {
-                    if additions >= MEMPOOL_BURST_ADDITIONS {
-                        break;
-                    }
-
-                    // A delayed poll can make the timer and buffered arrivals ready together.
-                    // Bound the drain by the backlog, plus one receive for a lag notification.
-                    for _ in 0..=changes.len() {
-                        match changes.try_recv() {
-                            Ok(change) if change.is_added() => {
-                                additions = additions.saturating_add(change.tx_ids().len());
-                            }
-                            Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                                additions = MEMPOOL_BURST_ADDITIONS;
-                            }
-                            Err(
-                                broadcast::error::TryRecvError::Empty
-                                | broadcast::error::TryRecvError::Closed,
-                            ) => break,
-                            _ => {}
+                _ = cache.refresh.notified() => {
+                    demanded = true;
+                    pending |= delta.drain(changes, template_ids, Some(&mut during_check));
+                    if delta.is_changed() { return; }
+                }
+                result = &mut snapshot => break result,
+                change = changes.recv(), if open => {
+                    match change {
+                        Ok(change) => {
+                            delta.observe(&change, template_ids);
+                            during_check.observe(&change, template_ids);
                         }
-                        if additions >= MEMPOOL_BURST_ADDITIONS {
-                            break;
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            delta.mark_unknown();
+                            during_check.mark_unknown();
                         }
+                        Err(broadcast::error::RecvError::Closed) => open = false,
                     }
-                    if additions < MEMPOOL_BURST_ADDITIONS {
-                        break;
+                    pending = true;
+                    if demanded {
+                        pending |= delta.drain(changes, template_ids, Some(&mut during_check));
+                        if delta.is_changed() { return; }
                     }
-                },
-                change = changes.recv() => match change {
-                    Ok(change) if change.is_added() => {
-                        additions = additions.saturating_add(change.tx_ids().len());
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        additions = MEMPOOL_BURST_ADDITIONS;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => sleep_until(deadline).await,
-                    _ => {}
                 }
             }
-        }
-
-        // Discard the whole burst, including lagged notifications, before taking the snapshot.
-        // Comparing all IDs also detects collateral evictions absent from the notification.
-        *changes = changes.resubscribe();
-        next_check = Instant::now() + MEMPOOL_THROTTLE;
-        additions = 0;
-        match mempool
-            .clone()
-            .oneshot(mempool::Request::TransactionIds)
-            .await
-        {
-            Ok(mempool::Response::TransactionIds(ids)) if ids == *template_ids => {}
+        };
+        match result {
+            Ok(mempool::Response::TransactionIds(ids)) if ids == *template_ids => {
+                std::mem::swap(&mut delta, &mut during_check);
+                if demanded && delta.is_changed() {
+                    return;
+                }
+                cache.refresh_checked.send_replace(());
+            }
             Ok(mempool::Response::TransactionIds(_)) | Err(_) => return,
             Ok(_) => unreachable!("mempool must return transaction IDs for TransactionIds"),
         }

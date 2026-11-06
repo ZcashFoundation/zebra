@@ -479,14 +479,21 @@ async fn mempool_changes_compare_the_verified_set() {
         ))
     });
     let (events, mut receiver) = broadcast::channel(1);
+    let cache = TemplateCache::default();
     let changed = wait_for_mempool_change(
         &mut receiver,
         mempool,
         &template_ids,
         Instant::now(),
         Instant::now(),
+        &cache,
     );
     tokio::pin!(changed);
+    cache.refresh.notify_one();
+    assert!(
+        futures::poll!(&mut changed).is_pending(),
+        "a demand wake for membership already published must not start another build",
+    );
 
     for _ in 0..20 {
         events
@@ -506,32 +513,341 @@ async fn mempool_changes_compare_the_verified_set() {
             [rejected_id].into_iter().collect(),
         ))
         .unwrap();
-    tokio::time::advance(MEMPOOL_THROTTLE).await;
+    assert!(futures::poll!(&mut changed).is_pending());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    cache.refresh.notify_one();
     tokio::time::timeout(Duration::from_millis(1), changed)
         .await
-        .expect("a collateral eviction must wake the updater even when its ID was not announced");
+        .expect("demand must recheck a collateral eviction during the rejection-only pause");
 }
 
-/// Steady 20–100 tx/s flows use the short pause; a 9,000 tx/s burst waits for coalescing.
+/// Requests coalesce demand without doing their own membership scans, and wait only briefly.
+#[tokio::test(start_paused = true)]
+async fn demand_refresh_waits_for_changed_work_with_a_bounded_deadline() {
+    let cache = TemplateCache::default();
+    let _updater = cache.claim_updater().unwrap();
+    let initial = template();
+    cache.publish(initial.clone());
+    let start = Instant::now();
+    let first = cache.refresh_if_changed(&initial);
+    let second = cache.refresh_if_changed(&initial);
+    tokio::pin!(first, second);
+    assert!(futures::poll!(&mut first).is_pending());
+    assert!(futures::poll!(&mut second).is_pending());
+    cache.refresh.notified().await;
+    let wake = cache.refresh.notified();
+    tokio::pin!(wake);
+    assert!(
+        futures::poll!(&mut wake).is_pending(),
+        "requests share one wake"
+    );
+    let mut fresh = initial.clone();
+    fresh.long_poll_id.mempool_transaction_count += 1;
+    cache.publish(fresh);
+    first.await;
+    second.await;
+    assert_eq!(start.elapsed(), Duration::ZERO);
+
+    // A busy updater or stalled membership check cannot hold callers beyond the deadline.
+    cache.publish(initial.clone());
+    cache.refresh_if_changed(&initial).await;
+    assert_eq!(start.elapsed(), Duration::from_millis(5));
+}
+
+/// Known admissions bypass short, burst and proof-cost pauses without a separate membership scan.
+#[tokio::test(start_paused = true)]
+async fn demand_after_admissions_bypasses_the_rebuild_pause() {
+    for (batch_size, pause, stalled_check) in [
+        (1, MEMPOOL_SHORT_PAUSE, false),
+        (MEMPOOL_BURST_ADDITIONS, MEMPOOL_THROTTLE, false),
+        (1, Duration::from_secs(5), false),
+        (1, Duration::from_secs(5), true),
+    ] {
+        let cache = TemplateCache::default();
+        let _updater = cache.claim_updater().unwrap();
+        let initial = template();
+        cache.publish(initial.clone());
+        let template_ids = HashSet::new();
+        let ids: HashSet<_> = (0..batch_size)
+            .map(|index| {
+                let mut bytes = [0; 32];
+                bytes[..8].copy_from_slice(&u64::try_from(index).unwrap().to_le_bytes());
+                UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash(bytes))
+            })
+            .collect();
+        let mempool = tower::service_fn(|_| {
+            std::future::pending::<Result<mempool::Response, zebra_node_services::BoxError>>()
+        });
+        let (events, mut receiver) = broadcast::channel(1);
+        let finished = Instant::now();
+        let changed = wait_for_mempool_change(
+            &mut receiver,
+            mempool,
+            &template_ids,
+            finished + pause,
+            finished + pause,
+            &cache,
+        );
+        tokio::pin!(changed);
+        if stalled_check {
+            assert!(futures::poll!(&mut changed).is_pending());
+            tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+            cache.refresh.notify_one();
+            assert!(
+                futures::poll!(&mut changed).is_pending(),
+                "the fallback membership check is stalled"
+            );
+        }
+        let start = Instant::now();
+        events.send(MempoolChange::added(ids.clone())).unwrap();
+        let request = cache.refresh_if_changed(&initial);
+        tokio::pin!(request);
+        assert!(futures::poll!(&mut request).is_pending());
+        assert!(futures::poll!(&mut changed).is_ready());
+        let mut fresh = initial.clone();
+        fresh.long_poll_id = LongPollInput::new(
+            Height(initial.long_poll_id.tip_height),
+            initial.previous_block_hash,
+            initial.long_poll_id.max_timestamp.into(),
+            ids,
+        )
+        .generate_id();
+        cache.publish(fresh);
+        request.await;
+        assert_eq!(start.elapsed(), Duration::ZERO);
+    }
+}
+
+/// Opposite events cancel, but a remaining net membership change still bypasses pacing.
+#[tokio::test(start_paused = true)]
+async fn demand_ignores_cancelled_membership_changes() {
+    for (initially_present, net_change) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let cache = TemplateCache::default();
+        let a = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+        let b = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([2; 32]));
+        let template_ids = initially_present.then_some(a).into_iter().collect();
+        let mempool = tower::service_fn(|_| {
+            std::future::pending::<Result<mempool::Response, zebra_node_services::BoxError>>()
+        });
+        let (events, mut receiver) = broadcast::channel(4);
+        let start = Instant::now();
+        let changed = wait_for_mempool_change(
+            &mut receiver,
+            mempool,
+            &template_ids,
+            start + MEMPOOL_THROTTLE,
+            start + MEMPOOL_THROTTLE,
+            &cache,
+        );
+        tokio::pin!(changed);
+        for added in [!initially_present, initially_present] {
+            let ids = [a].into_iter().collect();
+            events
+                .send(if added {
+                    MempoolChange::added(ids)
+                } else {
+                    MempoolChange::invalidated(ids)
+                })
+                .unwrap();
+        }
+        if net_change {
+            // A remaining admission or an invalidated built transaction must refresh immediately.
+            events
+                .send(if initially_present {
+                    MempoolChange::invalidated([a].into_iter().collect())
+                } else {
+                    MempoolChange::added([b].into_iter().collect())
+                })
+                .unwrap();
+        }
+        let checked = cache.refresh_checked.subscribe();
+        cache.refresh.notify_one();
+        assert_eq!(
+            futures::poll!(&mut changed).is_ready(),
+            net_change,
+            "only a net change may bypass pacing"
+        );
+        assert_eq!(checked.has_changed().unwrap(), !net_change);
+        assert_eq!(start.elapsed(), Duration::ZERO);
+    }
+}
+
+/// Demand interrupts a stalled reconciliation once verified additions arrive.
+#[tokio::test(start_paused = true)]
+async fn demand_interrupts_a_background_membership_check() {
+    let cache = TemplateCache::default();
+    let template_ids = HashSet::new();
+    let added = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let reading = Arc::new(AtomicBool::new(false));
+    let observed_reading = reading.clone();
+    let mempool = tower::service_fn(move |_| {
+        observed_reading.store(true, Ordering::SeqCst);
+        std::future::pending::<Result<mempool::Response, zebra_node_services::BoxError>>()
+    });
+    let (events, mut receiver) = broadcast::channel(1);
+    let start = Instant::now();
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        start + MEMPOOL_SHORT_PAUSE,
+        start + MEMPOOL_THROTTLE,
+        &cache,
+    );
+    tokio::pin!(changed);
+    events
+        .send(MempoolChange::invalidated([added].into_iter().collect()))
+        .unwrap();
+    assert!(futures::poll!(&mut changed).is_pending());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    assert!(futures::poll!(&mut changed).is_pending());
+    assert!(reading.load(Ordering::SeqCst));
+    events
+        .send(MempoolChange::added([added].into_iter().collect()))
+        .unwrap();
+    cache.refresh.notify_one();
+    assert!(futures::poll!(&mut changed).is_ready());
+    assert_eq!(start.elapsed(), MEMPOOL_SHORT_PAUSE);
+}
+
+/// An unchanged read cannot erase notifications received after its snapshot.
+#[tokio::test(start_paused = true)]
+async fn unchanged_membership_reads_preserve_later_admissions() {
+    let cache = TemplateCache::default();
+    let template_ids = HashSet::new();
+    let added = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let rejected = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([2; 32]));
+    let release = Arc::new(Notify::new());
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mempool = tower::service_fn({
+        let release = release.clone();
+        let checks = checks.clone();
+        move |request| {
+            assert_eq!(request, mempool::Request::TransactionIds);
+            checks.fetch_add(1, Ordering::SeqCst);
+            let release = release.clone();
+            async move {
+                release.notified().await;
+                Ok::<_, zebra_node_services::BoxError>(mempool::Response::TransactionIds(
+                    HashSet::new(),
+                ))
+            }
+        }
+    });
+    let (events, mut receiver) = broadcast::channel(2);
+    let start = Instant::now();
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        start + MEMPOOL_SHORT_PAUSE,
+        start + MEMPOOL_THROTTLE,
+        &cache,
+    );
+    tokio::pin!(changed);
+    events
+        .send(MempoolChange::invalidated([rejected].into_iter().collect()))
+        .unwrap();
+    assert!(futures::poll!(&mut changed).is_pending());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    assert!(futures::poll!(&mut changed).is_pending());
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
+    events
+        .send(MempoolChange::added([added].into_iter().collect()))
+        .unwrap();
+    assert!(futures::poll!(&mut changed).is_pending());
+    release.notify_one();
+    assert!(futures::poll!(&mut changed).is_pending());
+    assert_eq!(checks.load(Ordering::SeqCst), 1, "checks remain coalesced");
+    cache.refresh.notify_one();
+    assert!(futures::poll!(&mut changed).is_ready());
+    assert_eq!(start.elapsed(), MEMPOOL_SHORT_PAUSE);
+}
+
+/// Concurrent and repeated unchanged demand shares bounded checks and never starts another build.
+#[tokio::test(start_paused = true)]
+async fn unchanged_demand_coalesces_membership_checks_without_rebuilding() {
+    let cache = TemplateCache::default();
+    let _updater = cache.claim_updater().unwrap();
+    let initial = template();
+    cache.publish(initial.clone());
+    // The latest build includes an admission, but its proposal check still leaves old work served.
+    let added = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let template_ids: HashSet<_> = [added].into_iter().collect();
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_checks = checks.clone();
+    let mempool = tower::service_fn(move |request| {
+        assert_eq!(request, mempool::Request::TransactionIds);
+        observed_checks.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+            mempool::Response::TransactionIds([added].into_iter().collect()),
+        ))
+    });
+    let (events, mut receiver) = broadcast::channel(1);
+    events
+        .send(MempoolChange::added(template_ids.clone()))
+        .unwrap();
+    let start = Instant::now();
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        start + MEMPOOL_THROTTLE,
+        start + MEMPOOL_THROTTLE,
+        &cache,
+    );
+    tokio::pin!(changed);
+    // Poll once so the helper records the initial snapshot deadline before advancing time.
+    assert!(futures::poll!(&mut changed).is_pending());
+    for (advance, expected_checks) in [
+        (Duration::ZERO, 0),
+        (MEMPOOL_SHORT_PAUSE, 1),
+        (Duration::ZERO, 1),
+    ] {
+        tokio::time::advance(advance).await;
+        let mut requests: Vec<_> = (0..100)
+            .map(|_| Box::pin(cache.refresh_if_changed(&initial)))
+            .collect();
+        for request in &mut requests {
+            assert!(futures::poll!(request).is_pending());
+        }
+        assert!(
+            futures::poll!(&mut changed).is_pending(),
+            "unchanged demand must not rebuild, even after the check deadline"
+        );
+        for request in requests {
+            request.await;
+        }
+        assert_eq!(checks.load(Ordering::SeqCst), expected_checks);
+    }
+    assert_eq!(start.elapsed(), MEMPOOL_SHORT_PAUSE);
+}
+
+/// Steady 20–100 tx/s flows rebuild without rereading known membership; bursts still coalesce.
 #[tokio::test(start_paused = true)]
 async fn mempool_arrivals_adapt_the_rebuild_pause() {
     for (interval_ms, batch_size, burst) in [(50u32, 1u32, false), (10, 1, false), (1, 9, true)] {
         let template_ids = HashSet::new();
-        let changed_id = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
-        let mempool = tower::service_fn(move |request| {
-            assert_eq!(request, mempool::Request::TransactionIds);
-            std::future::ready(Ok::<_, zebra_node_services::BoxError>(
-                mempool::Response::TransactionIds([changed_id].into_iter().collect()),
-            ))
-        });
+        let mempool =
+            tower::service_fn(
+                |request| -> std::future::Ready<
+                    Result<mempool::Response, zebra_node_services::BoxError>,
+                > {
+                    panic!("verified additions already establish changed membership: {request:?}")
+                },
+            );
         let (events, mut receiver) = broadcast::channel(1);
         let start = Instant::now();
+        let cache = TemplateCache::default();
         let changed = wait_for_mempool_change(
             &mut receiver,
             mempool,
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            &cache,
         );
         tokio::pin!(changed);
 
@@ -584,12 +900,14 @@ async fn mempool_buffered_bursts_extend_the_short_deadline() {
         });
         let (events, mut receiver) = broadcast::channel(1);
         let start = Instant::now();
+        let cache = TemplateCache::default();
         let changed = wait_for_mempool_change(
             &mut receiver,
             mempool,
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            &cache,
         );
         tokio::pin!(changed);
 
@@ -627,9 +945,9 @@ async fn mempool_buffered_bursts_extend_the_short_deadline() {
     }
 }
 
-/// Slow builds get an equal idle interval, including the backstop, but tip changes bypass it.
+/// Background slow builds are paced; tip changes and dirty demand bypass the remaining pause.
 #[tokio::test(start_paused = true)]
-async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
+async fn slow_builds_pace_background_refresh_but_not_dirty_demand_or_tip_changes() {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
     let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
@@ -650,7 +968,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
     )
     .unwrap();
 
-    for change_tip in [false, true] {
+    for (change_tip, demand) in [(false, false), (true, false), (false, true)] {
         let (state_tip, state_tip_rx) = watch::channel(hash);
         let read_state = tower::service_fn({
             let state_tip_rx = state_tip_rx.clone();
@@ -732,7 +1050,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
             network.clone(),
             miner_params,
             CoinbaseCache::default(),
-            cache,
+            cache.clone(),
             mempool,
             receiver,
             read_state,
@@ -764,6 +1082,8 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
             let new_hash = block::Hash([2; 32]);
             state_tip.send_replace(new_hash);
             tip_sender.send_best_tip_hash(new_hash);
+        } else if demand {
+            cache.refresh.notify_one();
         } else {
             tokio::time::advance(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)).await;
             assert_eq!(*builds.borrow(), 1, "the backstop must not bypass pacing");
@@ -782,16 +1102,41 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
         }
         tokio::time::timeout(Duration::from_millis(1), builds.changed())
             .await
-            .expect("the next build starts at its deadline, or immediately for a new tip")
+            .expect("the next build starts at its deadline, or immediately for demand or a new tip")
             .unwrap();
         assert_eq!(
             finished.elapsed(),
-            if change_tip {
+            if change_tip || demand {
                 Duration::ZERO
             } else {
                 slow_build
             },
         );
+        if demand {
+            // Requests arriving during a build leave at most one stale permit, not a build queue.
+            for _ in 0..100 {
+                cache.refresh.notify_one();
+            }
+            assert_eq!(*builds.borrow(), 2);
+            tokio::time::advance(slow_build).await;
+            tokio::time::timeout(Duration::from_millis(1), publications.changed())
+                .await
+                .expect("the demanded transaction-bearing template is published");
+            assert!(!cache
+                .template_for_tip(hash, &network, now)
+                .expect("the demanded template extends the current tip")
+                .transactions
+                .is_empty());
+            for _ in 0..100 {
+                cache.refresh.notify_one();
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                *builds.borrow(),
+                2,
+                "neither in-flight nor subsequent unchanged demand rebuilds the same membership"
+            );
+        }
         updater.abort();
     }
 }
@@ -1417,26 +1762,20 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
         ));
         // Resuming the old build must not lose a mempool change received during early work.
         tokio::time::timeout(Duration::from_secs(5), async {
-            mempool
-                .expect_request(mempool::Request::TransactionIds)
-                .await
-                .respond(mempool::Response::TransactionIds(
-                    [added_id].into_iter().collect(),
-                ));
+            let snapshot = mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await;
             // Restoration is observed near the resumed build's end; unpaced builds wait only
             // `MEMPOOL_THROTTLE`.
             assert!(
                 restored_at.elapsed() >= awaited_build / 2,
                 "the resumed build's earlier proof time must pace the next mempool build"
             );
-            mempool
-                .expect_request(mempool::Request::FullTransactions)
-                .await
-                .respond(mempool::Response::FullTransactions {
-                    transactions: Vec::new(),
-                    transaction_dependencies: Default::default(),
-                    last_seen_tip_hash: tip_hash,
-                });
+            snapshot.respond(mempool::Response::FullTransactions {
+                transactions: Vec::new(),
+                transaction_dependencies: Default::default(),
+                last_seen_tip_hash: tip_hash,
+            });
         })
         .await
         .expect("a retained build must process mempool changes before the periodic backstop");

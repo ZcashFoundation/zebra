@@ -199,9 +199,12 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     let mut inserted_ids = HashSet::new();
-    service
-        .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        genesis_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
     inserted_ids.insert(genesis_transaction.transaction.id);
 
     // Test `Request::TransactionIds`
@@ -271,7 +274,9 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         inserted_ids.insert(tx.transaction.id);
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service
+            .storage()
+            .insert(tx.clone(), Vec::new(), None, &mut HashSet::new());
     }
 
     // Test `Request::RejectedTransactionIds`
@@ -394,7 +399,12 @@ async fn mempool_expires_transactions_once_per_tip_height() {
         for transaction in [expiring_transaction, surviving_transaction] {
             mempool
                 .storage()
-                .insert(transaction, Vec::new(), Some(Height(1)))
+                .insert(
+                    transaction,
+                    Vec::new(),
+                    Some(Height(1)),
+                    &mut HashSet::new(),
+                )
                 .unwrap();
             for _ in 0..4 {
                 mempool.dummy_call().await;
@@ -449,6 +459,7 @@ async fn mempool_verified_transactions_for_block_returns_requested_subset() {
                     transaction.clone(),
                     Vec::new(),
                     (index == 0).then_some(Height(0)),
+                    &mut HashSet::new(),
                 )
                 .unwrap();
         }
@@ -503,7 +514,12 @@ async fn mempool_verified_transactions_for_block_requires_last_seen_tip() {
         let hash = transaction.transaction.id.mined_id();
         service
             .storage()
-            .insert(transaction, Vec::new(), Some(Height(0)))
+            .insert(
+                transaction,
+                Vec::new(),
+                Some(Height(0)),
+                &mut HashSet::new(),
+            )
             .unwrap();
         let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
         let ActiveState::Enabled {
@@ -590,7 +606,12 @@ async fn mempool_verified_transactions_for_block_rejects_oversized_batch() {
         let hash = transaction.transaction.id.mined_id();
         service
             .storage()
-            .insert(transaction, Vec::new(), Some(Height(0)))
+            .insert(
+                transaction,
+                Vec::new(),
+                Some(Height(0)),
+                &mut HashSet::new(),
+            )
             .unwrap();
         let parent_hash = service.latest_chain_tip.best_tip_hash().unwrap();
         let max_transactions = usize::try_from(Transaction::max_allocation()).unwrap();
@@ -658,7 +679,9 @@ async fn mempool_queue_single() -> Result<(), Report> {
     for tx in transactions.iter() {
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service
+            .storage()
+            .insert(tx.clone(), Vec::new(), None, &mut HashSet::new());
     }
 
     // Test `Request::Queue` for a new transaction
@@ -746,9 +769,12 @@ async fn mempool_service_stays_enabled_when_sync_status_falls_behind() -> Result
     assert!(service.is_enabled());
 
     // Insert the genesis block coinbase transaction into the mempool storage.
-    service
-        .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        genesis_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
 
     // Test if the mempool answers correctly (i.e. is enabled)
     let response = service
@@ -1991,7 +2017,12 @@ async fn mempool_reject_non_standard() -> Result<(), Report> {
     // Expect insertion to fail for non-standard transaction.
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2036,9 +2067,12 @@ async fn mempool_accept_standard_op_return() -> Result<(), Report> {
 
     service.enable(&mut recent_syncs).await;
 
-    service
-        .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)?;
+    service.storage().insert(
+        last_transaction.clone(),
+        Vec::new(),
+        None,
+        &mut HashSet::new(),
+    )?;
 
     Ok(())
 }
@@ -2085,7 +2119,12 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2140,7 +2179,12 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2187,7 +2231,12 @@ async fn mempool_reject_non_standard_scriptpubkey() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2236,7 +2285,12 @@ async fn mempool_reject_bare_multisig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2283,7 +2337,12 @@ async fn mempool_reject_large_multisig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2326,7 +2385,12 @@ async fn mempool_reject_large_scriptsig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2369,7 +2433,12 @@ async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard tx");
 
     assert_eq!(
@@ -2413,7 +2482,12 @@ async fn mempool_reject_too_many_sigops() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for too many sigops");
 
     assert_eq!(
@@ -2463,7 +2537,12 @@ async fn mempool_reject_non_standard_inputs() -> Result<(), Report> {
 
     let insert_err = service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .expect_err("expected insert to fail for non-standard inputs");
 
     assert_eq!(
