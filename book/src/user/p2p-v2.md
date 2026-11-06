@@ -126,7 +126,9 @@ version 2 peers are recorded in a separate version 2 address book.
 - **One connection per host across both protocols.** By design, Zebra keeps
   at most one connection to each IP address and port, whatever its protocol.
   Each protocol's dialer skips a host that the other protocol is already
-  connected to, so connections are not dropped and redialled. An existing
+  connected to, so connections are rarely dropped and redialled. A dial still
+  in progress doesn't count, so both protocols can occasionally dial one host
+  at once; Zebra then keeps the first connection and drops the other. An existing
   legacy connection is not replaced with a version 2 one: while Zebra has a
   legacy connection to a version 2 peer, configured or discovered, it dials
   that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
