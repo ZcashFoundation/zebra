@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Added
+body: Added the `miner-poll` binary, behind the default `miner-poll` feature, which encodes and checks miner ballots and tallies miner sentiment polls from the blocks of a `zebrad` node, as specified in the draft ZIP "Miner Sentiment Polling".
+time: 2026-11-04T02:41:23.591754607+01:00
