@@ -30,7 +30,7 @@ const WINDOW_START: u32 = 21;
 fn snapshot_marker_sets_the_history_capabilities() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
-    let (state, base) = snapshot_state(
+    let (mut state, base) = snapshot_state(
         cache.path().to_path_buf(),
         TIP,
         WINDOW_START,
@@ -39,11 +39,12 @@ fn snapshot_marker_sets_the_history_capabilities() {
     );
     assert_eq!(state.db.snapshot_base(), Some(base));
 
+    // The window is known from its start, but only the snapshot block has a body.
     let history = state.db.history_capabilities().unwrap();
     assert_eq!(
         history,
         HistoryCapabilities {
-            lowest_retained_height: Height(WINDOW_START),
+            lowest_retained_height: Height(TIP),
             lowest_known_height: Height(WINDOW_START),
             snapshot_base: Some(base),
         }
@@ -52,19 +53,22 @@ fn snapshot_marker_sets_the_history_capabilities() {
     assert!(history.knows_block(Height(0)));
     assert!(!history.knows_block(Height(WINDOW_START - 1)));
     assert!(history.knows_block(Height(WINDOW_START)));
-    assert!(history.has_block_body(Height(WINDOW_START)));
-    assert!(!history.has_block_body(Height(WINDOW_START - 1)));
+    assert!(history.has_block_body(Height(TIP)));
+    assert!(!history.has_block_body(Height(TIP - 1)));
+    assert!(!history.has_block_body(Height(WINDOW_START)));
 
-    // Pruning bodies above the window start raises the floor, but the window start stays known.
+    // Pruning the snapshot block's body after a commit above it raises the floor, but the window
+    // start stays known.
+    commit_child(&mut state, Coinbase::Branched, vec![]);
     let mut batch = DiskWriteBatch::new();
     batch.zs_delete_range(
         &state.db.cf_handle("tx_by_loc").unwrap(),
-        TransactionLocation::min_for_height(Height(WINDOW_START)),
-        TransactionLocation::min_for_height(Height(WINDOW_START + 3)),
+        TransactionLocation::min_for_height(Height(TIP)),
+        TransactionLocation::min_for_height(Height(TIP + 1)),
     );
     state.db.write_batch(batch).unwrap();
     let history = state.db.history_capabilities().unwrap();
-    assert_eq!(history.lowest_retained_height, Height(WINDOW_START + 3));
+    assert_eq!(history.lowest_retained_height, Height(TIP + 1));
     assert_eq!(history.lowest_known_height, Height(WINDOW_START));
     assert_eq!(history.snapshot_base, Some(base));
 }

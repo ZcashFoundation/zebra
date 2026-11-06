@@ -132,7 +132,7 @@ fn import_round_trip() {
     assert_eq!(
         state.db.history_capabilities().unwrap(),
         HistoryCapabilities {
-            lowest_retained_height: window_start(HEIGHT),
+            lowest_retained_height: HEIGHT,
             lowest_known_height: window_start(HEIGHT),
             snapshot_base: Some(base),
         }
@@ -440,13 +440,13 @@ fn tampered_address_balance_is_refused() {
     assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
 }
 
-/// A window block body whose transactions do not have the header's merkle
+/// A snapshot block body whose transactions do not have the header's merkle
 /// root is refused, even when its transaction index rows match it.
 #[test]
-fn tampered_window_body_is_refused() {
+fn tampered_snapshot_block_body_is_refused() {
     let _init_guard = zebra_test::init();
     let chain = fixture::chain();
-    let location = TransactionLocation::from_usize(Height(HEIGHT.0 - 1), 0).as_bytes();
+    let location = TransactionLocation::from_usize(HEIGHT, 0).as_bytes();
     let result = import_tampered(&chain, |records| {
         let body = record(records, ComponentId::Transactions, &location);
         let coinbase = Transaction::from_bytes(&body);
@@ -459,6 +459,27 @@ fn tampered_window_body_is_refused() {
         let index = records.get_mut(&ComponentId::TxLocByHash).unwrap();
         index.retain(|(hash, _)| *hash != old_hash.as_bytes());
         index.push((tampered.hash().as_bytes().to_vec(), location.to_vec()));
+    });
+    assert_eq!(refused_by(&result), ImportCheck::Window);
+}
+
+/// A snapshot that ships a window body below the snapshot block, which the
+/// importing node would never keep, is refused.
+#[test]
+fn window_body_below_the_snapshot_block_is_refused() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let below = Height(HEIGHT.0 - 1);
+    let body = fixture::rows(&chain.state, ComponentId::Transactions)
+        .into_iter()
+        .filter(|(key, _)| Height::from_bytes(&key[..3]) == below)
+        .collect::<Vec<_>>();
+    assert!(!body.is_empty(), "the fixture block below H has a body");
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::Transactions)
+            .unwrap()
+            .extend(body);
     });
     assert_eq!(refused_by(&result), ImportCheck::Window);
 }

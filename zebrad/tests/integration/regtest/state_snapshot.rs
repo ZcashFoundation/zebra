@@ -84,7 +84,7 @@ const L: u32 = H + 1 - NODE_NETWORK_LIMITED_BLOCKS;
 const RETENTION_A: u32 = 4_000;
 
 /// Node B's initial retention, larger than the chain through the spend block, so its floor stays
-/// at the window start through import, initial sync, and the first restart. The ongoing-pruning
+/// at the snapshot height through import, initial sync, and the first restart. The ongoing-pruning
 /// phase lowers it explicitly.
 const RETENTION_B: u32 = 5_000;
 
@@ -116,7 +116,7 @@ const _: () = assert!(
 );
 const _: () = assert!(
     RETENTION_B > H + BLOCKS_ABOVE_H + SEMANTIC_TAIL + 1,
-    "B's floor stays at L through the initial sync and first restart"
+    "B's floor stays at H through the initial sync and first restart"
 );
 const _: () = assert!(
     // u32 to usize is a lossless widening on every target Zebra supports.
@@ -716,18 +716,21 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(info["blocks"], tip_a);
         assert_eq!(info["bestblockhash"], tip_hash_a.to_string());
 
-        // Pruned history: the window `L..=H` and everything above it is complete, the heights
-        // below `L` have no bodies, and the retained floor is the window start.
+        // Pruned history: block `H` and everything above it is complete, the window `L..H` has
+        // hashes and headers but no bodies, and the retained floor is the snapshot height.
         assert_eq!(info["pruned"], true);
-        assert_eq!(info["pruneheight"], L);
-        for height in [L, H, tip_a] {
+        assert_eq!(info["pruneheight"], H);
+        for height in [H, tip_a] {
             let retained = b
                 .get_block(i32::try_from(height)?)
                 .await
                 .map_err(|err| eyre!(err))?
-                .expect("window and synced bodies are retained");
+                .expect("the snapshot block and synced bodies are retained");
             assert_eq!(retained.coinbase_height(), Some(Height(height)));
         }
+        // The snapshot ships no window body below `H`, so B downloaded none it would not keep.
+        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H - 1).await?;
         let header_hex: String = b
             .json_result_from_call("getblockheader", json!([H.to_string(), false]).to_string())
             .await
@@ -863,16 +866,16 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(restarted["blocks"], tip);
         assert_eq!(restarted["bestblockhash"], spend_block_hash.to_string());
         assert_eq!(restarted["pruned"], true);
-        assert_eq!(restarted["pruneheight"], L);
+        assert_eq!(restarted["pruneheight"], H);
 
         // The full semantic tail and the spend finalized one block and left a full non-finalized
-        // window, so the retention change below initially leaves the floor at `L`.
+        // window, so the retention change below initially leaves the floor at `H`.
         stop_node(node_b)?;
 
-        // Lower only B's retention so the current floor stays at `L`, then mine one block on B.
-        // The next finalized tip moves the floor to `L + 1`, proving that a snapshot-born node
+        // Lower only B's retention so the current floor stays at `H`, then mine one block on B.
+        // The next finalized tip moves the floor to `H + 1`, proving that a snapshot-born node
         // continues pruning newly finalized history after the import-specific checks above.
-        let ongoing_retention = tip + 1 - MAX_BLOCK_REORG_HEIGHT - L;
+        let ongoing_retention = tip + 1 - MAX_BLOCK_REORG_HEIGHT - H;
         config_b.state.prune_blocks_older_than = Some(ongoing_retention);
         let mut node_b = start_node(dir_b.replace_config(&mut config_b)?)?.with_failure_regex_set(
             regex::escape(&Stage::BootstrapStarted.to_string()),
@@ -887,16 +890,16 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         let ongoing_hashes = b.generate(1).await?;
         let ongoing_tip = tip + 1;
         let best_block_hash = *ongoing_hashes.last().expect("one block was generated");
-        let pruned = pruned_info(&b, L + 1).await?;
+        let pruned = pruned_info(&b, H + 1).await?;
         assert_eq!(pruned["blocks"], ongoing_tip);
         assert_eq!(pruned["bestblockhash"], best_block_hash.to_string());
-        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H).await?;
         let retained = b
-            .get_block(i32::try_from(L + 1)?)
+            .get_block(i32::try_from(H + 1)?)
             .await
             .map_err(|err| eyre!(err))?
             .expect("the new retained floor has a body");
-        assert_eq!(retained.coinbase_height(), Some(Height(L + 1)));
+        assert_eq!(retained.coinbase_height(), Some(Height(H + 1)));
         wait_for_height(&a, ongoing_tip, RELAY_TIMEOUT, "node A").await?;
         assert_eq!(block_hash(&a, ongoing_tip).await?, best_block_hash);
 
@@ -912,10 +915,10 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .expect("retain the state directory until the end");
         node_b.expect_stdout_line_matches(regex::escape(&SkipReason::ExistingState.to_string()))?;
         wait_for_mempool_activation(&b).await?;
-        let restarted = pruned_info(&b, L + 1).await?;
+        let restarted = pruned_info(&b, H + 1).await?;
         assert_eq!(restarted["blocks"], ongoing_tip);
         assert_eq!(restarted["bestblockhash"], best_block_hash.to_string());
-        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H).await?;
         stop_node(node_b)?;
         drop(dir_b);
 

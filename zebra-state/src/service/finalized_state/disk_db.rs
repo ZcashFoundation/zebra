@@ -1278,9 +1278,10 @@ impl DiskDb {
 
     /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
     ///
-    /// A database imported from a state snapshot has no blocks below its window start, so its
-    /// [`SnapshotBase`] marker anchors the suffix instead: the database counts as pruned, and
-    /// its bodies start at the window start or the first retained body above it. The marker must
+    /// A database imported from a state snapshot has no blocks below its window start, and no
+    /// bodies below the snapshot height, so its [`SnapshotBase`] marker anchors the suffix
+    /// instead: the database counts as pruned, its known heights start at the window start, and
+    /// its bodies start at the snapshot height or the first retained body above it. The marker must
     /// agree with the stored hash at its height.
     pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         let invalid = |source: BoxError| StateInitError::HistoryRead {
@@ -1319,7 +1320,7 @@ impl DiskDb {
         }
         if let Some(base) = snapshot_base {
             return Ok(HistoryCapabilities {
-                lowest_retained_height: location.height.max(base.window_start),
+                lowest_retained_height: location.height.max(base.body_start()),
                 lowest_known_height: base.window_start,
                 snapshot_base: Some(base),
             });

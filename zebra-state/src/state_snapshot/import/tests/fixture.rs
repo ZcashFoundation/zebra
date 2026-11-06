@@ -347,16 +347,18 @@ fn height_of(bytes: &[u8]) -> Height {
 }
 
 /// Selects the rows a snapshot at the tip of `state` ships, by the design's
-/// row-selection rules ("Snapshot contents"): genesis and the window `L..=H`
-/// in full, with the block info of `L - 1`; the transaction index rows of the stored blocks and
-/// of every transaction with an unspent output; the trees at genesis, at each
+/// row-selection rules ("Snapshot contents"): the hashes and headers of
+/// genesis and the window `L..=H`, with the block info of `L - 1`; the bodies
+/// of genesis and `H`; the transaction index rows of those bodies and of every
+/// transaction with an unspent output; the trees at genesis, at each
 /// subtree end, as of `L`, and above `L`; and every other component whole.
 pub(super) fn select(state: &FinalizedState) -> Records {
     use ComponentId::*;
 
     let (height, _) = state.db.tip().unwrap();
     let start = window_start(height);
-    let stored = |height: Height| height.is_min() || height >= start;
+    let in_window = |height: Height| height.is_min() || height >= start;
+    let stored = |block: Height| block.is_min() || block == height;
     let utxo_transactions: BTreeSet<Vec<u8>> = rows(state, Utxos)
         .into_iter()
         .map(|(key, _)| key[..5].to_vec())
@@ -366,13 +368,17 @@ pub(super) fn select(state: &FinalizedState) -> Records {
     for component in ComponentId::ALL {
         let all = rows(state, component);
         let selected: Vec<_> = match component {
-            HashByHeight | Headers | Transactions => all
+            HashByHeight | Headers => all
+                .into_iter()
+                .filter(|(key, _)| in_window(height_of(key)))
+                .collect(),
+            Transactions => all
                 .into_iter()
                 .filter(|(key, _)| stored(height_of(key)))
                 .collect(),
             HeightByHash => all
                 .into_iter()
-                .filter(|(_, value)| stored(height_of(value)))
+                .filter(|(_, value)| in_window(height_of(value)))
                 .collect(),
             BlockInfo => all
                 .into_iter()

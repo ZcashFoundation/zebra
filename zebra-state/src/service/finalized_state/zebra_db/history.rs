@@ -81,13 +81,18 @@ impl PruningWitness {
                 self.height = Some(height);
                 break;
             }
+            // A snapshot-imported database has no bodies below the snapshot height, so the walk
+            // stops there, before it reads an ancestor without a body.
+            if snapshot_base.is_some_and(|base| height == base.body_start()) {
+                break;
+            }
         }
-        // The walk ran off the bottom of a snapshot-imported database: the snapshot commitment
-        // pins the chain at the window start, so the restart check accepts reaching it (DESIGN §7).
+        // The walk reached the first body of a snapshot-imported database: the snapshot commitment
+        // pins the chain there, so the restart check accepts reaching it (DESIGN §7).
         if self.height.is_none() {
             self.height = snapshot_base
-                .map(|base| base.window_start)
-                .filter(|window_start| last_height == Some(*window_start));
+                .map(|base| base.body_start())
+                .filter(|body_start| last_height == Some(*body_start));
         }
         self.tip = Some(tip);
         Ok(self.height)

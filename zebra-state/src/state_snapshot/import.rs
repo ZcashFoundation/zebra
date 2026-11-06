@@ -61,9 +61,9 @@ mod tests;
 /// roots, one per bootstrap: `<cache_dir>/state-snapshot-import/<nonce>/`.
 pub const IMPORT_DIR: &str = "state-snapshot-import";
 
-/// The number of blocks below the snapshot height that a snapshot carries in
-/// full, with the block at the snapshot height: its window is `L..=H` with
-/// `L = max(1, H - 2303)` (design, "Snapshot contents").
+/// The number of block hashes and headers a snapshot carries, ending at the
+/// snapshot height: its window is `L..=H` with `L = max(1, H - 2303)` (design,
+/// "Snapshot contents").
 pub const WINDOW_BLOCKS: u32 = 2_304;
 
 /// The largest SST metadata file: two keys of at most a piece each, the piece
@@ -87,7 +87,7 @@ pub fn sst_path(temp_root: &Path, component: ComponentId, index: u32) -> PathBuf
 }
 
 /// Returns the window start `L` of a snapshot at `height`: the first height
-/// whose block the snapshot carries in full, `max(1, H - 2303)`.
+/// whose hash and header the snapshot carries, `max(1, H - 2303)`.
 pub fn window_start(height: block::Height) -> block::Height {
     block::Height(height.0.saturating_sub(WINDOW_BLOCKS - 1).max(1))
 }
@@ -155,8 +155,8 @@ pub enum ImportCheck {
     /// history tree commits to, and those roots are anchors.
     TreeRoots,
 
-    /// The window and genesis blocks are complete and chain to the snapshot
-    /// block.
+    /// The window headers chain to the snapshot block, and the genesis and
+    /// snapshot block bodies are complete.
     Window,
 
     /// Every stored transaction location has its hash and location index rows.

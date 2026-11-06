@@ -10,7 +10,7 @@
 //! # Manifest
 //!
 //! ```text
-//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (1)
+//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
 //! genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 //! [Regtest and custom testnets only: parameters_hash 32]
 //! component_count u16 (28), then each component in [`ComponentId`] order:
@@ -48,21 +48,26 @@ pub use canonical::canonical_value;
 /// The string every manifest starts with.
 pub const MAGIC: &[u8; 20] = b"ZEBRA-STATE-SNAPSHOT";
 
-/// The number of complete blocks a snapshot ships, ending at its height: the
-/// `NODE_NETWORK_LIMITED` window, so the importing node serves the recent
-/// blocks from the start (design, "Snapshot contents").
+/// The number of block hashes, headers and block infos a snapshot ships,
+/// ending at its height: the headers window, which gives the block after the
+/// snapshot its difficulty and time context, and `getblockheader` its answers
+/// (design, "Snapshot contents"). Only the snapshot block's body is shipped
+/// with them.
 pub const WINDOW_LEN: u32 = 2304;
 
-/// Returns the first height of the window of complete blocks that a snapshot
-/// at `height` ships: `L = max(1, H - 2303)`. Genesis is shipped as well.
+/// Returns the first height of the headers window that a snapshot at `height`
+/// ships: `L = max(1, H - 2303)`. Genesis is shipped as well.
 pub fn window_start(height: block::Height) -> block::Height {
     block::Height(height.0.saturating_sub(WINDOW_LEN - 1).max(1))
 }
 
 /// The snapshot format this code reads and writes. It changes only when the
-/// shipped encodings change; the importer maps it onto the running database
-/// format.
-pub const SNAPSHOT_FORMAT: u16 = 1;
+/// shipped components or encodings change; the importer maps it onto the
+/// running database format.
+///
+/// Format 2 ships the bodies of genesis and the snapshot block only, instead of
+/// the whole window's.
+pub const SNAPSHOT_FORMAT: u16 = 2;
 
 /// The largest manifest, 1 MiB: a manifest is fetched whole before it is
 /// decoded, so this bounds the download and the decode.
@@ -92,7 +97,7 @@ pub enum ComponentId {
     HeightByHash = 1,
     /// `block_header_by_height`.
     Headers = 2,
-    /// `tx_by_loc`: the bodies of the window blocks and genesis.
+    /// `tx_by_loc`: the bodies of genesis and the snapshot block.
     Transactions = 3,
     /// `hash_by_tx_loc`.
     HashByTxLoc = 4,

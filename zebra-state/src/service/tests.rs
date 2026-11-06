@@ -315,14 +315,30 @@ fn legacy_chain_accepts_reaching_the_snapshot_base() {
         .iter()
         .all(|block| block.transactions[0].network_upgrade().is_none()));
     let ancestors = || blocks.iter().rev().cloned().map(Ok);
-    let base = |window_start| SnapshotBase {
-        window_start: Height(window_start),
-        height: Height(10),
-        block_hash: blocks[9].hash(),
+    let base = |height: u32| SnapshotBase {
+        window_start: Height(1),
+        height: Height(height),
+        block_hash: blocks[height as usize - 1].hash(),
         manifest: zebra_chain::state_snapshot::ObjectHash([0; 32]),
         deferred_checks: 0,
     };
 
+    // The snapshot ships no body below its height, so the walk stops at the snapshot block
+    // without reading the next ancestor.
+    let unavailable = std::iter::once(Ok(blocks[9].clone())).chain(std::iter::once(Err(
+        crate::BlockReadError::BlockBodyUnavailable { height: Height(9) },
+    )));
+    assert_eq!(
+        super::check::legacy_chain(
+            Height(0),
+            unavailable,
+            &Network::Mainnet,
+            100,
+            Some(base(10))
+        )
+        .unwrap(),
+        Some(Height(10))
+    );
     assert_eq!(
         super::check::legacy_chain(
             Height(0),
@@ -334,12 +350,9 @@ fn legacy_chain_accepts_reaching_the_snapshot_base() {
         .unwrap(),
         Some(Height(1))
     );
-    for base in [None, Some(base(2)), Some(base(10))] {
-        let error =
-            super::check::legacy_chain(Height(0), ancestors(), &Network::Mainnet, 100, base)
-                .unwrap_err();
-        assert!(error.to_string().contains("ancestor history ended"));
-    }
+    let error = super::check::legacy_chain(Height(0), ancestors(), &Network::Mainnet, 100, None)
+        .unwrap_err();
+    assert!(error.to_string().contains("ancestor history ended"));
 }
 
 async fn test_populated_state_responds_correctly(

@@ -178,9 +178,10 @@ fn block_count(base: &SnapshotBase) -> u64 {
 /// Checks the genesis and window blocks (design, "Trust model and
 /// verification"): hashes and heights
 /// index exactly those blocks, the window headers chain to the snapshot block,
-/// the genesis block is the network's, every body's transactions match their
-/// index rows and their header's merkle root, and the block info covers the
-/// window and its parent.
+/// the genesis block is the network's, the genesis and snapshot block bodies
+/// are the only bodies, and their transactions match their index rows and
+/// their header's merkle root, and the block info covers the window and its
+/// parent.
 fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(), SnapshotError> {
     let fail = |detail: String| refused(ImportCheck::Window, detail);
 
@@ -263,6 +264,10 @@ fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(),
             Some(*hash)
         };
 
+        // Only genesis and the snapshot block have bodies.
+        if !height.is_min() && *height != base.body_start() {
+            continue;
+        }
         let txids = check_body(raw, *height, network, &mut recipients)?;
         let merkle_root: block::merkle::Root = txids.iter().copied().collect();
         if merkle_root != header.merkle_root {
@@ -291,7 +296,7 @@ fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(),
         if received.is_none_or(|received| received == 0) {
             return Err(refused(
                 ImportCheck::AddressIndex,
-                format!("{address} received an output in the window, but has no balance"),
+                format!("{address} received an output in the snapshot block, but has no balance"),
             ));
         }
     }
@@ -533,11 +538,11 @@ fn check_tree_roots(
     )
 }
 
-/// Checks that every transaction location below the window has a location
-/// index row that points back at it, so the two transaction indexes are each
-/// other's inverse, and that every address transaction row is for a
+/// Checks that every transaction location in a block without a body has a
+/// location index row that points back at it, so the two transaction indexes
+/// are each other's inverse, and that every address transaction row is for a
 /// transaction with a hash index row. [`check_window`] checks the rows of the
-/// stored blocks.
+/// stored bodies.
 fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), SnapshotError> {
     let fail = |detail: String| refused(ImportCheck::TransactionIndex, detail);
 
@@ -550,7 +555,7 @@ fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), Snapsho
                 "transaction location {location:?} is above the snapshot height"
             )));
         }
-        let stored = location.height.is_min() || location.height >= base.window_start;
+        let stored = location.height.is_min() || location.height == base.body_start();
         if !stored && raw.get(ComponentId::TxLocByHash, hash)?.as_deref() != Some(key) {
             return Err(fail(format!(
                 "the location index of transaction {} does not point at {location:?}",
@@ -807,7 +812,7 @@ pub(super) fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(
     let history = db.history_capabilities()?;
     if history.snapshot_base != Some(*base)
         || history.lowest_known_height != base.window_start
-        || history.lowest_retained_height != base.window_start
+        || history.lowest_retained_height != base.body_start()
     {
         return Err(fail(format!(
             "the database's history is {history:?}, not that of the snapshot {base:?}"

@@ -445,16 +445,21 @@ where
         if has_network_upgrade {
             return Ok(block.coinbase_height());
         }
+
+        // A snapshot-imported database has no bodies below the snapshot height, so the walk stops
+        // there, before it reads an ancestor without a body.
+        if snapshot_base.is_some_and(|base| last_height == Some(base.body_start())) {
+            break;
+        }
     }
 
-    // A snapshot-imported database knows no blocks below its window, so the iterator ends at the
-    // window start. The snapshot commitment pins the chain there, which the branch check would
-    // otherwise have to prove (DESIGN §7).
-    if let Some(window_start) = snapshot_base
-        .map(|base| base.window_start)
-        .filter(|window_start| last_height == Some(*window_start))
+    // The walk reached the first body of a snapshot-imported database. The snapshot commitment
+    // pins the chain there, which the branch check would otherwise have to prove (DESIGN §7).
+    if let Some(body_start) = snapshot_base
+        .map(|base| base.body_start())
+        .filter(|body_start| last_height == Some(*body_start))
     {
-        return Ok(Some(window_start));
+        return Ok(Some(body_start));
     }
 
     Err(
