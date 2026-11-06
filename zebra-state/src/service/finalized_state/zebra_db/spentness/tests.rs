@@ -1052,3 +1052,80 @@ async fn state_service_ignores_an_artifact_above_the_max_checkpoint() {
     assert_eq!(read_progress(read_state.db()).unwrap(), None);
     assert!(!read_state.has_incomplete_spentness_hints());
 }
+
+/// The spentness hint format is a reusable major upgrade, so no 29.x binary can
+/// open a database that might hold a partial hinted state through its
+/// minor-version downgrade path (F-342).
+#[test]
+fn spentness_format_is_a_reusable_major_upgrade() {
+    use semver::Version;
+
+    use crate::{
+        config::database_format_version_on_disk,
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{restorable_db_versions, ZebraDb},
+    };
+
+    let _init_guard = zebra_test::init();
+    let running_major = state_database_format_version_in_code().major;
+
+    assert!(
+        running_major > 29,
+        "29.x readers must not share a directory with hinted state"
+    );
+    assert!(
+        restorable_db_versions().contains(&running_major),
+        "v29 state is reused without a resync"
+    );
+
+    // A 29.1.0 database (the format before spentness hints) moves out of `state/v29`.
+    let fixture = Fixture::generated(None);
+    let network = &fixture.network;
+    let old_version = Version::new(29, 1, 0);
+    let old_db = ZebraDb::new(
+        &fixture.config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    old_db.update_format_version_on_disk(&old_version).unwrap();
+    old_db.mark_finished_format_upgrades();
+    drop(old_db);
+    assert_eq!(
+        database_format_version_on_disk(&fixture.config, STATE_DATABASE_KIND, 29, network).unwrap(),
+        Some(old_version),
+    );
+
+    let (mut state, mut writer) = fixture.open();
+    assert_eq!(
+        database_format_version_on_disk(&fixture.config, STATE_DATABASE_KIND, 29, network).unwrap(),
+        None,
+        "no 29.x binary can open the moved database"
+    );
+    assert!(database_format_version_on_disk(
+        &fixture.config,
+        STATE_DATABASE_KIND,
+        running_major,
+        network
+    )
+    .unwrap()
+    .is_some());
+
+    // Hinted construction on the (empty) moved database only ever exists in the new directory.
+    fixture.commit(&mut state, &mut writer, 0..=10);
+    assert!(has_incomplete_hints(&state));
+    assert!(!fixture
+        .config
+        .db_path(STATE_DATABASE_KIND, 29, network)
+        .exists());
+    assert!(fixture
+        .config
+        .db_path(STATE_DATABASE_KIND, running_major, network)
+        .exists());
+}
