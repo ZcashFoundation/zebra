@@ -72,7 +72,8 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Avoid repeatedly revalidating a body while retention capacity or its checkpoint ancestor recovers.
+/// Avoid repeatedly revalidating a body while retention capacity or its checkpoint ancestor
+/// recovers.
 const RESOURCE_PRESSURE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Errors that can occur while downloading and verifying a block.
@@ -97,7 +98,7 @@ pub enum BlockDownloadVerifyError {
     /// The sync pipeline stayed above its byte bound, so the block download was not started.
     ///
     /// The syncer keeps the hash, observes the blocks that finished meanwhile, and requests it
-    /// again (design §4.2 step 2).
+    /// again (memory page, "How the budget is split").
     #[error("sync pipeline is above its memory limit, deferring the block download: {hash:?}")]
     PipelineFull { hash: block::Hash },
 
@@ -382,7 +383,7 @@ where
     }
 
     /// Bounds the pipeline by `admission`'s byte bound: downloaded blocks are charged to it, and
-    /// new downloads wait for it (design §4.2 steps 1 and 2).
+    /// new downloads wait for it (memory page, "How the budget is split").
     pub(super) fn with_pipeline_admission(mut self, admission: PipelineAdmission) -> Self {
         self.admission = Some(admission);
         self
@@ -404,8 +405,9 @@ where
 
     /// Queue a block for download and verification.
     ///
-    /// If the pipeline has a byte bound, this method first waits for it (design §4.2 step 2),
-    /// returning [`BlockDownloadVerifyError::PipelineFull`] if it can't start the download.
+    /// If the pipeline has a byte bound, this method first waits for it (memory page, "How the
+    /// budget is split"), returning [`BlockDownloadVerifyError::PipelineFull`] if it can't start
+    /// the download.
     ///
     /// This method waits for the network to become ready, returning an error if readiness fails
     /// or the download deadline expires. It returns immediately after queuing the request.
@@ -420,7 +422,7 @@ where
     /// bound.
     ///
     /// For blocks the verifier is already waiting for: the genesis block, and blocks the syncer
-    /// re-obtains after their download failed (design §4.2 step 2).
+    /// re-obtains after their download failed (memory page, "How the budget is split").
     pub async fn download_and_verify_exempt(
         &mut self,
         hash: block::Hash,
@@ -658,8 +660,8 @@ where
                     // Peers legitimately serve genuinely old blocks: the syncer tolerates an
                     // out-of-order first hash in `FindBlocks` responses, so a requested hash can
                     // resolve to an old side-chain block that an honest peer still has. Those
-                    // responses are consistent with their parent, or have a parent we don't hold, so
-                    // they are dropped without scoring.
+                    // responses are consistent with their parent, or have a parent we don't hold,
+                    // so they are dropped without scoring.
                     let advertiser_addr = match advertiser_addr {
                         Some(advertiser_addr) => match timeout(
                             PARENT_LOOKUP_TIMEOUT,

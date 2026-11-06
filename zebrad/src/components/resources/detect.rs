@@ -12,12 +12,12 @@ use color_eyre::{eyre::eyre, Report};
 mod tests;
 
 /// Returns the memory available to this process, in bytes: the smaller of the host's total
-/// memory and this process's cgroup memory limit (design §2.2).
+/// memory and this process's cgroup memory limit (memory page, "Setting a budget").
 ///
 /// # Errors
 ///
 /// If the available memory cannot be detected. Detection reads `/proc` and `/sys/fs/cgroup`, so
-/// it is only supported on Linux; elsewhere `"auto"` asks for an explicit budget (D9).
+/// it is only supported on Linux; elsewhere `"auto"` asks for an explicit budget.
 pub fn detect() -> Result<u64, Report> {
     #[cfg(target_os = "linux")]
     {

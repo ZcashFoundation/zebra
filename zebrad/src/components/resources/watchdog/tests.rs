@@ -161,7 +161,7 @@ fn sample(now: Instant, rss_anon_bytes: u64) -> Sample {
 }
 
 /// `malloc_trim` runs on the rising edge out of normal pressure, at most once every 10 minutes
-/// (design §4.7, P14).
+/// (memory page, "Allocator").
 #[test]
 fn trims_on_the_rising_edge_at_most_every_ten_minutes() {
     let _init_guard = zebra_test::init();
@@ -221,7 +221,7 @@ fn without_a_budget_the_watchdog_only_observes() {
 }
 
 /// An initial sync node switches to the tip-only plan when its tip reaches the last checkpoint,
-/// once (design §2.3 step 3).
+/// once (memory page, "How the budget is split").
 #[test]
 fn switches_to_tip_only_at_the_last_checkpoint() {
     let _init_guard = zebra_test::init();
@@ -352,7 +352,7 @@ async fn profile_change_resizes_pipeline_database_and_non_finalized_target() {
     assert_eq!(resident.load(Ordering::SeqCst), expected_resident);
 }
 
-/// RocksDB's memory above its share of the plan is reported once per crossing (P10).
+/// RocksDB's memory above its share of the plan is reported once per crossing.
 #[test]
 fn reports_rocksdb_crossing_its_share_once() {
     let _init_guard = zebra_test::init();

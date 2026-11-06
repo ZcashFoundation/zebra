@@ -34,7 +34,7 @@ fn resolve(
     .map(|settings| settings.expect("the config has a budget"))
 }
 
-/// Without a budget, the plan is today's limits and nothing is detected (D1).
+/// Without a budget, the plan is today's limits and nothing is detected.
 #[test]
 fn absent_budget_is_a_strict_no_op() {
     let _init_guard = zebra_test::init();
@@ -72,7 +72,7 @@ fn explicit_budget_opens_the_profile_it_covers() {
 }
 
 /// `"auto"` budgets half of the detected memory, raises a small host's budget to the initial
-/// sync minimum with a warning, and refuses a host below it (design §2.2).
+/// sync minimum with a warning, and refuses a host below it (memory page, "Setting a budget").
 #[test]
 fn auto_budget_follows_the_detected_memory() {
     let _init_guard = zebra_test::init();
@@ -128,7 +128,8 @@ fn oversized_budget_is_a_warning() {
 }
 
 /// A limit set explicitly in another section wins over the derived one, with a warning when it
-/// is above it; an explicit default is treated as unset (design §2.5).
+/// is above it; an explicit default is treated as unset (memory page, "Settings that win over the
+/// budget").
 #[test]
 fn explicit_limits_win_over_derived_limits() {
     let _init_guard = zebra_test::init();
@@ -184,7 +185,7 @@ fn explicit_limits_win_over_derived_limits() {
 }
 
 /// A budget below the floors is refused with the shortfall, unless `--unsafe-low-specs` runs
-/// every component at its floor, with one warning (design §2.3 step 5, D4).
+/// every component at its floor, with one warning (memory page, "How the budget is split").
 #[test]
 fn below_floor_budgets_are_refused_unless_unsafe() {
     let _init_guard = zebra_test::init();
@@ -214,7 +215,7 @@ fn below_floor_budgets_are_refused_unless_unsafe() {
     );
 }
 
-/// Once the state is open, a tip-only node below the last checkpoint is refused (D15), and an
+/// Once the state is open, a tip-only node below the last checkpoint is refused, and an
 /// initial sync node at the tip switches to the tip-only profile.
 #[test]
 fn profile_after_open_follows_the_state_tip() {
@@ -306,7 +307,7 @@ fn plan_inputs_follow_the_config() {
 }
 
 /// The startup line names the budget, the profile and every component's share and settings
-/// (design §5).
+/// (memory page, "Monitoring").
 #[test]
 fn startup_summary_lists_every_component() {
     let _init_guard = zebra_test::init();
@@ -373,7 +374,7 @@ fn operator_arena_caps_are_detected() {
 }
 
 /// A budget sets the derived arena cap, unless the operator set one; without a budget the cap
-/// is left alone (design §4.7).
+/// is left alone (memory page, "Allocator").
 #[test]
 fn arena_cap_needs_a_budget_and_no_operator_cap() {
     let _init_guard = zebra_test::init();

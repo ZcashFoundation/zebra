@@ -2,6 +2,9 @@
 //! limits of every component.
 //!
 //! Without a budget, which is the default, every component keeps today's limits.
+//!
+//! References like `(memory page, "How the budget is split")` in the memory budget's code, here and
+//! in the crates it bounds, name the sections of the memory page, `book/src/user/memory.md`.
 
 use std::thread::available_parallelism;
 
@@ -45,7 +48,7 @@ pub enum BudgetSource {
 }
 
 /// The limits an operator set in other config sections, which win over the limits a budget
-/// derives (design §2.5).
+/// derives (memory page, "Settings that win over the budget").
 ///
 /// A field is explicit when its value differs from its default: an explicit default cannot be
 /// told apart from an absent field, so it is treated as unset.
@@ -58,7 +61,8 @@ pub struct ExplicitLimits {
     pub peerset_initial_target_size: Option<usize>,
 
     /// Whether the operator set glibc's malloc arena cap with `MALLOC_ARENA_MAX` or the
-    /// `glibc.malloc.arena_max` tunable, which wins over the derived cap (design §4.7).
+    /// `glibc.malloc.arena_max` tunable, which wins over the derived cap (memory page,
+    /// "Allocator").
     pub malloc_arena_max: bool,
 }
 
@@ -115,7 +119,8 @@ fn environment_has_malloc_arena_override() -> bool {
 }
 
 /// Lowers glibc's malloc arena cap to `clamp(cores / 4, 2, 16)` when `config` sets a memory
-/// budget and the operator did not set the cap, and returns the cap it set (design §4.7, P8).
+/// budget and the operator did not set the cap, and returns the cap it set (memory page,
+/// "Allocator").
 ///
 /// Existing arenas never shrink, so this must run before the rayon and tokio threads start:
 /// `main()` has set the default cap of 16 by then, and only the main and tracing threads exist.
@@ -248,7 +253,7 @@ impl BudgetSettings {
     }
 
     /// Returns the profile a node opens its state with: `Ibd` when the budget covers its
-    /// floors, or `TipOnly` (design §2.3 step 3).
+    /// floors, or `TipOnly` (memory page, "How the budget is split").
     pub fn initial_profile(&self) -> Profile {
         Profile::for_budget(self.budget, &self.inputs)
     }
@@ -261,8 +266,8 @@ impl BudgetSettings {
     /// Derives the plan for `profile`, and returns it with the warnings to log about it.
     ///
     /// Below the floors, `--unsafe-low-specs` runs every component at its floor with a warning
-    /// (design §2.3 step 5, D4). Explicit limits win over derived ones, with a warning when they
-    /// are above them (§2.5).
+    /// (memory page, "How the budget is split"). Explicit limits win over derived ones, with a
+    /// warning when they are above them (memory page, "Settings that win over the budget").
     ///
     /// # Errors
     ///
@@ -315,7 +320,7 @@ impl BudgetSettings {
     }
 
     /// Returns the profile a node runs with once its state is open, given its state tip and the
-    /// last checkpoint (design §2.3 step 3, D15):
+    /// last checkpoint (memory page, "How the budget is split"):
     ///
     /// - a `TipOnly` node below the last checkpoint is refused, because initial sync needs the
     ///   `Ibd` floors, unless `--unsafe-low-specs` runs it anyway;
@@ -439,7 +444,7 @@ pub fn checkpoint_sync_engine_config(
     engine
 }
 
-/// Returns the refusal of a node at a tip-only budget that needs initial sync (D15).
+/// Returns the refusal of a node at a tip-only budget that needs initial sync.
 pub fn ibd_refusal(minimums: &MinimumBudgets) -> String {
     format!(
         "IBD needs >= {}: sync from a snapshot or raise the budget",
@@ -447,7 +452,7 @@ pub fn ibd_refusal(minimums: &MinimumBudgets) -> String {
     )
 }
 
-/// Returns the one-line summary of `plan` that zebrad logs at startup (design §5).
+/// Returns the one-line summary of `plan` that zebrad logs at startup (memory page, "Monitoring").
 pub fn startup_summary(
     plan: &MemoryPlan,
     settings: &BudgetSettings,
@@ -546,7 +551,7 @@ impl MemoryResources {
 }
 
 /// Resolves the memory budget of `config` into the plan the node opens with, and logs the plan
-/// and every warning about it (design §2.4).
+/// and every warning about it (memory page, "Settings that win over the budget").
 ///
 /// Without a budget, the plan is [`MemoryPlan::default()`]: every component keeps today's
 /// limits. This reads `/proc` and `/sys/fs/cgroup` for an `"auto"` budget, so async callers run

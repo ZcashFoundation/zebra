@@ -231,7 +231,8 @@ fn render_section(options: &OptionsFile, section: &str) -> String {
 ///
 /// The value follows the process limit, so it is host-dependent: today's rule gives the
 /// database half the files above Zebra's reserved count, and never an infinite table cache
-/// (which would load every table reader at open). No memory limit changes it (design §4.1 P7).
+/// (which would load every table reader at open). No memory limit changes it (memory page, "How the
+/// budget is split").
 fn assert_todays_max_open_files(options: &OptionsFile) {
     let expected_open_files =
         DiskDb::get_db_open_file_limit(DiskDb::increase_open_file_limit()).to_string();
@@ -298,7 +299,7 @@ fn block_cache_capacity(db: &DiskDb, column_family: &str) -> u64 {
 }
 
 /// The default limits must reproduce today's options exactly: a `[resources]` section that is
-/// absent from the config is a strict no-op (design §2.1, §6.1).
+/// absent from the config is a strict no-op (memory page, "Setting a budget").
 #[test]
 fn default_limits_reproduce_todays_options() {
     let _init_guard = zebra_test::init();
@@ -360,7 +361,7 @@ fn default_limits_reproduce_todays_options() {
 
 /// The default limits write today's whole OPTIONS file, not only the memory options above: every
 /// option of the database and of the state column families is in the snapshot, which was
-/// checked against the OPTIONS file of the code before the limits existed (design §0, §6.1).
+/// checked against the OPTIONS file of the code before the limits existed.
 #[test]
 fn default_limits_write_todays_options_file() {
     let _init_guard = zebra_test::init();
@@ -423,7 +424,7 @@ fn default_limits_write_todays_options_file() {
 }
 
 /// The per-column-family memtable shape is derived from the write buffer total so that
-/// natural flushes lead and the manager is the backstop (design §4.1).
+/// natural flushes lead and the manager is the backstop (memory page, "How the budget is split").
 #[test]
 fn write_buffer_total_derives_the_memtable_shape() {
     let _init_guard = zebra_test::init();
@@ -531,7 +532,8 @@ fn write_buffer_total_derives_the_memtable_shape() {
 }
 
 /// A block cache size creates one cache shared by every column family, and the index and
-/// filter blocks are charged to it on exactly the read-path column families (design §4.1).
+/// filter blocks are charged to it on exactly the read-path column families (memory page, "How the
+/// budget is split").
 #[test]
 fn block_cache_is_shared_and_charged_on_exactly_the_read_path_cfs() {
     let _init_guard = zebra_test::init();
@@ -634,7 +636,7 @@ fn charging_without_a_cache_size_shares_a_default_sized_cache() {
 
 /// The state service's entry point, which also takes the debug and read-only settings, opens
 /// the database with the limits it is given, for the read-write state and for a read-only
-/// secondary (design §2.4: `init_with_limits` and `init_read_only` open the state through it).
+/// secondary: `init_with_limits` and `init_read_only` open the state through it.
 #[test]
 fn new_with_debug_and_limits_bounds_read_write_and_read_only_states() {
     let _init_guard = zebra_test::init();
@@ -686,7 +688,7 @@ fn new_with_debug_and_limits_bounds_read_write_and_read_only_states() {
 
 /// A profile change resizes the write buffer manager, the block cache and the memtable shape
 /// of an open database, and leaves the open-time limits and the options that are fixed at open
-/// alone (design §2.3 step 3, §4.1).
+/// alone (memory page, "How the budget is split").
 #[test]
 fn apply_memory_limits_resizes_the_manager_cache_and_memtables() {
     let _init_guard = zebra_test::init();
@@ -823,8 +825,8 @@ fn apply_memory_limits_skips_what_cannot_change_live() {
     assert_eq!(block_cache_capacity(&secondary, "tx_by_loc"), 128 * MIB);
 }
 
-/// The async entry point applies new limits on a blocking thread (design §4.1 "Live resizing":
-/// zebrad's resize task calls it when the memory profile changes).
+/// The async entry point applies new limits on a blocking thread: zebrad's resize task calls it
+/// when the memory profile changes.
 #[tokio::test]
 async fn spawn_apply_memory_limits_resizes_an_open_state() {
     let _init_guard = zebra_test::init();
@@ -1046,7 +1048,7 @@ fn commit_bulky_blocks(
 
 /// Under a 64 MiB write buffer total, a few hundred blocks commit without a write stall: the
 /// memtable shape derived from the total lets the natural flushes lead and the manager's extra
-/// flushes keep up (design §4.1 P1; §6.3 asserts the same gauges on a budgeted node).
+/// flushes keep up (memory page, "How the budget is split").
 #[test]
 fn bounded_database_commits_blocks_without_write_stalls() {
     let _init_guard = zebra_test::init();
@@ -1088,7 +1090,7 @@ fn bounded_database_commits_blocks_without_write_stalls() {
 
 /// A write buffer total below the hot column families' memtables makes the manager, not the
 /// natural flush points, trigger most flushes; it flushes the oldest memtable instead of
-/// stalling writers (`allow_stall = false`, design §4.1).
+/// stalling writers (`allow_stall = false`, memory page, "How the budget is split").
 #[test]
 fn write_buffer_manager_flushes_instead_of_stalling() {
     let _init_guard = zebra_test::init();

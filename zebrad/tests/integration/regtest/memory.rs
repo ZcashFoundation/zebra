@@ -1,5 +1,5 @@
 //! Regtest nodes under a memory budget, inside a cgroup memory limit when systemd's user manager
-//! can create one (design §6.3).
+//! can create one.
 //!
 //! Without a user manager the nodes run without a memory limit, and the tests check only what
 //! the node itself reports.
@@ -177,7 +177,7 @@ fn budget_config(budget: MemoryBudget, rpc_port: u16, metrics_port: u16) -> Resu
 
 /// Starts a node with `budget_mib` inside a cgroup limited to the budget plus
 /// [`CGROUP_HEADROOM`], mines `blocks`, and checks it stays within its memory and exports the
-/// memory metrics (design §6.3 cases (a) and (d)).
+/// memory metrics.
 ///
 /// `profile` is the profile the budget opens with; Regtest's only checkpoint is its genesis
 /// block, so a node always switches to, or stays at, the tip-only profile once its state opens.
@@ -290,7 +290,7 @@ async fn mine_within_budget(budget_mib: u64, profile: &str, blocks: u32) -> Resu
 }
 
 /// A node at the 1,113 MiB initial sync minimum mines a few hundred blocks inside a cgroup
-/// limited to its budget, without being OOM-killed (design §6.3 case (a), at the `Ibd` tier).
+/// limited to its budget, without being OOM-killed, at the `Ibd` tier.
 #[tokio::test(flavor = "multi_thread")]
 async fn ibd_minimum_budget_mines_blocks_within_its_cgroup() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -299,8 +299,7 @@ async fn ibd_minimum_budget_mines_blocks_within_its_cgroup() -> Result<()> {
 }
 
 /// A node at a 1 GiB tip-only budget starts on Regtest, whose only checkpoint is genesis, so the
-/// initial sync refusal does not apply, and mines blocks inside its cgroup (design §6.3 case
-/// (a), D15).
+/// initial sync refusal does not apply, and mines blocks inside its cgroup.
 #[tokio::test(flavor = "multi_thread")]
 async fn tip_only_budget_starts_on_regtest() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -309,7 +308,7 @@ async fn tip_only_budget_starts_on_regtest() -> Result<()> {
 }
 
 /// A tip-only budget refuses a node whose state is below the last checkpoint, once the state is
-/// open (D15). Testnet has checkpoints above genesis, and the node needs no peers to refuse.
+/// open. Testnet has checkpoints above genesis, and the node needs no peers to refuse.
 #[test]
 fn tip_only_budget_refuses_initial_sync() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -379,8 +378,7 @@ fn checkpoint_gap_guard_only_applies_to_budgeted_ibd() -> Result<()> {
     Ok(())
 }
 
-/// A budget below the floors refuses to start, listing the shortfall (design §6.3 case (b),
-/// D4).
+/// A budget below the floors refuses to start, listing the shortfall.
 #[test]
 fn below_floor_budget_refuses_to_start() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -461,7 +459,7 @@ fn budget_shortfall_precedes_snapshot_bootstrap() -> Result<()> {
 }
 
 /// `--unsafe-low-specs` starts a node below the floors, with every component at its floor and
-/// a warning (design §6.3 case (c), D4).
+/// a warning.
 #[test]
 fn unsafe_low_specs_starts_below_the_floors() -> Result<()> {
     let _init_guard = zebra_test::init();

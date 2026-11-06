@@ -1095,7 +1095,7 @@ fn config_zebra_state_cache_dir_env() {
 }
 
 /// The memory budget can be set from the environment, which is how the Docker memory tests set
-/// it (design §2.1, §6.4); a number without a unit is still rejected.
+/// it (memory page, "Setting a budget"); a number without a unit is still rejected.
 #[test]
 fn config_zebra_resources_memory_budget_env() {
     use zebrad::components::resources::MemoryBudget;
