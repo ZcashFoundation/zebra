@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added bilateral opt-in early block relay, negotiated connection metadata, and authorized block serving ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).
+time: 2026-11-05T06:31:40.78604682+01:00
