@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce startup resident memory by loading only pinned Sapling verifying keys; bundled output proving parameters are loaded only for Sapling coinbase payouts.
+time: 2026-11-06T16:09:48.299509562+01:00

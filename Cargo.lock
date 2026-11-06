@@ -7418,6 +7418,8 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
+ "wagyu-zcash-parameters",
+ "wagyu-zcash-parameters-6",
  "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
