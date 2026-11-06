@@ -1,4 +1,4 @@
 project: zebrad-api
 kind: Added
-body: '`components::inbound::Inbound::with_early_blocks` and `components::sync::gossip_early_blocks` serve and announce authenticated early-relay blocks from a `zebra_state::EarlyRelayCache` ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).'
+body: '`components::inbound::Inbound::with_early_blocks` serves authenticated early-relay blocks from a `zebra_state::EarlyRelayCache` ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).'
 time: 2026-11-17T14:59:25.849322086+01:00

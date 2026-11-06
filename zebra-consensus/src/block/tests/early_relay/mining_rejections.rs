@@ -214,6 +214,7 @@ async fn ordinary_and_mined_forged_bodies_do_not_reject_genuine_mining_work() {
                 .oneshot(zs::Request::EarlyRelay {
                     block: block.clone(),
                     require_authentication: true,
+                    origin: zs::EarlyRelayOrigin::Peer,
                 })
                 .await
                 .unwrap()
