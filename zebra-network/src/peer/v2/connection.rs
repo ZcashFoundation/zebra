@@ -767,9 +767,12 @@ where
         let (tx, rx) = oneshot::channel();
         let request = Request::Peers;
         let tx = MustUseClientResponseSender::new(tx, &request, None, Some(source));
+        // The guard is created before the task is spawned, so if the task is aborted before it
+        // first runs, dropping it still answers `rx`.
+        let guard = outbound::ResponseGuard::new(tx);
         let context = self.request_context();
         self.tasks.spawn(async move {
-            outbound::drive(request, outbound::ResponseGuard::new(tx), permit, context).await;
+            outbound::drive(request, guard, permit, context).await;
             if let Ok(Ok(Response::Peers(addrs))) = rx.await {
                 book.intake(source, addrs, Via::GetAddr);
             }
