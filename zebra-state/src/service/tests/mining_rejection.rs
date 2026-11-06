@@ -473,6 +473,7 @@ async fn side_fork_child_authenticates_and_remembers_rejection() {
             .oneshot(Request::EarlyRelay {
                 block: child,
                 require_authentication: true,
+                origin: crate::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap()

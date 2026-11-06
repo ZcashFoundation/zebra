@@ -236,6 +236,7 @@ async fn early_relay_rejects_forged_authorizing_data_before_transactions() {
             .oneshot(zs::Request::EarlyRelay {
                 block: block.clone(),
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap();
@@ -269,6 +270,7 @@ async fn early_relay_rejects_forged_authorizing_data_before_transactions() {
             .oneshot(zs::Request::EarlyRelay {
                 block,
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap()
@@ -320,6 +322,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
             .oneshot(zs::Request::EarlyRelay {
                 block: child.clone(),
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap();
@@ -330,6 +333,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
             .oneshot(zs::Request::EarlyRelay {
                 block: parent.clone(),
                 require_authentication: false,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap();
@@ -349,6 +353,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
             .oneshot(zs::Request::EarlyRelay {
                 block: child.clone(),
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap();
@@ -363,6 +368,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
                 .oneshot(zs::Request::EarlyRelay {
                     block: child,
                     require_authentication: false,
+                    origin: zs::EarlyRelayOrigin::Peer,
                 })
                 .await
                 .unwrap(),
@@ -374,6 +380,7 @@ async fn early_relay_unknown_and_non_tip_parents_do_not_reserve_publication() {
             .oneshot(zs::Request::EarlyRelay {
                 block: next.clone(),
                 require_authentication: false,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap();
@@ -478,6 +485,7 @@ async fn early_relay_cancelled_verifier_withdraws_body() {
             .oneshot(zs::Request::EarlyRelay {
                 block,
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap()
@@ -532,6 +540,7 @@ async fn early_relay_rejects_locally_invalidated_hash() {
                 .oneshot(zs::Request::EarlyRelay {
                     block: block.clone(),
                     require_authentication,
+                    origin: zs::EarlyRelayOrigin::Peer,
                 })
                 .await
                 .unwrap_err()
