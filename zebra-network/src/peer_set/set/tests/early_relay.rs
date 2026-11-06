@@ -15,6 +15,81 @@ use crate::{
 
 use super::*;
 
+/// Early fanout excludes its supplier, including sidecars, but committed gossip still reaches it.
+#[tokio::test(start_paused = true)]
+async fn early_block_advert_excludes_supplier_but_not_other_peers_or_committed_gossip() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(2), async {
+        let addrs: Vec<PeerSocketAddr> = ["127.0.0.1:1", "127.0.0.2:1"]
+            .into_iter()
+            .map(|addr| addr.parse().unwrap())
+            .collect();
+        let mut discovered = Vec::new();
+        let mut connections = Vec::new();
+        let mut messages = Vec::new();
+        let mut harnesses = Vec::new();
+        for addr in &addrs {
+            let (client, harness, connection, wire) = real_advert_peer_with_authorization(
+                CURRENT_NETWORK_PROTOCOL_VERSION,
+                true,
+                MinimumPeerVersion::new(NoChainTip, &Network::Mainnet),
+                watch::channel(crate::BanList::default()).1,
+            );
+            discovered.push(Ok::<_, BoxError>(Change::Insert(*addr, client.into())));
+            connections.push(connection);
+            messages.push(wire);
+            harnesses.push(harness);
+        }
+        let (mut peer_set, _guard) = PeerSetBuilder::new()
+            .with_discover(stream::iter(discovered).chain(stream::pending()))
+            .with_minimum_peer_version(MinimumPeerVersion::new(NoChainTip, &Network::Mainnet))
+            .with_block_gossip_peer_ips(addrs.iter().map(|addr| addr.ip()).collect())
+            .build();
+        peer_set.ready().await.unwrap();
+        let tasks: Vec<_> = connections.into_iter().map(tokio::spawn).collect();
+        for wire in &mut messages {
+            assert_eq!(
+                wire.next().await,
+                Some(Message::SendCompact {
+                    high_bandwidth: true,
+                    version: 1,
+                })
+            );
+        }
+        let mut advertiser = peer_set.block_advertiser();
+        let (_network, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+        let hash = block::Hash([26; 32]);
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseEarlyBlock(hash, Some(addrs[0])));
+        let (result, message) = tokio::join!(advert, messages[1].next());
+        assert_eq!(result.unwrap(), Response::Nil);
+        assert_eq!(message, Some(Message::Inv(vec![hash.into()])));
+        assert!(
+            messages[0].try_recv().is_err(),
+            "the supplier must not receive its own early block",
+        );
+
+        let advert = advertiser
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::AdvertiseBlockToAll(hash));
+        let (source, others) = messages.split_at_mut(1);
+        let (result, source, other) = tokio::join!(advert, source[0].next(), others[0].next());
+        assert_eq!(result.unwrap(), Response::Nil);
+        assert_eq!(source, Some(Message::Inv(vec![hash.into()])));
+        assert_eq!(other, Some(Message::Inv(vec![hash.into()])));
+        for task in tasks {
+            task.abort();
+        }
+    })
+    .await
+    .expect("early fanout and subsequent committed gossip complete within the deadline");
+}
+
 /// Only bit 16 permits compact blocks, early adverts, and early serving.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compact_block_service_bit_controls_early_adverts_and_serving() {
@@ -105,7 +180,7 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
                 .ready()
                 .await
                 .unwrap()
-                .call(Request::AdvertiseEarlyBlock(hash))
+                .call(Request::AdvertiseEarlyBlock(hash, None))
                 .await;
             if early_relay {
                 assert_eq!(result.unwrap(), Response::Nil);

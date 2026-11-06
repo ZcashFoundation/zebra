@@ -155,10 +155,10 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
 
     fn call(&mut self, request: Request) -> Self::Future {
         self.maintained = false;
-        let (hash, all, early) = match request {
-            Request::AdvertiseBlock(hash, _) => (hash, false, false),
-            Request::AdvertiseBlockToAll(hash) => (hash, true, false),
-            Request::AdvertiseEarlyBlock(hash) => (hash, false, true),
+        let (hash, all, early, source) = match request {
+            Request::AdvertiseBlock(hash, _) => (hash, false, false, None),
+            Request::AdvertiseBlockToAll(hash) => (hash, true, false, None),
+            Request::AdvertiseEarlyBlock(hash, source) => (hash, false, true, source),
             _ => return futures::future::ready(Err("not a block advertisement".into())).boxed(),
         };
         let minimum = self.minimum_version.current();
@@ -169,6 +169,7 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
             .filter(|(addr, (version, _, early_block_relay, sender))| {
                 *version >= minimum
                     && (!early || *early_block_relay)
+                    && source.as_ref() != Some(*addr)
                     && !bans.is_banned(addr.ip())
                     && !sender.is_closed()
             })

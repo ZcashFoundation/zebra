@@ -2314,6 +2314,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
         .oneshot(zebra_state::Request::EarlyRelay {
             block: block.clone(),
             require_authentication: true,
+            origin: zebra_state::EarlyRelayOrigin::Peer,
         })
         .await?
     else {

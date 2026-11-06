@@ -40,6 +40,7 @@ fn guard(state: &Arc<EarlyRelayState>, hash: block::Hash) -> EarlyRelayGuard {
         hash,
         context,
         height: block::Height(2),
+        origin: EarlyRelayOrigin::Peer,
     }
 }
 
@@ -452,7 +453,7 @@ async fn early_relay_declines_finalized_only_parent() {
         let block = Arc::new(block);
         assert!(read
             .clone()
-            .early_relay(block.clone(), true, true)
+            .early_relay(block.clone(), true, true, EarlyRelayOrigin::Peer)
             .await
             .unwrap()
             .is_none());
@@ -471,7 +472,7 @@ async fn early_relay_declines_finalized_only_parent() {
             Arc::make_mut(&mut stale.header).previous_block_hash = block::Hash([1; 32]);
             assert!(read
                 .clone()
-                .early_relay(Arc::new(stale), false, true)
+                .early_relay(Arc::new(stale), false, true, EarlyRelayOrigin::Peer)
                 .await
                 .unwrap()
                 .is_none());

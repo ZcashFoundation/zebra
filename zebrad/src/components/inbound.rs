@@ -346,7 +346,11 @@ impl Service<zn::Request> for Inbound {
                             latest_chain_tip,
                             network,
                         )
-                        .with_sync_downloads(sync_downloads),
+                        .with_sync_downloads(sync_downloads)
+                        .with_cached_blocks(
+                            self.submitted_blocks.clone(),
+                            self.early_blocks.clone(),
+                        ),
                     );
 
                     result = Ok(());
@@ -752,7 +756,7 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) | zn::Request::AdvertiseEarlyBlock(_) =>
+            zn::Request::AdvertiseBlockToAll(_) | zn::Request::AdvertiseEarlyBlock(_, _) =>
                 unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
             zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),

@@ -2375,7 +2375,7 @@ where
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlockToAll(_)
             | Request::AdvertiseBlock(_, _)
-            | Request::AdvertiseEarlyBlock(_) => {
+            | Request::AdvertiseEarlyBlock(_, _) => {
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
             }
             Request::EarlyBlocksByHash(_)

@@ -301,11 +301,13 @@ pub enum Request {
     /// Use [`crate::BlockAdvertiser`]. Sampling and sidecar selection follow ordinary
     /// [`Request::AdvertiseBlock`] fanout, restricted to bilaterally opted-in connections.
     /// The block must already be available in the bounded early-relay serving cache.
+    /// The second field is the actual supplying peer, excluded from this early fanout.
+    /// Use `None` for locally submitted blocks.
     ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil) only after all selected local writes succeed.
-    AdvertiseEarlyBlock(block::Hash),
+    AdvertiseEarlyBlock(block::Hash, Option<PeerSocketAddr>),
 
     /// Request the contents of this node's mempool.
     ///
@@ -362,7 +364,7 @@ impl fmt::Display for Request {
 
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
-            Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock".to_string(),
+            Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
             Request::PollPeerSet => "PollPeerSet".to_string(),
         })
@@ -392,7 +394,7 @@ impl Request {
             Request::AdvertiseTransactionIds(_, _) => "AdvertiseTransactionIds",
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
-            Request::AdvertiseEarlyBlock(_) => "AdvertiseEarlyBlock",
+            Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
             Request::PollPeerSet => "PollPeerSet",
         }

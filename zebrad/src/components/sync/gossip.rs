@@ -273,9 +273,10 @@ async fn recv_submitted_block(
 ///
 /// A single watch slot coalesces candidates while the bounded advertiser is busy. Committed
 /// gossip runs independently, so this path never replaces or delays its legacy-peer announcements.
-pub async fn gossip_early_blocks<ZN>(
+pub(crate) async fn gossip_early_blocks<ZN>(
     cache: Option<zebra_state::EarlyRelayCache>,
     broadcast_network: ZN,
+    downloads: super::InFlightDownloads,
 ) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -296,10 +297,12 @@ where
         let result = tokio::time::timeout(TIPS_RESPONSE_TIMEOUT, async {
             let mut network = broadcast_network.clone();
             network.ready().await?;
-            if cache.get(&hash).is_none() {
+            let Some(source) = downloads.early_relay_source(&hash, &cache) else {
                 return Ok(zn::Response::Nil);
-            }
-            network.call(zn::Request::AdvertiseEarlyBlock(hash)).await
+            };
+            network
+                .call(zn::Request::AdvertiseEarlyBlock(hash, source))
+                .await
         })
         .await;
         if !matches!(result, Ok(Ok(_))) {

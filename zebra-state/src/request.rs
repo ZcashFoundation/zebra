@@ -34,6 +34,7 @@ use crate::{
 use crate::{
     error::{InvalidateError, LayeredStateError, ReconsiderError},
     AwaitUtxoError, CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError,
+    EarlyRelayOrigin,
 };
 
 /// The per-pool nullifier types used by the indexer-only [`Spend`] enum, imported here rather than
@@ -1100,6 +1101,8 @@ pub enum Request {
         /// in any published non-finalized chain. Missing snapshot context returns no guard.
         /// If false, skip disabled caching and restrict admission to the current best tip.
         require_authentication: bool,
+        /// Explicit local or peer provenance, retained with the authenticated body.
+        origin: EarlyRelayOrigin,
     },
 
     /// Authenticates an early-relay body without publishing it or reserving publication capacity.

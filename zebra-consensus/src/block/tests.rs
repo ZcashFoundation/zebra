@@ -1288,6 +1288,7 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .expect_request(zs::Request::EarlyRelay {
                 block: block.clone(),
                 require_authentication: false,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .respond(zs::Response::EarlyRelay(None));
