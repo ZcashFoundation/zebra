@@ -179,6 +179,16 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
+
+        /// Opt in to authenticated next-tip block relay before full transaction validation.
+        ///
+        /// Both ends must advertise this bit. This is a temporary experiment, not a production
+        /// allocation: bits 24–31 are [reserved for temporary experiments][experimental-bits].
+        /// Bit 25 avoids bit 24, which another implementation already uses for a different
+        /// capability. A production allocation is pending.
+        ///
+        /// [experimental-bits]: https://github.com/zcash/zcash/blob/16ac743/src/protocol.h#L77-L83
+        const NODE_EARLY_BLOCK_RELAY = 1 << 25;
     }
 }
 

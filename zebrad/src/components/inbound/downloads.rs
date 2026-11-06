@@ -403,7 +403,10 @@ where
             .await
             .map_err(|e| (BoxError::from(e), None))?
             .map_err(|e| (e, None))?;
-            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = response {
+            let early_relay = matches!(response, zn::Response::EarlyBlocks(_));
+            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
+            | zn::Response::EarlyBlocks(blocks) = response
+            {
                 assert_eq!(
                     blocks.len(),
                     1,
@@ -534,8 +537,13 @@ where
                 ));
             }
 
+            let request = if early_relay {
+                zebra_consensus::Request::CommitEarlyRelay(block)
+            } else {
+                zebra_consensus::Request::Commit(block)
+            };
             verifier
-                .oneshot(zebra_consensus::Request::Commit(block))
+                .oneshot(request)
                 .await
                 .map(|hash| (hash, block_height))
                 .map_err(|e| (e, advertiser_addr))
