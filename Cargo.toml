@@ -409,7 +409,7 @@ unwrap_in_result = "warn"
 result_large_err = "allow"
 
 [patch.crates-io]
-reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "da27c7d7daf9d4b5d13347f57a4a6fd0c8b69c91" }
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "26105a046d6694b29df87f48c1ce9933581d6bae" }
 zcash_encoding = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_primitives = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
 zcash_transparent = { git = "https://github.com/upbqdn/librustzcash", rev = "c789ccc046c76b94c17fbdf28038cf4f28a3114d" }
