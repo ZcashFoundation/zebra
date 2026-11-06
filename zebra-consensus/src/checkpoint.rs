@@ -221,7 +221,7 @@ where
 
     /// The highest checkpoint another component has committed to the state, if any.
     ///
-    /// When it changes, `poll_ready` fast-forwards the verifier to it.
+    /// When it changes, `poll_ready` resets the verifier to it.
     checkpoint_tip: Option<watch::Receiver<Option<(block::Height, block::Hash)>>>,
 
     /// Queued block height progress transmitter.
@@ -448,12 +448,14 @@ where
         }
     }
 
-    /// Fast-forwards the verifier to tips that another component commits to the state.
+    /// Resets the verifier to tips that another component commits to the state.
     ///
     /// Each new value of `checkpoint_tip` is a block the local state committed, usually a
     /// checkpoint, but in the middle of a checkpoint interval if a commit failed there. It is
-    /// applied by `poll_ready` if, and only if, it is above the verifier's progress and, at a
-    /// checkpoint height, has that checkpoint's hash. Any other value is ignored.
+    /// applied by `poll_ready` if, at a checkpoint height, it has that checkpoint's hash, whether
+    /// it is above or below the verifier's progress: progress above a committed tip is
+    /// speculative, because the verifier counts spawned commits that the state has not confirmed.
+    /// Any other value is ignored.
     pub(crate) fn with_checkpoint_tip(
         mut self,
         checkpoint_tip: watch::Receiver<Option<(block::Height, block::Hash)>>,
@@ -462,7 +464,7 @@ where
         self
     }
 
-    /// Applies a changed `checkpoint_tip`, if it is above the verifier's progress.
+    /// Applies a changed `checkpoint_tip`, above or below the verifier's progress.
     fn fast_forward_to_checkpoint_tip(&mut self) {
         let Some(checkpoint_tip) = self.checkpoint_tip.as_mut() else {
             return;
@@ -493,24 +495,18 @@ where
             );
             return;
         }
-        let is_above_progress = match self.previous_checkpoint_height() {
-            BeforeGenesis => true,
-            InitialTip(verified) | PreviousCheckpoint(verified) => height > verified,
-            FinalCheckpoint => false,
-        };
-        if !is_above_progress {
-            tracing::debug!(
-                ?height,
-                progress = ?self.previous_checkpoint_height(),
-                "ignoring a committed tip at or below the verifier's progress"
-            );
-            return;
-        }
-
-        tracing::info!(?height, ?hash, "fast-forwarding to a committed tip");
+        // The tip was read from the state, so it is applied even at or below the verifier's
+        // progress: that progress can include spawned commits the state never confirmed, such as
+        // the legacy syncer's commits that raced the engine and failed.
+        tracing::info!(
+            ?height,
+            ?hash,
+            progress = ?self.previous_checkpoint_height(),
+            "resetting to a committed tip"
+        );
         self.reset_progress(Some((height, hash)));
-        // Commit failures from before the fast-forward carry an older state tip, which must not
-        // rewind the verifier below the committed checkpoint.
+        // Commit failures from before the reset carry an older state tip, which must not rewind
+        // the verifier below the committed tip.
         self.epoch = self.epoch.wrapping_add(1);
         // Blocks queued above the committed checkpoint may now be a complete range, and the
         // caller might not send another block to trigger their verification.

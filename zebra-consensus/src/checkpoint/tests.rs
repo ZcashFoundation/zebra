@@ -7,7 +7,7 @@ use std::{cmp::min, time::Duration};
 use color_eyre::eyre::{eyre, Report};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
-    TryFutureExt,
+    FutureExt, TryFutureExt,
 };
 use tokio::time::timeout;
 use tracing_futures::Instrument;
@@ -1329,8 +1329,8 @@ async fn fast_forward_to_committed_checkpoint() -> Result<(), Report> {
     Ok(())
 }
 
-/// A checkpoint tip at a checkpoint height with the wrong hash, or at or below the
-/// verifier's progress, is ignored.
+/// A checkpoint tip at a checkpoint height with the wrong hash is ignored, and a valid tip is
+/// applied whether it is above, at or below the verifier's progress.
 #[tokio::test(flavor = "multi_thread")]
 async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
@@ -1354,10 +1354,6 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
     let ignored = [
         // A checkpoint height with the wrong hash.
         Some((block::Height(5), blocks[4].1)),
-        // A checkpoint below the verifier's progress.
-        Some(tip(0)),
-        // The checkpoint at the verifier's progress.
-        Some(tip(2)),
         // No committed checkpoint.
         None,
     ];
@@ -1371,7 +1367,19 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
         );
     }
 
-    // A valid tip is still applied after the ignored ones, and a later lower tip is ignored.
+    // The checkpoint at the verifier's progress, and one below it, are applied: the committed
+    // tip comes from the state, and the verifier's progress may be speculative.
+    checkpoint_tip_sender.send_replace(Some(tip(2)));
+    checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+    assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_two);
+    checkpoint_tip_sender.send_replace(Some(tip(0)));
+    checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+    assert_eq!(
+        checkpoint_verifier.previous_checkpoint_height(),
+        InitialTip(block::Height(0))
+    );
+
+    // A valid tip is still applied after the ignored ones, and so is a later lower tip.
     checkpoint_tip_sender.send_replace(Some(tip(5)));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     let at_five = InitialTip(block::Height(5));
@@ -1379,7 +1387,7 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
 
     checkpoint_tip_sender.send_replace(Some(tip(2)));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
-    assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_five);
+    assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_two);
 
     // The final checkpoint finishes verification, and nothing moves it afterwards.
     checkpoint_tip_sender.send_replace(Some(tip(8)));
@@ -1396,6 +1404,66 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
         checkpoint_verifier.previous_checkpoint_height(),
         FinalCheckpoint
     );
+
+    Ok(())
+}
+
+/// A committed tip at or below the verifier's speculative progress resets the verifier to it,
+/// and discards the commit failures from before it, so that a stale failure can't rewind the
+/// verifier below the committed tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn fast_forward_at_or_below_progress_discards_stale_commit_failures() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let blocks = mainnet_blocks(8)?;
+    let tip = |height: usize| (block::Height(height.try_into().unwrap()), blocks[height].1);
+
+    // (speculative progress, committed tip at hand-back)
+    for (progress, committed) in [(5, 4), (5, 5)] {
+        let state_service = MockService::build().for_unit_tests();
+        let (checkpoint_tip_sender, checkpoint_tip) = watch::channel(None);
+        let mut checkpoint_verifier = CheckpointVerifier::from_list(
+            [tip(0), tip(2), tip(5), tip(8)],
+            &Mainnet,
+            Some(tip(2)),
+            state_service.clone(),
+        )
+        .map_err(|e| eyre!(e))?
+        .with_checkpoint_tip(checkpoint_tip);
+
+        // The legacy syncer's spawned commits moved the verifier's progress ahead of the state,
+        // and one of them failed before the engine took over, at a lower state tip.
+        checkpoint_verifier.reset_progress(Some(tip(progress)));
+        checkpoint_verifier
+            .reset_sender
+            .send(CommitFailure {
+                epoch: checkpoint_verifier.epoch,
+                tip: Some(tip(2)),
+                child: None,
+            })
+            .expect("the verifier holds the receiver");
+
+        // The engine hands back at the state tip.
+        checkpoint_tip_sender.send_replace(Some(tip(committed)));
+        checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+        let at_committed = InitialTip(block::Height(committed.try_into().unwrap()));
+        assert_eq!(
+            checkpoint_verifier.previous_checkpoint_height(),
+            at_committed,
+            "the committed tip {committed} is applied at progress {progress}"
+        );
+
+        // The legacy syncer's next block drains the stale failure, which must not rewind the
+        // verifier. The block leaves a gap above the committed tip, so it is only queued.
+        let _ = checkpoint_verifier
+            .call(blocks[committed + 2].0.clone())
+            .now_or_never();
+        assert_eq!(
+            checkpoint_verifier.previous_checkpoint_height(),
+            at_committed,
+            "a failure from before the hand-back is discarded"
+        );
+    }
 
     Ok(())
 }
