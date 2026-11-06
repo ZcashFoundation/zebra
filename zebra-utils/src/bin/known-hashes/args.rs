@@ -1,0 +1,55 @@
+//! known-hashes arguments
+//!
+//! For usage please refer to the program help: `known-hashes --help`
+
+use std::{net::SocketAddr, path::PathBuf};
+
+use clap::Parser;
+
+use zebra_chain::{block::Height, parameters::Network};
+
+/// known-hashes arguments
+#[derive(Clone, Debug, Parser)]
+#[command(version)]
+pub struct Args {
+    /// Address and port of the local node's JSON-RPC endpoint.
+    ///
+    /// The sweep is designed for a local, fully synced node: it pipelines
+    /// requests at `--concurrency`, which is impolite to remote public nodes.
+    #[arg(long, default_value = "127.0.0.1:8232")]
+    pub rpc_addr: SocketAddr,
+
+    /// Network to assemble the known-hash list for: `mainnet` or `testnet`.
+    #[arg(long, default_value = "mainnet")]
+    pub network: Network,
+
+    /// First height to sweep.
+    ///
+    /// Sweeps are resumable: heights already present in the sweep file are
+    /// always skipped, so this is only needed to restrict the swept range.
+    #[arg(long, default_value = "0")]
+    pub start_height: Height,
+
+    /// Last height to sweep or pin, inclusive.
+    ///
+    /// During sweeps this defaults to the node tip minus a confirmation margin
+    /// of 100 blocks. It is required by `--emit-pins`, where it becomes the
+    /// reviewed `max_height` of the emitted `KnownHashListSpec`.
+    #[arg(long)]
+    pub end_height: Option<Height>,
+
+    /// Directory for the sweep file, `known-hashes-sweep-<network>.bin`.
+    #[arg(long)]
+    pub out_dir: PathBuf,
+
+    /// Number of concurrent RPC requests during the sweep.
+    #[arg(long, default_value = "32")]
+    pub concurrency: usize,
+
+    /// Compute the chunk pins from a completed sweep, and print the
+    /// `KnownHashListSpec` constant block, instead of sweeping.
+    ///
+    /// Requires `--end-height`, and a sweep that covers every height up to it.
+    #[arg(long)]
+    pub emit_pins: bool,
+}
