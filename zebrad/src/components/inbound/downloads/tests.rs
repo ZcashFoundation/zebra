@@ -24,7 +24,11 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use zebra_network as zn;
 use zebra_state as zs;
 
-use super::{DownloadAction, Downloads, HeightLimitError, MIN_CONCURRENCY_LIMIT};
+use crate::components::sync::{PipelineBudget, SyncMemoryLimits};
+
+use super::{
+    DownloadAction, Downloads, HeightLimitError, PipelineFullError, MIN_CONCURRENCY_LIMIT,
+};
 
 use InventoryResponse::*;
 
@@ -421,8 +425,8 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
 /// The parent lookup is bounded: when the state does not answer, the block is still dropped and the
 /// peer is still not attributed.
 ///
-/// Paused time lets the runtime advance past `PARENT_LOOKUP_TIMEOUT` as soon as the download task is
-/// the only thing waiting, so the test does not sleep for real.
+/// Paused time lets the runtime advance past `PARENT_LOOKUP_TIMEOUT` as soon as the download task
+/// is the only thing waiting, so the test does not sleep for real.
 #[tokio::test(start_paused = true)]
 async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
     let _init_guard = zebra_test::init();
@@ -709,8 +713,8 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
 /// A block at the highest height that is still within the lookahead limit is verified, not dropped.
 ///
 /// This is the guard against dropping and attributing honest near-boundary blocks:
-/// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block exactly
-/// on it is a normal download and the parent is never consulted.
+/// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block
+/// exactly on it is a normal download and the parent is never consulted.
 #[tokio::test(start_paused = true)]
 async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
@@ -819,5 +823,88 @@ async fn download_deadline_includes_readiness_and_response() {
         assert!(error.is::<tokio::time::error::Elapsed>());
         assert_eq!(advertiser, None);
         assert_eq!(Instant::now() - started, budget);
+    }
+}
+
+/// Above the sync pipeline's byte bound, a downloaded gossiped block is dropped without waiting,
+/// never reaches the verifier, and is never attributed to the peer that served it; with room in
+/// the bound, the block is charged until its verification ends (memory page, "How the budget is
+/// split").
+#[tokio::test(start_paused = true)]
+async fn gossiped_block_over_the_pipeline_bound_is_dropped_unattributed() {
+    let _init_guard = zebra_test::init();
+
+    let block = block_1();
+    let hash = block.hash();
+    let peer: PeerSocketAddr = ADVERTISER.parse().unwrap();
+    let hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    let charge = u64::try_from(zs::block_retained_charge(&block, &hashes))
+        .expect("usize fits in u64 on supported platforms");
+
+    // The bound fits exactly this block.
+    let budget = PipelineBudget::new(SyncMemoryLimits {
+        pipeline_bytes: Some(charge),
+    });
+    let (downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let mut downloads = downloads.with_pipeline_budget(budget.clone());
+
+    for room in [false, true] {
+        // Another download holds one byte of the bound, unless there is room for this block.
+        let other_download = (!room).then(|| budget.charge(1).expect("the budget is bounded"));
+
+        assert!(matches!(
+            downloads.download_and_verify(hash, Some(peer)),
+            DownloadAction::AddedToQueue
+        ));
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: Some(peer),
+            })
+            .await
+            .respond(zn::Response::Blocks(vec![Available((
+                block.clone(),
+                Some(peer),
+            ))]));
+
+        if room {
+            let verification = verifier
+                .expect_request_that(|request| {
+                    matches!(request, zebra_consensus::Request::CommitWithRetention(body, _) if body == &block)
+                })
+                .await;
+            assert_eq!(budget.charged_bytes(), charge);
+            verification.respond(hash);
+            assert_eq!(
+                downloads
+                    .next()
+                    .await
+                    .expect("the download has a result")
+                    .expect("the block is verified"),
+                hash,
+            );
+            assert_eq!(budget.charged_bytes(), 0, "the verified block is released");
+        } else {
+            let (error, advertiser) =
+                tokio::time::timeout(MAX_SERVICE_REQUEST_DELAY, downloads.next())
+                    .await
+                    .expect("a full pipeline drops the block without waiting for verification")
+                    .expect("the download has a result")
+                    .expect_err("the block doesn't fit under the bound");
+            assert!(
+                error
+                    .downcast_ref::<PipelineFullError>()
+                    .is_some_and(|error| error.hash == hash && error.bytes == charge),
+                "{error:?}",
+            );
+            assert_eq!(advertiser, None, "a full pipeline is not peer misbehavior");
+            verifier.expect_no_requests().await;
+            assert_eq!(budget.charged_bytes(), 1, "a dropped block is not charged");
+            drop(other_download);
+        }
     }
 }

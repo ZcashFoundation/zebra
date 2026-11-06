@@ -20,7 +20,8 @@ use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
 pub use initialize::{
-    close_v2_endpoint, init, init_with_block_gossip_peer_ips, v2_bootstrap_clients, BootstrapPeers,
+    close_v2_endpoint, init, init_with_block_gossip_peer_ips, init_with_limits,
+    v2_bootstrap_clients, BootstrapPeers, MemoryLimits,
 };
 pub use service::{NetworkResponseFuture, NetworkService};
 

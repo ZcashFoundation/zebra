@@ -71,7 +71,20 @@ test_docker:
   - "docker/**/*.toml"
   - "zebrad/tests/common/configs/**"
   - ".github/workflows/test-docker.yml"
+  - ".github/scripts/test-docker-memory-budget.sh"
   - ".github/path-filters.yml"
+
+# The sustained Testnet memory-budget sync depends on public peers and takes over an hour, so pull
+# requests only run it when they change the memory budget or its test.
+memory_budget_testnet:
+  - "zebrad/src/components/resources.rs"
+  - "zebrad/src/components/resources/**"
+  - "zebrad/src/components/sync/budget.rs"
+  - "zebrad/src/components/sync/budget/**"
+  - "zebra-state/src/service/memory_limits.rs"
+  - "zebra-state/src/service/finalized_state/disk_db.rs"
+  - "zebra-network/src/peer_set/initialize.rs"
+  - ".github/scripts/test-docker-memory-budget.sh"
 
 book:
   - "book/**"

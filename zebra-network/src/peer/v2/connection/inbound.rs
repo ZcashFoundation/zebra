@@ -96,7 +96,7 @@ use block_range::{serve_block_range, PendingRange};
 /// service on their own, so one peer can have up to six inbound service
 /// calls outstanding. Each call holds a slot in the inbound service's shared
 /// buffer only until the buffer's worker takes it, not while it is answered.
-pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
+pub(crate) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 
 /// The most bytes of `get-blocks` or `get-tx` response entries one request
 /// stream writes, after which the response is finished early, as the draft

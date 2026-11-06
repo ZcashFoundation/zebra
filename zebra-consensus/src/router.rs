@@ -43,7 +43,10 @@ use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
-    block::{PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError},
+    block::{
+        PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError,
+        DEFAULT_PROPOSAL_CACHE_BYTES,
+    },
     checkpoint::{CheckpointVerifier, CommittedTip, VerifyCheckpointError},
     error::TransactionError,
     primitives::halo2,
@@ -163,6 +166,7 @@ impl RouterError {
             RouterError::Block { source } => matches!(
                 **source,
                 VerifyBlockError::Commit(zebra_state::CommitBlockError::OrphanQueueFull)
+                    | VerifyBlockError::ProposalMemoryPressure
             ),
         }
     }
@@ -270,12 +274,18 @@ where
                     .verify(block, Some(notifications))
                     .map_err(Into::into)
                     .boxed(),
+                Request::CommitWithRetention(_, retention)
+                | Request::CommitEarlyRelayWithRetention(_, retention) => self
+                    .checkpoint
+                    .verify_with_retention(block, retention, None)
+                    .map_err(Into::into)
+                    .boxed(),
                 Request::Commit(_)
                 | Request::CommitEarlyRelay(_)
                 | Request::CommitDecoded(_, None) => {
                     self.checkpoint.call(block).map_err(Into::into).boxed()
                 }
-                Request::CheckProposal(_) => {
+                Request::CheckProposal(_) | Request::CheckProposalAdmitted(_) => {
                     unreachable!("proposals below the checkpoint were rejected")
                 }
             },
@@ -319,6 +329,9 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
+///
+/// The block verifier caches up to [`DEFAULT_PROPOSAL_CACHE_BYTES`] of successful block proposals;
+/// [`init_with_limits`] sets another bound.
 #[instrument(skip(state_service, read_state_service, mempool, block_mempool))]
 pub async fn init<S, ReadState, Mempool>(
     config: Config,
@@ -353,6 +366,71 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    init_with_limits(
+        config,
+        network,
+        state_service,
+        read_state_service,
+        mempool,
+        block_mempool,
+        DEFAULT_PROPOSAL_CACHE_BYTES,
+        None,
+    )
+    .await
+}
+
+/// Initializes verifier services like [`init`], with the block verifier caching up to
+/// `proposal_cache_bytes` of successful block proposals, charged with
+/// [`ContextuallyVerifiedBlock::retained_bytes`](zs::ContextuallyVerifiedBlock::retained_bytes).
+///
+/// A bound smaller than one proposal's charge caches no proposal: mined submissions are then
+/// decoded and verified without reuse.
+///
+/// With `checkpoint_tip`, the checkpoint verifier fast-forwards to the committed tip it carries,
+/// like [`init_with_checkpoint_tip`]. With `None`, it verifies like [`init`].
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(
+    state_service,
+    read_state_service,
+    mempool,
+    block_mempool,
+    checkpoint_tip
+))]
+pub async fn init_with_limits<S, ReadState, Mempool>(
+    config: Config,
+    network: &Network,
+    state_service: S,
+    read_state_service: ReadState,
+    mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
+    proposal_cache_bytes: usize,
+    checkpoint_tip: Option<watch::Receiver<Option<CommittedTip>>>,
+) -> (
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<
+        BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
+        transaction::MempoolRequest,
+    >,
+    BackgroundTaskHandles,
+    Height,
+    PreparedBlockCache,
+)
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
+{
     init_with_preload_handle(
         config,
         network,
@@ -361,7 +439,8 @@ where
         mempool,
         block_mempool,
         halo2::spawn_key_preload(),
-        None,
+        proposal_cache_bytes,
+        checkpoint_tip,
     )
     .await
 }
@@ -430,13 +509,15 @@ where
         mempool,
         block_mempool,
         halo2::spawn_key_preload(),
+        DEFAULT_PROPOSAL_CACHE_BYTES,
         Some(checkpoint_tip),
     )
     .await
 }
 
-/// Initializes verifier services with the caller's key preload task, and an optional
-/// committed checkpoint tip for the checkpoint verifier to fast-forward to.
+/// Initializes verifier services with the caller's key preload task, a proposal-cache byte
+/// capacity, and an optional committed checkpoint tip for the checkpoint verifier to fast-forward
+/// to.
 #[allow(clippy::too_many_arguments)]
 async fn init_with_preload_handle<S, ReadState, Mempool>(
     config: Config,
@@ -448,6 +529,7 @@ async fn init_with_preload_handle<S, ReadState, Mempool>(
         oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
     >,
     halo2_key_preload_handle: JoinHandle<()>,
+    proposal_cache_bytes: usize,
     checkpoint_tip: Option<watch::Receiver<Option<CommittedTip>>>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
@@ -599,7 +681,8 @@ where
     );
 
     let block =
-        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+        SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone())
+            .with_proposal_cache_bytes(proposal_cache_bytes);
     let block = match block_mempool {
         Some(receiver) => block.with_mempool(receiver),
         None => block,
@@ -746,6 +829,7 @@ where
         .1,
         None,
         tokio::spawn(std::future::ready(())),
+        DEFAULT_PROPOSAL_CACHE_BYTES,
         None,
     )
     .await

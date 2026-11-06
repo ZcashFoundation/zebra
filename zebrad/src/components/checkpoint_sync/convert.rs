@@ -220,6 +220,8 @@ pub fn convert(
         new_outputs,
         transaction_hashes,
         received_time: None,
+        retained_charge: None,
+        retention: None,
     });
 
     Ok(block.with_precomputed_auth_data_root())

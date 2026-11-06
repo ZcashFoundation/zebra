@@ -43,7 +43,7 @@ use futures::{
 use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{
-    sync::{mpsc, oneshot, Notify},
+    sync::{mpsc, oneshot, Notify, OwnedSemaphorePermit, Semaphore},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt};
@@ -120,6 +120,78 @@ pub const MAX_INBOUND_CONCURRENCY: usize = 500;
 /// transactions have no source peer and are not counted against the cap.
 pub const MAX_INBOUND_CONCURRENCY_PER_PEER: usize = 5;
 
+/// A conservative decoded-transaction charge, including the 9 MB worst case for a
+/// [`MAX_PROTOCOL_MESSAGE_LEN`](zebra_chain::serialization::MAX_PROTOCOL_MESSAGE_LEN) wire body.
+const DECODED_TX_CHARGE_RATIO: usize = 5;
+
+/// The charge reserved for an advertised transaction before its body is available: a decoded
+/// 10 kB transaction, larger than most transactions.
+///
+/// The undownloaded body is buffered by the network, whose memory share already covers it. The
+/// download tops this reservation up to the body's charge once it arrives, and drops the
+/// transaction if the top-up does not fit, so a peer that advertises IDs it never serves holds
+/// only this much of the bound per ID, for at most the download timeout.
+const ADVERTISED_TX_RESERVATION_BYTES: usize = 10_000 * DECODED_TX_CHARGE_RATIO;
+
+/// The optional byte bound shared by queued and active transaction work.
+#[derive(Clone, Debug)]
+struct PendingByteBudget {
+    limit: usize,
+    slots: Arc<Semaphore>,
+}
+
+impl PendingByteBudget {
+    fn new(bytes: u64) -> Self {
+        let limit = usize::try_from(bytes)
+            .unwrap_or(usize::MAX)
+            .min(Semaphore::MAX_PERMITS);
+        Self {
+            limit,
+            slots: Arc::new(Semaphore::new(limit)),
+        }
+    }
+
+    /// Returns the charge of a transaction body of `size` bytes, at most the whole bound.
+    fn body_charge(&self, size: usize) -> usize {
+        size.saturating_mul(DECODED_TX_CHARGE_RATIO).min(self.limit)
+    }
+
+    /// Charges a pushed body in full, or reserves [`ADVERTISED_TX_RESERVATION_BYTES`] for an
+    /// advertised ID until its body arrives.
+    fn try_charge(&self, gossip: &Gossip) -> Result<OwnedSemaphorePermit, MempoolError> {
+        let charge = match gossip {
+            Gossip::Id(_) => ADVERTISED_TX_RESERVATION_BYTES.min(self.limit),
+            Gossip::Tx(tx) => self.body_charge(tx.size),
+        };
+        if charge == 0 {
+            return Err(MempoolError::FullQueue);
+        }
+
+        self.try_acquire(charge).ok_or(MempoolError::FullQueue)
+    }
+
+    /// Charges the bytes a downloaded body of `size` bytes needs beyond the `reserved` bytes of its
+    /// advertisement, or returns `None` if they don't fit.
+    fn try_top_up(&self, reserved: usize, size: usize) -> Option<Option<OwnedSemaphorePermit>> {
+        match self.body_charge(size).saturating_sub(reserved) {
+            0 => Some(None),
+            extra => self.try_acquire(extra).map(Some),
+        }
+    }
+
+    fn try_acquire(&self, charge: usize) -> Option<OwnedSemaphorePermit> {
+        self.slots
+            .clone()
+            .try_acquire_many_owned(u32::try_from(charge).unwrap_or(u32::MAX))
+            .ok()
+    }
+
+    #[cfg(test)]
+    fn available(&self) -> usize {
+        self.slots.available_permits()
+    }
+}
+
 /// A marker struct for the oneshot channels which cancel a pending download and verify.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct CancelDownloadAndVerify;
@@ -178,6 +250,9 @@ type VerifyResult = Result<
     (UnminedTxId, tokio::time::error::Elapsed),
 >;
 
+/// A result and the admission charge that must live until the result is consumed.
+type QueuedVerifyResult = (VerifyResult, Option<OwnedSemaphorePermit>);
+
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
@@ -213,13 +288,16 @@ where
     pending: FuturesUnordered<JoinHandle<()>>,
 
     /// The results of finished download and verify tasks.
-    results: mpsc::UnboundedReceiver<VerifyResult>,
+    results: mpsc::UnboundedReceiver<QueuedVerifyResult>,
 
     /// The sender each task uses to queue its result.
-    results_sender: mpsc::UnboundedSender<VerifyResult>,
+    results_sender: mpsc::UnboundedSender<QueuedVerifyResult>,
 
     /// Transactions whose results have not been consumed, including cancelled tasks.
     in_flight: usize,
+
+    /// The byte bound for work in `pending` and `results`, or `None` without a memory budget.
+    pending_bytes: Option<PendingByteBudget>,
 
     /// A list of channels that can be used to cancel pending transaction
     /// download and verify tasks. Each entry also stores the corresponding
@@ -300,7 +378,7 @@ where
         if result.is_pending() && !this.results.is_empty() {
             this.transaction_verified.notify_one();
         }
-        let item = if let Some(result) = ready!(result) {
+        let item = if let Some((result, _admission)) = ready!(result) {
             *this.in_flight -= 1;
             let (result, completed_txid) = match result {
                 Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
@@ -383,12 +461,19 @@ where
             results,
             results_sender,
             in_flight: 0,
+            pending_bytes: None,
             cancel_handles: HashMap::new(),
             pending_ids: HashMap::new(),
             pending_peer_mined_ids: HashSet::new(),
             pending_per_peer: HashMap::new(),
             transaction_verified,
         }
+    }
+
+    /// Applies the derived byte bound to queued and active download and verification work.
+    pub fn with_pending_bytes(mut self, pending_bytes: Option<u64>) -> Self {
+        self.pending_bytes = pending_bytes.map(PendingByteBudget::new);
+        self
     }
 
     /// Queue a transaction for download (if needed) and verification.
@@ -458,6 +543,12 @@ where
             }
         }
 
+        let admission = self
+            .pending_bytes
+            .as_ref()
+            .map(|budget| budget.try_charge(&gossiped_tx))
+            .transpose()?;
+
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<CancelDownloadAndVerify>();
 
@@ -467,6 +558,10 @@ where
         let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
+        let budget = self.pending_bytes.clone();
+        let reserved = admission
+            .as_ref()
+            .map_or(0, OwnedSemaphorePermit::num_permits);
 
         let fut = async move {
             // Don't download/verify if the transaction is already in the best chain.
@@ -487,7 +582,7 @@ where
 
             trace!(?txid, ?next_height, "got next height");
 
-            let (tx, advertiser_addr) = match gossiped_tx {
+            let (tx, advertiser_addr, top_up) = match gossiped_tx {
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
@@ -509,18 +604,34 @@ where
                         "unexpected missing tx status: single tx failures should be errors",
                     );
 
+                    // Charge the body before keeping it for verification.
+                    let top_up = match &budget {
+                        Some(budget) => budget.try_top_up(reserved, tx.size).ok_or_else(|| {
+                            metrics::counter!("mempool.full_queue.pending_bytes.total")
+                                .increment(1);
+                            TransactionDownloadVerifyError::DownloadFailed(
+                                BoxError::from(
+                                    "the downloaded transaction does not fit the mempool's \
+                                     pending byte bound",
+                                )
+                                .into(),
+                            )
+                        })?,
+                        None => None,
+                    };
+
                     metrics::counter!(
                         "mempool.downloaded.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    (tx, advertiser_addr)
+                    (tx, advertiser_addr, top_up)
                 }
                 Gossip::Tx(tx) => {
                     metrics::counter!(
                         "mempool.pushed.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    (tx, pushed_advertiser_addr)
+                    (tx, pushed_advertiser_addr, None)
                 }
             };
 
@@ -535,7 +646,7 @@ where
                 .map_ok(|rsp| {
                     let tx::MempoolResponse { transaction, spent_mempool_outpoints } = rsp;
 
-                    (transaction, spent_mempool_outpoints, tip_height)
+                    (transaction, spent_mempool_outpoints, tip_height, top_up)
                 })
                 .await;
 
@@ -549,12 +660,12 @@ where
                 verification_height: next_height,
             })
         }
-        .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
+        .map_ok(|(tx, spent_mempool_outpoints, tip_height, top_up)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 "version" => format!("{}", tx.transaction.transaction.version()),
             ).increment(1);
-            (tx, spent_mempool_outpoints, tip_height)
+            (tx, spent_mempool_outpoints, tip_height, top_up)
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
@@ -569,6 +680,7 @@ where
         let transaction_verified = self.transaction_verified.clone();
         let results_sender = self.results_sender.clone();
         let task = tokio::spawn(async move {
+            let mut admission = admission;
             let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
 
             // Prefer the cancel handle if both are ready.
@@ -593,7 +705,13 @@ where
                         .map_err(|elapsed| (txid, elapsed))
                         .map(|inner_result| {
                             match inner_result {
-                                Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
+                                Ok((transaction, spent_mempool_outpoints, tip_height, top_up)) => {
+                                    // The verified body stays charged until its result is consumed.
+                                    if let (Some(admission), Some(top_up)) = (admission.as_mut(), top_up) {
+                                        admission.merge(top_up);
+                                    }
+                                    Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx))
+                                }
                                 Err(boxed_err) => {
                                     let (tx_verifier_error, tx_id) = *boxed_err;
                                     if let Some(rsp_tx) = rsp_tx.take() {
@@ -612,7 +730,7 @@ where
 
             // Queue before notifying: the woken mempool must see the result even if this task
             // has not exited yet. A dropped downloader needs no notification.
-            if results_sender.send(result).is_ok() {
+            if results_sender.send((result, admission)).is_ok() {
                 transaction_verified.notify_one();
             }
         });

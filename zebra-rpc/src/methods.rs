@@ -3045,6 +3045,7 @@ where
         {
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
+                self.prepared_blocks.clone(),
                 read_state,
                 block_proposal_bytes,
                 &self.network,
@@ -3326,12 +3327,20 @@ where
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
         let prepared_blocks = self.prepared_blocks.clone();
-        let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
-            Some(cache) => cache.deserialize(&block_bytes),
-            None => zebra_consensus::DecodedBlock::deserialize(&block_bytes),
-        })
-        .await
-        .expect("block deserialization reports malformed input as an error rather than panicking");
+        let decoded = if let Some(cache) = prepared_blocks {
+            cache
+                .deserialize_with_admission(block_bytes)
+                .await
+                .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
+        } else {
+            tokio::task::spawn_blocking(move || {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            })
+            .await
+            .expect(
+                "block deserialization reports malformed input as an error rather than panicking",
+            )
+        };
         let decoded = match decoded {
             Ok(decoded) => decoded,
             Err(error) => {

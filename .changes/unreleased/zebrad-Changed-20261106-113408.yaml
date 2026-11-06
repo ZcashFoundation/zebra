@@ -1,0 +1,17 @@
+project: zebrad
+kind: Changed
+body: >-
+  Changed `[mempool] tx_cost_limit` and `[network] peerset_initial_target_size` to be derived from
+  `[resources] memory_budget` when a budget is set, unless set explicitly to a value other than
+  their default; a budget can lower `tx_cost_limit` below ZIP 401's recommended default, which Zebra
+  logs. With a budget, the sync pipeline is also bounded in bytes on top of the `[sync]` concurrency
+  limits, and glibc's malloc arena cap drops to a quarter of the cores (between 2 and 16) unless
+  `MALLOC_ARENA_MAX` or `GLIBC_TUNABLES` sets it. Mempool download and verification queues are
+  bounded in bytes as well as entries. The version 2 checkpoint sync engine's lookahead and peer
+  receive windows fit the sync pipeline and network shares, its lookahead counts toward the
+  sync pipeline's `zebra.memory.usage_bytes`, and the network share always pays for its two
+  outbound version 2 peers, which raises the minimum budgets with `[sync] v2_checkpoint_sync` to
+  978 MiB at the tip and 1,129 MiB for initial sync. The non-finalized target finalizes
+  above its charge, down to 100 blocks. Snapshot bootstrap derives its peer, piece, and SST-build
+  limits before downloading. Nothing changes without a budget.
+time: 2026-11-06T11:34:08Z

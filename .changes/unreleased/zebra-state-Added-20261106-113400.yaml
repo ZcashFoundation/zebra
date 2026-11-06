@@ -1,0 +1,14 @@
+project: zebra-state
+kind: Added
+body: >-
+  Added `RocksDbMemoryLimits`, which bounds the state database's memtable total, per-column-family
+  memtable shape, block cache size and index/filter charging on the read-path column families
+  (`READ_PATH_COLUMN_FAMILIES`); `FinalizedState::new_with_limits` and `ZebraDb::new_with_limits`
+  open the database with those bounds, `ZebraDb::apply_memory_limits` and
+  `ZebraDb::spawn_apply_memory_limits` resize them live, and `ZebraDb::memory_sample` returns the
+  database's memory use and write stall state. The default limits keep today's database options.
+  The RocksDB metrics gain table reader, block cache capacity and pinned usage, write buffer
+  manager, immutable memtable, flush pending and write stall gauges, and, when a memory bound is
+  set, the `zebra.state.rocksdb.block_cache_index_filter{result}` hit and miss counters and the
+  `zebra.state.rocksdb.stall_micros` counter.
+time: 2026-11-06T11:34:00Z

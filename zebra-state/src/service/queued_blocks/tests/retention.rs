@@ -15,14 +15,38 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    service::{queued_blocks::QueuedBlocks, StateService},
+    service::{
+        queued_blocks::{QueuedBlocks, MAX_QUEUED_BYTES},
+        StateService,
+    },
     tests::FakeChainHelper,
-    Config, ContextuallyVerifiedBlock, MinedBlockNotifications, Request, MAX_BLOCK_REORG_HEIGHT,
+    Config, ContextuallyVerifiedBlock, MemoryLimits, MinedBlockNotifications, Request,
+    MAX_BLOCK_REORG_HEIGHT,
 };
 
 async fn orphan_state() -> (StateService, Arc<Block>) {
-    let (mut state, _, _, _) =
+    let (state, _, _, _) =
         StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
+    with_genesis(state).await
+}
+
+/// Like [`orphan_state`], with the state opened with `limits`.
+async fn orphan_state_with_limits(limits: MemoryLimits) -> (StateService, Arc<Block>) {
+    let (state, _, _, _) = StateService::new_with_debug_and_limits(
+        Config::ephemeral(),
+        &Network::Mainnet,
+        Height(0),
+        0,
+        None,
+        false,
+        limits,
+    )
+    .await;
+    with_genesis(state).await
+}
+
+/// Commits the Mainnet genesis block to `state`, and returns it with block 1 as the next parent.
+async fn with_genesis(mut state: StateService) -> (StateService, Arc<Block>) {
     let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .unwrap();
@@ -906,4 +930,234 @@ async fn newer_mined_duplicate_restores_required_notifications() {
     .expect(
         "a newer mined request must restore required admission without poisoning ordinary retry",
     );
+}
+
+/// A bound set through the read service applies the next time the state queues an orphan.
+#[tokio::test(flavor = "multi_thread")]
+async fn read_service_changes_the_orphan_queue_bound() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (state, read_service, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(0), 0).await;
+        let (mut state, parent) = with_genesis(state).await;
+
+        let orphans = orphan_blocks(&parent.make_fake_child(), 5);
+        for orphan in &orphans[..4] {
+            drop(state.queue_and_commit_to_non_finalized_state(
+                orphan.clone().prepare(),
+                None,
+                None,
+            ));
+        }
+        assert_eq!(state.non_finalized_state_queued_blocks.blocks.len(), 4);
+
+        let charge = |block: &Arc<Block>| {
+            QueuedBlocks::retained_bytes(&(
+                block.clone().prepare(),
+                tokio::sync::oneshot::channel().0,
+                None,
+                None,
+            ))
+        };
+        let limit = charge(&orphans[0]) + charge(&orphans[1]);
+        read_service.set_queued_blocks_bytes(limit);
+        assert_eq!(
+            state.non_finalized_state_queued_blocks.max_queued_bytes(),
+            limit
+        );
+
+        drop(state.queue_and_commit_to_non_finalized_state(
+            orphans[4].clone().prepare(),
+            None,
+            None,
+        ));
+        let queue = &state.non_finalized_state_queued_blocks;
+        assert!(queue.queued_bytes <= limit);
+        assert_eq!(
+            queue.blocks.len(),
+            2,
+            "the two lowest orphans fit the bound"
+        );
+        assert!(queue.has(orphans[0].hash()));
+        assert!(queue.has(orphans[1].hash()));
+        assert_indexes(queue);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// The state's memory limits bound the orphan queue's retained bytes, and the default limits keep
+/// today's 320 MiB bound.
+#[tokio::test(flavor = "multi_thread")]
+async fn memory_limits_bound_the_orphan_queue_bytes() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (mut state, parent) = orphan_state().await;
+        assert_eq!(
+            state.non_finalized_state_queued_blocks.max_queued_bytes(),
+            MAX_QUEUED_BYTES
+        );
+
+        let orphans = orphan_blocks(&parent.make_fake_child(), 4);
+        for orphan in &orphans {
+            drop(state.queue_and_commit_to_non_finalized_state(
+                orphan.clone().prepare(),
+                None,
+                None,
+            ));
+        }
+        assert_eq!(
+            state.non_finalized_state_queued_blocks.blocks.len(),
+            orphans.len(),
+            "the default bound keeps a few small orphans",
+        );
+        let charge = |block: &Arc<Block>| {
+            QueuedBlocks::retained_bytes(&(
+                block.clone().prepare(),
+                tokio::sync::oneshot::channel().0,
+                None,
+                None,
+            ))
+        };
+        let limit = charge(&orphans[0]) + charge(&orphans[1]);
+        drop(state);
+
+        let (mut state, _) = orphan_state_with_limits(MemoryLimits {
+            queued_blocks_bytes: limit,
+            ..MemoryLimits::default()
+        })
+        .await;
+        let mut responses: Vec<_> = orphans
+            .iter()
+            .map(|orphan| {
+                state.queue_and_commit_to_non_finalized_state(orphan.clone().prepare(), None, None)
+            })
+            .collect();
+
+        let queue = &state.non_finalized_state_queued_blocks;
+        assert_eq!(queue.max_queued_bytes(), limit);
+        assert!(queue.queued_bytes <= limit);
+        assert_eq!(
+            queue.blocks.len(),
+            2,
+            "the two lowest orphans fit the bound"
+        );
+        assert!(queue.has(orphans[0].hash()));
+        assert!(queue.has(orphans[1].hash()));
+        assert_indexes(queue);
+        for response in &mut responses[2..] {
+            assert_eq!(
+                response
+                    .try_recv()
+                    .expect("byte pressure answers the evicted orphan")
+                    .unwrap_err()
+                    .inner(),
+                &crate::CommitBlockError::OrphanQueueFull,
+            );
+        }
+    })
+    .await
+    .expect("queueing orphans never waits");
+}
+
+/// The orphan queue charges the block charge its producer carried, and carries a charge it had to
+/// compute to the writer, so its byte total is the carried charges plus its own overhead.
+#[test]
+fn orphan_queue_charges_the_carried_block_charge() {
+    let _init_guard = zebra_test::init();
+    let parent = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap();
+    let child = parent.make_fake_child();
+    let blocks = [&parent, &child];
+    let computed = |block: &Arc<Block>| {
+        let prepared = block.clone().prepare();
+        crate::block_retained_charge(block, &prepared.transaction_hashes)
+    };
+
+    // Without a carried charge, the queue computes one and carries it with the block.
+    let mut uncarried = QueuedBlocks::default();
+    for block in blocks {
+        uncarried.queue((
+            block.clone().prepare(),
+            tokio::sync::oneshot::channel().0,
+            None,
+            None,
+        ));
+        assert_eq!(
+            uncarried.blocks[&block.hash()].0 .0.retained_charge,
+            Some(computed(block)),
+        );
+    }
+    // The queue's own overhead on top of each block's charge: entries, indexes and outputs.
+    let overhead: Vec<usize> = blocks
+        .iter()
+        .map(|block| uncarried.blocks[&block.hash()].1 - computed(block))
+        .collect();
+    let dequeued = uncarried.dequeue_children(parent.header.previous_block_hash);
+    assert_eq!(
+        dequeued[0].0.retained_charge,
+        Some(computed(&parent)),
+        "the dequeued block carries its charge to the writer",
+    );
+
+    // With a carried charge, the queue charges it instead of serializing the block.
+    let carried_charges = [7_000_000, 11_000_000];
+    let mut carried = QueuedBlocks::default();
+    for (block, charge) in blocks.into_iter().zip(carried_charges) {
+        let mut prepared = block.clone().prepare();
+        prepared.retained_charge = Some(charge);
+        carried.queue((prepared, tokio::sync::oneshot::channel().0, None, None));
+        assert_eq!(
+            carried.blocks[&block.hash()].0 .0.retained_charge,
+            Some(charge)
+        );
+    }
+    assert_secondary_indexes(&carried);
+    for ((block, charge), overhead) in blocks.into_iter().zip(carried_charges).zip(&overhead) {
+        assert_eq!(carried.blocks[&block.hash()].1, charge + overhead);
+    }
+    assert_eq!(
+        carried.queued_bytes,
+        carried_charges.iter().sum::<usize>() + overhead.iter().sum::<usize>(),
+    );
+}
+
+/// A contextually verified commit queues the charge its record carries, instead of the queue
+/// serializing the block again.
+#[tokio::test(flavor = "multi_thread")]
+async fn contextual_commit_queues_the_record_charge() {
+    use tower::Service;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, parent) = orphan_state().await;
+        let orphan = orphan_blocks(&parent.make_fake_child(), 1)
+            .pop()
+            .expect("one orphan was requested");
+        let mut contextual =
+            ContextuallyVerifiedBlock::test_with_zero_spent_utxos(orphan.clone().prepare());
+        contextual.retained_charge = 9_000_000;
+        // Only blocks above the mandatory checkpoint are accepted as non-finalized commits.
+        contextual.height = Height(Network::Mainnet.mandatory_checkpoint_height().0 + 1);
+
+        drop(
+            state.call(Request::CommitContextuallyVerifiedBlock(Box::new(
+                contextual,
+            ))),
+        );
+
+        let (queued, _) = &state.non_finalized_state_queued_blocks.blocks[&orphan.hash()];
+        assert_eq!(queued.0.retained_charge, Some(9_000_000));
+        assert_eq!(
+            queued
+                .2
+                .as_ref()
+                .expect("the contextual record is queued with its block")
+                .retained_charge,
+            9_000_000
+        );
+    })
+    .await
+    .expect("queueing an orphan never waits");
 }

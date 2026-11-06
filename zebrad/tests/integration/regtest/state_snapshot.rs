@@ -54,9 +54,12 @@ use zebra_state::{
 };
 use zebra_test::{args, command::TestChild, prelude::*};
 use zebrad::{
-    components::state_snapshot::{
-        decision::{Precondition, SkipReason},
-        progress::Stage,
+    components::{
+        resources::MemoryBudget,
+        state_snapshot::{
+            decision::{Precondition, SkipReason},
+            progress::Stage,
+        },
     },
     config::ZebradConfig,
 };
@@ -664,6 +667,7 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // Keep post-checkpoint validation from starving on loaded hosts with many CPU workers.
         config_b.sync.full_verify_concurrency_limit = 1;
         config_b.sync.parallel_cpu_threads = 1;
+        config_b.resources.memory_budget = Some(MemoryBudget::Bytes(2 * 1024 * 1024 * 1024));
         config_b.network.initial_testnet_peers = [p2p_a.to_string()].into();
         config_b.network.v2_listen_addr = Some(quic_b);
         config_b.metrics.endpoint_addr = Some(metrics_b);
@@ -680,8 +684,14 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .expect("retain the state directory for the restart");
         let b = RpcRequestClient::new_with_timeout(loopback(rpc_b), TEST_TIMEOUT);
 
-        // The stage lines appear in order, from the decision to the last checkpoint.
+        // Resource planning precedes the download, and snapshot installation still precedes the
+        // state open. The remaining stage lines appear in order through the last checkpoint.
+        node_b.expect_stdout_line_matches("memory budget 2 GiB .*profile=ibd")?;
         for stage in EXPECTED_STAGES {
+            if stage == Stage::StateInitialized {
+                node_b
+                    .expect_stdout_line_matches("opening database, this may take a few minutes")?;
+            }
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
             if stage == Stage::StateInitialized {
                 // Capture transport counters before A's restart resets them. Bootstrap has finished,

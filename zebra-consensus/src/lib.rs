@@ -57,8 +57,8 @@ pub use block::check::{
 pub use block::SemanticBlockVerifier;
 
 pub use block::{
-    DecodedBlock, PreparedBlockCache, Request, ShieldedActionCounts, VerifyBlockError,
-    MAX_BLOCK_SIGOPS,
+    AdmittedProposal, DecodedBlock, PreparedBlockCache, Request, ShieldedActionCounts,
+    VerifyBlockError, DEFAULT_PROPOSAL_CACHE_BYTES, MAX_BLOCK_SIGOPS,
 };
 pub use checkpoint::{
     CommittedTip, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP,

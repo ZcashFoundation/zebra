@@ -164,6 +164,7 @@ fn v2_checkpoint_sync_config_maps_to_the_engine() {
             lookahead_bytes: 4_194_304,
             min_peer_rate: 65536,
             target_peers: 3,
+            ..EngineConfig::default()
         }
     );
     assert_eq!(
@@ -195,6 +196,7 @@ fn v2_checkpoint_sync_config_raises_low_values() {
             lookahead_bytes: sync::MIN_V2_LOOKAHEAD_BYTES,
             min_peer_rate: sync::MIN_V2_MIN_PEER_RATE,
             target_peers: sync::MIN_V2_TARGET_PEERS,
+            ..EngineConfig::default()
         }
     );
     assert_eq!(sync::MIN_V2_TARGET_PEERS, 1);

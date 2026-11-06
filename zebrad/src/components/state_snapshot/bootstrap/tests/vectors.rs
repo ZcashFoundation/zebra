@@ -52,6 +52,7 @@ use crate::components::state_snapshot::{
         ChainCheckError, FetchError, Peers, SstBuilder, INSTALLS_QUIESCED,
         VERIFIED_PIECE_CHANNEL_BOUND,
     },
+    memory::MemoryLimits,
     scheduler::{PieceDescriptor, SchedulerError, VerifiedPiece},
 };
 
@@ -1951,7 +1952,16 @@ async fn verified_piece_backpressure_bounds_the_sst_build_queue() {
     };
     let import_root = temp.path().join("workspace");
     let build = tokio::spawn(async move {
-        download_and_build_with(peers, &manifest, store, &import_root, tree_piece, builder).await
+        download_and_build_with(
+            peers,
+            &manifest,
+            store,
+            &import_root,
+            tree_piece,
+            &MemoryLimits::default(),
+            builder,
+        )
+        .await
     });
 
     for pending in 1..=VERIFIED_PIECE_CHANNEL_BOUND {

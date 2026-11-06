@@ -419,6 +419,7 @@ fn spawn_v2_node(
         misbehavior_tx,
         peerset_tx,
         ConnectedPeers::unconnected(),
+        crate::quic::QuicWindows::default(),
         RECONNECTION_DELAY,
         INBOUND_INTERVAL,
     )

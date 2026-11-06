@@ -1,0 +1,20 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added the public `retained_charge` and `retention` fields to `SemanticallyVerifiedBlock`, so
+  code that builds the struct with a literal or destructures it without `..` must set or match
+  them. `retained_charge` carries the numeric block charge computed by `block_retained_charge`;
+  the state reuses it instead of serializing again, including through contextual conversions and
+  `ContextuallyVerifiedBlock::into_mined_request`. `retention` optionally holds a distinct
+  crate-neutral `BlockRetentionToken`, which keeps a type-erased lifetime guard alive until the
+  last accepted owner drops it. Added `MemoryLimits` and `init_with_limits`, which open the state
+  with the RocksDB bounds in `MemoryLimits::rocksdb` and drop the highest blocks waiting for their
+  parent above `MemoryLimits::queued_blocks_bytes`; `init` uses `MemoryLimits::default()`, which
+  keeps today's limits. `MemoryLimits::non_finalized_resident_bytes` finalizes above its target,
+  down to the minimum 100-block rollback window, and
+  `ReadStateService::set_non_finalized_resident_bytes` updates the target on later commits;
+  `ReadStateService::set_queued_blocks_bytes` likewise updates the orphan queue bound. Added
+  the `state.memory.resident_bytes` gauge and
+  `ReadStateService::non_finalized_resident_bytes`, plus the `memory_sample` and
+  `spawn_apply_memory_limits` database accessors.
+time: 2026-11-06T11:34:05Z

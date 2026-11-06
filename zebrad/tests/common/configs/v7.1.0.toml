@@ -102,6 +102,8 @@ v2_serve_block_ranges = true
 
 [notify]
 
+[resources]
+
 [rpc]
 cookie_dir = "cache_dir"
 debug_force_finished_sync = false

@@ -173,6 +173,22 @@ namespace. See [Docker's sysctl rules][docker-sysctl].
 [ip-sysctl]: https://docs.kernel.org/networking/ip-sysctl.html
 [docker-sysctl]: https://docs.docker.com/reference/cli/docker/container/run/#sysctl
 
+## Memory
+
+These apply to a node with a [memory budget](memory.md):
+
+| Symptom | Cause | Remedy |
+| --- | --- | --- |
+| The container or service is OOM-killed | The budget is too close to the memory limit, or swap hides the limit | Set `memory_budget` to at most 80 % of the container's memory limit, and turn swap off for the container. |
+| `memory_budget ... is below the 963 MiB minimum` and Zebra exits | The budget does not cover the floors of the components it lists | Raise the budget, remove it, sync from a [state snapshot](snapshots.md), or pass `--unsafe-low-specs` to run every component at its floor over the budget. |
+| `IBD needs >= 1,113 MiB: sync from a snapshot or raise the budget` | The budget only fits a node at the tip, and the state is below the last checkpoint | Restore a [state snapshot](snapshots.md), or raise the budget to at least 1,113 MiB until the node is synced. |
+| `memory_budget = "auto" needs at least 1,113 MiB` | Half of the memory available to Zebra, or all of it, is below the initial sync minimum | Give Zebra more memory, or set an explicit budget for a node at the tip. |
+| `"auto"` reports it can only detect the memory on Linux | Detection reads `/proc` and `/sys/fs/cgroup` | Set `memory_budget` to a size. |
+| Resident memory is above the budget | RocksDB's limits are soft, the allocator keeps freed memory, and the cgroup also counts the page cache | Compare `zebra.memory.usage_bytes` with `zebra.memory.plan_bytes`, check `MALLOC_ARENA_MAX` and `GLIBC_TUNABLES`, and compare `zebra.process.rss_anon_bytes`, which leaves out the reclaimable page cache. |
+| `/ready` fails while memory is near a `MemoryHigh` limit | The kernel throttles a cgroup above `MemoryHigh` | Raise `MemoryHigh` above the budget, or rely on `MemoryMax` alone. |
+| Initial sync is slow at a small budget | The sync pipeline holds fewer large blocks in flight | Check `sync.pipeline.admission_wait_seconds` and `sync.pipeline.over_admitted_bytes`, and raise the budget if the pipeline waits often. |
+| Writes stall | RocksDB's memtables are full | Check `zebra.state.rocksdb.write_stopped`, and raise the budget if it is often `1`. |
+
 ## Known limitation: private peer addresses
 
 Zebra does not reject private IP addresses merely because they are private.

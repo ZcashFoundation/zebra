@@ -25,7 +25,10 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
+use rocksdb::{
+    statistics::Ticker, Cache, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions,
+    WriteBufferManager, DEFAULT_COLUMN_FAMILY_NAME,
+};
 use semver::Version;
 use zebra_chain::{
     block::{self, Height},
@@ -65,6 +68,311 @@ pub type DBThreadMode = rocksdb::SingleThreaded;
 ///
 /// Also the [`rocksdb::DBAccess`] used by database iterators.
 pub type DB = rocksdb::DBWithThreadMode<DBThreadMode>;
+
+/// One mebibyte, the unit of RocksDB's memory settings.
+const MIB: u64 = 1024 * 1024;
+
+/// Converts a memory size from the limits into the `usize` RocksDB's setters take.
+///
+/// A size this process cannot address is no bound at all, so it saturates.
+fn memory_size(bytes: u64) -> usize {
+    usize::try_from(bytes).unwrap_or(usize::MAX)
+}
+
+/// Converts a memory size RocksDB's getters return into the `u64` the limits and gauges use.
+fn memory_bytes(size: usize) -> u64 {
+    u64::try_from(size).unwrap_or(u64::MAX)
+}
+
+/// A sample of the database's memory use and write stalls, read from RocksDB.
+///
+/// [`DiskDb::export_metrics`] exports it as gauges, zebrad compares it with its memory plan,
+/// and the memory limit tests assert on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RocksDbMemorySample {
+    /// The heap memory of the open table readers, summed over the column families
+    /// (`rocksdb.estimate-table-readers-mem`). It includes the index and filter blocks that are
+    /// not charged to the block cache, which stay pinned for the process lifetime.
+    pub table_readers_bytes: u64,
+
+    /// The memtables waiting to be flushed, summed over the column families
+    /// (`rocksdb.num-immutable-mem-table`).
+    pub immutable_memtables: u64,
+
+    /// The column families with a flush pending (`rocksdb.mem-table-flush-pending`).
+    pub memtable_flush_pending: u64,
+
+    /// The block cache shared by Zebra's column families.
+    pub block_cache: Option<BlockCacheSample>,
+
+    /// The write buffer manager, when the database was opened with one.
+    pub write_buffer_manager: Option<WriteBufferManagerSample>,
+
+    /// True while RocksDB has stopped every write (`rocksdb.is-write-stopped`).
+    ///
+    /// A stop blocks the single write queue, which is the state writer thread.
+    pub write_stopped: bool,
+
+    /// The rate writes are being delayed to, in bytes per second, or 0 when writes are not
+    /// delayed (`rocksdb.actual-delayed-write-rate`).
+    pub delayed_write_rate: u64,
+
+    /// The statistics tickers, when the limits collect statistics.
+    pub statistics: Option<RocksDbStatisticsSample>,
+}
+
+/// The block cache's usage and capacity, read through one of Zebra's column families.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlockCacheSample {
+    /// The bytes in the cache (`rocksdb.block-cache-usage`).
+    pub usage_bytes: u64,
+
+    /// The bytes pinned in the cache by open iterators and pinned index and filter blocks
+    /// (`rocksdb.block-cache-pinned-usage`).
+    pub pinned_bytes: u64,
+
+    /// The cache capacity (`rocksdb.block-cache-capacity`), which is not a strict limit.
+    pub capacity_bytes: u64,
+}
+
+/// The write buffer manager's usage against its total.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WriteBufferManagerSample {
+    /// The memtable memory the manager counts, mutable and immutable.
+    pub usage_bytes: u64,
+
+    /// The total the manager flushes above. Advisory: the usage can exceed it while a flush
+    /// runs.
+    pub total_bytes: u64,
+}
+
+/// The statistics tickers behind the cache and stall gauges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RocksDbStatisticsSample {
+    /// The total time writers have been stalled, in microseconds (`rocksdb.stall.micros`).
+    pub stall_micros: u64,
+
+    /// The index and filter block cache hits of the charged column families.
+    pub index_and_filter_cache_hits: u64,
+
+    /// The index and filter block cache misses of the charged column families.
+    pub index_and_filter_cache_misses: u64,
+}
+
+/// Memory bounds for the finalized state's RocksDB database.
+///
+/// zebrad derives these bounds from its memory plan and passes them when the state is opened.
+/// Every `None` keeps the value Zebra uses today, so [`RocksDbMemoryLimits::default()`]
+/// reproduces today's database options exactly: it is a strict no-op.
+///
+/// The bounds are soft. The write buffer manager flushes memtables instead of stalling writers,
+/// the block cache is not a strict LRU, and the table readers of the uncharged column families
+/// stay outside both, so the database can briefly exceed the configured totals.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RocksDbMemoryLimits {
+    /// The total memtable memory across every column family, enforced by a RocksDB
+    /// `WriteBufferManager` shared by all of them.
+    ///
+    /// The manager flushes the oldest memtable when the total is exceeded instead of stalling
+    /// writers, and the memtable shape of every column family is derived from it, so the
+    /// natural per-column-family flushes lead and the manager is the backstop. `None` leaves
+    /// memtables bounded only by their per-column-family sizes.
+    pub write_buffer_total: Option<u64>,
+
+    /// The capacity of the LRU block cache shared by every column family.
+    ///
+    /// `None` keeps RocksDB's default 32 MiB cache.
+    pub block_cache_bytes: Option<u64>,
+
+    /// The column families whose SST index and filter blocks are charged to the block cache,
+    /// instead of being pinned on the heap by their table readers for the process lifetime.
+    ///
+    /// Empty charges none, which is today's behaviour. zebrad passes
+    /// [`READ_PATH_COLUMN_FAMILIES`](super::READ_PATH_COLUMN_FAMILIES): the column families
+    /// the block commit path point-reads keep their filters pinned, so the state writer never
+    /// re-reads a filter block on a cache miss.
+    pub charge_index_and_filter_cfs: &'static [&'static str],
+
+    /// The memtable size of each column family, under a write buffer total.
+    ///
+    /// Only used when `write_buffer_total` is set, because the whole per-column-family memtable
+    /// shape is derived from the write buffer manager: without a total, every column family
+    /// keeps today's 32 MiB memtables. `None` derives `clamp(write_buffer_total / 8, 8 MiB,
+    /// 32 MiB)`.
+    pub per_cf_write_buffer_size: Option<u64>,
+
+    /// The number of RocksDB background flush and compaction threads.
+    ///
+    /// `None` uses 4 when the write buffer total is below the natural memtable capacity of the
+    /// state's column families (a second flush thread keeps up with the manager's extra
+    /// flushes), and otherwise keeps RocksDB's default of 2.
+    pub max_background_jobs: Option<i32>,
+}
+
+/// The per-column-family memtable shape derived from a [`RocksDbMemoryLimits`].
+///
+/// Only present when the limits bound memtables; the shape has been chosen so that the
+/// natural per-column-family flushes lead and the write buffer manager is the backstop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MemtableShape {
+    /// The size of each column family's mutable memtable, in bytes.
+    pub write_buffer_size: u64,
+
+    /// The number of memtables (mutable and immutable) a column family can hold before its
+    /// writes stop.
+    pub max_write_buffer_number: i32,
+
+    /// The number of immutable memtables merged into one flush.
+    pub min_write_buffer_number_to_merge: i32,
+
+    /// The number of level 0 files that triggers a compaction into level 1.
+    pub level0_file_num_compaction_trigger: i32,
+}
+
+impl RocksDbMemoryLimits {
+    /// The smallest derived per-column-family memtable.
+    pub const MIN_PER_CF_WRITE_BUFFER_SIZE: u64 = 8 * MIB;
+
+    /// The largest derived per-column-family memtable, which is also today's memtable size.
+    pub const MAX_PER_CF_WRITE_BUFFER_SIZE: u64 = 32 * MIB;
+
+    /// The number of column families that are hot during a sync, which the write buffer total
+    /// is divided between to derive the per-column-family memtable size.
+    const HOT_COLUMN_FAMILIES_DURING_SYNC: u64 = 8;
+
+    /// The number of memtables a column family can hold under a write buffer manager.
+    ///
+    /// RocksDB only delays writes before stopping them when this is above 3, so 3 would go
+    /// straight from no stall to a write stop.
+    const BOUNDED_MAX_WRITE_BUFFER_NUMBER: i32 = 4;
+
+    /// Under a write buffer manager, every immutable memtable is flushed on its own, so a
+    /// manager-triggered flush never waits for a second memtable to fill.
+    const BOUNDED_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: i32 = 1;
+
+    /// The background threads used when a write buffer manager adds flushes: two for flushes
+    /// and two for compactions.
+    const BOUNDED_MAX_BACKGROUND_JOBS: i32 = 4;
+
+    /// Today's size of a level 0 to level 1 compaction input: two 32 MiB memtables merged into
+    /// one file, compacted as soon as a second file exists.
+    const LEVEL0_COMPACTION_INPUT_BYTES: u64 = 64 * MIB;
+
+    /// The most level 0 files allowed before a compaction into level 1 is triggered.
+    ///
+    /// RocksDB delays writes at 20 level 0 files, so this keeps 12 files of headroom.
+    const MAX_LEVEL0_FILE_NUM_COMPACTION_TRIGGER: u64 = 8;
+
+    /// The number of column families in the state database, used to decide whether a write
+    /// buffer total is below their natural memtable capacity: the column families in code and
+    /// the `default` column family RocksDB always opens.
+    //
+    // The cast is lossless: a slice length fits in a `u64` on every supported platform.
+    const STATE_COLUMN_FAMILY_COUNT: u64 = super::STATE_COLUMN_FAMILIES_IN_CODE.len() as u64 + 1;
+
+    /// Returns the memtable shape of every column family, if these limits bound memtables.
+    pub(crate) fn memtable_shape(&self) -> Option<MemtableShape> {
+        let write_buffer_size = self.effective_write_buffer_size()?;
+
+        // Keep the compaction input near today's 64 MiB when memtables shrink, so the write
+        // amplification of the level 0 to level 1 compactions stays near today's.
+        let level0_file_num_compaction_trigger = (Self::LEVEL0_COMPACTION_INPUT_BYTES
+            / write_buffer_size.max(1))
+        .clamp(2, Self::MAX_LEVEL0_FILE_NUM_COMPACTION_TRIGGER);
+
+        Some(MemtableShape {
+            write_buffer_size,
+            max_write_buffer_number: Self::BOUNDED_MAX_WRITE_BUFFER_NUMBER,
+            min_write_buffer_number_to_merge: Self::BOUNDED_MIN_WRITE_BUFFER_NUMBER_TO_MERGE,
+            level0_file_num_compaction_trigger: i32::try_from(level0_file_num_compaction_trigger)
+                .expect("the trigger is clamped to at most 8"),
+        })
+    }
+
+    /// Returns the memtable size of each column family, if these limits bound memtables.
+    ///
+    /// Only a write buffer total bounds memtables; `per_cf_write_buffer_size` overrides the
+    /// size derived from it.
+    pub fn effective_write_buffer_size(&self) -> Option<u64> {
+        let total = self.write_buffer_total?;
+
+        Some(self.per_cf_write_buffer_size.unwrap_or_else(|| {
+            (total / Self::HOT_COLUMN_FAMILIES_DURING_SYNC).clamp(
+                Self::MIN_PER_CF_WRITE_BUFFER_SIZE,
+                Self::MAX_PER_CF_WRITE_BUFFER_SIZE,
+            )
+        }))
+    }
+
+    /// Returns the number of background threads, if these limits set or derive one.
+    pub fn effective_max_background_jobs(&self) -> Option<i32> {
+        self.max_background_jobs.or_else(|| {
+            let natural_capacity =
+                Self::STATE_COLUMN_FAMILY_COUNT * Self::MAX_PER_CF_WRITE_BUFFER_SIZE;
+
+            self.write_buffer_total
+                .filter(|total| *total < natural_capacity)
+                .map(|_| Self::BOUNDED_MAX_BACKGROUND_JOBS)
+        })
+    }
+
+    /// Returns true if these limits need a block cache object of their own, rather than the
+    /// default cache RocksDB creates for the table factory shared by every column family.
+    ///
+    /// Charging index and filter blocks gives the charged column families their own table
+    /// factory, so without an explicit cache each factory would create its own default cache.
+    fn needs_shared_block_cache(&self) -> bool {
+        self.block_cache_bytes.is_some() || !self.charge_index_and_filter_cfs.is_empty()
+    }
+
+    /// Returns true if RocksDB statistics are collected for these limits.
+    ///
+    /// Statistics cost a little CPU on every operation, so they are only collected when a
+    /// memory bound is set and the cache hit and stall tickers have something to explain.
+    pub(crate) fn collects_statistics(&self) -> bool {
+        self.write_buffer_total.is_some() || self.block_cache_bytes.is_some()
+    }
+}
+
+/// The RocksDB options a [`DiskDb`] was opened with, and the shared objects they reference.
+///
+/// The block cache and write buffer manager are RocksDB objects shared by every column family.
+/// They are kept here so their usage can be exported and their limits resized live.
+struct DatabaseOptions {
+    /// The memory limits the options were built from.
+    limits: RocksDbMemoryLimits,
+
+    /// The database-wide options, which are also the base of every column family's options.
+    ///
+    /// When [`RocksDbMemoryLimits::collects_statistics`] is true, the statistics tickers are
+    /// read from here.
+    options: Options,
+
+    /// The block cache shared by every column family, if the limits create one.
+    block_cache: Option<Cache>,
+
+    /// The write buffer manager shared by every column family, if the limits create one.
+    write_buffer_manager: Option<WriteBufferManager>,
+}
+
+impl Debug for DatabaseOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseOptions")
+            .field("limits", &self.limits)
+            .field(
+                "block_cache_usage",
+                &self.block_cache.as_ref().map(Cache::get_usage),
+            )
+            .field(
+                "write_buffer_manager_usage",
+                &self
+                    .write_buffer_manager
+                    .as_ref()
+                    .map(WriteBufferManager::get_usage),
+            )
+            .finish()
+    }
+}
 
 /// Wrapper struct to ensure low-level database access goes through the correct API.
 ///
@@ -125,6 +433,15 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
+
+    /// The options the database was opened with, and the memory objects they share.
+    database_options: Arc<DatabaseOptions>,
+
+    /// The names of the column families the database was opened with, including `default`.
+    ///
+    /// Zebra never creates or drops a column family after opening, so the metrics and size
+    /// paths list column families from here instead of reading the MANIFEST on every call.
+    column_family_names: Arc<[String]>,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -605,15 +922,13 @@ impl DiskDb {
         let mut total_size_on_disk = 0;
         let mut total_live_size_on_disk = 0;
         let mut total_size_in_mem = 0;
+        let mut total_table_readers_size: u64 = 0;
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
 
-        for cf_descriptor in column_families {
-            let cf_name = &cf_descriptor.name();
+        for cf_name in self.column_family_names() {
             let cf_handle = db
                 .cf_handle(cf_name)
                 .expect("Column family handle must exist");
@@ -630,6 +945,12 @@ impl DiskDb {
                 .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
                 .unwrap_or(Some(0));
             total_size_in_mem += mem_table_size.unwrap_or(0);
+            let table_readers_size = db
+                .property_int_value_cf(cf_handle, "rocksdb.estimate-table-readers-mem")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            total_table_readers_size = total_table_readers_size.saturating_add(table_readers_size);
 
             write!(
                 column_families_log_string,
@@ -654,6 +975,11 @@ impl DiskDb {
             "Total Database Memory Size: {}",
             human_bytes::human_bytes(total_size_in_mem as f64)
         );
+        // The `as f64` conversion is exact: table reader memory is far below 2^53 bytes.
+        info!(
+            "Total Table Readers Memory Size: {}",
+            human_bytes::human_bytes(total_table_readers_size as f64)
+        );
     }
 
     /// Exports RocksDB metrics to Prometheus.
@@ -662,8 +988,6 @@ impl DiskDb {
     /// Call this periodically (e.g., every 30 seconds) from a background task.
     pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
 
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
@@ -671,9 +995,8 @@ impl DiskDb {
         let mut measured_column_family = false;
         let mut complete_disk_measurement = true;
 
-        for cf_descriptor in column_families {
-            let cf_name = cf_descriptor.name().to_string();
-            if let Some(cf_handle) = db.cf_handle(&cf_name) {
+        for cf_name in self.column_family_names() {
+            if let Some(cf_handle) = db.cf_handle(cf_name) {
                 measured_column_family = true;
                 let disk = match db.property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
                 {
@@ -700,7 +1023,7 @@ impl DiskDb {
 
                 metrics::gauge!("zebra.state.rocksdb.cf_disk_size_bytes", "cf" => cf_name.clone())
                     .set(disk as f64);
-                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
+                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name.clone())
                     .set(mem as f64);
             } else {
                 complete_disk_measurement = false;
@@ -724,8 +1047,45 @@ impl DiskDb {
             metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
         }
 
-        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
-            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
+        // Memory and write stall metrics. The `as f64` conversions are exact: these are byte
+        // and item counts far below 2^53.
+        let sample = self.memory_sample();
+        metrics::gauge!("zebra.state.rocksdb.table_readers_bytes")
+            .set(sample.table_readers_bytes as f64);
+        metrics::gauge!("zebra.state.rocksdb.immutable_memtables")
+            .set(sample.immutable_memtables as f64);
+        metrics::gauge!("zebra.state.rocksdb.memtable_flush_pending")
+            .set(sample.memtable_flush_pending as f64);
+        metrics::gauge!("zebra.state.rocksdb.write_stopped").set(if sample.write_stopped {
+            1.0
+        } else {
+            0.0
+        });
+        metrics::gauge!("zebra.state.rocksdb.delayed_write_rate")
+            .set(sample.delayed_write_rate as f64);
+
+        if let Some(cache) = sample.block_cache {
+            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes")
+                .set(cache.usage_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.block_cache_pinned_bytes")
+                .set(cache.pinned_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.block_cache_capacity_bytes")
+                .set(cache.capacity_bytes as f64);
+        }
+
+        if let Some(manager) = sample.write_buffer_manager {
+            metrics::gauge!("zebra.state.rocksdb.write_buffer_usage_bytes")
+                .set(manager.usage_bytes as f64);
+            metrics::gauge!("zebra.state.rocksdb.write_buffer_total_bytes")
+                .set(manager.total_bytes as f64);
+        }
+
+        if let Some(statistics) = sample.statistics {
+            metrics::counter!("zebra.state.rocksdb.block_cache_index_filter", "result" => "hit")
+                .absolute(statistics.index_and_filter_cache_hits);
+            metrics::counter!("zebra.state.rocksdb.block_cache_index_filter", "result" => "miss")
+                .absolute(statistics.index_and_filter_cache_misses);
+            metrics::counter!("zebra.state.rocksdb.stall_micros").absolute(statistics.stall_micros);
         }
 
         // Level-by-level file counts (RocksDB typically has up to 7 levels)
@@ -757,12 +1117,10 @@ impl DiskDb {
     /// Measures disk usage and reports whether every column family's property was available.
     fn measure_size(&self) -> (u64, bool) {
         let db: &Arc<DB> = &self.db;
-        let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
         let mut measured_column_family = false;
         let mut complete = true;
-        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
-            let cf_name = &cf_descriptor.name();
+        for cf_name in self.column_family_names() {
             let cf_handle = db
                 .cf_handle(cf_name)
                 .expect("column family handle exists because RocksDB opened every descriptor");
@@ -1008,13 +1366,33 @@ impl DiskDb {
     /// This limits restart recovery work during heavy sync without disabling WAL durability.
     const MAX_TOTAL_WAL_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+    /// The capacity of the block cache RocksDB creates when none is configured.
+    const DEFAULT_BLOCK_CACHE_BYTES: u64 = 32 * MIB;
+
     /// Build a vector of current column families on the disk and optionally any new column families.
-    /// Returns an iterable collection of all column families.
     pub(crate) fn construct_column_families(
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
-    ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
+    ) -> Vec<ColumnFamilyDescriptor> {
+        Self::construct_column_families_with_options(
+            &DatabaseOptions {
+                limits: RocksDbMemoryLimits::default(),
+                options: db_options,
+                block_cache: None,
+                write_buffer_manager: None,
+            },
+            path,
+            column_families_in_code,
+        )
+    }
+
+    /// Build column family descriptors using the shared memory objects in `database_options`.
+    fn construct_column_families_with_options(
+        database_options: &DatabaseOptions,
+        path: &Path,
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> Vec<ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
         // To make Zebra forward-compatible with databases updated by later versions,
@@ -1022,15 +1400,16 @@ impl DiskDb {
         // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
+        let column_families_on_disk =
+            DB::list_cf(&database_options.options, path).unwrap_or_default();
         let column_families_in_code = column_families_in_code.into_iter();
 
         column_families_on_disk
             .into_iter()
             .chain(column_families_in_code)
             .unique()
-            .map(move |cf_name: String| {
-                let mut cf_options = db_options.clone();
+            .map(|cf_name: String| {
+                let mut cf_options = database_options.options.clone();
 
                 if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
                     cf_options.set_merge_operator_associative(
@@ -1039,13 +1418,31 @@ impl DiskDb {
                     );
                 }
 
-                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
+                // The charged column families get their own table factory, which shares the
+                // block cache and filter settings of every other column family and charges its
+                // index and filter blocks to that cache.
+                if database_options
+                    .limits
+                    .charge_index_and_filter_cfs
+                    .contains(&cf_name.as_str())
+                {
+                    cf_options.set_block_based_table_factory(&Self::block_based_options(
+                        database_options.block_cache.as_ref(),
+                        true,
+                    ));
+                }
+
+                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options)
             })
+            .collect()
     }
 
     /// Opens or creates the database at a path based on the kind, major version and network,
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
+    ///
+    /// The database is opened with today's memory options. [`DiskDb::new_with_limits`] bounds
+    /// its memory.
     ///
     /// # Errors
     ///
@@ -1063,6 +1460,29 @@ impl DiskDb {
         network: &Network,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
+    ) -> Result<DiskDb, StateInitError> {
+        Self::new_with_limits(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+            &RocksDbMemoryLimits::default(),
+        )
+    }
+
+    /// Opens or creates the database like [`DiskDb::new`], with its memory bounded by `limits`.
+    ///
+    /// [`RocksDbMemoryLimits::default()`] opens the database with today's options.
+    pub fn new_with_limits(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+        limits: &RocksDbMemoryLimits,
     ) -> Result<DiskDb, StateInitError> {
         config.validate_pruning(network)?;
 
@@ -1094,11 +1514,12 @@ impl DiskDb {
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
 
-        let db_options = DiskDb::options();
+        let database_options = Arc::new(DiskDb::database_options(limits));
+        let db_options = &database_options.options;
 
         let mut column_families_in_code: Vec<String> =
             column_families_in_code.into_iter().collect();
-        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        let column_families_on_disk = DB::list_cf(db_options, &path).unwrap_or_default();
         if read_only && !column_families_on_disk.is_empty() {
             // A secondary instance can not create column families, and RocksDB refuses to open
             // one with a column family that is not on disk. A database without one of the
@@ -1118,8 +1539,26 @@ impl DiskDb {
             }
             column_families_in_code.retain(|cf| column_families_on_disk.contains(cf));
         }
-        let column_families =
-            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
+        let column_families = DiskDb::construct_column_families_with_options(
+            &database_options,
+            &path,
+            column_families_in_code,
+        );
+
+        // rust-rocksdb also opens the `default` column family when it is not on disk yet.
+        let column_family_names: Arc<[String]> = if column_families
+            .iter()
+            .any(|cf| cf.name() == DEFAULT_COLUMN_FAMILY_NAME)
+        {
+            column_families
+                .iter()
+                .map(|cf| cf.name().to_string())
+                .collect()
+        } else {
+            std::iter::once(DEFAULT_COLUMN_FAMILY_NAME.to_string())
+                .chain(column_families.iter().map(|cf| cf.name().to_string()))
+                .collect()
+        };
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
@@ -1134,13 +1573,13 @@ impl DiskDb {
             info!(?create_dir_result, "creating secondary db directory");
 
             DB::open_cf_descriptors_as_secondary(
-                &db_options,
+                db_options,
                 &path,
                 &secondary_path,
                 column_families,
             )
         } else {
-            DB::open_cf_descriptors(&db_options, &path, column_families)
+            DB::open_cf_descriptors(db_options, &path, column_families)
         };
 
         match db_result {
@@ -1155,6 +1594,8 @@ impl DiskDb {
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                     cached_size: Arc::new(AtomicU64::new(0)),
+                    database_options,
+                    column_family_names,
                 };
 
                 // Guard the lowest writable entry point before launching migrations or checks.
@@ -1265,9 +1706,228 @@ impl DiskDb {
         self.network.clone()
     }
 
+    /// Returns the memory limits this database was opened with.
+    ///
+    /// [`DiskDb::apply_memory_limits`] resizes the database's memory objects in place without
+    /// changing this value.
+    pub fn limits(&self) -> &RocksDbMemoryLimits {
+        &self.database_options.limits
+    }
+
+    /// Applies `limits` to the open database, where RocksDB allows a live change.
+    ///
+    /// zebrad calls this when its memory profile changes, for example when the initial sync
+    /// reaches full verification and the sync pipeline's share moves to the database. Every
+    /// change goes through RocksDB's own synchronisation; Zebra holds no lock.
+    ///
+    /// What changes live:
+    /// - the memtable size, memtable count and level 0 compaction trigger of every column
+    ///   family (the shape `write_buffer_total` derives), on a read-write database opened with
+    ///   a write buffer total;
+    /// - the write buffer manager's total (`write_buffer_total`), when the database was opened
+    ///   with a manager;
+    /// - the block cache capacity (`block_cache_bytes`), when the database was opened with a
+    ///   cache of its own.
+    ///
+    /// What cannot change after the database is opened, and is logged and skipped:
+    /// - adding or removing the write buffer manager or the shared block cache;
+    /// - the bounded memtable shape, on a database opened without a write buffer total:
+    ///   `min_write_buffer_number_to_merge` is an immutable RocksDB option, and with today's 2 a
+    ///   flush of the smaller memtables would wait for two immutable memtables while writes are
+    ///   delayed at three;
+    /// - `charge_index_and_filter_cfs`: table factories are fixed when a column family opens;
+    /// - `max_background_jobs`: RocksDB can change it live, but its C API (and so the Rust
+    ///   binding) exposes no `SetDBOptions`;
+    /// - column family options on a read-only secondary, which RocksDB rejects;
+    /// - `max_open_files`, which the limits never change.
+    ///
+    /// Every skipped change applies when the database is reopened under the new limits.
+    /// [`DiskDb::limits`] keeps returning the limits the database was opened with.
+    ///
+    /// This is blocking disk I/O: RocksDB rewrites its OPTIONS file after each column family's
+    /// change. Async callers use
+    /// [`ZebraDb::spawn_apply_memory_limits`](super::ZebraDb::spawn_apply_memory_limits).
+    ///
+    /// # Errors
+    ///
+    /// If RocksDB rejects a column family option change. The column families change first, one
+    /// at a time, so after an error the write buffer manager and the block cache keep their
+    /// sizes, the column families before the failing one have the new memtable shape, and the
+    /// others keep the old one. Applying the same limits again completes the change.
+    pub fn apply_memory_limits(&self, limits: &RocksDbMemoryLimits) -> Result<(), rocksdb::Error> {
+        let opened = &self.database_options;
+
+        // Column family changes are the only step that can fail, so they go first.
+        if let Some(shape) = limits.memtable_shape() {
+            if self.mode.is_read_only() {
+                debug!("a read-only secondary cannot change its column family options");
+            } else if opened.limits.memtable_shape().is_some() {
+                let write_buffer_size = shape.write_buffer_size.to_string();
+                let max_write_buffer_number = shape.max_write_buffer_number.to_string();
+                let level0_file_num_compaction_trigger =
+                    shape.level0_file_num_compaction_trigger.to_string();
+
+                for cf_name in self.column_family_names() {
+                    let Some(cf) = self.db.cf_handle(cf_name) else {
+                        continue;
+                    };
+
+                    self.db.set_options_cf(
+                        &cf,
+                        &[
+                            ("write_buffer_size", &write_buffer_size),
+                            ("max_write_buffer_number", &max_write_buffer_number),
+                            (
+                                "level0_file_num_compaction_trigger",
+                                &level0_file_num_compaction_trigger,
+                            ),
+                        ],
+                    )?;
+                }
+            }
+            // Otherwise the database was opened without a write buffer total, which the write
+            // buffer manager warning below logs.
+        }
+
+        match (&opened.write_buffer_manager, limits.write_buffer_total) {
+            (Some(manager), Some(total)) => manager.set_buffer_size(memory_size(total)),
+            (None, Some(total)) => warn!(
+                ?total,
+                "the database was opened without a write buffer manager, so its memtables keep \
+                 today's shape and stay unbounded until it is reopened under the new limits"
+            ),
+            (Some(manager), None) => warn!(
+                total = manager.get_buffer_size(),
+                "a write buffer manager cannot be removed from an open database, \
+                 keeping its current total"
+            ),
+            (None, None) => {}
+        }
+
+        match (&opened.block_cache, limits.block_cache_bytes) {
+            (Some(cache), Some(capacity)) => {
+                // `set_capacity` takes the handle by `&mut`, but every handle points at the same
+                // RocksDB cache, so a clone of the shared handle resizes the shared cache.
+                let mut cache = cache.clone();
+                cache.set_capacity(memory_size(capacity));
+            }
+            (None, Some(capacity)) => warn!(
+                ?capacity,
+                "the database was opened with RocksDB's default block cache, \
+                 which cannot be resized"
+            ),
+            (Some(_), None) => warn!(
+                "a block cache cannot be removed from an open database, \
+                 keeping its current capacity"
+            ),
+            (None, None) => {}
+        }
+
+        if limits.charge_index_and_filter_cfs != opened.limits.charge_index_and_filter_cfs {
+            warn!(
+                opened = ?opened.limits.charge_index_and_filter_cfs,
+                requested = ?limits.charge_index_and_filter_cfs,
+                "index and filter block charging is fixed when the database opens, \
+                 keeping the column families it was opened with"
+            );
+        }
+
+        if limits.effective_max_background_jobs() != opened.limits.effective_max_background_jobs() {
+            debug!(
+                opened = ?opened.limits.effective_max_background_jobs(),
+                requested = ?limits.effective_max_background_jobs(),
+                "the background thread count is fixed when the database opens"
+            );
+        }
+
+        info!(?limits, "applied new memory limits to the state database");
+
+        Ok(())
+    }
+
+    /// Returns a sample of the database's memory use and write stalls.
+    ///
+    /// Every value is read from RocksDB's properties, the shared memory objects and, when the
+    /// limits collect them, the statistics tickers.
+    pub(crate) fn memory_sample(&self) -> RocksDbMemorySample {
+        let db: &Arc<DB> = &self.db;
+        let property = |name: &str| db.property_int_value(name).ok().flatten().unwrap_or(0);
+        let property_cf = |cf: &rocksdb::ColumnFamily, name: &str| {
+            db.property_int_value_cf(cf, name)
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+        };
+
+        let mut sample = RocksDbMemorySample::default();
+        let column_families = self.column_family_names();
+
+        for cf_name in column_families {
+            let Some(cf) = db.cf_handle(cf_name) else {
+                continue;
+            };
+
+            sample.table_readers_bytes = sample
+                .table_readers_bytes
+                .saturating_add(property_cf(cf, "rocksdb.estimate-table-readers-mem"));
+            sample.immutable_memtables = sample
+                .immutable_memtables
+                .saturating_add(property_cf(cf, "rocksdb.num-immutable-mem-table"));
+            sample.memtable_flush_pending = sample
+                .memtable_flush_pending
+                .saturating_add(property_cf(cf, "rocksdb.mem-table-flush-pending"));
+        }
+
+        // On a newly created database, rust-rocksdb opens the unused `default` column family
+        // with RocksDB's own options and its own cache, because it is not on disk yet; it only
+        // gets Zebra's options from the next open. So the cache Zebra's column families share
+        // is read through one of them.
+        sample.block_cache = column_families
+            .iter()
+            .find(|cf_name| *cf_name != DEFAULT_COLUMN_FAMILY_NAME)
+            .and_then(|cf_name| db.cf_handle(cf_name))
+            .map(|cf| BlockCacheSample {
+                usage_bytes: property_cf(cf, "rocksdb.block-cache-usage"),
+                pinned_bytes: property_cf(cf, "rocksdb.block-cache-pinned-usage"),
+                capacity_bytes: property_cf(cf, "rocksdb.block-cache-capacity"),
+            });
+
+        sample.write_buffer_manager =
+            self.database_options
+                .write_buffer_manager
+                .as_ref()
+                .map(|manager| WriteBufferManagerSample {
+                    usage_bytes: memory_bytes(manager.get_usage()),
+                    total_bytes: memory_bytes(manager.get_buffer_size()),
+                });
+
+        sample.write_stopped = property("rocksdb.is-write-stopped") != 0;
+        sample.delayed_write_rate = property("rocksdb.actual-delayed-write-rate");
+
+        sample.statistics = self.database_options.limits.collects_statistics().then(|| {
+            let options = &self.database_options.options;
+            let ticker = |ticker| options.get_ticker_count(ticker);
+
+            RocksDbStatisticsSample {
+                stall_micros: ticker(Ticker::StallMicros),
+                index_and_filter_cache_hits: ticker(Ticker::BlockCacheIndexHit)
+                    .saturating_add(ticker(Ticker::BlockCacheFilterHit)),
+                index_and_filter_cache_misses: ticker(Ticker::BlockCacheIndexMiss)
+                    .saturating_add(ticker(Ticker::BlockCacheFilterMiss)),
+            }
+        });
+
+        sample
+    }
+
     /// Returns the `Path` where the files used by this database are located.
     pub fn path(&self) -> &Path {
         self.db.path()
+    }
+
+    /// Returns the names of the column families the database was opened with.
+    fn column_family_names(&self) -> &[String] {
+        &self.column_family_names
     }
 
     /// Returns the low-level rocksdb inner database.
@@ -1502,6 +2162,7 @@ impl DiskDb {
                 return None;
             }
 
+            // Listing column families only reads the database-wide options, not memory bounds.
             let opts = DiskDb::options();
             let old_db_exists = DB::list_cf(&opts, &old_path).is_ok_and(|cf| !cf.is_empty());
             let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
@@ -1592,19 +2253,29 @@ impl DiskDb {
 
     /// Returns the database options for the finalized state database.
     pub(crate) fn options() -> rocksdb::Options {
+        Self::database_options(&RocksDbMemoryLimits::default()).options
+    }
+
+    /// Returns the database options for the finalized state database, bounded by `limits`,
+    /// with the memory objects the options share between column families.
+    fn database_options(limits: &RocksDbMemoryLimits) -> DatabaseOptions {
         let mut opts = rocksdb::Options::default();
-        let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
         const ONE_MEGABYTE: usize = 1024 * 1024;
 
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
 
-        // Use the recommended Ribbon filter setting for all column families.
-        //
-        // Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.
-        // (They aren't needed for single-valued column families, but they don't hurt either.)
-        block_based_opts.set_ribbon_filter(9.9);
+        // Without an explicit cache, RocksDB creates a default 32 MiB cache for the table
+        // factory that every column family shares. A sized cache, or charged column families
+        // with a table factory of their own, need one explicit cache so every factory shares it.
+        let block_cache = limits.needs_shared_block_cache().then(|| {
+            let capacity = limits
+                .block_cache_bytes
+                .unwrap_or(Self::DEFAULT_BLOCK_CACHE_BYTES);
+            Cache::new_lru_cache(memory_size(capacity))
+        });
+        let block_based_opts = Self::block_based_options(block_cache.as_ref(), false);
 
         // Use the recommended LZ4 compression type.
         //
@@ -1615,6 +2286,38 @@ impl DiskDb {
         //
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
+
+        // Under a write buffer total, shrink each column family's memtables so their natural
+        // flushes lead and the manager is the backstop. RocksDB flushes the column family with
+        // the *oldest* mutable memtable when the manager's total is exceeded, so with today's
+        // 32 MiB memtables a small total would cascade flushes of arbitrary small sizes across
+        // column families. The file and level sizes set above stay unchanged, so the layout of
+        // level 1 and below is identical.
+        if let Some(shape) = limits.memtable_shape() {
+            opts.set_write_buffer_size(memory_size(shape.write_buffer_size));
+            opts.set_min_write_buffer_number_to_merge(shape.min_write_buffer_number_to_merge);
+            opts.set_max_write_buffer_number(shape.max_write_buffer_number);
+            opts.set_level_zero_file_num_compaction_trigger(
+                shape.level0_file_num_compaction_trigger,
+            );
+        }
+
+        // The manager flushes instead of stalling writers: a stall would block the single
+        // write queue, which is the state writer thread.
+        let write_buffer_manager = limits
+            .write_buffer_total
+            .map(|total| WriteBufferManager::new_write_buffer_manager(memory_size(total), false));
+        if let Some(write_buffer_manager) = &write_buffer_manager {
+            opts.set_write_buffer_manager(write_buffer_manager);
+        }
+
+        if let Some(max_background_jobs) = limits.effective_max_background_jobs() {
+            opts.set_max_background_jobs(max_background_jobs);
+        }
+
+        if limits.collects_statistics() {
+            opts.enable_statistics();
+        }
 
         // Flush older WALs during heavy sync to reduce restart replay work.
         opts.set_max_total_wal_size(Self::MAX_TOTAL_WAL_SIZE_BYTES);
@@ -1635,7 +2338,43 @@ impl DiskDb {
         // Set the block-based options
         opts.set_block_based_table_factory(&block_based_opts);
 
-        opts
+        DatabaseOptions {
+            limits: *limits,
+            options: opts,
+            block_cache,
+            write_buffer_manager,
+        }
+    }
+
+    /// Returns the block-based table options for the finalized state database.
+    ///
+    /// `block_cache` is the cache shared by every column family, if the limits create one.
+    /// When `charge_index_and_filter` is true, the SST index and filter blocks are charged to
+    /// that cache instead of being pinned on the heap by their table readers.
+    fn block_based_options(
+        block_cache: Option<&Cache>,
+        charge_index_and_filter: bool,
+    ) -> rocksdb::BlockBasedOptions {
+        let mut block_based_opts = rocksdb::BlockBasedOptions::default();
+
+        // Use the recommended Ribbon filter setting for all column families.
+        //
+        // Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.
+        // (They aren't needed for single-valued column families, but they don't hurt either.)
+        block_based_opts.set_ribbon_filter(9.9);
+
+        if let Some(block_cache) = block_cache {
+            block_based_opts.set_block_cache(block_cache);
+        }
+
+        if charge_index_and_filter {
+            block_based_opts.set_cache_index_and_filter_blocks(true);
+            // Level 0 files are the freshest flushes, read on most lookups: their index and
+            // filter blocks stay pinned so a lookup never evicts them.
+            block_based_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
+        }
+
+        block_based_opts
     }
 
     /// Calculate the database's share of `open_file_limit`

@@ -13,7 +13,7 @@ const CONFIG_PAGE: &str = include_str!("../../../book/src/user/config.md");
 const INTRO_PAGE: &str = include_str!("../../../book/src/README.md");
 
 /// The top-level `zebrad.toml` sections, in the order the configuration reference documents them.
-const SECTIONS: [&str; 12] = [
+const SECTIONS: [&str; 13] = [
     "consensus",
     "network",
     "state",
@@ -25,6 +25,7 @@ const SECTIONS: [&str; 12] = [
     "metrics",
     "health",
     "notify",
+    "resources",
     "zcashd_compat",
 ];
 

@@ -70,6 +70,15 @@ pub struct EngineConfig {
     /// The number of peers to stream from at once. Default 8; the engine
     /// starts with at least 2.
     pub target_peers: usize,
+
+    /// The connection receive window of a peer the engine streams from.
+    /// Default [`SELECTED_RECEIVE_WINDOW`].
+    pub selected_receive_window: u32,
+
+    /// The connection receive window the engine gives a peer it stops
+    /// streaming from, and every peer when it exits. Default
+    /// [`DESELECTED_RECEIVE_WINDOW`].
+    pub deselected_receive_window: u32,
 }
 
 impl Default for EngineConfig {
@@ -78,6 +87,8 @@ impl Default for EngineConfig {
             lookahead_bytes: 512 * 1024 * 1024,
             min_peer_rate: 256 * 1024,
             target_peers: 8,
+            selected_receive_window: SELECTED_RECEIVE_WINDOW,
+            deselected_receive_window: DESELECTED_RECEIVE_WINDOW,
         }
     }
 }
@@ -895,7 +906,7 @@ where
         let exit = loop {
             let now = Instant::now();
 
-            apply_window_changes(&mut scheduler, &known_peers);
+            apply_window_changes(&mut scheduler, &known_peers, &config);
 
             // Assign units to peers with free pull budgets.
             while let Some(assignment) = scheduler.next_assignment(now) {
@@ -1175,7 +1186,7 @@ where
         shared_charge.store(0, std::sync::atomic::Ordering::Relaxed);
 
         for peer in known_peers.values() {
-            peer.set_bulk_receive_window(DESELECTED_RECEIVE_WINDOW);
+            peer.set_bulk_receive_window(config.deselected_receive_window);
         }
 
         EngineOutcome {
@@ -1435,13 +1446,14 @@ fn update_peers<P: RangePeer>(
 fn apply_window_changes<P: RangePeer>(
     scheduler: &mut Scheduler,
     known_peers: &HashMap<ConnectionId, P>,
+    config: &EngineConfig,
 ) {
     for change in scheduler.take_window_changes() {
         if let Some(peer) = known_peers.get(&change.peer) {
             peer.set_bulk_receive_window(if change.selected {
-                SELECTED_RECEIVE_WINDOW
+                config.selected_receive_window
             } else {
-                DESELECTED_RECEIVE_WINDOW
+                config.deselected_receive_window
             });
         }
     }

@@ -96,6 +96,32 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, ReadState>;
 
+/// Memory limits for the mempool, derived from zebrad's memory budget.
+///
+/// [`MempoolMemoryLimits::default()`] is today's behaviour: the configured limits apply.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MempoolMemoryLimits {
+    /// Replaces [`Config::tx_cost_limit`].
+    ///
+    /// `None` keeps the configured value. The memory plan leaves it `None` when the config sets a
+    /// limit explicitly, so an explicit limit wins.
+    pub tx_cost_limit: Option<u64>,
+}
+
+impl MempoolMemoryLimits {
+    /// Returns a copy of `config` with these limits applied, for [`Mempool::new`].
+    pub fn apply_to(&self, config: &Config) -> Config {
+        let mut config = config.clone();
+
+        if let Some(tx_cost_limit) = self.tx_cost_limit {
+            config.tx_cost_limit = tx_cost_limit;
+            config.pending_bytes = Some(tx_cost_limit);
+        }
+
+        config
+    }
+}
+
 /// The wall-clock window around a network upgrade activation where an adjacent upgrade's branch ID
 /// receives no peer score: 40 blocks at 75 seconds, 120 blocks at ZIP 218's 25 seconds.
 const BRANCH_ID_GRACE_PERIOD: Duration = Duration::minutes(50);
@@ -448,12 +474,15 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.read_state.clone(),
-            self.transaction_verified.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.read_state.clone(),
+                self.transaction_verified.clone(),
+            )
+            .with_pending_bytes(self.config.pending_bytes),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,

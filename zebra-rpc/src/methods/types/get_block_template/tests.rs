@@ -872,3 +872,108 @@ fn coinbase_pays_nsm_subsidy() {
     );
     assert!(cache.get(height, fee, Some(Amount::zero())).is_none());
 }
+
+/// Under a proposal work bound, an admitted proposal reaches the verifier as
+/// `CheckProposalAdmitted` and keeps its capacity until verification finishes, and a concurrent
+/// proposal returns the memory-pressure error without reaching the verifier.
+#[tokio::test]
+async fn bounded_proposals_are_admitted_or_refused_under_memory_pressure() {
+    use std::time::Duration;
+
+    use zebra_chain::{
+        block, chain_sync_status::MockSyncStatus, chain_tip::mock::MockChainTip,
+        parameters::Network,
+    };
+    use zebra_test::mock_service::{MockService, PanicAssertion};
+
+    use super::validate_block_proposal;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(Default::default());
+    assert_eq!(
+        network.nsm_reissuance_height(),
+        None,
+        "the proposal preflight doesn't query the state"
+    );
+    let mut router: MockService<
+        zebra_consensus::Request,
+        block::Hash,
+        PanicAssertion,
+        zebra_consensus::BoxError,
+    > = MockService::build().for_unit_tests();
+    let read_state: MockService<
+        zebra_state::ReadRequest,
+        zebra_state::ReadResponse,
+        PanicAssertion,
+        zebra_state::BoxError,
+    > = MockService::build().for_unit_tests();
+    let (tip, _tip_sender) = MockChainTip::new();
+    // Any positive bound admits one proposal at a time: charges are clamped to the bound.
+    let cache = zebra_consensus::PreparedBlockCache::with_work_limit(1);
+    let bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+
+    let first = validate_block_proposal(
+        router.clone(),
+        Some(cache.clone()),
+        read_state.clone(),
+        bytes.clone(),
+        &network,
+        tip.clone(),
+        MockSyncStatus::default(),
+    );
+    let refuse_concurrent_proposal = async {
+        let request = router
+            .expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposalAdmitted(_))
+            })
+            .await;
+
+        let refused = tokio::time::timeout(
+            Duration::from_secs(5),
+            validate_block_proposal(
+                router.clone(),
+                Some(cache.clone()),
+                read_state.clone(),
+                bytes.clone(),
+                &network,
+                tip.clone(),
+                MockSyncStatus::default(),
+            ),
+        )
+        .await
+        .expect("a refused proposal returns at once");
+        let error = refused.expect_err("the in-flight proposal holds the whole bound");
+        assert_eq!(
+            error.message(),
+            zebra_consensus::VerifyBlockError::ProposalMemoryPressure.to_string()
+        );
+        router.expect_no_requests().await;
+
+        let hash = request.request().block().hash();
+        request.respond(hash);
+        hash
+    };
+    let (first, hash) = tokio::join!(first, refuse_concurrent_proposal);
+    first.expect("the first proposal is verified");
+
+    // The finished proposal released its capacity.
+    let second = validate_block_proposal(
+        router.clone(),
+        Some(cache),
+        read_state,
+        bytes,
+        &network,
+        tip,
+        MockSyncStatus::default(),
+    );
+    let verify = async {
+        router
+            .expect_request_that(|request| {
+                matches!(request, zebra_consensus::Request::CheckProposalAdmitted(_))
+            })
+            .await
+            .respond(hash);
+    };
+    let (second, ()) = tokio::join!(second, verify);
+    second.expect("the second proposal is verified");
+}

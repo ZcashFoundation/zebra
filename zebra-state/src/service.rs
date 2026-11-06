@@ -18,7 +18,10 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -57,7 +60,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
-        queued_blocks::QueuedBlocks,
+        queued_blocks::{QueuedBlocks, MAX_QUEUED_BYTES},
         read::find,
         watch_receiver::WatchReceiver,
     },
@@ -82,6 +85,7 @@ pub mod check;
 pub(crate) mod early_relay;
 
 pub(crate) mod finalized_state;
+mod memory_limits;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod pruning;
@@ -101,7 +105,10 @@ use write::NonFinalizedWriteMessage;
 
 use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, SentHashes};
 
-pub use self::traits::{ReadState, State};
+pub use self::{
+    memory_limits::MemoryLimits,
+    traits::{ReadState, State},
+};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///
@@ -253,6 +260,13 @@ pub struct ReadStateService {
     /// so it might include some block data that is also on `disk`.
     non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
 
+    /// The writer's current non-finalized resident target, or `u64::MAX` for no target.
+    non_finalized_resident_target: Arc<AtomicU64>,
+
+    /// The current bound on the retained charges of blocks waiting for their parent, shared with
+    /// the [`StateService`]'s queue.
+    queued_blocks_limit: Arc<AtomicUsize>,
+
     /// At most one early mining parent, separate from committed state.
     mining_candidate: watch::Sender<Option<MiningCandidate>>,
 
@@ -357,43 +371,26 @@ impl StateService {
     ///
     /// Returns the read-write and read-only state services,
     /// and read-only watch channels for its best chain tip.
+    #[cfg(any(test, feature = "proptest-impl"))]
     pub async fn new(
         config: Config,
         network: &Network,
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
-        Self::new_with_spentness(
-            config,
-            network,
-            max_checkpoint_height,
-            checkpoint_verify_concurrency_limit,
-            None,
-        )
-        .await
-    }
-
-    /// Creates a new state service like [`Self::new`], whose finalized writer
-    /// applies the spentness hints that `spentness` delivers, if any.
-    pub(crate) async fn new_with_spentness(
-        config: Config,
-        network: &Network,
-        max_checkpoint_height: block::Height,
-        checkpoint_verify_concurrency_limit: usize,
-        spentness: Option<SpentnessHintsReceiver>,
-    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         Self::new_with_debug(
             config,
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
-            spentness,
+            None,
             false,
         )
         .await
     }
 
     /// Creates state services with optional format checks disabled for corruption tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
     async fn new_with_debug(
         config: Config,
         network: &Network,
@@ -402,18 +399,44 @@ impl StateService {
         spentness: Option<SpentnessHintsReceiver>,
         debug_skip_format_upgrades: bool,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
+        Self::new_with_debug_and_limits(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            spentness,
+            debug_skip_format_upgrades,
+            MemoryLimits::default(),
+        )
+        .await
+    }
+
+    /// Creates state services like [`StateService::new_with_debug`], with the memory limits in
+    /// `limits`.
+    ///
+    /// [`MemoryLimits::default()`] keeps today's limits.
+    async fn new_with_debug_and_limits(
+        config: Config,
+        network: &Network,
+        max_checkpoint_height: block::Height,
+        checkpoint_verify_concurrency_limit: usize,
+        spentness: Option<SpentnessHintsReceiver>,
+        debug_skip_format_upgrades: bool,
+        limits: MemoryLimits,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let (finalized_state, finalized_tip, timer) = {
             let config = config.clone();
             let network = network.clone();
             tokio::task::spawn_blocking(move || {
                 let timer = CodeTimer::start();
-                let finalized_state = FinalizedState::new_with_debug(
+                let finalized_state = FinalizedState::new_with_debug_and_limits(
                     &config,
                     &network,
                     debug_skip_format_upgrades,
                     #[cfg(feature = "elasticsearch")]
                     true,
                     false,
+                    &limits.rocksdb,
                 )
                 .expect(
                     "opening the read-write finalized state database failed; check that the \
@@ -454,6 +477,18 @@ impl StateService {
                 "not restoring the non-finalized state backup, because the finalized tip is absent \
                  or below the max checkpoint height: Zebra will re-download and re-verify the \
                  blocks above its finalized tip"
+            );
+        }
+        let non_finalized_resident_target = Arc::new(AtomicU64::new(
+            limits
+                .non_finalized_resident_bytes
+                .unwrap_or(memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT),
+        ));
+        if let Some(resident_target_bytes) = limits.non_finalized_resident_bytes {
+            tracing::debug!(
+                resident_target_bytes,
+                "the writer finalizes above the non-finalized resident target, down to the \
+                 minimum rollback window",
             );
         }
         let skip_backup_task = config.debug_skip_non_finalized_state_backup_task;
@@ -504,12 +539,14 @@ impl StateService {
             early_relay.clone(),
             spentness.map(|hints| (hints, max_checkpoint_height)),
             pruning_wake,
+            non_finalized_resident_target.clone(),
         );
 
         let mut read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
+            non_finalized_resident_target,
         );
         read_service.early_relay = early_relay;
 
@@ -518,7 +555,9 @@ impl StateService {
                 .expect("fits in HeightDiff");
         let full_verifier_utxo_lookahead =
             full_verifier_utxo_lookahead.unwrap_or(block::Height::MIN);
-        let non_finalized_state_queued_blocks = QueuedBlocks::default();
+        let non_finalized_state_queued_blocks =
+            QueuedBlocks::with_byte_limit(limits.queued_blocks_bytes);
+        read_service.queued_blocks_limit = non_finalized_state_queued_blocks.byte_limit();
         let pending_utxos = PendingUtxos::default();
 
         let finalized_block_write_last_sent_hash =
@@ -1310,11 +1349,14 @@ impl ReadStateService {
         finalized_state: &FinalizedState,
         block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
         non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+        non_finalized_resident_target: Arc<AtomicU64>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
             non_finalized_state_receiver,
+            non_finalized_resident_target,
+            queued_blocks_limit: Arc::new(AtomicUsize::new(MAX_QUEUED_BYTES)),
             block_write_task,
             pruning_task: None,
             mining_candidate: watch::Sender::new(None),
@@ -1368,6 +1410,49 @@ impl ReadStateService {
     /// Logs rocksdb metrics using the read only state service.
     pub fn log_db_metrics(&self) {
         self.db.print_db_metrics();
+    }
+
+    /// Returns a sample of the state database's memory use and write stalls.
+    ///
+    /// See [`ZebraDb::memory_sample`]. This reads RocksDB properties, so async callers run it on
+    /// a blocking thread.
+    pub fn memory_sample(&self) -> finalized_state::RocksDbMemorySample {
+        self.db.memory_sample()
+    }
+
+    /// Applies `limits` to the open state database on a blocking thread, where RocksDB allows a
+    /// live change.
+    ///
+    /// See [`ZebraDb::spawn_apply_memory_limits`].
+    pub async fn spawn_apply_memory_limits(
+        &self,
+        limits: finalized_state::RocksDbMemoryLimits,
+    ) -> Result<(), rocksdb::Error> {
+        self.db.spawn_apply_memory_limits(limits).await
+    }
+
+    /// Changes the non-finalized resident target used by the writer for subsequent commits.
+    pub fn set_non_finalized_resident_bytes(&self, target: Option<u64>) {
+        self.non_finalized_resident_target.store(
+            target.unwrap_or(memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Changes the bound on the retained charges of blocks waiting for their parent block. The
+    /// state applies it the next time it queues such a block, dropping the highest queued blocks
+    /// above it.
+    pub fn set_queued_blocks_bytes(&self, max_queued_bytes: usize) {
+        self.queued_blocks_limit
+            .store(max_queued_bytes, Ordering::Relaxed);
+    }
+
+    /// Returns the retained charge of the distinct blocks in the latest non-finalized state, in
+    /// bytes: the value of the `state.memory.resident_bytes` gauge for that state.
+    ///
+    /// It walks every non-finalized chain, so call it from a blocking task.
+    pub fn non_finalized_resident_bytes(&self) -> u64 {
+        write::non_finalized_resident_bytes(&self.latest_non_finalized_state())
     }
 }
 
@@ -1425,6 +1510,8 @@ impl Service<Request> for StateService {
                     new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut contextual.new_outputs)),
                     transaction_hashes: contextual.transaction_hashes.clone(),
                     received_time: contextual.received_time,
+                    retained_charge: Some(contextual.retained_charge),
+                    retention: contextual.retention.take(),
                 };
                 (
                     Request::CommitSemanticallyVerifiedBlock(prepared),
@@ -2563,12 +2650,15 @@ impl Service<ReadRequest> for ReadStateService {
 /// The artifact cannot be a plain argument (the design's
 /// `Option<VerifiedArtifact>`): `zebrad` initializes the state before the
 /// network, and the artifact is fetched from peers.
+///
+/// The state uses the memory limits in `limits`, like [`init_with_limits`].
 pub async fn init_with_spentness(
     config: Config,
     network: &Network,
     max_checkpoint_height: block::Height,
     checkpoint_verify_concurrency_limit: usize,
     spentness: SpentnessHintsReceiver,
+    limits: MemoryLimits,
 ) -> (
     BoxService<Request, Response, BoxError>,
     ReadStateService,
@@ -2576,12 +2666,14 @@ pub async fn init_with_spentness(
     ChainTipChange,
 ) {
     let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new_with_spentness(
+        StateService::new_with_debug_and_limits(
             config,
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
             Some(spentness),
+            false,
+            limits,
         )
         .await;
 
@@ -2608,6 +2700,8 @@ pub async fn init_with_spentness(
 /// It's possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
+///
+/// The state uses today's memory limits; [`init_with_limits`] bounds them.
 pub async fn init(
     config: Config,
     network: &Network,
@@ -2619,12 +2713,40 @@ pub async fn init(
     LatestChainTip,
     ChainTipChange,
 ) {
+    init_with_limits(
+        config,
+        network,
+        max_checkpoint_height,
+        checkpoint_verify_concurrency_limit,
+        MemoryLimits::default(),
+    )
+    .await
+}
+
+/// Initialize a state service like [`init`], with the memory limits in `limits`.
+///
+/// [`MemoryLimits::default()`] is today's behaviour.
+pub async fn init_with_limits(
+    config: Config,
+    network: &Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
+    limits: MemoryLimits,
+) -> (
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
     let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new(
+        StateService::new_with_debug_and_limits(
             config,
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
+            None,
+            false,
+            limits,
         )
         .await;
 
@@ -2672,6 +2794,9 @@ pub fn init_read_only(
             &finalized_state,
             None,
             WatchReceiver::new(non_finalized_state_receiver),
+            Arc::new(AtomicU64::new(
+                memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT,
+            )),
         ),
         finalized_state.db.clone(),
         non_finalized_state_sender,

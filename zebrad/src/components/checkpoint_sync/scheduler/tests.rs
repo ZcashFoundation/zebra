@@ -987,6 +987,7 @@ fn simulate(
         lookahead_bytes: LOOKAHEAD,
         min_peer_rate: 256 * 1024,
         target_peers,
+        ..EngineConfig::default()
     };
 
     let begin = Instant::now();

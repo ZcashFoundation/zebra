@@ -1,6 +1,9 @@
 //! Header reads must not mix a stale cached fork with the finalized chain.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{atomic::AtomicU64, Arc},
+    time::Duration,
+};
 
 use tower::ServiceExt;
 use zebra_chain::{
@@ -69,7 +72,14 @@ async fn header_reads_keep_finalized_and_stale_cached_forks_separate() {
         }
         finalized.db.write_batch(batch).unwrap();
         let (_sender, receiver) = tokio::sync::watch::channel(cached);
-        let read_state = ReadStateService::new(&finalized, None, WatchReceiver::new(receiver));
+        let read_state = ReadStateService::new(
+            &finalized,
+            None,
+            WatchReceiver::new(receiver),
+            Arc::new(AtomicU64::new(
+                crate::service::memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT,
+            )),
+        );
 
         for (query, block, next_block_hash) in [
             (
@@ -154,7 +164,14 @@ async fn header_reads_keep_cached_successor_of_finalized_tip() {
         );
         finalized.db.write_batch(batch).unwrap();
         let (_sender, receiver) = tokio::sync::watch::channel(cached);
-        let read_state = ReadStateService::new(&finalized, None, WatchReceiver::new(receiver));
+        let read_state = ReadStateService::new(
+            &finalized,
+            None,
+            WatchReceiver::new(receiver),
+            Arc::new(AtomicU64::new(
+                crate::service::memory_limits::NO_NON_FINALIZED_RESIDENT_LIMIT,
+            )),
+        );
 
         for query in [hash.into(), height.into()] {
             assert_eq!(

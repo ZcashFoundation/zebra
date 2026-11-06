@@ -108,6 +108,7 @@ use crate::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
+        resources,
         state_snapshot::{
             bootstrap,
             decision::{self, Decision},
@@ -324,8 +325,16 @@ impl StartCmd {
     ///
     /// `hints_gate` is `Some` while spentness hints may apply: the engine then
     /// commits nothing above genesis until the hints task opens it.
+    ///
+    /// With a memory budget, `memory_plan` bounds the engine's lookahead and
+    /// receive windows (see [`resources::checkpoint_sync_engine_config`]).
+    /// The engine publishes its lookahead charge in `charged`, which the
+    /// memory watchdog reads.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_checkpoint_sync_engine<ZS, ZSTip>(
         config: &ZebradConfig,
+        memory_plan: &resources::MemoryPlan,
+        charged: checkpoint_sync::engine::Charged,
         peers: Option<zebra_network::SyncPeers>,
         ownership: Option<checkpoint_sync::EngineOwnership>,
         state: ZS,
@@ -371,7 +380,7 @@ impl StartCmd {
         );
         let owner = ownership.owner.subscribe();
         let supervisor = checkpoint_sync::CheckpointSync::new(
-            config.sync.v2_engine_config(),
+            resources::checkpoint_sync_engine_config(config.sync.v2_engine_config(), memory_plan),
             config.network.network.clone(),
             peers,
             state,
@@ -379,7 +388,8 @@ impl StartCmd {
             ownership,
             hints_gate,
             known_hashes,
-        );
+        )
+        .with_charged(charged);
 
         tokio::spawn(
             async move {
@@ -520,6 +530,24 @@ impl StartCmd {
             None
         };
 
+        // Derive the memory plan before snapshot networking and the database open, because both
+        // use its limits. An "auto" budget reads /proc and /sys/fs/cgroup on this blocking task.
+        let resources_config = config.clone();
+        let unsafe_low_specs = self.unsafe_low_specs;
+        let resources::MemoryResources {
+            settings: memory_settings,
+            plan_sender: memory_plan_sender,
+        } = tokio::task::spawn_blocking(move || {
+            resources::init(&resources_config, unsafe_low_specs)
+        })
+        .await
+        .map_err(|err| eyre!("failed to join the memory budget task: {err}"))??;
+        let mut memory_plan = memory_plan_sender.borrow().clone();
+        let snapshot_memory = crate::components::state_snapshot::memory::MemoryLimits::from_plan(
+            &memory_plan,
+            resources::node_cores(&config),
+        );
+
         // An empty pruned node may bootstrap from a state snapshot before the state
         // opens: the import renames a complete database into place, and `zebra_state::init`
         // then opens it at the snapshot height like any other state.
@@ -539,7 +567,7 @@ impl StartCmd {
                 "{}",
                 Stage::BootstrapStarted
             );
-            match bootstrap::bootstrap(&config, commitment, peers).await {
+            match bootstrap::bootstrap(&config, commitment, peers, &snapshot_memory).await {
                 Ok(()) => bootstrapped_height = Some(commitment.height),
                 Err(error) => match config.sync.state_snapshot_fallback {
                     StateSnapshotFallback::Error => {
@@ -596,10 +624,11 @@ impl StartCmd {
         }
 
         info!("initializing node state");
-        let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
-            config.consensus.clone(),
-            &config.network.network,
-        );
+        let (checkpoint_list, max_checkpoint_height) =
+            zebra_consensus::router::init_checkpoint_list(
+                config.consensus.clone(),
+                &config.network.network,
+            );
 
         info!("opening database, this may take a few minutes");
 
@@ -623,15 +652,17 @@ impl StartCmd {
                         max_checkpoint_height,
                         state_checkpoint_verify_concurrency_limit,
                         spentness_hints_receiver,
+                        memory_plan.state,
                     )
                     .await
                 }
                 None => {
-                    zebra_state::init(
+                    zebra_state::init_with_limits(
                         config.state.clone(),
                         &config.network.network,
                         max_checkpoint_height,
                         state_checkpoint_verify_concurrency_limit,
+                        memory_plan.state,
                     )
                     .await
                 }
@@ -643,6 +674,51 @@ impl StartCmd {
                 read_only_state_service.incomplete_spentness_commitment(),
             )
         });
+
+        // A tip-only budget cannot sync to the last checkpoint, and a node already past it
+        // needs no initial sync share (memory page, "How the budget is split").
+        if let Some(settings) = &memory_settings {
+            let (profile, warning) = settings.profile_after_open(
+                memory_plan.profile,
+                latest_chain_tip.best_tip_height(),
+                max_checkpoint_height,
+            )?;
+            if let Some(warning) = warning {
+                warn!("{warning}");
+            }
+
+            if profile != memory_plan.profile {
+                let (plan, _) = settings.plan(profile)?;
+                info!(
+                    "memory profile changed: {} → {profile}: the state is at the last checkpoint",
+                    memory_plan.profile,
+                );
+                memory_plan_sender.send_replace(plan.clone());
+                read_only_state_service
+                    .set_non_finalized_resident_bytes(plan.state.non_finalized_resident_bytes);
+                read_only_state_service.set_queued_blocks_bytes(plan.state.queued_blocks_bytes);
+                if tokio::time::timeout(
+                    resources::watchdog::BLOCKING_TIMEOUT,
+                    read_only_state_service.spawn_apply_memory_limits(plan.state.rocksdb),
+                )
+                .await
+                .is_err()
+                {
+                    warn!("resizing the state database took too long, continuing startup");
+                }
+                memory_plan = plan;
+            }
+        }
+
+        let state_tip_height = latest_chain_tip
+            .best_tip_height()
+            .unwrap_or(zebra_chain::block::Height(0));
+        if memory_plan.sync.pipeline_bytes.is_some()
+            && config.consensus.checkpoint_sync
+            && state_tip_height < max_checkpoint_height
+        {
+            sync::check_checkpoint_gaps(&checkpoint_list, max_checkpoint_height, state_tip_height)?;
+        }
 
         let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
             .clone()
@@ -730,13 +806,14 @@ impl StartCmd {
         };
 
         let (peer_set, address_book, misbehavior_sender, block_advertiser) =
-            zebra_network::init_with_block_gossip_peer_ips(
+            zebra_network::init_with_limits(
                 network_config,
                 local_services,
                 inbound,
                 latest_chain_tip.clone(),
                 user_agent(),
                 zcashd_compat_block_gossip_peer_ips,
+                memory_plan.network,
             )
             .await;
 
@@ -790,19 +867,23 @@ impl StartCmd {
             consensus_task_handles,
             max_checkpoint_height,
             prepared_blocks,
-        ) = zebra_consensus::router::init_with_checkpoint_tip(
+        ) = zebra_consensus::router::init_with_limits(
             config.consensus.clone(),
             &config.network.network,
             state.clone(),
             read_only_state_service.clone(),
             tx_verifier_setup_rx,
             Some(block_verifier_setup_rx),
-            checkpoint_tip,
+            memory_plan.proposal_cache_bytes,
+            Some(checkpoint_tip),
         )
         .await;
 
+        let engine_charged = checkpoint_sync::engine::Charged::default();
         let mut checkpoint_sync_task_handle = Self::spawn_checkpoint_sync_engine(
             &config,
+            &memory_plan,
+            engine_charged.clone(),
             sync_peers,
             engine_ownership,
             state.clone(),
@@ -812,7 +893,7 @@ impl StartCmd {
         );
 
         info!("initializing syncer");
-        let (syncer, sync_status) = ChainSync::new(
+        let (syncer, sync_status) = ChainSync::new_with_limits(
             &config,
             max_checkpoint_height,
             peer_set.clone(),
@@ -821,6 +902,8 @@ impl StartCmd {
             read_only_state_service.clone(),
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
+            checkpoint_list,
+            memory_plan.sync,
         );
         let syncer = match legacy_ownership {
             Some(ownership) => syncer.with_ownership(ownership),
@@ -834,9 +917,13 @@ impl StartCmd {
         };
 
         info!("initializing mempool");
+        // The mempool reads its cost limit from its config, so a budget's limit replaces it in a
+        // copy (memory page, "How the budget is split"); an explicit limit has already won in the
+        // plan (memory page, "Settings that win over the budget").
+        let mempool_config = memory_plan.mempool.apply_to(&config.mempool);
         let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
             &config.network.network,
-            &config.mempool,
+            &mempool_config,
             peer_set.background_service(),
             state.clone(),
             tower::util::BoxCloneService::new(read_only_state_service.clone()),
@@ -875,6 +962,7 @@ impl StartCmd {
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            pipeline_budget: syncer.pipeline_budget(),
         };
         setup_tx
             .send(setup_data)
@@ -1078,6 +1166,44 @@ impl StartCmd {
                 .in_current_span(),
         );
 
+        info!("spawning memory watchdog task");
+        // Nothing reads the memory pressure yet: pausing downloads at critical pressure is phase
+        // 2 (memory page, "How the budget is split").
+        let (memory_pressure_sender, _) =
+            watch::channel(resources::watchdog::MemoryPressure::default());
+        let sampled_state = read_only_state_service.clone();
+        let resized_state = read_only_state_service.clone();
+        let memory_task_handle = tokio::spawn(
+            resources::watchdog::run(
+                resources::watchdog::Watchdog::new(
+                    memory_settings,
+                    memory_plan_sender,
+                    max_checkpoint_height,
+                )
+                .with_pipeline_budget(syncer.pipeline_budget())
+                .with_engine_charged(engine_charged),
+                memory_pressure_sender,
+                latest_chain_tip.clone(),
+                move || resources::watchdog::StateMemorySample {
+                    rocksdb: sampled_state.memory_sample(),
+                    non_finalized_resident_bytes: sampled_state.non_finalized_resident_bytes(),
+                },
+                move |limits| {
+                    resized_state
+                        .set_non_finalized_resident_bytes(limits.non_finalized_resident_bytes);
+                    resized_state.set_queued_blocks_bytes(limits.queued_blocks_bytes);
+                    let resized_state = resized_state.clone();
+                    async move {
+                        // A failure is logged, and the database keeps its current limits.
+                        let _ = resized_state
+                            .spawn_apply_memory_limits(limits.rocksdb)
+                            .await;
+                    }
+                },
+            )
+            .in_current_span(),
+        );
+
         info!("spawning delete old databases task");
         let mut old_databases_task_handle = zebra_state::check_and_delete_old_state_databases(
             &config.state,
@@ -1097,7 +1223,8 @@ impl StartCmd {
             .in_current_span(),
         );
 
-        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
+        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it
+        // exits.
         info!("spawning tip block delay metrics task");
         let tip_delay_task_handle =
             tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());
@@ -1209,6 +1336,7 @@ impl StartCmd {
         pin!(end_of_support_task_handle);
         pin!(miner_task_handle);
         pin!(block_template_task_handle);
+        pin!(memory_task_handle);
 
         // startup tasks
         let BackgroundTaskHandles {
@@ -1384,6 +1512,10 @@ impl StartCmd {
                     .expect("unexpected panic in the miner task")
                     .map(|_| info!("miner task exited")),
 
+                memory_result = &mut memory_task_handle => memory_result
+                    .expect("unexpected panic in the memory watchdog task")
+                    .map(|_| info!("memory watchdog task exited")),
+
                 zcashd_compat_result = &mut zcashd_compat_task_handle_fused => {
                     zcashd_compat_task_finished = true;
                     exit_when_task_finishes =
@@ -1424,6 +1556,7 @@ impl StartCmd {
         miner_task_handle.abort();
         spentness_hints_task_handle.abort();
         snapshot_stages_task_handle.abort();
+        memory_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
         } else if let Some(zcashd_compat_shutdown_timeout) = zcashd_compat_shutdown_timeout {

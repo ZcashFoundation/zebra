@@ -52,9 +52,10 @@ use crate::{
         PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    quic::QuicWindows,
     types::PeerServices,
     AddressBook, BanList, BoxError, Config, MisbehaviorReport, NetworkService, PeerSocketAddr,
-    Request, Response,
+    Request, Response, V2Endpoint,
 };
 
 #[cfg(test)]
@@ -76,6 +77,67 @@ pub use v2::{close_v2_endpoint, v2_bootstrap_clients, BootstrapPeers};
 /// - The connection limits don't include failed connections
 /// - tower::Discover interprets an error as stream termination
 type DiscoveredPeer = (PeerSocketAddr, peer::Client);
+
+/// Memory limits for the network, derived from zebrad's memory budget and passed to
+/// [`init_with_limits`].
+///
+/// [`MemoryLimits::default()`] is today's behaviour: [`init`] starts the network with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MemoryLimits {
+    /// Replaces [`Config::peerset_initial_target_size`], which scales every connection limit.
+    ///
+    /// `None` keeps the configured value, and so does `Some(0)`, with a warning, because the peer
+    /// set needs a target. The caller decides whether a configured size wins: zebrad leaves this
+    /// `None` when the config sets a size other than the default.
+    pub peerset_initial_target_size: Option<usize>,
+
+    /// The flow-control windows of every version 2 QUIC connection.
+    ///
+    /// A window below its [`QuicWindows::compact()`] minimum is raised to it, with a warning.
+    pub quic: QuicWindows,
+}
+
+impl MemoryLimits {
+    /// Derives a peer target and QUIC windows whose buffered request bytes fit in `share_bytes`,
+    /// with the version 2 connections that `v2` allows.
+    ///
+    /// Peer targets use compact-window charges, which keeps them monotone as the share grows. The
+    /// windows grow only when the same target also fits with the larger windows: those of a node
+    /// that serves synchronization artifacts when `serves_artifacts` is set, which a version 2 node
+    /// with an object source does (see [`QuicWindows::for_services`]), or the defaults otherwise.
+    ///
+    /// # Panics
+    ///
+    /// If `share_bytes` is below [`MemoryLimits::minimum_budget_bytes`] for `v2`.
+    pub fn for_budget(share_bytes: u64, v2: V2Endpoint, serves_artifacts: bool) -> Self {
+        let compact = QuicWindows::compact();
+        let peers = Config::peer_target_for_memory(share_bytes, v2, compact)
+            .expect("a budget at or above the network floor covers one peer");
+        let larger = if serves_artifacts {
+            QuicWindows::SERVING
+        } else {
+            QuicWindows::DEFAULT
+        };
+        let quic = if Config::buffered_request_bytes_for_target(peers, v2, larger) <= share_bytes {
+            larger
+        } else {
+            compact
+        };
+
+        Self {
+            peerset_initial_target_size: Some(peers),
+            quic,
+        }
+    }
+
+    /// Returns the smallest share that covers one peer target with the version 2 connections that
+    /// `v2` allows and compact QUIC windows.
+    ///
+    /// [`V2Endpoint::Enabled`]'s minimum is also conservative with version 2 disabled.
+    pub fn minimum_budget_bytes(v2: V2Endpoint) -> u64 {
+        Config::buffered_request_bytes_for_target(1, v2, QuicWindows::compact())
+    }
+}
 
 /// Initialize a peer set, using a network `config`, `local_services`, `inbound_service`,
 /// and `latest_chain_tip`.
@@ -177,6 +239,67 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    init_with_limits(
+        config,
+        local_services,
+        inbound_service,
+        latest_chain_tip,
+        user_agent,
+        block_gossip_peer_ips,
+        MemoryLimits::default(),
+    )
+    .await
+}
+
+/// Initialize a peer set like [`init_with_block_gossip_peer_ips`], with the memory limits in
+/// `limits`.
+///
+/// `limits.peerset_initial_target_size` replaces `config.peerset_initial_target_size` before
+/// anything reads it, so it scales every legacy and version 2 connection limit. The version 2
+/// endpoint, when `config.v2_listen_addr` enables it, uses the flow-control windows in
+/// `limits.quic` for every connection it accepts or opens, after raising any window below its
+/// [`QuicWindows::compact()`] minimum to it, with a warning. The resulting limits are logged
+/// once, at info level when they differ from the configured target size or the default windows.
+///
+/// [`MemoryLimits::default()`] is today's behaviour.
+///
+/// # Panics
+///
+/// If `config.peerset_initial_target_size` is zero and `limits` do not replace it, like
+/// [`init`].
+pub async fn init_with_limits<S, C>(
+    config: Config,
+    local_services: PeerServices,
+    inbound_service: S,
+    latest_chain_tip: C,
+    user_agent: String,
+    block_gossip_peer_ips: Vec<IpAddr>,
+    limits: MemoryLimits,
+) -> (
+    NetworkService,
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<MisbehaviorReport>,
+    super::BlockAdvertiser<C>,
+)
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S::Future: Send + 'static,
+    C: ChainTip + Clone + Send + Sync + 'static,
+{
+    let quic = limits.quic.at_least_compact();
+    if quic != limits.quic {
+        warn!(
+            requested = ?limits.quic,
+            used = ?quic,
+            "raising the version 2 flow-control windows below their minimum, which can stall \
+             streams on flow control"
+        );
+    }
+
+    let configured_target_size = config.peerset_initial_target_size;
+    let config = config.with_peerset_initial_target_size(limits.peerset_initial_target_size);
+    log_memory_limits(&config, configured_target_size, quic);
+
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     // Legacy peers are not told about `NODE_NETWORK_LIMITED`: ZIP 204 does not define it, so only
@@ -328,6 +451,7 @@ where
         misbehavior_tx.clone(),
         peerset_tx.clone(),
         connected_peers.clone(),
+        quic,
     );
     peer_set.extend_tasks(v2_task.iter().map(JoinHandle::abort_handle));
 
@@ -404,6 +528,50 @@ fn inventory_channel_capacity(config: &Config) -> usize {
     config
         .peerset_total_connection_limit()
         .min(crate::peer_set::inventory_registry::INVENTORY_CHANNEL_CAPACITY)
+}
+
+/// Logs the connection limits `config` gives the network and the version 2 flow-control
+/// `windows`: at info level when the memory limits changed them from the `configured_target_size`
+/// or the default windows, and at debug level otherwise, so a node without a memory budget logs
+/// what it logged before.
+fn log_memory_limits(config: &Config, configured_target_size: usize, windows: QuicWindows) {
+    let peerset_initial_target_size = config.peerset_initial_target_size;
+    let outbound_connection_limit = config.peerset_outbound_connection_limit();
+    let inbound_connection_limit = config.peerset_inbound_connection_limit();
+    let v2_outbound_connection_limit = config.v2_outbound_connection_limit();
+    let v2_inbound_connection_limit = config.v2_inbound_connection_limit();
+    let QuicWindows {
+        stream_receive_window,
+        connection_receive_window,
+        send_window,
+    } = windows;
+
+    if peerset_initial_target_size == configured_target_size && windows == QuicWindows::default() {
+        debug!(
+            peerset_initial_target_size,
+            outbound_connection_limit,
+            inbound_connection_limit,
+            v2_outbound_connection_limit,
+            v2_inbound_connection_limit,
+            stream_receive_window,
+            connection_receive_window,
+            send_window,
+            "network connection limits, and version 2 flow-control windows in bytes"
+        );
+    } else {
+        info!(
+            peerset_initial_target_size,
+            outbound_connection_limit,
+            inbound_connection_limit,
+            v2_outbound_connection_limit,
+            v2_inbound_connection_limit,
+            stream_receive_window,
+            connection_receive_window,
+            send_window,
+            "network connection limits, and version 2 flow-control windows in bytes, from the \
+             memory limits"
+        );
+    }
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and

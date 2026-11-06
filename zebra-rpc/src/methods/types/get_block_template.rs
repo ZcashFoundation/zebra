@@ -981,6 +981,7 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 /// or the verifier cannot accept the request.
 pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
+    prepared_blocks: Option<zebra_consensus::PreparedBlockCache>,
     read_state: ReadState,
     block_proposal_bytes: Vec<u8>,
     net: &Network,
@@ -1008,9 +1009,24 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
-        Ok(block) => block,
-        Err(parse_error) => {
+    enum ProposalBlock {
+        Admitted(zebra_consensus::AdmittedProposal),
+        Ordinary(Arc<Block>),
+    }
+
+    let decoded = if let Some(cache) = prepared_blocks {
+        cache
+            .deserialize_proposal(block_proposal_bytes)
+            .await
+            .map(|result| result.map(ProposalBlock::Admitted))
+    } else {
+        Ok(block_proposal_bytes
+            .zcash_deserialize_into()
+            .map(|block| ProposalBlock::Ordinary(Arc::new(block))))
+    };
+    let proposal = match decoded {
+        Ok(Ok(proposal)) => proposal,
+        Ok(Err(parse_error)) => {
             tracing::info!(
                 ?parse_error,
                 "error response from block parser in CheckProposal request"
@@ -1022,6 +1038,13 @@ where
             )
             .into());
         }
+        Err(error) => {
+            return Err(ErrorObject::owned(0, error.to_string(), None::<()>));
+        }
+    };
+    let block = match &proposal {
+        ProposalBlock::Admitted(proposal) => proposal.block(),
+        ProposalBlock::Ordinary(block) => block.clone(),
     };
 
     let height = block.coinbase_height();
@@ -1058,11 +1081,17 @@ where
         // verification, including when the chain reorganizes after this snapshot.
     }
 
+    let request = match proposal {
+        ProposalBlock::Admitted(proposal) => {
+            zebra_consensus::Request::CheckProposalAdmitted(proposal)
+        }
+        ProposalBlock::Ordinary(block) => zebra_consensus::Request::CheckProposal(block),
+    };
     let block_verifier_router_response = block_verifier_router
         .ready()
         .await
         .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
+        .call(request)
         .await;
 
     Ok(block_verifier_router_response

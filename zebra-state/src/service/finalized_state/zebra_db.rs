@@ -32,7 +32,7 @@ use crate::{
         STATE_DATABASE_KIND,
     },
     service::finalized_state::{
-        disk_db::DiskDb,
+        disk_db::{DiskDb, RocksDbMemoryLimits, RocksDbMemorySample},
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
             transparent::AddressLocation,
@@ -116,9 +116,11 @@ impl ZebraDb {
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
     /// This argument is only used in tests or with `proptest-impl`, and is ignored otherwise.
+    ///
+    /// The database is opened with today's memory options. [`ZebraDb::new_with_limits`] bounds
+    /// its memory.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
-    #[allow(clippy::unwrap_in_result)]
     pub fn new(
         config: &Config,
         db_kind: impl AsRef<str>,
@@ -127,6 +129,33 @@ impl ZebraDb {
         debug_skip_format_upgrades: bool,
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
+    ) -> Result<ZebraDb, StateInitError> {
+        Self::new_with_limits(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            debug_skip_format_upgrades,
+            column_families_in_code,
+            read_only,
+            &RocksDbMemoryLimits::default(),
+        )
+    }
+
+    /// Opens or creates the database like [`ZebraDb::new`], with its memory bounded by
+    /// `limits`.
+    ///
+    /// [`RocksDbMemoryLimits::default()`] opens the database with today's options.
+    #[allow(clippy::unwrap_in_result, clippy::too_many_arguments)]
+    pub fn new_with_limits(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+        limits: &RocksDbMemoryLimits,
     ) -> Result<ZebraDb, StateInitError> {
         config.validate_pruning(network)?;
 
@@ -228,13 +257,14 @@ impl ZebraDb {
             } if read_previous_version => older_disk_version,
             _ => format_version_in_code,
         };
-        let disk_db = DiskDb::new(
+        let disk_db = DiskDb::new_with_limits(
             config,
             db_kind,
             format_version_for_open,
             network,
             column_families_in_code,
             read_only,
+            limits,
         )?;
 
         let mut db = ZebraDb {
@@ -563,6 +593,51 @@ impl ZebraDb {
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
         self.db.size()
+    }
+
+    /// Returns the memory limits this database was opened with.
+    pub fn memory_limits(&self) -> &RocksDbMemoryLimits {
+        self.db.limits()
+    }
+
+    /// Returns a sample of the database's memory use and write stalls.
+    ///
+    /// The memtable, block cache and table reader bytes are the database's share of the
+    /// process's memory; the stall fields say whether RocksDB is holding the state writer back.
+    pub fn memory_sample(&self) -> RocksDbMemorySample {
+        self.db.memory_sample()
+    }
+
+    /// Applies `limits` to the open database, where RocksDB allows a live change.
+    ///
+    /// See [`DiskDb::apply_memory_limits`] for what changes live and what is fixed at open.
+    /// This is blocking disk I/O, so async callers use
+    /// [`ZebraDb::spawn_apply_memory_limits`].
+    pub fn apply_memory_limits(&self, limits: &RocksDbMemoryLimits) -> Result<(), rocksdb::Error> {
+        self.db.apply_memory_limits(limits)
+    }
+
+    /// Spawns a blocking task to apply `limits` to the open database, where RocksDB allows a
+    /// live change.
+    ///
+    /// See [`DiskDb::apply_memory_limits`] for what changes live and what is fixed at open.
+    pub async fn spawn_apply_memory_limits(
+        &self,
+        limits: RocksDbMemoryLimits,
+    ) -> Result<(), rocksdb::Error> {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = db.apply_memory_limits(&limits);
+            if let Err(apply_error) = &result {
+                tracing::warn!(
+                    ?apply_error,
+                    "failed to apply new state database memory limits"
+                );
+            }
+            result
+        })
+        .wait_for_panics()
+        .await
     }
 }
 

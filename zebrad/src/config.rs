@@ -90,6 +90,9 @@ pub struct ZebradConfig {
     /// <https://zebra.zfnd.org/user/health.html>
     pub health: crate::components::health::Config,
 
+    /// Memory budget configuration.
+    pub resources: crate::components::resources::Config,
+
     /// zcashd-compat mode configuration.
     pub zcashd_compat: crate::components::zcashd_compat::Config,
 }

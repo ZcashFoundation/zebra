@@ -8,6 +8,7 @@
 
 pub mod bootstrap;
 pub mod decision;
+pub mod memory;
 pub mod progress;
 pub mod scheduler;
 pub mod serving;

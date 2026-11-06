@@ -4,6 +4,10 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     iter,
     mem::size_of,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use tokio::sync::oneshot;
@@ -14,9 +18,10 @@ use zebra_chain::{
 };
 
 use crate::{
+    block_retained_charge,
     constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
-    request::{block_wire_and_retained_bytes, output_retained_bytes},
+    request::output_retained_bytes,
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, ContextuallyVerifiedBlock,
     KnownBlock, MinedBlockNotifications, NonFinalizedState, SemanticallyVerifiedBlock,
 };
@@ -46,10 +51,11 @@ pub type QueuedSemanticallyVerified = (
 /// RSS. Shared allocations are charged per owner, including cached prior-output scripts. Unlike a
 /// single checkpoint budget, this allows ordinary concurrent full verification of large blocks.
 // Both constants fit usize on every supported platform.
-const MAX_QUEUED_BYTES: usize = MAX_CHECKPOINT_BYTE_COUNT as usize * MAX_NON_FINALIZED_CHAIN_FORKS;
+pub(crate) const MAX_QUEUED_BYTES: usize =
+    MAX_CHECKPOINT_BYTE_COUNT as usize * MAX_NON_FINALIZED_CHAIN_FORKS;
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct QueuedBlocks {
     /// Blocks awaiting their parent blocks for contextual verification.
     blocks: HashMap<block::Hash, (QueuedSemanticallyVerified, usize)>,
@@ -61,6 +67,17 @@ pub struct QueuedBlocks {
     known_utxos: KnownUtxos,
     /// Sum of the immutable charges stored alongside queued payloads.
     queued_bytes: usize,
+    /// The sum of charges above which [`Self::prune_overflow`] drops the highest queued blocks.
+    ///
+    /// Shared with [`ReadStateService`](crate::ReadStateService), which changes it when the
+    /// memory plan changes.
+    max_queued_bytes: Arc<AtomicUsize>,
+}
+
+impl Default for QueuedBlocks {
+    fn default() -> Self {
+        Self::with_byte_limit(MAX_QUEUED_BYTES)
+    }
 }
 
 /// UTXOs created by queued or sent blocks, with the number of those blocks that create each one.
@@ -98,13 +115,38 @@ impl KnownUtxos {
 }
 
 impl QueuedBlocks {
+    /// Returns an empty queue whose retained charges are bounded by `max_queued_bytes`.
+    ///
+    /// [`QueuedBlocks::default()`] uses [`MAX_QUEUED_BYTES`].
+    pub fn with_byte_limit(max_queued_bytes: usize) -> Self {
+        Self {
+            blocks: HashMap::new(),
+            by_parent: HashMap::new(),
+            by_height: BTreeMap::new(),
+            known_utxos: KnownUtxos::default(),
+            queued_bytes: 0,
+            max_queued_bytes: Arc::new(AtomicUsize::new(max_queued_bytes)),
+        }
+    }
+
+    /// Returns the current bound on the queue's retained charges.
+    pub fn max_queued_bytes(&self) -> usize {
+        self.max_queued_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Returns the shared bound on the queue's retained charges. A new value applies from the
+    /// next [`Self::prune_overflow`].
+    pub(crate) fn byte_limit(&self) -> Arc<AtomicUsize> {
+        self.max_queued_bytes.clone()
+    }
+
     /// Queue a block for eventual verification and commit.
     ///
     /// The caller must dispatch ready blocks, then call [`Self::prune_overflow`] before returning.
     /// The queue can temporarily exceed its limits by this one incoming block, without awaiting.
     /// This lets a commit-ready parent release a full queue of children before applying the limits.
     #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
-    pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
+    pub fn queue(&mut self, mut new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
         let new_height = new.0.height;
         let parent_hash = new.0.block.header.previous_block_hash;
@@ -114,6 +156,13 @@ impl QueuedBlocks {
             return;
         }
 
+        // Carry the charge to the writer, so it never serializes this block again.
+        if new.0.retained_charge.is_none() {
+            new.0.retained_charge = Some(block_retained_charge(
+                &new.0.block,
+                &new.0.transaction_hashes,
+            ));
+        }
         let bytes = Self::retained_bytes(&new);
         let Some(queued_bytes) = self
             .queued_bytes
@@ -146,13 +195,15 @@ impl QueuedBlocks {
     }
 
     /// Conservative content/metadata charge, computed once without copying transactions or outputs.
+    ///
+    /// The block's share is its carried charge, if its producer computed one.
     fn retained_bytes(queued: &QueuedSemanticallyVerified) -> usize {
         let prepared = &queued.0;
-        let mut bytes =
-            block_wire_and_retained_bytes(&prepared.block, &prepared.transaction_hashes)
-                .1
-                .saturating_add(size_of::<(QueuedSemanticallyVerified, usize, block::Hash)>())
-                .saturating_add(2 * size_of::<(block::Hash, HashSet<block::Hash>)>());
+        let mut bytes = prepared
+            .retained_charge
+            .unwrap_or_else(|| block_retained_charge(&prepared.block, &prepared.transaction_hashes))
+            .saturating_add(size_of::<(QueuedSemanticallyVerified, usize, block::Hash)>())
+            .saturating_add(2 * size_of::<(block::Hash, HashSet<block::Hash>)>());
         // Charge the semantic output map and its UTXO-cache copy independently.
         bytes =
             bytes.saturating_add(output_retained_bytes(&prepared.new_outputs).saturating_mul(2));
@@ -166,9 +217,10 @@ impl QueuedBlocks {
     ///
     /// Pressure is an operational error, not evidence that the evicted block is invalid.
     pub fn prune_overflow(&mut self) {
+        let max_queued_bytes = self.max_queued_bytes();
         // The reorganization window fits usize on every supported platform.
         while self.blocks.len() > MAX_BLOCK_REORG_HEIGHT as usize
-            || self.queued_bytes > MAX_QUEUED_BYTES
+            || self.queued_bytes > max_queued_bytes
         {
             let hash = *self
                 .by_height

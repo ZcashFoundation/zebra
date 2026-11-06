@@ -9,13 +9,28 @@ only for an idle node at the chain tip. See
 | Resource | Consumers | Capacity planning |
 | --- | --- | --- |
 | CPU | Proof and signature verification, transaction execution, database compaction, and RPC requests | Reserve capacity for synchronization and client traffic; see [CPU worker configuration](config.md#sync). |
-| RAM | Blocks awaiting verification, recent non-finalized chains, the mempool, proof parameters, and RocksDB caches and write buffers | Account for all processes and container memory limits. Reducing synchronization concurrency reduces the number of in-flight blocks; the mempool cost limit is not a process-wide memory limit. |
+| RAM | Blocks awaiting verification, recent non-finalized chains, the mempool, proof parameters, and RocksDB caches and write buffers | Account for all processes and container memory limits. Set a [memory budget](memory.md) to derive these limits from the memory you give Zebra; without one, reducing synchronization concurrency reduces the number of in-flight blocks, and the mempool cost limit is not a process-wide memory limit. |
 | Disk | Blocks, transactions, state indexes, recent-state backups, and configured log files | Keep free space for chain growth, database compaction, and upgrades. Account separately for snapshots and other services. |
 | Network | Initial block download, new blocks and transactions, peer discovery, and responses to peer or RPC requests | Allow sustained outbound connectivity. Upload demand depends on the peers and clients served by the node. |
 
 The [configuration reference](config.md) documents these controls. Monitor
 [metrics](metrics.md) and host resource usage while synchronizing and under the
 expected RPC load.
+
+## Memory
+
+With `[resources] memory_budget`, Zebra fits its components into the memory you
+give it. These sizes are **predicted**, not yet measured on Mainnet for every
+budget, and the 1 GiB budget is experimental; [Memory](memory.md) explains what
+each budget gives up.
+
+| Budget | What the node can do | Predicted memory use |
+| --- | --- | --- |
+| Below 963 MiB | Refuses to start | — |
+| 963 MiB to 1,112 MiB, like 1 GiB | Run at the chain tip only: an already synced node, or one restored from a [state snapshot](snapshots.md) | 0.8 to 1.05 GiB at the tip |
+| 2 GiB | Initial sync, slower than without a budget on fast links | At most 1.9 GiB during initial sync, about 1.2 GiB at the tip |
+| 4 GiB | Initial sync with today's limits, without the unbounded worst cases | At most 3.6 GiB |
+| 8 GiB | Everything | Bounded by the budget |
 
 ## Reference deployment
 

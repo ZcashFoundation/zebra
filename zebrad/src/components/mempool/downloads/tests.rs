@@ -487,7 +487,10 @@ async fn full_queue_can_retry_before_completed_task_exits() {
     let (response, mut receiver) = oneshot::channel();
     downloads
         .results_sender
-        .send(Ok(Ok((tx, Vec::new(), Some(Height(0)), Some(response)))))
+        .send((
+            Ok(Ok((tx, Vec::new(), Some(Height(0)), Some(response)))),
+            None,
+        ))
         .unwrap();
     let (tx, _, _, response) = tokio::time::timeout(Duration::from_secs(1), downloads.next())
         .await
@@ -537,4 +540,208 @@ async fn mined_transaction_needs_no_body() {
         .expect("the task did not time out");
     let error = result.expect_err("a mined transaction is reported as already in the state");
     assert!(matches!(error.1, TransactionDownloadVerifyError::InState));
+}
+
+/// Pushed bodies stay charged until their cancelled results are consumed.
+#[tokio::test]
+async fn pending_byte_budget_covers_pushes_through_cancellation() {
+    let _init_guard = zebra_test::init();
+    let transactions: Vec<_> = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=2)
+        .map(|tx| tx.transaction)
+        .take(2)
+        .collect();
+    let [first, second]: [transaction::UnminedTx; 2] = transactions
+        .try_into()
+        .expect("the test needs two distinct transactions");
+    let limit = first.size.saturating_mul(DECODED_TX_CHARGE_RATIO);
+    let mut downloads = Downloads::new(
+        service_fn(|_| std::future::pending::<Result<zn::Response, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<zs::ReadResponse, BoxError>>()),
+        Arc::new(Notify::new()),
+    )
+    .with_pending_bytes(Some(u64::try_from(limit).unwrap()));
+
+    downloads
+        .download_if_needed_and_verify(Gossip::Tx(first), None, None)
+        .expect("the first body fits the byte budget");
+    assert_eq!(downloads.pending_bytes.as_ref().unwrap().available(), 0);
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(Gossip::Tx(second.clone()), None, None),
+        Err(MempoolError::FullQueue)
+    ));
+
+    downloads.cancel_all();
+    assert_eq!(
+        downloads.pending_bytes.as_ref().unwrap().available(),
+        0,
+        "cancellation must not release active work before its result is consumed"
+    );
+    let result = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .expect("the cancelled task queues its result")
+        .expect("a task was queued")
+        .expect("the task did not time out");
+    assert!(matches!(
+        result,
+        Err(error) if matches!(error.1, TransactionDownloadVerifyError::Cancelled)
+    ));
+    assert_eq!(downloads.pending_bytes.as_ref().unwrap().available(), limit);
+
+    downloads
+        .download_if_needed_and_verify(Gossip::Tx(second), None, None)
+        .expect("consuming the cancelled result releases its charge");
+    downloads.cancel_all();
+}
+
+/// Advertised IDs reserve a small fixed charge before spawning work, so a bound smaller than one
+/// worst-case body still admits many downloads.
+#[tokio::test]
+async fn pending_byte_budget_reserves_advertised_downloads() {
+    let _init_guard = zebra_test::init();
+    let ids: Vec<_> = Network::Mainnet
+        .unmined_transactions_in_blocks(1..=2)
+        .map(|tx| tx.transaction.id)
+        .take(2)
+        .collect();
+    let mut downloads = Downloads::new(
+        service_fn(|_| std::future::pending::<Result<zn::Response, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<zs::ReadResponse, BoxError>>()),
+        Arc::new(Notify::new()),
+    )
+    .with_pending_bytes(Some(
+        u64::try_from(ADVERTISED_TX_RESERVATION_BYTES).unwrap(),
+    ));
+
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(ids[0]), None, None)
+        .expect("one advertised download fits the byte budget");
+    assert_eq!(downloads.pending_bytes.as_ref().unwrap().available(), 0);
+    assert!(matches!(
+        downloads.download_if_needed_and_verify(Gossip::Id(ids[1]), None, None),
+        Err(MempoolError::FullQueue)
+    ));
+
+    downloads.cancel_all();
+}
+
+/// The smallest derived bound, for a 1 GiB tip-only budget, admits many peers' advertised IDs at
+/// once: peers that never serve their IDs can't take the whole bound.
+#[tokio::test]
+async fn small_pending_byte_budget_admits_many_peers() {
+    let _init_guard = zebra_test::init();
+    const SMALLEST_DERIVED_POOL: u64 = 19_400_000;
+    const PEERS: u8 = 50;
+
+    let mut downloads = Downloads::new(
+        service_fn(|_| std::future::pending::<Result<zn::Response, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<tx::MempoolResponse, BoxError>>()),
+        service_fn(|_| std::future::pending::<Result<zs::ReadResponse, BoxError>>()),
+        Arc::new(Notify::new()),
+    )
+    .with_pending_bytes(Some(SMALLEST_DERIVED_POOL));
+
+    for peer in 0..PEERS {
+        let source = SocketAddr::from(([10, 0, 0, peer], 8233));
+        for index in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+            let mut hash = [0; 32];
+            hash[0] = peer;
+            hash[1] = u8::try_from(index).expect("the per-peer cap is small");
+            let id = UnminedTxId::Legacy(transaction::Hash(hash));
+            downloads
+                .download_if_needed_and_verify(Gossip::Id(id), Some(source), None)
+                .expect("advertised IDs from many peers fit the smallest derived bound");
+        }
+    }
+    assert_eq!(
+        downloads.in_flight(),
+        usize::from(PEERS) * MAX_INBOUND_CONCURRENCY_PER_PEER
+    );
+
+    downloads.cancel_all();
+}
+
+/// A downloaded body that doesn't fit the bound beside other work is dropped without verification,
+/// and its reservation is released.
+#[tokio::test]
+async fn pending_byte_budget_drops_downloaded_bodies_that_do_not_fit() {
+    let _init_guard = zebra_test::init();
+    let transaction = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .find(|tx| {
+            tx.transaction.size.saturating_mul(DECODED_TX_CHARGE_RATIO)
+                > ADVERTISED_TX_RESERVATION_BYTES
+        })
+        .expect("the test blocks have a transaction larger than the reservation")
+        .transaction;
+    let txid = transaction.id;
+
+    let mut peer_set: MockService<zn::Request, zn::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let mut verifier: MockService<tx::MempoolRequest, tx::MempoolResponse, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let limit = ADVERTISED_TX_RESERVATION_BYTES * 2;
+    let mut downloads = Downloads::new(
+        peer_set.clone(),
+        verifier.clone(),
+        service_fn(|request| async move {
+            Ok(match request {
+                zs::ReadRequest::KnownTransaction(_) => zs::ReadResponse::KnownTransaction(false),
+                zs::ReadRequest::Tip => zs::ReadResponse::Tip(None),
+                _ => unreachable!("downloads only query transactions and the tip"),
+            })
+        }),
+        Arc::new(Notify::new()),
+    )
+    .with_pending_bytes(Some(u64::try_from(limit).unwrap()));
+
+    let mut other = [0; 32];
+    other[0] = 1;
+    downloads
+        .download_if_needed_and_verify(
+            Gossip::Id(UnminedTxId::Legacy(transaction::Hash(other))),
+            None,
+            None,
+        )
+        .expect("the first reservation fits");
+    downloads
+        .download_if_needed_and_verify(Gossip::Id(txid), None, None)
+        .expect("the second reservation fits");
+    assert_eq!(downloads.pending_bytes.as_ref().unwrap().available(), 0);
+
+    // The two downloads can reach the peer set in either order. The other one stays pending.
+    let mut pending_other = None;
+    for _ in 0..2 {
+        let request = peer_set.expect_request_that(|_| true).await;
+        if matches!(request.request(), zn::Request::TransactionsById(ids) if ids.contains(&txid)) {
+            request.respond(zn::Response::Transactions(vec![
+                zn::InventoryResponse::Available((transaction.clone(), None)),
+            ]));
+        } else {
+            pending_other = Some(request);
+        }
+    }
+    assert!(pending_other.is_some(), "the other download stays pending");
+
+    let failed = tokio::time::timeout(Duration::from_secs(1), downloads.next())
+        .await
+        .expect("the oversized download completes")
+        .expect("the download was queued")
+        .expect("the download does not time out")
+        .expect_err("the body does not fit the bound");
+    assert_eq!(failed.0, txid);
+    assert!(matches!(
+        failed.1,
+        TransactionDownloadVerifyError::DownloadFailed(_)
+    ));
+    verifier.expect_no_requests().await;
+    assert_eq!(
+        downloads.pending_bytes.as_ref().unwrap().available(),
+        ADVERTISED_TX_RESERVATION_BYTES,
+        "the dropped body releases its reservation"
+    );
+
+    downloads.cancel_all();
 }

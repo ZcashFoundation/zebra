@@ -1,6 +1,7 @@
 //! State [`tower::Service`] request types.
 
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     mem::{size_of, size_of_val},
     ops::{Add, Deref, RangeInclusive},
@@ -239,6 +240,56 @@ impl std::str::FromStr for HashOrHeight {
     }
 }
 
+/// A cloneable, type-erased owner of a block's pipeline retention guard.
+///
+/// The guard is released when the last token clone is dropped. Lower crates can carry accepted
+/// work without knowing the guard's concrete type or the component that owns its accounting.
+#[derive(Clone)]
+pub struct BlockRetentionToken {
+    owner: Arc<dyn Any + Send + Sync>,
+    retained_charge: Option<usize>,
+}
+
+impl BlockRetentionToken {
+    /// Hides `guard` in a token whose clones jointly own it.
+    pub fn new<G>(guard: G) -> Self
+    where
+        G: Any + Send + Sync,
+    {
+        Self {
+            owner: Arc::new(guard),
+            retained_charge: None,
+        }
+    }
+
+    /// Carries a charge computed from the same block with [`block_retained_charge`].
+    pub fn with_retained_charge(mut self, retained_charge: usize) -> Self {
+        self.retained_charge = Some(retained_charge);
+        self
+    }
+
+    /// Returns the block's precomputed retained-content charge, if its producer supplied one.
+    pub fn retained_charge(&self) -> Option<usize> {
+        self.retained_charge
+    }
+}
+
+impl std::fmt::Debug for BlockRetentionToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BlockRetentionToken")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for BlockRetentionToken {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.owner, &other.owner)
+    }
+}
+
+impl Eq for BlockRetentionToken {}
+
 /// A block which has undergone semantic validation and has been prepared for
 /// contextual validation.
 ///
@@ -288,6 +339,20 @@ pub struct SemanticallyVerifiedBlock {
     /// tests); `Chain::cmp` treats unstamped blocks as received before any stamped
     /// block, like `zcashd`'s disk-loaded blocks, which all share `nSequenceId` 0.
     pub received_time: Option<Instant>,
+
+    /// The block's retained-content charge from [`block_retained_charge`], if the producer of
+    /// this block computed it, so later memory accounting reuses it instead of serializing the
+    /// block again.
+    ///
+    /// `None` when no producer computed it; consumers then compute it themselves. A producer
+    /// that sets it must use [`block_retained_charge`] of this `block` and `transaction_hashes`:
+    /// the state's orphan queue and non-finalized memory accounting use the carried value as
+    /// given.
+    pub retained_charge: Option<usize>,
+
+    /// The pipeline guard jointly owned by this accepted block and its downstream commit owners.
+    /// `None` preserves unbudgeted behavior.
+    pub retention: Option<BlockRetentionToken>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -339,7 +404,7 @@ pub struct CommitAids {}
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct ContextuallyVerifiedBlock {
     /// The block to commit to the state.
     pub(crate) block: Arc<Block>,
@@ -380,6 +445,43 @@ pub struct ContextuallyVerifiedBlock {
     /// through the block verifier, copied from the [`SemanticallyVerifiedBlock`] it was
     /// built from. See that type's `received_time` field for details.
     pub(crate) received_time: Option<Instant>,
+
+    /// The block's retained-content charge from [`block_retained_charge`]: the
+    /// [`SemanticallyVerifiedBlock::retained_charge`] this block was built from, or computed once
+    /// when it was built without one.
+    pub(crate) retained_charge: usize,
+
+    /// The pipeline guard carried through cached verification and state commit transport.
+    pub(crate) retention: Option<BlockRetentionToken>,
+}
+
+/// Compares every field except `retained_charge`, which is derived from the block, so records of
+/// the same block are equal whichever producer computed their charge.
+impl PartialEq for ContextuallyVerifiedBlock {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+            received_time,
+            retained_charge: _,
+            retention,
+        } = self;
+
+        *block == other.block
+            && *hash == other.hash
+            && *height == other.height
+            && *new_outputs == other.new_outputs
+            && *spent_outputs == other.spent_outputs
+            && *transaction_hashes == other.transaction_hashes
+            && *chain_value_pool_change == other.chain_value_pool_change
+            && *received_time == other.received_time
+            && *retention == other.retention
+    }
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -445,6 +547,8 @@ pub struct FinalizedBlock {
     /// The block's authorizing data root, if the checkpoint verifier already
     /// computed it from this block body.
     pub(super) auth_data_root: Option<AuthDataRoot>,
+    /// The pipeline guard retained until this finalized commit owner is dropped.
+    pub(super) retention: Option<BlockRetentionToken>,
 }
 
 impl FinalizedBlock {
@@ -494,6 +598,7 @@ impl FinalizedBlock {
             treestate,
             deferred_pool_balance_change,
             auth_data_root,
+            retention: block.retention,
         }
     }
 }
@@ -547,13 +652,18 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Carries `retention` through cached verification into the state commit queue.
+    pub fn with_retention(mut self, retention: BlockRetentionToken) -> Self {
+        self.retention = Some(retention);
+        self
+    }
+
     /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
     ///
     /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.
-    /// Computing the charge serializes the block without copying its bytes; use a blocking worker.
+    /// The block's share is the charge it carries, so this only walks the output maps.
     pub fn retained_bytes(&self) -> usize {
-        block_wire_and_retained_bytes(&self.block, &self.transaction_hashes)
-            .1
+        self.retained_charge
             .saturating_add(self.contextual_data_retained_bytes())
     }
 
@@ -569,6 +679,8 @@ impl ContextuallyVerifiedBlock {
     /// The caller must verify proof of work and ensure every serialized byte except nonce and
     /// solution matches the proposal. Receipt time tracks the solved block, not the proposal.
     pub fn rebind(&mut self, block: Arc<Block>, received_time: Instant) {
+        // The solved block has the proposal's serialized size and transactions, so it keeps the
+        // proposal's charge.
         self.hash = block.hash();
         self.block = block;
         self.received_time = Some(received_time);
@@ -586,6 +698,8 @@ impl ContextuallyVerifiedBlock {
             new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut self.new_outputs)),
             transaction_hashes: self.transaction_hashes.clone(),
             received_time: self.received_time,
+            retained_charge: Some(self.retained_charge),
+            retention: self.retention.take(),
         };
         Request::CommitMinedBlock {
             block,
@@ -641,6 +755,8 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time,
+            retained_charge,
+            retention,
         } = semantically_verified;
 
         let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
@@ -649,6 +765,8 @@ impl ContextuallyVerifiedBlock {
             network,
             previous_value_pools,
         )?;
+        let retained_charge =
+            retained_charge.unwrap_or_else(|| block_retained_charge(&block, &transaction_hashes));
 
         Ok((
             Self {
@@ -660,10 +778,22 @@ impl ContextuallyVerifiedBlock {
                 transaction_hashes,
                 chain_value_pool_change,
                 received_time,
+                retained_charge,
+                retention,
             },
             transaction_fees,
         ))
     }
+}
+
+/// The conservative retained-content charge of `block` and its `transaction_hashes`, including
+/// decoded metadata, in bytes: the block's share of every retained-memory charge.
+///
+/// This is a resource bound, not allocator RSS. Computing it serializes the block without copying
+/// its bytes, so call it once per block, off the async runtime and the state writer thread, and
+/// carry the result in [`SemanticallyVerifiedBlock::retained_charge`].
+pub fn block_retained_charge(block: &Block, transaction_hashes: &[transaction::Hash]) -> usize {
+    block_wire_and_retained_bytes(block, transaction_hashes).1
 }
 
 /// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
@@ -734,6 +864,20 @@ impl CheckpointVerifiedBlock {
         Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
     }
 
+    /// Carries `retention` and its precomputed charge with this block and its commit owners.
+    pub fn with_retention(mut self, retention: BlockRetentionToken) -> Self {
+        self.verified.retained_charge = retention
+            .retained_charge()
+            .or(self.verified.retained_charge);
+        self.verified.retention = Some(retention);
+        self
+    }
+
+    /// Takes the guard into the state writer, which holds it until the commit outcome is known.
+    pub(crate) fn take_retention(&mut self) -> Option<BlockRetentionToken> {
+        self.verified.retention.take()
+    }
+
     /// Computes and caches the authorizing-data root from this immutable block body.
     pub fn with_precomputed_auth_data_root(mut self) -> Self {
         self.auth_data_root = Some(self.block.auth_data_root());
@@ -760,6 +904,13 @@ impl CheckpointVerifiedBlock {
 }
 
 impl SemanticallyVerifiedBlock {
+    /// Carries `retention` and its precomputed charge with this block and its commit owners.
+    pub fn with_retention(mut self, retention: BlockRetentionToken) -> Self {
+        self.retained_charge = retention.retained_charge().or(self.retained_charge);
+        self.retention = Some(retention);
+        self
+    }
+
     /// Creates [`SemanticallyVerifiedBlock`] from [`Block`] and [`block::Hash`].
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         let height = block
@@ -775,6 +926,8 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time: None,
+            retained_charge: None,
+            retention: None,
         }
     }
 }
@@ -811,6 +964,8 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             received_time: None,
+            retained_charge: None,
+            retention: None,
         }
     }
 }
@@ -824,6 +979,8 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             new_outputs: Arc::unwrap_or_clone(valid.new_outputs),
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
+            retained_charge: Some(valid.retained_charge),
+            retention: valid.retention,
         }
     }
 }
@@ -838,6 +995,8 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             transaction_hashes: finalized.transaction_hashes,
             // The finalized state does not track receipt times, so there is no stamp.
             received_time: None,
+            retained_charge: None,
+            retention: finalized.retention,
         }
     }
 }
