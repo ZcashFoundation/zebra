@@ -147,6 +147,7 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let estimated_height = obj.estimated_height();
     let chain_supply = obj.chain_supply();
     let value_pools = obj.value_pools();
+    let nsm_value_balance = obj.nsm_value_balance();
     let upgrades = obj.upgrades();
     let consensus = obj.consensus();
 
@@ -157,6 +158,7 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
         estimated_height,
         chain_supply.clone(),
         value_pools.clone(),
+        nsm_value_balance.clone(),
         upgrades.clone(),
         consensus,
         headers,
@@ -274,6 +276,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
     let value_pools = block.value_pools().clone();
+    let nsm_value_balance = block.nsm_value_balance().clone();
     let trees = block.trees();
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
@@ -307,6 +310,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         difficulty,
         chain_supply,
         value_pools,
+        nsm_value_balance,
         GetBlockTrees::new(trees_sapling, trees_orchard, trees_ironwood),
         previous_block_hash,
         next_block_hash,
@@ -357,6 +361,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let difficulty = block.difficulty();
     let chain_supply = block.chain_supply().clone();
     let value_pools = block.value_pools().clone();
+    let nsm_value_balance = block.nsm_value_balance().clone();
     let trees = block.trees();
     let previous_block_hash = block.previous_block_hash();
     let next_block_hash = block.next_block_hash();
@@ -383,6 +388,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         difficulty,
         chain_supply,
         value_pools,
+        nsm_value_balance,
         trees,
         previous_block_hash,
         next_block_hash,

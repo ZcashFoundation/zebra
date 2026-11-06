@@ -1464,6 +1464,10 @@ where
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                value_balance.nsm_amount(),
+                None,
+            )),
             upgrades,
             consensus,
             headers: tip_height,
@@ -1824,6 +1828,12 @@ where
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| {
+                    GetBlockchainInfoBalance::nsm(
+                        d.value_pools().nsm_amount(),
+                        delta.map(|delta| delta.nsm_amount()),
+                    )
+                }),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
@@ -4024,6 +4034,16 @@ pub struct GetBlockchainInfoResponse {
     #[serde(rename = "valuePools")]
     value_pools: BlockchainValuePoolBalances,
 
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7). It is not part of the
+    /// chain supply, so it is not in `valuePools`. It is absent in responses from nodes that
+    /// don't report it.
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
+
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
@@ -4041,6 +4061,7 @@ impl Default for GetBlockchainInfoResponse {
             estimated_height: Height(1),
             chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
             value_pools: GetBlockchainInfoBalance::zero_pools(),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(Amount::zero(), None)),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
@@ -4069,6 +4090,7 @@ impl GetBlockchainInfoResponse {
         estimated_height: Height,
         chain_supply: GetBlockchainInfoBalance,
         value_pools: BlockchainValuePoolBalances,
+        nsm_value_balance: Option<GetBlockchainInfoBalance>,
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,
@@ -4086,6 +4108,7 @@ impl GetBlockchainInfoResponse {
             estimated_height,
             chain_supply,
             value_pools,
+            nsm_value_balance,
             upgrades,
             consensus,
             headers,
@@ -4500,6 +4523,7 @@ impl Default for GetBlockResponse {
             difficulty: None,
             chain_supply: None,
             value_pools: None,
+            nsm_value_balance: None,
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
@@ -4614,6 +4638,15 @@ pub struct BlockObject {
     #[serde(rename = "valuePools")]
     #[serde(skip_serializing_if = "Option::is_none")]
     value_pools: Option<BlockchainValuePoolBalances>,
+
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7) after this block, and the
+    /// block's change to it. It is not part of the chain supply, so it is not in `valuePools`.
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
 
     /// Information about the note commitment trees.
     #[getter(copy)]
