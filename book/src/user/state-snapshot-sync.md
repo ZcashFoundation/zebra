@@ -276,5 +276,8 @@ import.
 - The history below `L` is never downloaded. A node that needs it must sync from genesis or
   restore an [archive](snapshots.md) instead.
 - Snapshot peers are not discovered: `NODE_SYNC_ARTIFACTS` peers must be configured.
+- A node that bootstrapped from a snapshot does not serve
+  [known hashes](p2p-v2.md#serving-known-hashes): it answers every `get-hashes` request with no
+  entries, because its per-block counts would need the history below `L`.
 - The export runs on a stopped node whose finalized tip is exactly `H`. A running node cannot
   export, and a node past `H` cannot go back to it.
