@@ -48,7 +48,7 @@ pub use error::{
     CommitSemanticallyVerifiedError, DuplicateNullifierError, StateInitError, ValidateContextError,
 };
 pub use request::{
-    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest,
+    AwaitUtxoRequest, CheckpointVerifiedBlock, CommitAids, CommitSemanticallyVerifiedBlockRequest,
     HashOrHeight, MappedRequest, MinedBlockNotifications, ReadRequest, Request,
     SemanticallyVerifiedBlock,
 };
