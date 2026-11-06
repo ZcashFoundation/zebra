@@ -39,6 +39,13 @@ new job. Each filter includes the shared file itself. GCP integration and
 node-deployment workflows instead have their own event and path filters;
 changing the shared file does not automatically run those workflows.
 
+The `unit_tests` filter also matches three book pages that unit tests compare
+with the code: the configuration reference and the network upgrade table
+(`zebrad/tests/unit/book.rs`), and the JSON-RPC method table
+(`zebra-rpc/src/methods/tests/book.rs`). A change that adds a configuration key
+or an RPC method, or changes an activation height, fails these tests until the
+book is updated.
+
 On PRs targeting `main`, labels other than `release` do not rerun the main
 Linux unit-test job. PRs targeting `next` run it on edits and label events
 when the path filter matches; `next` has no merge queue to rerun it.
