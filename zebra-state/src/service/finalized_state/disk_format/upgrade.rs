@@ -132,20 +132,22 @@ fn format_upgrades(
         // Adds the `sync_meta_by_height` column family, which new blocks write at commit time,
         // and backfills it for existing blocks.
         Box::new(add_sync_metadata::Upgrade),
-        // The spentness hint column families are created empty when the database is opened.
+        // The spentness hint column families are created empty when the database is opened. This
+        // is a reusable major upgrade: v29 state moves to v30 without a resync, and 29.x readers,
+        // which cannot handle a partial hinted state's missing UTXOs, never open a v30 directory.
         Box::new(no_migration::NoMigration::new(
             "add spentness hint column families",
-            Version::new(29, 2, 0),
+            Version::new(30, 0, 0),
         )),
         // The major directory isolates body deletion from older archive readers.
         Box::new(no_migration::NoMigration::new(
             "isolate pruned state from archive readers",
-            Version::new(30, 0, 0),
+            Version::new(31, 0, 0),
         )),
         // Opening the database creates the empty snapshot base column family.
         Box::new(no_migration::NoMigration::new(
             "add the state snapshot base marker",
-            Version::new(30, 1, 0),
+            Version::new(31, 1, 0),
         )),
         // The major directory prevents older readers from opening and downgrading snapshot state.
         Box::new(no_migration::NoMigration::new(
@@ -1069,4 +1071,5 @@ fn reusable_source_follows_the_registered_upgrade_chain() {
         restorable_db_source_versions(31).is_empty(),
         "no upgrade registers format 31"
     );
+    assert!(sources.contains(&29), "older caches remain reusable");
 }

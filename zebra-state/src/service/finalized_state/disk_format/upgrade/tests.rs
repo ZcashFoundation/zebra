@@ -157,7 +157,7 @@ fn existing_database_is_marked_with_the_snapshot_base_format() {
         ),
         (33, 0, 0)
     );
-    let mut disk_version = Version::new(30, 0, 0);
+    let mut disk_version = Version::new(31, 0, 0);
     disk_version.build = running_version.build.clone();
     state
         .db

@@ -65,16 +65,21 @@ const DATABASE_FORMAT_VERSION: u64 = 33;
 ///   state snapshot with its window start, snapshot height, block hash and manifest. Existing
 ///   databases get the column family empty when they are opened, so the upgrade rewrites no
 ///   records. The v32 directory barrier supersedes the unenforceable same-directory prohibition
-///   on 30.0.0 readers; existing 30.1.0 databases upgrade to v32 without record rewrites.
-/// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
-///   Compatible v29 archive state is moved to `state/v30` without rewriting records. Older
-///   binaries must not open a pruned v30 directory: their minor-version downgrade path assumes
-///   archive bodies remain complete. A never-pruned v30 directory can be renamed back to v29 for
+///   on 31.0.0 readers; existing 31.1.0 databases upgrade to v32 without record rewrites.
+/// - 31.0.0: isolates historical body deletion from older archive readers in a separate directory.
+///   Compatible v30 and v29 archive state is moved to `state/v31` without rewriting records. Older
+///   binaries must not open a pruned v31 directory: their minor-version downgrade path assumes
+///   archive bodies remain complete. A never-pruned v31 directory can be renamed back to v30 for
 ///   rollback, because no records are rewritten; a pruned one needs a separate archive backup.
-/// - 29.2.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
+/// - 30.0.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the
-///   journal is emptied when a hinted sync completes.
+///   journal is emptied when a hinted sync completes. This is a major bump: a partial hinted
+///   state leaves the omitted outputs out of `utxo_by_out_loc`, which 29.x readers cannot
+///   handle, so they must never open it through their minor-version downgrade path. Compatible
+///   v29 state is moved to `state/v30` without a resync or record rewrite. Hinted construction
+///   only starts on an empty state, so every partial hinted state is created in v30. A
+///   never-hinted v30 directory can be renamed back to v29 for rollback; a hinted one cannot.
 /// - 29.1.0: adds the `sync_meta_by_height` column family: 64 bytes of per-block synchronization
 ///   metadata (size, transaction and note commitment counts, ZIP 221 per-pool transaction counts,
 ///   the ZIP 244 authorizing data root, and the cumulative transparent output count, which gives
