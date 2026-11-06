@@ -73,6 +73,8 @@ mod announcements;
 mod inbound;
 mod outbound;
 
+pub(crate) use outbound::{RequestSend, ResponseStream};
+
 #[cfg(test)]
 mod tests;
 
@@ -111,7 +113,16 @@ pub struct ConnectionParams<S> {
     /// The hub that relays addresses between version 2 peers and advertises
     /// this node's own; `None` for a connection that relays nothing.
     pub addr_relay: Option<AddrRelayHandle>,
+    /// Whether the peer's `get-block-range` requests are served
+    /// (`network.v2_serve_block_ranges`).
+    pub serve_block_ranges: bool,
+
+    /// The node-wide `get-block-range` stream permits, shared by every
+    /// version 2 connection: [`global_block_range_permits`].
+    pub block_range_permits: Arc<Semaphore>,
 }
+
+pub(crate) use inbound::global_block_range_permits;
 
 /// Something a stream task needs the connection task to act on.
 enum Event {
@@ -182,6 +193,9 @@ struct Events {
     fatal: mpsc::Sender<Event>,
     /// Best-effort events: the addresses the peer sent.
     others: mpsc::Sender<Event>,
+    /// Set by the first close handed to `fatal`, before the connection task
+    /// reads it, so a [`ConnectionCloser`] sees the close at once.
+    closing: Arc<AtomicBool>,
 }
 
 impl Events {
@@ -190,13 +204,23 @@ impl Events {
     fn channel() -> (Self, mpsc::Receiver<Event>, mpsc::Receiver<Event>) {
         let (fatal, fatal_rx) = mpsc::channel(1);
         let (others, others_rx) = mpsc::channel(EVENT_QUEUE);
-        (Events { fatal, others }, fatal_rx, others_rx)
+        let closing = Arc::new(AtomicBool::new(false));
+        (
+            Events {
+                fatal,
+                others,
+                closing,
+            },
+            fatal_rx,
+            others_rx,
+        )
     }
 
     /// Hands a connection-closing event to the connection task, without
     /// waiting: if one is already queued, the connection is closing anyway,
     /// and if the task is gone, so is the connection.
     fn close(&self, event: Event) {
+        self.closing.store(true, Ordering::Relaxed);
         let _ = self.fatal.try_send(event);
     }
 
@@ -208,6 +232,44 @@ impl Events {
         {
             metrics::counter!("zebra.net.in.addresses.dropped").increment(1);
         }
+    }
+}
+
+/// A handle that closes one connection through its connection task, for code
+/// outside this module that holds the connection: a
+/// [`SyncPeer`](crate::SyncPeer) that found a violation in a bulk response.
+///
+/// It sends on the connection-closing queue, as the stream tasks do, so the
+/// close goes through the connection task's error slot and log.
+#[derive(Clone)]
+pub(crate) struct ConnectionCloser {
+    events: Events,
+}
+
+impl ConnectionCloser {
+    /// Queues a close of the connection with `code` because of `reason`,
+    /// without waiting, and marks the connection as closing at once (see
+    /// [`ConnectionCloser::is_closed`]).
+    ///
+    /// The connection task closes the connection when it reads the close. If
+    /// another close is already queued, the connection closes with that one's
+    /// code instead; if the connection task is gone, the connection is closed
+    /// or about to be anyway.
+    pub(crate) fn close(&self, reason: String, code: ErrorCode) {
+        self.events.close(Event::Violation { reason, code });
+    }
+
+    /// Whether a close has been queued, by this handle or by one of the
+    /// connection's stream tasks, or the connection task has ended, however
+    /// it ended.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.events.closing.load(Ordering::Relaxed) || self.events.fatal.is_closed()
+    }
+
+    /// Waits until the connection task has ended, however it ended: even an
+    /// aborted task, which does not close its connection explicitly.
+    pub(crate) async fn closed(&self) {
+        self.events.fatal.closed().await
     }
 }
 
@@ -344,7 +406,8 @@ pub(super) fn close_error(reason: String, code: ErrorCode) -> PeerError {
 }
 
 /// Spawns the connection task for a completed handshake and returns the
-/// [`Client`] the peer set uses to talk to the peer.
+/// [`Client`] the peer set uses to talk to the peer, and a
+/// [`ConnectionCloser`] for the connection's [`SyncPeer`](crate::SyncPeer).
 ///
 /// `exit_notifier` is dropped when the connection task ends, however it
 /// ends, so a caller holding the receiver learns the connection is gone.
@@ -354,7 +417,7 @@ pub fn spawn_connection<S>(
     connection_tracker: ConnectionTracker,
     params: ConnectionParams<S>,
     exit_notifier: Option<tokio::sync::oneshot::Sender<()>>,
-) -> Client
+) -> (Client, ConnectionCloser)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -373,6 +436,9 @@ where
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<CancelHeartbeatTask>();
     let error_slot = ErrorSlot::default();
     let (events, fatal_rx, events_rx) = Events::channel();
+    let closer = ConnectionCloser {
+        events: events.clone(),
+    };
 
     let connection_span = tracing::debug_span!("v2_connection", %addr_label);
 
@@ -387,6 +453,10 @@ where
     };
 
     let is_inbound = connection_info.connected_addr.is_inbound();
+    let block_ranges = inbound::BlockRangeServing::new(
+        params.serve_block_ranges,
+        params.block_range_permits.clone(),
+    );
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
@@ -406,6 +476,7 @@ where
         addr_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
+        block_ranges,
         overloads: Arc::new(Overloads::new()),
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
         tasks: JoinSet::new(),
@@ -436,7 +507,7 @@ where
     let (block_advert_tx, _) = mpsc::channel(1);
     let (compact_receive_tx, _) = tokio::sync::watch::channel(None);
 
-    Client {
+    let client = Client {
         connection_info,
         shutdown_tx: Some(shutdown_tx),
         server_tx,
@@ -446,7 +517,8 @@ where
         error_slot,
         connection_task,
         heartbeat_task,
-    }
+    };
+    (client, closer)
 }
 
 /// The task that owns a connection.
@@ -483,6 +555,8 @@ struct ConnectionTask<S> {
     announcement_permits: AnnouncementPermits,
     /// Bounds how many of the peer's requests are in the inbound service at once.
     inbound_permits: Arc<Semaphore>,
+    /// Bounds how many of the peer's `get-block-range` requests are served at once.
+    block_ranges: inbound::BlockRangeServing,
     /// The peer's inbound service overloads, which may close the connection.
     overloads: Arc<Overloads>,
     /// Bounds how many of this node's requests are in flight to the peer at once.
@@ -747,6 +821,7 @@ where
             self.get_addr_allowed.clone(),
             self.params.address_book.clone(),
             self.events.clone(),
+            self.block_ranges.clone(),
         ));
     }
 
@@ -843,7 +918,8 @@ where
             | Request::AdvertiseCompactBlock(..)
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
-            | Request::CheckCompactBlock(_) => Err(PeerError::InboundOnlyRequest.into()),
+            | Request::CheckCompactBlock(_)
+            | Request::BlockRange { .. } => Err(PeerError::InboundOnlyRequest.into()),
 
             // Peer set internal.
             Request::PollPeerSet => Ok(Response::Nil),

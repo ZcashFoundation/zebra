@@ -579,6 +579,10 @@ pub enum ReadResponse {
     /// The response to a `FindBlockHeaders` request.
     BlockHeaders(Vec<block::CountedHeader>),
 
+    /// The response to a [`ReadRequest::AncestorBlocks`] request: descending
+    /// height order, each block the parent of the one before it.
+    AncestorBlocks(Vec<Arc<Block>>),
+
     /// The response to a `FindForkPoint` request.
     /// Returns the height and hash of the fork point, or `None` if no locator entry is
     /// on the best chain.
@@ -780,7 +784,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
-            | ReadResponse::ForkPoint(_) => {
+            | ReadResponse::ForkPoint(_)
+            | ReadResponse::AncestorBlocks(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

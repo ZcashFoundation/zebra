@@ -661,6 +661,8 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         discovery: false,
         bans: tokio::sync::watch::channel(crate::BanList::default()).1,
         addr_relay: None,
+        serve_block_ranges: true,
+        block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
     };
     let client = spawn_connection(
         outbound,
@@ -668,14 +670,16 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         counter.track_connection(),
         params.clone(),
         None,
-    );
+    )
+    .0;
     let peer = spawn_connection(
         inbound,
         listener_handshake.expect("the handshake completes"),
         counter.track_connection(),
         params,
         None,
-    );
+    )
+    .0;
 
     (client, (peer, [dialer, listener]))
 }

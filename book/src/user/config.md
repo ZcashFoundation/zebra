@@ -156,6 +156,7 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `v2_listen_addr` | Optional socket-address string | Absent | Beta, opt-in: open a QUIC (UDP) endpoint for the draft version 2 peer-to-peer protocol at this address, also used for the version 2 connections Zebra makes. The legacy TCP protocol keeps running on `listen_addr`, and both can use the same port number. See [Version 2 peer-to-peer protocol (beta)](p2p-v2.md). |
 | `initial_v2_peers` | Array of address strings | `[]` | Peers to connect to over the version 2 protocol at startup; each IP address or DNS name must include the peer's QUIC (UDP) port. Only used when `v2_listen_addr` is set; these peers have the first claim on the outbound version 2 slots. |
 | `v2_peer_discovery` | Boolean | `true` | Only used when `v2_listen_addr` is set: discover version 2 peers through the `get-addr` answers of the version 2 peers Zebra dials, a version 2 peer cache (`<cache_dir>/network/<network>.v2-peers`), and the DNS seeders on the network's default port, and connect to some of them. Set to `false` to connect only to `initial_v2_peers`, as on a closed test network. |
+| `v2_serve_block_ranges` | Boolean | `true` | Serve `get-block-range` requests, which version 2 peers use to download ranges of up to 64 MiB of blocks. Zebra serves at most 2 ranges per peer and 8 in total at once, and refuses the rest. Only used when `v2_listen_addr` is set; `false` refuses every such request. |
 
 The exact default Mainnet seed list is:
 
@@ -375,6 +376,10 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `download_concurrency_limit` | `usize` | `50` | Parallel block-download requests. Values below `1` are raised to `1` with a warning. The old key `max_concurrent_block_requests` is an accepted alias. |
+| `v2_checkpoint_sync` | `bool` | `false` | Downloads the checkpointed part of the chain from version 2 peers with `get-block-range` requests, beside the legacy syncer. Needs `network.v2_listen_addr` and version 2 peers. See [Checkpoint sync over version 2](p2p-v2.md#checkpoint-sync-over-version-2). |
+| `v2_lookahead_bytes` | `u64` | `536870912` (512 MiB) | The most block data the checkpoint sync engine requests ahead of the committed tip, in bytes. Values below 2000000, one maximum-size block, are raised to it. |
+| `v2_min_peer_rate` | `u64` | `262144` (256 KiB/s) | The slowest rate, in bytes per second, at which the engine keeps downloading from a peer before moving its request to another peer. Values below `16384` (16 KiB/s) are raised to it. |
+| `v2_target_peers` | `usize` | `8` | The number of version 2 peers the engine downloads from at the same time. A value of 0 is raised to 1. |
 | `checkpoint_verify_concurrency_limit` | `usize` | `1000` | Blocks submitted concurrently to checkpoint verification. Values below `400` are raised to `400` with a warning. The old key `lookahead_limit` is an accepted alias. |
 | `full_verify_concurrency_limit` | `usize` | `20` | Blocks submitted concurrently to full verification. Values below `1` are raised to `1` with a warning. |
 | `parallel_cpu_threads` | `usize` | `0` | Rayon worker threads for CPU-intensive verification. Zero delegates thread-count selection to Rayon; a positive value overrides its automatic selection. |

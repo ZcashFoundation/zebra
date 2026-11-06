@@ -13,4 +13,4 @@ pub mod misbehavior;
 pub mod nonces;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -173,6 +173,8 @@ pub mod protocol;
 mod quic;
 mod v2_address_book;
 
+pub mod sync_peer;
+
 #[allow(unused)]
 pub(crate) use peer_set::PeerSet;
 
@@ -212,6 +214,8 @@ pub use crate::{
         internal::{BlockAuthorization, InventoryResponse, Request, Response},
     },
 };
+
+pub use crate::sync_peer::{SyncPeer, SyncPeerError, SyncPeers, SyncPeersSender};
 
 /// Types used in the definition of [`Request`], [`Response`], [`VersionMessage`],
 /// and [`RemoteHandshake`].

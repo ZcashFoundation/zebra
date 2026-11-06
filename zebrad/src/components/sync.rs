@@ -37,7 +37,12 @@ use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 use zebra_state as zs;
 
 use crate::{
-    components::sync::downloads::BlockDownloadVerifyError, config::ZebradConfig, BoxError,
+    components::{
+        checkpoint_sync::{EngineConfig, LegacyOwnership, SyncOwner},
+        sync::downloads::BlockDownloadVerifyError,
+    },
+    config::ZebradConfig,
+    BoxError,
 };
 
 mod diagnostics;
@@ -121,6 +126,26 @@ pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPO
 ///
 /// If the concurrency limit is 0, Zebra can't download or verify any blocks.
 pub const MIN_CONCURRENCY_LIMIT: usize = 1;
+
+/// A lower bound on `sync.v2_target_peers`.
+///
+/// With no target peers, the checkpoint sync engine would claim block download
+/// and never download a block.
+pub const MIN_V2_TARGET_PEERS: usize = 1;
+
+/// A lower bound on `sync.v2_lookahead_bytes`: one maximum-size block.
+///
+/// With a smaller lookahead, the checkpoint sync engine could not request a
+/// maximum-size block.
+pub const MIN_V2_LOOKAHEAD_BYTES: u64 = block::MAX_BLOCK_BYTES;
+
+/// A lower bound on `sync.v2_min_peer_rate`, in bytes per second.
+///
+/// With a zero or tiny floor, the minimum-rate stall rule never cancels a
+/// request, so peers that trickle bytes could keep their requests, and block
+/// download, forever. At this rate a maximum-size block arrives in about two
+/// minutes.
+pub const MIN_V2_MIN_PEER_RATE: u64 = 16 * 1024;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -232,6 +257,14 @@ const REGTEST_SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
 /// network requests. If there are a lot of them, it could overwhelm the network.
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
+/// How long the syncer waits after genesis, below the final checkpoint, for the
+/// checkpoint sync engine to claim block download before it starts syncing.
+///
+/// The engine needs a version 2 handshake with two peers before it can claim.
+/// Without this wait, a syncer with a fast link to a peer could download the
+/// checkpointed blocks first, or start a round the claim then cancels.
+pub const ENGINE_CLAIM_GRACE: Duration = Duration::from_secs(5);
+
 /// Sync configuration section.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
@@ -243,6 +276,37 @@ pub struct Config {
     /// performance on machines with a fast network connection.
     #[serde(alias = "max_concurrent_block_requests")]
     pub download_concurrency_limit: usize,
+
+    /// Whether to download the checkpointed part of the chain from version 2
+    /// peers with `get-block-range` requests, using the checkpoint sync engine.
+    ///
+    /// The engine runs beside the legacy syncer. It takes over block download
+    /// when at least two connected version 2 peers can serve block ranges and
+    /// the state tip is far below the final checkpoint, and it hands block
+    /// download back to the legacy syncer at a checkpoint height. The legacy
+    /// syncer always downloads the genesis block and the blocks above the
+    /// final checkpoint, and it takes over again if the engine's peers go
+    /// away.
+    ///
+    /// Off by default. It needs `network.v2_listen_addr` and version 2 peers.
+    pub v2_checkpoint_sync: bool,
+
+    /// The most block data the checkpoint sync engine requests ahead of the
+    /// committed state tip, in bytes.
+    ///
+    /// Larger values can keep more peers busy, and use more memory. Values
+    /// below one maximum-size block (2,000,000 bytes) are raised to it.
+    pub v2_lookahead_bytes: u64,
+
+    /// The slowest download rate, in bytes per second, at which the checkpoint
+    /// sync engine keeps downloading from a peer. A slower peer's request is
+    /// cancelled and sent to another peer. Values below 16 KiB/s (16,384
+    /// bytes per second) are raised to it.
+    pub v2_min_peer_rate: u64,
+
+    /// The number of version 2 peers the checkpoint sync engine downloads from
+    /// at the same time. A value of 0 is raised to 1.
+    pub v2_target_peers: usize,
 
     /// The number of blocks submitted in parallel to the checkpoint verifier.
     ///
@@ -282,9 +346,17 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        let engine = EngineConfig::default();
+
         Self {
             // 2/3 of the default outbound peer limit.
             download_concurrency_limit: 50,
+
+            // The checkpoint sync engine is opt-in.
+            v2_checkpoint_sync: false,
+            v2_lookahead_bytes: engine.lookahead_bytes,
+            v2_min_peer_rate: engine.min_peer_rate,
+            v2_target_peers: engine.target_peers,
 
             // A few max-length checkpoints.
             checkpoint_verify_concurrency_limit: DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
@@ -307,6 +379,74 @@ impl Default for Config {
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
         }
+    }
+}
+
+impl Config {
+    /// The checkpoint sync engine's parameters, from the `v2_*` fields.
+    ///
+    /// Raises `v2_target_peers` to [`MIN_V2_TARGET_PEERS`],
+    /// `v2_lookahead_bytes` to [`MIN_V2_LOOKAHEAD_BYTES`] and
+    /// `v2_min_peer_rate` to [`MIN_V2_MIN_PEER_RATE`], with a warning.
+    pub fn v2_engine_config(&self) -> EngineConfig {
+        let mut target_peers = self.v2_target_peers;
+        let mut lookahead_bytes = self.v2_lookahead_bytes;
+        let mut min_peer_rate = self.v2_min_peer_rate;
+
+        if target_peers < MIN_V2_TARGET_PEERS {
+            warn!(
+                "configured v2 target peers {} too low, increasing to {}",
+                self.v2_target_peers, MIN_V2_TARGET_PEERS,
+            );
+
+            target_peers = MIN_V2_TARGET_PEERS;
+        }
+
+        if lookahead_bytes < MIN_V2_LOOKAHEAD_BYTES {
+            warn!(
+                "configured v2 lookahead bytes {} too low, increasing to {}",
+                self.v2_lookahead_bytes, MIN_V2_LOOKAHEAD_BYTES,
+            );
+
+            lookahead_bytes = MIN_V2_LOOKAHEAD_BYTES;
+        }
+
+        if min_peer_rate < MIN_V2_MIN_PEER_RATE {
+            warn!(
+                "configured v2 min peer rate {} too low, increasing to {}",
+                self.v2_min_peer_rate, MIN_V2_MIN_PEER_RATE,
+            );
+
+            min_peer_rate = MIN_V2_MIN_PEER_RATE;
+        }
+
+        EngineConfig {
+            lookahead_bytes,
+            min_peer_rate,
+            target_peers,
+        }
+    }
+}
+
+/// Waits until the checkpoint sync engine owns block download, or forever if
+/// its supervisor is gone (or was never started).
+async fn wait_for_engine_claim(owner: &mut watch::Receiver<SyncOwner>) {
+    if owner.wait_for(|owner| !owner.is_legacy()).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Ownership channels whose owner is always this syncer, for a node that does
+/// not run the checkpoint sync engine.
+fn inert_ownership() -> LegacyOwnership {
+    let (_owner_sender, owner) = watch::channel(SyncOwner::Legacy);
+    let (ack, _ack_receiver) = watch::channel(0);
+    let (_unit_lengths_sender, unit_lengths) = mpsc::channel(1);
+
+    LegacyOwnership {
+        owner,
+        ack,
+        unit_lengths,
     }
 }
 
@@ -419,6 +559,11 @@ where
 
     /// Publishes the syncer state that the progress task logs when sync stalls.
     diagnostics: watch::Sender<SyncDiagnostics>,
+
+    /// Which component owns block download: this syncer, or the checkpoint
+    /// sync engine. Inert, so this syncer always owns it, unless
+    /// [`ChainSync::with_ownership`] replaces it.
+    ownership: LegacyOwnership,
 }
 
 /// A sync round that ended early, and why.
@@ -588,9 +733,23 @@ where
             block_reobtain_retries: HashMap::new(),
             utxo_race_drops: 0,
             diagnostics,
+            ownership: inert_ownership(),
         };
 
         (new_syncer, sync_status)
+    }
+
+    /// Shares block download with the checkpoint sync engine through
+    /// `ownership`.
+    ///
+    /// The syncer then starts a sync round only while it owns block download,
+    /// ends its round and cancels its downloads when the engine claims it, and
+    /// acknowledges the claim. While the engine owns block download, the
+    /// syncer counts the engine's committed units as sync lengths, so the
+    /// mempool and block gossip stay off.
+    pub fn with_ownership(mut self, ownership: LegacyOwnership) -> Self {
+        self.ownership = ownership;
+        self
     }
 
     /// Runs the syncer to synchronize the chain and keep it synchronized.
@@ -599,13 +758,28 @@ where
         // We can't download the genesis block using our normal algorithm,
         // due to protocol limitations
         self.request_genesis().await?;
+        self.wait_for_engine_claim_grace().await;
 
         loop {
+            self.wait_for_download_ownership().await;
+
             let start_tip = self.latest_chain_tip.best_tip_height();
             let result = self.try_to_sync().await;
             if result.is_err() {
                 self.count_finished_block_errors();
                 self.downloads.cancel_all();
+            }
+
+            if !self.owns_download() {
+                // The engine claimed block download during this round. Cancel the
+                // round's downloads like the error path does; the next
+                // `wait_for_download_ownership` then acknowledges the claim, and
+                // waits for the engine to hand block download back.
+                if result.is_ok() {
+                    self.downloads.cancel_all();
+                }
+                self.update_metrics();
+                continue;
             }
 
             self.update_metrics();
@@ -647,7 +821,11 @@ where
                     "waiting to restart sync"
                 );
             }
-            sleep(restart_delay).await;
+            // An engine claim ends the delay, so the engine does not wait for it.
+            tokio::select! {
+                () = sleep(restart_delay) => {}
+                () = wait_for_engine_claim(&mut self.ownership.owner) => {}
+            }
         }
     }
 
@@ -706,7 +884,9 @@ where
         };
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
+        while (!self.prospective_tips.is_empty() || !extra_hashes.is_empty())
+            && self.owns_download()
+        {
             // Avoid hangs due to service readiness or other internal operations
             extra_hashes = match timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
                 .await
@@ -718,9 +898,107 @@ where
             };
         }
 
+        if !self.owns_download() {
+            info!(
+                owner = ?*self.ownership.owner.borrow(),
+                "the checkpoint sync engine claimed block download, ending this sync round"
+            );
+            return Ok(());
+        }
+
         info!("exhausted prospective tip set");
 
         Ok(())
+    }
+
+    /// Whether this syncer owns block download.
+    ///
+    /// It also does if the checkpoint sync engine's supervisor stopped
+    /// without handing block download back, so block download never stops.
+    fn owns_download(&self) -> bool {
+        self.ownership.owner.borrow().is_legacy() || self.ownership.owner.has_changed().is_err()
+    }
+
+    /// Waits up to [`ENGINE_CLAIM_GRACE`] for the checkpoint sync engine to
+    /// claim block download, if it runs and the state tip is below the final
+    /// checkpoint.
+    async fn wait_for_engine_claim_grace(&mut self) {
+        // The inert ownership has no sender. The state has genesis, even if the
+        // latest tip has not caught up yet.
+        let tip = self.latest_chain_tip.best_tip_height().unwrap_or(Height(0));
+        if self.ownership.owner.has_changed().is_err() || tip >= self.max_checkpoint_height {
+            return;
+        }
+
+        info!(
+            grace = ?ENGINE_CLAIM_GRACE,
+            "waiting for the checkpoint sync engine to claim block download"
+        );
+        tokio::select! {
+            () = sleep(ENGINE_CLAIM_GRACE) => {}
+            () = wait_for_engine_claim(&mut self.ownership.owner) => {}
+        }
+    }
+
+    /// Waits until this syncer owns block download.
+    ///
+    /// While the checkpoint sync engine owns it, this cancels this syncer's
+    /// downloads and then acknowledges each claim, and pushes the block counts
+    /// of the engine's committed units into the recent sync lengths. A round
+    /// that ran out of tips leaves its downloads in flight, so a claim during
+    /// the restart delay reaches this with downloads still running.
+    async fn wait_for_download_ownership(&mut self) {
+        let mut waited = false;
+
+        loop {
+            while let Ok(unit_length) = self.ownership.unit_lengths.try_recv() {
+                self.recent_syncs.push_extend_tips_length(unit_length);
+            }
+
+            let owner = *self.ownership.owner.borrow_and_update();
+            let SyncOwner::Engine { target, generation } = owner else {
+                if waited {
+                    info!(
+                        state_tip = ?self.latest_chain_tip.best_tip_height(),
+                        "the checkpoint sync engine handed block download back to the syncer"
+                    );
+                }
+                return;
+            };
+
+            let acknowledged = *self.ownership.ack.borrow() == generation;
+            if !acknowledged {
+                // The engine starts downloading once it sees the ack, so this
+                // syncer must not download or submit blocks after it.
+                self.downloads.cancel_all();
+            }
+            self.ownership.ack.send_replace(generation);
+            if !acknowledged {
+                info!(
+                    ?target,
+                    generation,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "the checkpoint sync engine owns block download, waiting for it to finish"
+                );
+            }
+            waited = true;
+
+            tokio::select! {
+                changed = self.ownership.owner.changed() => {
+                    if changed.is_err() {
+                        warn!(
+                            state_tip = ?self.latest_chain_tip.best_tip_height(),
+                            "the checkpoint sync engine stopped without handing block download \
+                             back, resuming sync"
+                        );
+                        return;
+                    }
+                }
+                Some(unit_length) = self.ownership.unit_lengths.recv() => {
+                    self.recent_syncs.push_extend_tips_length(unit_length);
+                }
+            }
+        }
     }
 
     /// Tries to synchronize the chain once, using the existing `extra_hashes`.
@@ -820,7 +1098,8 @@ where
     /// Blocks that can't get network capacity before the download deadline stay queued for the
     /// next sync round.
     async fn reobtain_missing_blocks(&mut self) {
-        if self.reobtain_hashes.is_empty() {
+        // The checkpoint sync engine downloads these blocks while it owns block download.
+        if self.reobtain_hashes.is_empty() || !self.owns_download() {
             return;
         }
 
@@ -1227,6 +1506,16 @@ where
         &mut self,
         mut hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        // The checkpoint sync engine may have claimed block download while this step
+        // waited on the network. The round then ends, so these hashes are not needed.
+        if !self.owns_download() {
+            debug!(
+                hashes.len = hashes.len(),
+                "the checkpoint sync engine owns block download, not queueing blocks",
+            );
+            return Ok(IndexSet::new());
+        }
+
         let lookahead_limit = self.lookahead_limit(hashes.len());
 
         debug!(

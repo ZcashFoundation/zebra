@@ -15,6 +15,7 @@
 use crate::service;
 
 pub mod address;
+pub mod ancestors;
 pub mod block;
 pub mod difficulty;
 pub mod find;
@@ -22,6 +23,8 @@ pub mod tree;
 
 #[cfg(test)]
 pub(in crate::service) mod tests;
+
+pub use ancestors::ancestor_blocks;
 
 pub use address::{
     balance::transparent_balance,

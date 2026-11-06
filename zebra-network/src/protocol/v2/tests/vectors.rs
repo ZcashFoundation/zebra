@@ -809,6 +809,7 @@ fn empty_requests_and_stream_type_handling() {
                 | StreamType::GetTx
                 | StreamType::GetAddr
                 | StreamType::GetMempool
+                | StreamType::GetBlockRange
         );
         if served {
             assert!(max_body_len(stream_type).is_some());
@@ -1497,4 +1498,470 @@ fn relayed_times_are_clamped_at_the_edges() {
     assert_eq!(clamp_relayed_time(now, now), now);
     let old = now.saturating_sub(Duration32::from_days(40));
     assert_eq!(clamp_relayed_time(old, now), old);
+}
+
+/// `get-block-range` (draft, "`get-block-range`"): a fixed-width request, and
+/// a response of a `result` byte then length-prefixed blocks in descending
+/// height order, bounded by the request's `count` and `max_bytes` with the
+/// first block exempt from `max_bytes`.
+mod get_block_range {
+    use std::sync::Arc;
+
+    use tokio::io::{AsyncRead, AsyncWriteExt};
+
+    use zebra_chain::{
+        block::{self, Block},
+        serialization::ZcashSerialize,
+    };
+
+    use super::{read_byte_by_byte, test_block};
+    use crate::protocol::v2::{
+        constants::{
+            GET_BLOCK_RANGE_REQUEST_LEN, MAX_GET_BLOCK_RANGE_BYTES, MAX_GET_BLOCK_RANGE_COUNT,
+            MAX_RECORD_PAYLOAD_LEN,
+        },
+        request::{GetBlockRange, Request},
+        response::block_range::{
+            read_block_range_answer, read_block_range_element, write_block_range_answer,
+            write_block_range_element, BlockRangeAnswer, BlockRangeBounds,
+        },
+        types::{ErrorCode, StreamType},
+        wire::{Violation, WireError},
+    };
+
+    /// Mainnet block 1, then its parent, the genesis block: a descending range.
+    fn descending_blocks() -> Vec<Arc<Block>> {
+        let genesis = test_block(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES);
+        let block_1 = test_block(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES);
+        assert_eq!(block_1.header.previous_block_hash, genesis.hash());
+        vec![block_1, genesis]
+    }
+
+    /// A request for `count` blocks and `max_bytes` from mainnet block 1.
+    fn request(count: u32, max_bytes: u32) -> GetBlockRange {
+        GetBlockRange {
+            final_hash: descending_blocks()[0].hash(),
+            count,
+            max_bytes,
+        }
+    }
+
+    /// A complete `Found` response carrying `blocks`.
+    fn found_response(blocks: &[Vec<u8>]) -> Vec<u8> {
+        let mut wire = Vec::new();
+        write_block_range_answer(&mut wire, BlockRangeAnswer::Found).expect("valid");
+        for block in blocks {
+            write_block_range_element(&mut wire, block).expect("valid");
+        }
+        wire
+    }
+
+    /// Reads a whole `Found` response to `request` from `wire`.
+    async fn read_found(wire: &[u8], request: &GetBlockRange) -> Result<Vec<Vec<u8>>, WireError> {
+        read_found_from(&mut &wire[..], request).await
+    }
+
+    /// Reads a whole `Found` response to `request` from `reader`.
+    async fn read_found_from<R: AsyncRead + Unpin>(
+        reader: &mut R,
+        request: &GetBlockRange,
+    ) -> Result<Vec<Vec<u8>>, WireError> {
+        assert_eq!(
+            read_block_range_answer(reader).await?,
+            BlockRangeAnswer::Found
+        );
+        let mut bounds = BlockRangeBounds::new(request);
+        let mut blocks = Vec::new();
+        while let Some(block) = read_block_range_element(reader, &mut bounds).await? {
+            blocks.push(block.to_vec());
+        }
+        Ok(blocks)
+    }
+
+    #[test]
+    fn request_pins_layout_and_limits() {
+        assert_eq!(GET_BLOCK_RANGE_REQUEST_LEN, 40);
+        assert_eq!(MAX_GET_BLOCK_RANGE_COUNT, 65_536);
+        assert_eq!(MAX_GET_BLOCK_RANGE_BYTES, 67_108_864);
+
+        let request = GetBlockRange {
+            final_hash: block::Hash([0xB7; 32]),
+            count: 0x0102_0304,
+            max_bytes: 0x0A0B_0C0D,
+        };
+        // The bounds are checked separately; this request only pins the byte order.
+        let mut body = Vec::new();
+        body.extend_from_slice(&[0xB7; 32]);
+        body.extend_from_slice(&[0x04, 0x03, 0x02, 0x01]);
+        body.extend_from_slice(&[0x0D, 0x0C, 0x0B, 0x0A]);
+        let read = GetBlockRange::read(&mut &body[..]);
+        assert_err!(
+            read,
+            WireError::CountTooLarge { field: "count", .. },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+
+        let request = GetBlockRange {
+            count: 0x0102,
+            max_bytes: 0x0304,
+            ..request
+        };
+        let wire = Request::BlockRange(request).encode().expect("valid");
+        let mut expected = vec![0xB7; 32];
+        expected.extend_from_slice(&[0x02, 0x01, 0, 0, 0x04, 0x03, 0, 0]);
+        assert_eq!(&wire[..], &expected[..]);
+        assert_eq!(wire.len(), GET_BLOCK_RANGE_REQUEST_LEN);
+        assert_eq!(
+            Request::decode(StreamType::GetBlockRange, &wire).expect("valid"),
+            Request::BlockRange(request)
+        );
+        assert_eq!(
+            Request::BlockRange(request).stream_type(),
+            StreamType::GetBlockRange
+        );
+
+        // Both bounds are inclusive, and `count = 0` is a valid request.
+        for (count, max_bytes) in [
+            (MAX_GET_BLOCK_RANGE_COUNT, MAX_GET_BLOCK_RANGE_BYTES),
+            (0, 0),
+        ] {
+            let request = GetBlockRange {
+                count,
+                max_bytes,
+                ..request
+            };
+            request.check().expect("within the bounds");
+            let wire = Request::BlockRange(request).encode().expect("valid");
+            assert_eq!(
+                Request::decode(StreamType::GetBlockRange, &wire).expect("valid"),
+                Request::BlockRange(request)
+            );
+        }
+
+        // One past either bound is a local error before sending, and a protocol error when
+        // received.
+        for (field, count, max_bytes, max) in [
+            (
+                "count",
+                MAX_GET_BLOCK_RANGE_COUNT + 1,
+                0,
+                MAX_GET_BLOCK_RANGE_COUNT,
+            ),
+            (
+                "max_bytes",
+                0,
+                MAX_GET_BLOCK_RANGE_BYTES + 1,
+                MAX_GET_BLOCK_RANGE_BYTES,
+            ),
+        ] {
+            let over = GetBlockRange {
+                count,
+                max_bytes,
+                ..request
+            };
+            assert_err!(
+                over.check(),
+                WireError::LocalCountTooLarge { field: got, max: got_max, .. }
+                    if got == field && got_max == max as usize,
+                Violation::Close(ErrorCode::InternalError)
+            );
+            assert_err!(
+                Request::BlockRange(over).encode(),
+                WireError::LocalCountTooLarge { .. }
+            );
+
+            let mut body = vec![0; 32];
+            body.extend_from_slice(&count.to_le_bytes());
+            body.extend_from_slice(&max_bytes.to_le_bytes());
+            assert_err!(
+                Request::decode(StreamType::GetBlockRange, &body),
+                WireError::CountTooLarge { field: got, count: got_count, max: got_max }
+                    if got == field && got_count == u64::from(max) + 1 && got_max == max as usize,
+                Violation::Close(ErrorCode::ProtocolError)
+            );
+        }
+
+        // Every strict prefix is truncated, and a longer body has trailing bytes.
+        for cut in 0..wire.len() {
+            assert_err!(
+                Request::decode(StreamType::GetBlockRange, &wire[..cut]),
+                WireError::Truncated { .. },
+                Violation::Close(ErrorCode::ProtocolError)
+            );
+        }
+        let mut long = wire.to_vec();
+        long.push(0);
+        assert_err!(
+            Request::decode(StreamType::GetBlockRange, &long),
+            WireError::TrailingBytes {
+                what: "request",
+                count: 1
+            },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+    }
+
+    #[tokio::test]
+    async fn answer_pins_result_bytes() {
+        for (answer, byte) in [
+            (BlockRangeAnswer::Found, 0x00),
+            (BlockRangeAnswer::NotFound, 0x02),
+        ] {
+            let mut wire = Vec::new();
+            write_block_range_answer(&mut wire, answer).expect("valid");
+            assert_eq!(wire, [byte]);
+            assert_eq!(
+                read_block_range_answer(&mut &wire[..])
+                    .await
+                    .expect("valid"),
+                answer
+            );
+        }
+
+        assert_err!(
+            read_block_range_answer(&mut &[][..]).await,
+            WireError::Truncated { .. },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+        for value in [0x01, 0x03, 0xFF] {
+            assert_err!(
+                read_block_range_answer(&mut &[value][..]).await,
+                WireError::UnknownByte { value: got, .. } if got == value,
+                Violation::Close(ErrorCode::ProtocolError)
+            );
+        }
+        // Nothing follows `NotFound`.
+        assert_err!(
+            read_block_range_answer(&mut &[0x02, 0x00][..]).await,
+            WireError::TrailingBytes { .. },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+
+        // `Found` with no blocks is a valid response, which is how a responder answers
+        // `count = 0`.
+        let wire = found_response(&[]);
+        assert_eq!(wire, [0x00]);
+        assert_eq!(
+            read_found(&wire, &request(0, 0)).await.expect("valid"),
+            Vec::<Vec<u8>>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn response_pins_descending_framing() {
+        let blocks: Vec<Vec<u8>> = descending_blocks()
+            .iter()
+            .map(|block| block.zcash_serialize_to_vec().expect("valid"))
+            .collect();
+        let wire = found_response(&blocks);
+
+        // `result`, then each block behind its CompactSize length, highest first.
+        let mut expected = vec![0x00];
+        for block in &blocks {
+            let len = u16::try_from(block.len()).expect("the vector blocks are small");
+            assert!(len >= 0xFD, "the vector blocks use a 3-byte prefix");
+            expected.push(0xFD);
+            expected.extend_from_slice(&len.to_le_bytes());
+            expected.extend_from_slice(block);
+        }
+        assert_eq!(wire, expected);
+
+        let request = request(2, MAX_GET_BLOCK_RANGE_BYTES);
+        assert_eq!(read_found(&wire, &request).await.expect("valid"), blocks);
+
+        // The bounds track what was delivered.
+        let mut reader = &wire[1..];
+        let mut bounds = BlockRangeBounds::new(&request);
+        assert_eq!(
+            bounds,
+            BlockRangeBounds {
+                count: 2,
+                max_bytes: MAX_GET_BLOCK_RANGE_BYTES,
+                delivered: 0,
+                delivered_bytes: 0,
+            }
+        );
+        read_block_range_element(&mut reader, &mut bounds)
+            .await
+            .expect("valid");
+        assert_eq!(bounds.delivered, 1);
+        assert_eq!(bounds.delivered_bytes, blocks[0].len() as u64);
+
+        // The same bytes arriving one at a time read the same.
+        let decoded = read_byte_by_byte(wire.clone(), |mut reader| async move {
+            read_found_from(&mut reader, &request).await
+        })
+        .await;
+        assert_eq!(decoded, blocks);
+
+        // The responder may finish after any element.
+        assert_eq!(
+            read_found(&found_response(&blocks[..1]), &request)
+                .await
+                .expect("valid"),
+            blocks[..1]
+        );
+    }
+
+    #[tokio::test]
+    async fn response_bounds_are_exact_with_the_first_block_exempt() {
+        let blocks: Vec<Vec<u8>> = descending_blocks()
+            .iter()
+            .map(|block| block.zcash_serialize_to_vec().expect("valid"))
+            .collect();
+        let wire = found_response(&blocks);
+        // `u32` holds the vector blocks' total size.
+        let total = (blocks[0].len() + blocks[1].len()) as u32;
+
+        // The first block is delivered whatever `max_bytes` is, even 0.
+        let first_only = found_response(&blocks[..1]);
+        assert_eq!(
+            read_found(&first_only, &request(2, 0))
+                .await
+                .expect("valid"),
+            blocks[..1]
+        );
+
+        // A later block may bring the total up to `max_bytes`, but not above it.
+        assert_eq!(
+            read_found(&wire, &request(2, total)).await.expect("valid"),
+            blocks
+        );
+        assert_err!(
+            read_found(&wire, &request(2, total - 1)).await,
+            WireError::Flood { count, max, .. }
+                if count == u64::from(total) && max == total as usize - 1,
+            Violation::Close(ErrorCode::Flood)
+        );
+        assert_err!(
+            read_found(&wire, &request(2, 0)).await,
+            WireError::Flood { .. },
+            Violation::Close(ErrorCode::Flood)
+        );
+
+        // More blocks than `count`.
+        assert_err!(
+            read_found(&wire, &request(1, MAX_GET_BLOCK_RANGE_BYTES)).await,
+            WireError::Flood {
+                count: 2,
+                max: 1,
+                ..
+            },
+            Violation::Close(ErrorCode::Flood)
+        );
+        assert_err!(
+            read_found(&first_only, &request(0, MAX_GET_BLOCK_RANGE_BYTES)).await,
+            WireError::Flood {
+                count: 1,
+                max: 0,
+                ..
+            },
+            Violation::Close(ErrorCode::Flood)
+        );
+    }
+
+    /// Every `FLOOD` is detected from the length prefix: the body is never
+    /// awaited, so a stream that sends a prefix and then stalls still errors.
+    #[tokio::test]
+    async fn response_flood_is_detected_from_the_prefix() {
+        let blocks: Vec<Vec<u8>> = descending_blocks()
+            .iter()
+            .map(|block| block.zcash_serialize_to_vec().expect("valid"))
+            .collect();
+        let first_len = blocks[0].len() as u64;
+
+        // (bounds after the first element, the prefix that follows it)
+        let mut oversize_prefix = vec![0xFE];
+        // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u32`.
+        oversize_prefix.extend_from_slice(&(MAX_RECORD_PAYLOAD_LEN as u32 + 1).to_le_bytes());
+        let cases = [
+            // Past `count`: a single prefix byte is enough.
+            (1, MAX_GET_BLOCK_RANGE_BYTES, vec![0x01]),
+            // Above `max_bytes`.
+            (2, first_len as u32, vec![0x01]),
+            // Above the element limit.
+            (2, MAX_GET_BLOCK_RANGE_BYTES, oversize_prefix),
+        ];
+
+        for (count, max_bytes, prefix) in cases {
+            let (mut writer, mut reader) = tokio::io::duplex(1 << 16);
+            let mut wire = Vec::new();
+            write_block_range_element(&mut wire, &blocks[0]).expect("valid");
+            wire.extend_from_slice(&prefix);
+            writer.write_all(&wire).await.expect("the reader is alive");
+            // The writer stays open: reading the body would wait forever.
+
+            let mut bounds = BlockRangeBounds::new(&request(count, max_bytes));
+            read_block_range_element(&mut reader, &mut bounds)
+                .await
+                .expect("the first element is valid")
+                .expect("an element");
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                read_block_range_element(&mut reader, &mut bounds),
+            )
+            .await
+            .expect("a flood is detected without waiting for the body");
+            assert_err!(
+                result,
+                WireError::Flood { .. },
+                Violation::Close(ErrorCode::Flood)
+            );
+            drop(writer);
+        }
+
+        // The oversize prefix is a flood on the first element too.
+        let mut wire = vec![0xFE];
+        wire.extend_from_slice(&(MAX_RECORD_PAYLOAD_LEN as u32 + 1).to_le_bytes());
+        let mut bounds = BlockRangeBounds::new(&request(1, MAX_GET_BLOCK_RANGE_BYTES));
+        assert_err!(
+            read_block_range_element(&mut &wire[..], &mut bounds).await,
+            WireError::Flood { .. },
+            Violation::Close(ErrorCode::Flood)
+        );
+    }
+
+    #[tokio::test]
+    async fn response_truncation_and_malformed_prefixes() {
+        let block = descending_blocks()[0]
+            .zcash_serialize_to_vec()
+            .expect("valid");
+        let mut element = Vec::new();
+        write_block_range_element(&mut element, &block).expect("valid");
+
+        // A FIN anywhere inside an element, in its prefix or its body, is truncation; a FIN
+        // before it is the end of the response.
+        for cut in 0..element.len() {
+            let mut bounds = BlockRangeBounds::new(&request(1, 0));
+            let result = read_block_range_element(&mut &element[..cut], &mut bounds).await;
+            if cut == 0 {
+                assert_eq!(result.expect("a clean finish"), None);
+            } else {
+                assert_err!(
+                    result,
+                    WireError::Truncated { .. },
+                    Violation::Close(ErrorCode::ProtocolError)
+                );
+            }
+            assert_eq!(bounds.delivered, 0);
+        }
+
+        // A non-canonical length prefix is malformed.
+        let mut bounds = BlockRangeBounds::new(&request(1, 0));
+        assert_err!(
+            read_block_range_element(&mut &[0xFD, 0x01, 0x00, 0xAA][..], &mut bounds).await,
+            WireError::Malformed { .. },
+            Violation::Close(ErrorCode::ProtocolError)
+        );
+
+        // This node never writes an element the receiver would treat as a flood.
+        let mut wire = Vec::new();
+        write_block_range_element(&mut wire, &vec![0; MAX_RECORD_PAYLOAD_LEN])
+            .expect("at the limit is valid");
+        assert_err!(
+            write_block_range_element(&mut Vec::new(), &vec![0; MAX_RECORD_PAYLOAD_LEN + 1]),
+            WireError::LocalUnencodable { .. },
+            Violation::Close(ErrorCode::InternalError)
+        );
+    }
 }

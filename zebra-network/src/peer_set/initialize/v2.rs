@@ -41,7 +41,7 @@ use crate::{
         self,
         v2::{
             addr_relay::AddrRelay,
-            connection::{spawn_connection, ConnectionParams},
+            connection::{global_block_range_permits, spawn_connection, ConnectionParams},
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
@@ -57,6 +57,7 @@ use crate::{
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
+    sync_peer::{ConnectionId, SyncPeer, SyncPeersSender},
     v2_address_book::{self, Group, Provenance, V2BookHandle, V2BookStats},
     BanList, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
@@ -92,6 +93,8 @@ pub(super) struct Shared<S, C> {
     /// The peer set's connected peers, over either protocol, so the dialers do not dial a host
     /// whose connection the peer set would drop.
     connected_peers: ConnectedPeers,
+    /// Where completed connections are registered for the checkpoint sync engine, if anywhere.
+    sync_peers: Option<SyncPeersSender>,
 }
 
 impl<S, C> Shared<S, C>
@@ -142,11 +145,14 @@ where
                     config.v2_advertised_addr(),
                     config.network.clone(),
                 )),
+                serve_block_ranges: config.v2_serve_block_ranges,
+                block_range_permits: global_block_range_permits(),
             },
             endpoint,
             identity,
             address_book,
             connected_peers,
+            sync_peers: config.v2_sync_peers.clone(),
         };
         (shared, open_inbound_tx)
     }
@@ -1013,14 +1019,28 @@ where
     let addr = connected_addr
         .get_transient_addr()
         .expect("direct connections have a transient address");
-    let client: peer::Client = spawn_connection(
-        connection,
+    let services = completed.connection_info.remote.services();
+    let remote_tip_height = completed.connection_info.remote.start_height();
+    let misbehavior = shared.connection_params.misbehavior.clone();
+    let (client, closer): (peer::Client, _) = spawn_connection(
+        connection.clone(),
         completed,
         connection_tracker,
         shared.connection_params,
         exit_notifier,
     );
     let connection_info = client.connection_info.clone();
+    if let Some(sync_peers) = &shared.sync_peers {
+        sync_peers.connected(SyncPeer::new(
+            ConnectionId::next(),
+            addr,
+            services,
+            remote_tip_height,
+            connection,
+            misbehavior,
+            closer,
+        ));
+    }
 
     // The peer set closed: nothing more to do, the client is dropped and the connection ends.
     peerset_tx

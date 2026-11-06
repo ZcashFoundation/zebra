@@ -29,8 +29,9 @@ use crate::{
             connection::{
                 announcements::AnnouncementWriter,
                 inbound::{
-                    serve as serve_request_stream, INBOUND_REQUEST_CONCURRENCY,
-                    MAX_LOOKUP_CALLS_PER_RESPONSE, RESPONSE_BYTES_LIMIT,
+                    global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
+                    INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
+                    RESPONSE_BYTES_LIMIT,
                 },
                 outbound::{
                     drive, RequestContext, RequestSend, ResponseGuard, MAX_OUTBOUND_REQUEST_STREAMS,
@@ -278,9 +279,12 @@ fn spawn_node_scored(
             address_book: relaying.address_book,
             bans: relaying.bans,
             addr_relay: relaying.addr_relay,
+            serve_block_ranges: true,
+            block_range_permits: global_block_range_permits(),
         },
         None,
-    );
+    )
+    .0;
     TestNode {
         client,
         inv_rx,
@@ -2893,6 +2897,7 @@ async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             None,
             events,
+            BlockRangeServing::new(true, global_block_range_permits()),
         ));
 
         let expected = found(&block);

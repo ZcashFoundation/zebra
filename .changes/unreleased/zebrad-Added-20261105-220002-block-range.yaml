@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added serving of `get-block-range` requests from version 2 peers, so they can download ranges of blocks from this node. Set `network.v2_serve_block_ranges = false` to turn it off.
+time: 2026-11-05T22:00:02.000000000Z

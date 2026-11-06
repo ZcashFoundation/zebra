@@ -35,6 +35,18 @@ pub const MAX_HEADERS_PER_RESPONSE: usize = 160;
 /// (draft, "`get-blocks`").
 pub const MAX_BLOCKS_PER_REQUEST: usize = 128;
 
+/// The maximum `count` of a `get-block-range` request (draft,
+/// "`get-block-range`").
+pub const MAX_GET_BLOCK_RANGE_COUNT: u32 = 65_536;
+
+/// The maximum `max_bytes` of a `get-block-range` request: 64 MiB (draft,
+/// "`get-block-range`").
+pub const MAX_GET_BLOCK_RANGE_BYTES: u32 = 64 * 1024 * 1024;
+
+/// The length of a `get-block-range` request body: `final_hash[32] ‖ count
+/// u32 ‖ max_bytes u32`.
+pub const GET_BLOCK_RANGE_REQUEST_LEN: usize = 32 + 4 + 4;
+
 /// The maximum number of transaction references in a `get-tx` request
 /// (draft, "`get-tx`").
 pub const MAX_TXS_PER_REQUEST: usize = 50_000;
