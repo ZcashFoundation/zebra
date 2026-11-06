@@ -112,6 +112,24 @@ struct Verified {
     sent: oneshot::Sender<()>,
 }
 
+/// A block the local state committed, published to the checkpoint verifier by the checkpoint
+/// sync engine's supervisor.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CommittedTip {
+    /// The block's height.
+    pub height: block::Height,
+    /// The block's hash.
+    pub hash: block::Hash,
+    /// The engine hand-back this tip belongs to, if any.
+    ///
+    /// The first tip of each hand-back was read from the state before the legacy syncer submitted
+    /// anything again, so the verifier resets to it whether it is above or below its progress.
+    /// A later tip of the same hand-back, or a tip without one, is a commit that landed after
+    /// the hand-back, such as an engine commit that timed out: it only moves the verifier
+    /// forward, because by then the legacy syncer's spawned commits can be ahead of the state.
+    pub hand_back: Option<u64>,
+}
+
 /// A failed checkpoint block commit, sent from its commit task to the verifier.
 #[derive(Debug)]
 struct CommitFailure {
@@ -222,7 +240,10 @@ where
     /// The highest checkpoint another component has committed to the state, if any.
     ///
     /// When it changes, `poll_ready` resets the verifier to it.
-    checkpoint_tip: Option<watch::Receiver<Option<(block::Height, block::Hash)>>>,
+    checkpoint_tip: Option<watch::Receiver<Option<CommittedTip>>>,
+
+    /// The last engine hand-back whose tip the verifier applied.
+    applied_hand_back: Option<u64>,
 
     /// Queued block height progress transmitter.
     #[cfg(feature = "progress-bar")]
@@ -369,6 +390,7 @@ where
             epoch: 0,
             previous_block_sent: None,
             checkpoint_tip: None,
+            applied_hand_back: None,
             #[cfg(feature = "progress-bar")]
             queued_blocks_bar,
             #[cfg(feature = "progress-bar")]
@@ -452,19 +474,21 @@ where
     ///
     /// Each new value of `checkpoint_tip` is a block the local state committed, usually a
     /// checkpoint, but in the middle of a checkpoint interval if a commit failed there. It is
-    /// applied by `poll_ready` if, at a checkpoint height, it has that checkpoint's hash, whether
-    /// it is above or below the verifier's progress: progress above a committed tip is
-    /// speculative, because the verifier counts spawned commits that the state has not confirmed.
-    /// Any other value is ignored.
+    /// applied by `poll_ready` if, at a checkpoint height, it has that checkpoint's hash. The
+    /// first tip of a hand-back is applied whether it is above or below the verifier's progress:
+    /// progress above a committed tip is speculative, because the verifier counts spawned commits
+    /// that the state has not confirmed. Any later tip is applied only above the verifier's
+    /// progress. Any other value is ignored.
     pub(crate) fn with_checkpoint_tip(
         mut self,
-        checkpoint_tip: watch::Receiver<Option<(block::Height, block::Hash)>>,
+        checkpoint_tip: watch::Receiver<Option<CommittedTip>>,
     ) -> Self {
         self.checkpoint_tip = Some(checkpoint_tip);
         self
     }
 
-    /// Applies a changed `checkpoint_tip`, above or below the verifier's progress.
+    /// Applies a changed `checkpoint_tip`: a new hand-back's tip above or below the verifier's
+    /// progress, any other tip only above it.
     fn fast_forward_to_checkpoint_tip(&mut self) {
         let Some(checkpoint_tip) = self.checkpoint_tip.as_mut() else {
             return;
@@ -475,7 +499,12 @@ where
         if !checkpoint_tip.has_changed() {
             return;
         }
-        let Some((height, hash)) = *checkpoint_tip else {
+        let Some(CommittedTip {
+            height,
+            hash,
+            hand_back,
+        }) = *checkpoint_tip
+        else {
             return;
         };
         drop(checkpoint_tip);
@@ -495,9 +524,29 @@ where
             );
             return;
         }
-        // The tip was read from the state, so it is applied even at or below the verifier's
-        // progress: that progress can include spawned commits the state never confirmed, such as
-        // the legacy syncer's commits that raced the engine and failed.
+        // A new hand-back's tip was read from the state while the legacy syncer submitted
+        // nothing, so it is applied even at or below the verifier's progress: that progress can
+        // include spawned commits the state never confirmed, such as the legacy syncer's commits
+        // that raced the engine and failed. Any later tip was read while the legacy syncer's own
+        // commits may be in flight, ahead of the state, so it only moves the verifier forward.
+        let is_new_hand_back = hand_back.is_some() && hand_back != self.applied_hand_back;
+        let is_above_progress = match self.previous_checkpoint_height() {
+            BeforeGenesis => true,
+            InitialTip(verified) | PreviousCheckpoint(verified) => height > verified,
+            FinalCheckpoint => false,
+        };
+        if !is_new_hand_back && !is_above_progress {
+            tracing::debug!(
+                ?height,
+                progress = ?self.previous_checkpoint_height(),
+                "ignoring a late committed tip at or below the verifier's progress"
+            );
+            return;
+        }
+        if hand_back.is_some() {
+            self.applied_hand_back = hand_back;
+        }
+
         tracing::info!(
             ?height,
             ?hash,

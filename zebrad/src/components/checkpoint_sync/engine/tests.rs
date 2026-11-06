@@ -584,6 +584,18 @@ pub(crate) fn mock_state_with_tip(
     fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
     tip_sender: Option<zebra_chain::chain_tip::mock::MockChainTipSender>,
 ) -> MockState {
+    mock_state_with_stall(commits, fail, tip_sender, |_, _| None)
+}
+
+/// [`mock_state_with_tip`], whose write task awaits `stall(height, attempt)`
+/// before it commits that height: requests sent meanwhile stay queued, and
+/// are committed once the stall ends, even if their senders stopped waiting.
+pub(crate) fn mock_state_with_stall(
+    commits: mpsc::UnboundedSender<(block::Height, block::Hash)>,
+    fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
+    tip_sender: Option<zebra_chain::chain_tip::mock::MockChainTipSender>,
+    stall: impl Fn(block::Height, u32) -> Option<BoxFuture<'static, ()>> + Send + 'static,
+) -> MockState {
     let (requests_tx, mut requests) = mpsc::unbounded_channel::<MockCommit>();
 
     tokio::spawn(async move {
@@ -628,6 +640,9 @@ pub(crate) fn mock_state_with_tip(
             while let Some(((block, rsp), attempt)) =
                 queue.remove(&tip.next().expect("test heights are small"))
             {
+                if let Some(stall) = stall(block.height, attempt) {
+                    stall.await;
+                }
                 if let Some(failure) = fail(block.height, attempt) {
                     reset_next = Some(block.height);
                     let _ = rsp.send(Err(failure.error()));
