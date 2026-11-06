@@ -986,8 +986,9 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
     tokio::time::pause();
 
     let chain = TestChain::new();
+    let peers = honest_pair(&chain);
     let harness = run_engine_with(
-        honest_pair(&chain),
+        peers.clone(),
         |height, _| (height.0 == 3).then_some(MockFailure::AuthMismatch),
         None,
     )
@@ -998,9 +999,18 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
         EngineOutcome {
             exit: EngineExit::NoProgress,
             base: block::Height(3),
-            blamed: BTreeSet::new(),
+            blamed: peers.iter().map(|peer| peer.peer_ip()).collect(),
         },
-        "lying peers make the engine hand back, not fail"
+        "lying peers make the engine hand back, not fail, and are blamed"
+    );
+    let penalties: u32 = peers
+        .iter()
+        .map(|peer| peer.penalties.load(Ordering::SeqCst))
+        .sum();
+    assert_eq!(
+        penalties,
+        FRONTIER_FAILURE_LIMIT * AUTH_COMMITMENT_PENALTY,
+        "every lying copy is penalized, the last one too"
     );
 }
 
