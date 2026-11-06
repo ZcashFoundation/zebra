@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Fixed
-body: 'Display TEX addresses as Bech32m with the `tex`, `textest` or `texregtest` HRP (ZIP 320). `transparent::Address` previously printed and serialized them as the P2PKH address with the same key hash.'
-time: 2026-10-22T00:30:00.000000+05:30

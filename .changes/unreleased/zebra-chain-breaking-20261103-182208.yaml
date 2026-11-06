@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: breaking
-body: 'Remove the `elasticsearch` feature. The `serde::Serialize` impls it enabled on `Block`, `Transaction` and transparent types are still available with `proptest-impl`.'
-time: 2026-11-03T18:22:08.000000000Z
