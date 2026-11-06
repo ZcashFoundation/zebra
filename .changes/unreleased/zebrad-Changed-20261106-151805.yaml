@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reuse inbound blocks that commit while sync briefly waits, with bounded independent downloading if inbound verification stalls or fails ([#12309](https://github.com/ZcashFoundation/zebra/pull/12309)).
+time: 2026-11-06T15:18:05.650072816+01:00
