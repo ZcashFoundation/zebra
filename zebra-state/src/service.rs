@@ -1298,11 +1298,12 @@ impl Service<Request> for StateService {
             Request::EarlyRelay {
                 block,
                 require_authentication,
+                origin,
             } => {
                 let state = self.read_service.clone();
                 async move {
                     state
-                        .early_relay(block, require_authentication, true)
+                        .early_relay(block, require_authentication, true, origin)
                         .await
                         .map(Response::EarlyRelay)
                 }
@@ -1312,7 +1313,7 @@ impl Service<Request> for StateService {
                 let state = self.read_service.clone();
                 async move {
                     state
-                        .early_relay(block, true, false)
+                        .early_relay(block, true, false, crate::EarlyRelayOrigin::Peer)
                         .await
                         .map(Response::EarlyRelay)
                 }

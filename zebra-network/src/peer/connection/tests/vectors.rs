@@ -547,7 +547,7 @@ async fn early_block_outbound_requests_require_the_correct_service() {
     tokio::time::timeout(Duration::from_secs(2), async {
         for request in [
             Request::EarlyBlocksByHash(HashSet::from([block::Hash([0; 32])])),
-            Request::AdvertiseEarlyBlock(block::Hash([0; 32])),
+            Request::AdvertiseEarlyBlock(block::Hash([0; 32]), None),
         ] {
             let (tx, rx) = oneshot::channel();
             client_tx

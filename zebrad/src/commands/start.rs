@@ -655,7 +655,8 @@ impl StartCmd {
             Some(submit_block_channel.receiver()),
             submitted_blocks,
         );
-        let early_gossip = sync::gossip_early_blocks(early_blocks, block_advertiser);
+        let early_gossip =
+            sync::gossip_early_blocks(early_blocks, block_advertiser, syncer.in_flight_downloads());
         let block_gossip_task_handle = tokio::spawn(
             async move {
                 tokio::try_join!(committed_gossip, early_gossip)?;

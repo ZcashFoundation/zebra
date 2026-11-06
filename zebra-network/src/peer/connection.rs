@@ -1441,7 +1441,7 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_)) => {
+            (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_, _)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
             (AwaitingRequest, EarlyBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
