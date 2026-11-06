@@ -5,6 +5,147 @@ use std::task::{Context, Poll};
 use super::*;
 
 #[test]
+fn upgrade_admission_replaces_outdated_ready_ipv4_peer() {
+    assert_upgrade_admission(
+        "127.0.0.1:1",
+        "127.0.0.1:2",
+        Version::min_remote_for_height(&Network::Mainnet, None),
+        false,
+    );
+}
+
+#[test]
+fn upgrade_admission_replaces_outdated_ready_ipv6_peer() {
+    assert_upgrade_admission(
+        "[2001:db8::1]:1",
+        "[2001:db8::2]:2",
+        Version::min_remote_for_height(&Network::Mainnet, None),
+        false,
+    );
+}
+
+#[test]
+fn upgrade_admission_replaces_outdated_busy_ipv4_peer() {
+    assert_upgrade_admission(
+        "127.0.0.1:1",
+        "127.0.0.1:2",
+        Version::min_remote_for_height(&Network::Mainnet, None),
+        true,
+    );
+}
+
+#[test]
+fn upgrade_admission_replaces_outdated_busy_ipv6_peer() {
+    assert_upgrade_admission(
+        "[2001:db8::1]:1",
+        "[2001:db8::2]:2",
+        Version::min_remote_for_height(&Network::Mainnet, None),
+        true,
+    );
+}
+
+#[test]
+fn upgrade_admission_preserves_eligible_ipv4_peer() {
+    assert_upgrade_admission(
+        "127.0.0.1:1",
+        "127.0.0.1:2",
+        CURRENT_NETWORK_PROTOCOL_VERSION,
+        false,
+    );
+}
+
+#[test]
+fn upgrade_admission_preserves_eligible_ipv6_peer() {
+    assert_upgrade_admission(
+        "[2001:db8::1]:1",
+        "[2001:db8::2]:2",
+        CURRENT_NETWORK_PROTOCOL_VERSION,
+        false,
+    );
+}
+
+/// Admission must reclaim obsolete connections' group slots, but retain eligible occupants.
+fn assert_upgrade_admission(
+    old_addr: &str,
+    replacement_addr: &str,
+    old_version: Version,
+    busy: bool,
+) {
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let old_addr: PeerSocketAddr = old_addr.parse().unwrap();
+    let replacement_addr: PeerSocketAddr = replacement_addr.parse().unwrap();
+    let (old, mut old_handle) = ClientTestHarness::build()
+        .with_version(old_version)
+        .finish();
+    let (replacement, mut replacement_handle) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .finish();
+    let (mut discovery_tx, discovery) = mpsc::channel(1);
+    discovery_tx
+        .try_send(Ok::<_, BoxError>(Change::Insert(old_addr, old.into())))
+        .expect("discovery channel has room for the initial connection");
+    let (minimum, best_tip) = MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    let (mut peers, _peer_guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum)
+        .max_conns_per_ip(1)
+        .build();
+
+    let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(matches!(peers.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+    assert!(old_handle.wants_connection_heartbeats());
+
+    // Keep the responses alive and leave the real client request channel undrained.
+    // Two queued requests fill the mock channel, making the old client unready.
+    let mut pending_responses = Vec::new();
+    if busy {
+        for _ in 0..2 {
+            assert!(matches!(peers.poll_ready(&mut cx), Poll::Ready(Ok(()))));
+            pending_responses.push(peers.call(Request::Peers));
+        }
+        assert!(peers.poll_ready(&mut cx).is_pending());
+        assert!(peers.cancel_handles.contains_key(&old_addr));
+    }
+
+    // The old connection must already occupy its group slot when the upgrade activates.
+    best_tip.send_best_tip_height(NetworkUpgrade::Nu6_3.activation_height(&Network::Mainnet));
+    let minimum = peers.minimum_peer_version.current();
+    assert!(
+        minimum > Version::min_remote_for_height(&Network::Mainnet, None),
+        "the selected upgrade must raise the minimum protocol version",
+    );
+    let old_is_eligible = old_version >= minimum;
+    discovery_tx
+        .try_send(Ok(Change::Insert(replacement_addr, replacement.into())))
+        .expect("discovery channel has room for the replacement");
+    let readiness = peers.poll_ready(&mut cx);
+
+    assert_eq!(
+        old_handle.wants_connection_heartbeats(),
+        old_is_eligible,
+        "the upgrade must disconnect only the obsolete occupant",
+    );
+    assert_eq!(
+        replacement_handle.wants_connection_heartbeats(),
+        !old_is_eligible,
+        "an obsolete occupant must not block replacement admission; an eligible occupant must still enforce the group limit",
+    );
+    assert!(
+        matches!(readiness, Poll::Ready(Ok(()))),
+        "the admitted connection must be ready to serve requests: {readiness:?}",
+    );
+    let _response = peers.call(Request::Peers);
+    let admitted_handle = if old_is_eligible {
+        &mut old_handle
+    } else {
+        &mut replacement_handle
+    };
+    assert_eq!(received_request(admitted_handle), Some(Request::Peers));
+}
+
+#[test]
 fn outdated_canceled_future_preserves_same_address_replacement() {
     let (runtime, _init_guard) = zebra_test::init_async();
     let _guard = runtime.enter();

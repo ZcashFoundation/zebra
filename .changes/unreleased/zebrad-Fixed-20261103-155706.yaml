@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Avoid dropping compatible replacement peers at network upgrade activation when an outdated connection still occupies the same IPv4 address or IPv6 /64 connection slot ([#12109](https://github.com/ZcashFoundation/zebra/issues/12109)).'
+time: 2026-11-03T15:57:06Z
