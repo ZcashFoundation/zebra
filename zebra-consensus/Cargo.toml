@@ -41,6 +41,7 @@ bellman = { workspace = true }
 bls12_381 = { workspace = true }
 groth16 = { workspace = true }
 halo2 = { workspace = true }
+jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
 
@@ -63,7 +64,7 @@ sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
 zcash_primitives.workspace = true
-zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+wagyu-zcash-parameters-6 = "0.2"
 zcash_transparent = { workspace = true }
 libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
@@ -87,7 +88,9 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-jubjub = { workspace = true }
+zcash_primitives = { workspace = true, features = ["non-standard-fees"] }
+zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+wagyu-zcash-parameters = "0.2"
 
 hex = { workspace = true }
 nonempty = { workspace = true }
