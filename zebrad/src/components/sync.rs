@@ -139,6 +139,14 @@ pub const MIN_V2_TARGET_PEERS: usize = 1;
 /// maximum-size block.
 pub const MIN_V2_LOOKAHEAD_BYTES: u64 = block::MAX_BLOCK_BYTES;
 
+/// A lower bound on `sync.v2_min_peer_rate`, in bytes per second.
+///
+/// With a zero or tiny floor, the minimum-rate stall rule never cancels a
+/// request, so peers that trickle bytes could keep their requests, and block
+/// download, forever. At this rate a maximum-size block arrives in about two
+/// minutes.
+pub const MIN_V2_MIN_PEER_RATE: u64 = 16 * 1024;
+
 /// Controls how long we wait for a tips response to return.
 ///
 /// ## Correctness
@@ -292,7 +300,8 @@ pub struct Config {
 
     /// The slowest download rate, in bytes per second, at which the checkpoint
     /// sync engine keeps downloading from a peer. A slower peer's request is
-    /// cancelled and sent to another peer.
+    /// cancelled and sent to another peer. Values below 16 KiB/s (16,384
+    /// bytes per second) are raised to it.
     pub v2_min_peer_rate: u64,
 
     /// The number of version 2 peers the checkpoint sync engine downloads from
@@ -389,11 +398,13 @@ impl Default for Config {
 impl Config {
     /// The checkpoint sync engine's parameters, from the `v2_*` fields.
     ///
-    /// Raises `v2_target_peers` to [`MIN_V2_TARGET_PEERS`] and
-    /// `v2_lookahead_bytes` to [`MIN_V2_LOOKAHEAD_BYTES`], with a warning.
+    /// Raises `v2_target_peers` to [`MIN_V2_TARGET_PEERS`],
+    /// `v2_lookahead_bytes` to [`MIN_V2_LOOKAHEAD_BYTES`] and
+    /// `v2_min_peer_rate` to [`MIN_V2_MIN_PEER_RATE`], with a warning.
     pub fn v2_engine_config(&self) -> EngineConfig {
         let mut target_peers = self.v2_target_peers;
         let mut lookahead_bytes = self.v2_lookahead_bytes;
+        let mut min_peer_rate = self.v2_min_peer_rate;
 
         if target_peers < MIN_V2_TARGET_PEERS {
             warn!(
@@ -413,9 +424,18 @@ impl Config {
             lookahead_bytes = MIN_V2_LOOKAHEAD_BYTES;
         }
 
+        if min_peer_rate < MIN_V2_MIN_PEER_RATE {
+            warn!(
+                "configured v2 min peer rate {} too low, increasing to {}",
+                self.v2_min_peer_rate, MIN_V2_MIN_PEER_RATE,
+            );
+
+            min_peer_rate = MIN_V2_MIN_PEER_RATE;
+        }
+
         EngineConfig {
             lookahead_bytes,
-            min_peer_rate: self.v2_min_peer_rate,
+            min_peer_rate,
             target_peers,
         }
     }
