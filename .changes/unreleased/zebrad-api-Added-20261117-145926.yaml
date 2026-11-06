@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: Added
+body: '`components::inbound::Inbound::with_compact_relay` answers compact block requests from the mempool and the given read-only state ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).'
+time: 2026-11-17T14:59:26.88153198+01:00

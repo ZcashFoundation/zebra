@@ -28,6 +28,7 @@ use crate::constants;
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock},
     message::{
         Message, RejectReason, VersionMessage, MAX_REJECT_MESSAGE_LENGTH, MAX_REJECT_REASON_LENGTH,
         MAX_USER_AGENT_LENGTH,
@@ -51,6 +52,9 @@ const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 pub struct Codec {
     builder: Builder,
     state: DecodeState,
+    early_block_relay: bool,
+    compact_send: bool,
+    compact_receive: bool,
 }
 
 /// A builder for specifying [`Codec`] options.
@@ -85,6 +89,11 @@ impl Codec {
     pub fn reconfigure_full_body_len(&mut self) {
         self.builder.max_len = MAX_PROTOCOL_MESSAGE_LEN;
     }
+
+    /// Enables compact negotiation only after bilateral experimental service-bit consent.
+    pub(crate) fn reconfigure_early_block_relay(&mut self, enabled: bool) {
+        self.early_block_relay = enabled;
+    }
 }
 
 impl Builder {
@@ -93,6 +102,9 @@ impl Builder {
         Codec {
             builder: self,
             state: DecodeState::Head,
+            early_block_relay: false,
+            compact_send: false,
+            compact_receive: false,
         }
     }
 
@@ -125,10 +137,17 @@ impl Encoder<Message> for Codec {
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         use Error::Parse;
 
-        let body_length = self.body_length(&item);
+        let body_length = self.body_length(&item)?;
 
         if body_length > self.builder.max_len {
             return Err(Parse("body length exceeded maximum size"));
+        }
+        if let Message::SendCompact {
+            high_bandwidth,
+            version,
+        } = &item
+        {
+            self.compact_receive = self.early_block_relay && *high_bandwidth && *version == 1;
         }
 
         // The bounded message length plus its header fits in u64.
@@ -149,6 +168,10 @@ impl Encoder<Message> for Codec {
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
             GetAddr => b"getaddr\0\0\0\0\0",
             Block { .. } => b"block\0\0\0\0\0\0\0",
+            SendCompact { .. } => b"sendcmpct\0\0\0",
+            CompactBlock { .. } => b"cmpctblock\0\0",
+            GetBlockTransactions { .. } => b"getblocktxn\0",
+            BlockTransactions { .. } => b"blocktxn\0\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
             GetHeaders { .. } => b"getheaders\0\0",
@@ -192,12 +215,10 @@ impl Codec {
     //
     // If this code shows up in profiles, replace with a size estimate or cached size,
     // to avoid multiple serializations for large data structures like lists, blocks, and transactions.
-    fn body_length(&self, msg: &Message) -> usize {
+    fn body_length(&self, msg: &Message) -> Result<usize, Error> {
         let mut writer = FakeWriter(0);
-
-        self.write_body(msg, &mut writer)
-            .expect("writer should never fail");
-        writer.0
+        self.write_body(msg, &mut writer)?;
+        Ok(writer.0)
     }
 
     /// Write the body of the message into the given writer. This allows writing
@@ -290,6 +311,16 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
+            Message::SendCompact {
+                high_bandwidth,
+                version,
+            } => {
+                writer.write_u8(u8::from(*high_bandwidth))?;
+                writer.write_u64::<LittleEndian>(*version)?;
+            }
+            Message::CompactBlock(block) => block.zcash_serialize(&mut writer)?,
+            Message::GetBlockTransactions(request) => request.zcash_serialize(&mut writer)?,
+            Message::BlockTransactions(response) => response.zcash_serialize(&mut writer)?,
             Message::GetBlocks { known_blocks, stop } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 known_blocks.zcash_serialize(&mut writer)?;
@@ -436,6 +467,16 @@ impl Decoder for Codec {
                 let body = src.split_to(body_len);
                 self.state = DecodeState::Head;
 
+                // Ignore unnegotiated extensions before hashing or deserializing their bodies.
+                if (command == *b"sendcmpct\0\0\0" && !self.early_block_relay)
+                    || (matches!(
+                        &command,
+                        b"cmpctblock\0\0" | b"getblocktxn\0" | b"blocktxn\0\0\0\0"
+                    ) && !(self.early_block_relay && self.compact_send && self.compact_receive))
+                {
+                    return Ok(None);
+                }
+
                 if checksum != sha256d::Checksum::from(&body[..]) {
                     return Err(Parse(
                         "supplied message checksum does not match computed checksum",
@@ -453,6 +494,32 @@ impl Decoder for Codec {
                     b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
                     b"block\0\0\0\0\0\0\0" => self.read_block(&mut body_reader),
+                    b"sendcmpct\0\0\0" => {
+                        let high_bandwidth = match body_reader.read_u8()? {
+                            0 => false,
+                            1 => true,
+                            _ => return Err(Parse("invalid sendcmpct boolean")),
+                        };
+                        let version = body_reader.read_u64::<LittleEndian>()?;
+                        self.compact_send =
+                            self.early_block_relay && high_bandwidth && version == 1;
+                        Ok(Message::SendCompact {
+                            high_bandwidth,
+                            version,
+                        })
+                    }
+                    b"cmpctblock\0\0" => {
+                        Self::deserialize_spawning::<CompactBlock, _>(&mut body_reader)
+                            .map(|block| Message::CompactBlock(Arc::new(block)))
+                    }
+                    b"getblocktxn\0" => {
+                        BlockTransactionsRequest::zcash_deserialize(&mut body_reader)
+                            .map(Message::GetBlockTransactions)
+                    }
+                    b"blocktxn\0\0\0\0" => {
+                        Self::deserialize_spawning::<BlockTransactions, _>(&mut body_reader)
+                            .map(Message::BlockTransactions)
+                    }
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
                     b"headers\0\0\0\0\0" => self.read_headers(&mut body_reader),
                     b"getheaders\0\0" => self.read_getheaders(&mut body_reader),
@@ -659,7 +726,7 @@ impl Codec {
     }
 
     fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_block_spawning(reader);
+        let result = Self::deserialize_spawning::<Block, _>(reader);
         Ok(Message::Block(result?.into()))
     }
 
@@ -727,7 +794,7 @@ impl Codec {
     }
 
     fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
-        let result = Self::deserialize_transaction_spawning(reader);
+        let result = Self::deserialize_spawning::<Transaction, _>(reader);
         Ok(Message::Tx(Arc::new(result?).into()))
     }
 
@@ -777,11 +844,11 @@ impl Codec {
         Ok(Message::FilterClear)
     }
 
-    /// Given the reader, deserialize the transaction in the rayon thread pool.
+    /// Deserializes transaction-bearing messages on the existing blocking Rayon path.
     #[allow(clippy::unwrap_in_result)]
-    fn deserialize_transaction_spawning<R: Read + std::marker::Send>(
+    fn deserialize_spawning<T: ZcashDeserialize + Send, R: Read + Send>(
         reader: R,
-    ) -> Result<Transaction, Error> {
+    ) -> Result<T, Error> {
         let mut result = None;
 
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
@@ -794,29 +861,7 @@ impl Codec {
         // - There is no way to check the blocking task's future for panics
         tokio::task::block_in_place(|| {
             rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Transaction::zcash_deserialize(reader)))
-            })
-        });
-
-        result.expect("scope has already finished")
-    }
-
-    /// Given the reader, deserialize the block in the rayon thread pool.
-    #[allow(clippy::unwrap_in_result)]
-    fn deserialize_block_spawning<R: Read + std::marker::Send>(reader: R) -> Result<Block, Error> {
-        let mut result = None;
-
-        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
-        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
-        //
-        // We can't use `spawn_blocking()` because:
-        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
-        // - There is no way to check the blocking task's future for panics
-        tokio::task::block_in_place(|| {
-            rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| result = Some(Block::zcash_deserialize(reader)))
+                s.spawn_fifo(|_s| result = Some(T::zcash_deserialize(reader)))
             })
         });
 

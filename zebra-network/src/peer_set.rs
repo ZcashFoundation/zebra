@@ -44,6 +44,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct BlockAdvert {
     pub(crate) hash: block::Hash,
+    pub(crate) compact_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) result: oneshot::Sender<Result<(), BoxError>>,
 }
 
@@ -183,6 +184,7 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
         let mut writes = FuturesUnordered::new();
         let mut failure = None;
         let mut sampled = 0;
+        let compact_slots = Arc::new(tokio::sync::Semaphore::new(3));
         for (addr, (_, sidecar, _, sender)) in selected {
             if !all && !*sidecar {
                 if sampled >= sample {
@@ -191,7 +193,11 @@ impl<C: ChainTip + Clone + Send + 'static> Service<Request> for AdvertisePeers<C
                 sampled += 1;
             }
             let (result, receiver) = oneshot::channel();
-            if let Err(error) = sender.try_send(BlockAdvert { hash, result }) {
+            if let Err(error) = sender.try_send(BlockAdvert {
+                hash,
+                compact_slots: compact_slots.clone(),
+                result,
+            }) {
                 tracing::debug!(?addr, %error, "block advert queue admission failed");
                 failure.get_or_insert_with(|| -> BoxError { error.to_string().into() });
                 continue;
