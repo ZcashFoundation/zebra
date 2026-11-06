@@ -50,6 +50,46 @@ pub(crate) struct BlockAdvert {
 
 type AdvertPeers = HashMap<PeerSocketAddr, (Version, bool, bool, mpsc::Sender<BlockAdvert>)>;
 
+/// Publishes recipient demand with every change to the registered advert channels.
+#[derive(Debug)]
+struct AdvertPeerRegistry {
+    peers: watch::Sender<AdvertPeers>,
+    early_relay_recipients: watch::Sender<bool>,
+}
+
+impl Default for AdvertPeerRegistry {
+    fn default() -> Self {
+        Self {
+            peers: watch::Sender::new(HashMap::new()),
+            early_relay_recipients: watch::Sender::new(false),
+        }
+    }
+}
+
+impl AdvertPeerRegistry {
+    fn subscribe(&self) -> watch::Receiver<AdvertPeers> {
+        self.peers.subscribe()
+    }
+
+    fn borrow(&self) -> watch::Ref<'_, AdvertPeers> {
+        self.peers.borrow()
+    }
+
+    fn send_modify(&self, update: impl FnOnce(&mut AdvertPeers)) {
+        self.peers.send_modify(|peers| {
+            update(peers);
+            let needed = peers
+                .values()
+                .any(|(_, _, negotiated, sender)| *negotiated && !sender.is_closed());
+            self.early_relay_recipients.send_if_modified(|recipients| {
+                let changed = *recipients != needed;
+                *recipients = needed;
+                changed
+            });
+        });
+    }
+}
+
 /// Discovery and maintenance requests wake both an active worker and the idle-buffer self-poller.
 #[derive(Debug, Default)]
 struct PeerSetWaker {
@@ -79,6 +119,17 @@ impl Wake for PeerSetWaker {
 #[derive(Clone, Debug)]
 pub struct BlockAdvertiser<C> {
     inner: ConcurrencyLimit<AdvertisePeers<C>>,
+    early_relay_recipients: watch::Receiver<bool>,
+}
+
+impl<C> BlockAdvertiser<C> {
+    /// Subscribes to whether a registered peer has negotiated early relay.
+    ///
+    /// This is an availability hint, not authorization to serve an uncommitted block. Peer-set
+    /// maintenance removes banned, outdated, and disconnected peers from the registered channels.
+    pub fn early_relay_recipients(&self) -> watch::Receiver<bool> {
+        self.early_relay_recipients.clone()
+    }
 }
 
 #[derive(Debug)]

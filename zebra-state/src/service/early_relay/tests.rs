@@ -184,6 +184,123 @@ async fn early_relay_subscribers_enable_without_mining() {
     assert!(state.entry.lock().unwrap().is_none());
 }
 
+/// Recipient demand is sampled before authentication, without changing mandatory inbound checks.
+#[test]
+fn early_relay_skips_authentication_without_recipients() {
+    let _init_guard = zebra_test::init();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let network = Network::new_regtest(
+                zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+                    nu5: Some(1),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            let (_state, read, _, _) =
+                crate::init(crate::Config::ephemeral(), &network, block::Height(0), 0).await;
+            let cache = read.early_relay.cache();
+            let (recipients, demand) = watch::channel(false);
+            cache.set_recipients(demand);
+            let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+                .zcash_deserialize_into()
+                .unwrap();
+            // Holding admission distinguishes a skipped request from one that authenticates.
+            let _permit = read
+                .early_relay
+                .computation
+                .clone()
+                .acquire_owned()
+                .await
+                .unwrap();
+            let skipped = read
+                .clone()
+                .early_relay(block.clone(), false, true, EarlyRelayOrigin::Peer)
+                .await
+                .unwrap();
+            assert!(skipped.is_none());
+            assert!(read.early_relay.entry.lock().unwrap().is_none());
+
+            // A later negotiation enables the next request, not work already skipped.
+            recipients.send_replace(true);
+            let mut negotiated = Box::pin(read.clone().early_relay(
+                block.clone(),
+                false,
+                true,
+                EarlyRelayOrigin::Peer,
+            ));
+            assert!(futures::poll!(negotiated.as_mut()).is_pending());
+            drop(negotiated);
+
+            recipients.send_replace(false);
+            let mut required = Box::pin(read.clone().early_relay(
+                block.clone(),
+                true,
+                true,
+                EarlyRelayOrigin::Peer,
+            ));
+            assert!(futures::poll!(required.as_mut()).is_pending());
+            drop(required);
+
+            // A queued optional request must recheck demand before entering the blocking pool.
+            // Occupy its only worker so accidentally spawning authentication cannot complete.
+            let (started, running) = tokio::sync::oneshot::channel();
+            let (release, wait) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+            });
+            running.await.unwrap();
+            recipients.send_replace(true);
+            let mut queued = Box::pin(read.clone().early_relay(
+                block.clone(),
+                false,
+                true,
+                EarlyRelayOrigin::Peer,
+            ));
+            assert!(futures::poll!(queued.as_mut()).is_pending());
+            recipients.send_replace(false);
+            drop(_permit);
+            let skipped = futures::poll!(queued.as_mut());
+            release.send(()).unwrap();
+            assert!(matches!(skipped, std::task::Poll::Ready(Ok(None))));
+            blocker.await.unwrap();
+
+            // A disconnected producer cannot leave optional authentication permanently enabled.
+            recipients.send_replace(true);
+            drop(recipients);
+            assert!(read
+                .clone()
+                .early_relay(block, false, true, EarlyRelayOrigin::Peer)
+                .await
+                .unwrap()
+                .is_none());
+        })
+        .await
+        .expect("absent recipients skip authentication without waiting for its permit");
+    });
+}
+
+#[tokio::test]
+async fn early_relay_recipient_demand_controls_retention() {
+    let (state, cache, _tip, block) = cache();
+    let (recipients, demand) = watch::channel(false);
+    cache.set_recipients(demand);
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_none());
+    assert_eq!(state.slot.available_permits(), 1);
+
+    recipients.send_replace(true);
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_some());
+}
+
 /// Full blocks of compact transparent payments must fit the decoded-body charge.
 #[test]
 fn early_relay_retains_large_small_transaction_blocks() {
