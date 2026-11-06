@@ -229,7 +229,7 @@ impl VerifiedSet {
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     #[allow(clippy::unwrap_in_result)]
-    pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
+    pub fn evict_one(&mut self) -> Vec<VerifiedUnminedTx> {
         use rand::distr::{weighted::WeightedIndex, Distribution};
 
         let (keys, weights): (Vec<transaction::Hash>, Vec<u64>) = self
@@ -246,9 +246,7 @@ impl VerifiedSet {
             .get(dist.sample(&mut rand::rng()))
             .expect("should have a key at every index in the distribution");
 
-        // Removes the randomly selected transaction and all of its dependents from the set,
-        // then returns just the randomly selected transaction
-        self.remove(key_to_remove).pop()
+        self.remove(key_to_remove)
     }
 
     /// Clears a list of mined transaction ids from the lists of dependencies for

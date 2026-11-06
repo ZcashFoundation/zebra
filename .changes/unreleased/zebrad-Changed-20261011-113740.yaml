@@ -1,7 +1,8 @@
 project: zebrad
 kind: Changed
 body: >-
-  Mining templates refresh after verified mempool changes and wake long polls on publication.
+  Mining templates refresh after verified mempool additions and evictions, including removed
+  dependent transactions, and wake long polls on publication.
   Steady arrivals use a 50 ms coalescing pause; bursts of at least 50 additions or lost
   notifications use one second. Slow builds extend the pause, while chain-tip changes rebuild
   immediately. Cached failures from an old tip do not interrupt mining

@@ -407,12 +407,16 @@ impl Storage {
     ///
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
+    ///
+    /// Adds every evicted transaction ID, including collateral dependents, to `evicted_ids` so the
+    /// caller can publish complete verified-membership invalidations.
     #[allow(clippy::unwrap_in_result)]
     pub fn insert(
         &mut self,
         tx: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         height: Option<Height>,
+        evicted_ids: &mut HashSet<UnminedTxId>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -485,9 +489,10 @@ impl Storage {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
-            let victim_tx = self
-                .verified
-                .evict_one()
+            let evicted = self.verified.evict_one();
+            evicted_ids.extend(evicted.iter().map(|tx| tx.transaction.id));
+            let victim_tx = evicted
+                .last()
                 .expect("mempool is empty, but was expected to be full");
 
             // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in

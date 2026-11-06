@@ -107,7 +107,12 @@ const BUILD_STARTED: u8 = 2;
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
-pub(crate) struct TemplateCache(Arc<watch::Sender<Option<TemplateState>>>, Arc<AtomicBool>);
+pub(crate) struct TemplateCache {
+    /// Work served by `getblocktemplate`.
+    served: Arc<watch::Sender<Option<TemplateState>>>,
+    /// Whether [`run()`] owns template construction.
+    updater: Arc<AtomicBool>,
+}
 
 struct TemplateState {
     template: Option<Arc<BlockTemplateResponse>>,
@@ -117,7 +122,10 @@ struct TemplateState {
 
 impl Default for TemplateCache {
     fn default() -> Self {
-        Self(Arc::new(watch::Sender::new(None)), Arc::default())
+        Self {
+            served: Arc::new(watch::Sender::new(None)),
+            updater: Arc::default(),
+        }
     }
 }
 
@@ -126,8 +134,8 @@ struct UpdaterGuard(TemplateCache);
 
 impl Drop for UpdaterGuard {
     fn drop(&mut self) {
-        self.0 .1.store(false, Ordering::Release);
-        self.0 .0.send_modify(|_| {});
+        self.0.updater.store(false, Ordering::Release);
+        self.0.served.send_modify(|_| {});
     }
 }
 
@@ -162,11 +170,11 @@ impl TemplateChanges {
 impl TemplateCache {
     /// Whether the updater, rather than an individual request, owns template construction.
     pub(crate) fn updater_is_running(&self) -> bool {
-        self.1.load(Ordering::Acquire)
+        self.updater.load(Ordering::Acquire)
     }
 
     fn claim_updater(&self) -> Option<UpdaterGuard> {
-        self.1
+        self.updater
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
             .map(|_| UpdaterGuard(self.clone()))
@@ -174,7 +182,7 @@ impl TemplateCache {
 
     /// Returns `true` if the precomputed template extends `tip_hash`.
     fn holds_tip(&self, tip_hash: block::Hash) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.template.as_ref())
@@ -183,13 +191,13 @@ impl TemplateCache {
 
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
-        self.0.borrow().is_none()
+        self.served.borrow().is_none()
     }
 
     /// Returns `true` if no template is currently available.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .is_none_or(|state| state.template.is_none())
@@ -200,7 +208,7 @@ impl TemplateCache {
         if self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .map(|state| state.published_at + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL))
@@ -211,14 +219,14 @@ impl TemplateCache {
         if !self.updater_is_running() {
             return None;
         }
-        self.0
+        self.served
             .borrow()
             .as_ref()
             .and_then(|state| state.error.clone())
     }
 
     fn record_error(&self, error: (Option<block::Hash>, ErrorObjectOwned)) {
-        self.0.send_modify(|state| {
+        self.served.send_modify(|state| {
             let state = state.get_or_insert_with(|| TemplateState {
                 template: None,
                 published_at: Instant::now(),
@@ -235,7 +243,7 @@ impl TemplateCache {
     /// after it as unseen, so a template published while the caller decides what to do with the
     /// one it just read still wakes it.
     pub(crate) fn subscribe(&self) -> TemplateChanges {
-        TemplateChanges(self.0.subscribe())
+        TemplateChanges(self.served.subscribe())
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
@@ -244,7 +252,7 @@ impl TemplateCache {
     /// subset of the new one. A Testnet difficulty transition changes difficulty or the lower
     /// bound, so it must retain the new identity instead.
     pub(crate) fn preserve_work_identity(&self, template: &mut BlockTemplateResponse) {
-        let cached = self.0.borrow();
+        let cached = self.served.borrow();
         if let Some(previous) = cached.as_ref().and_then(|state| state.template.as_ref()) {
             if previous.previous_block_hash == template.previous_block_hash
                 && previous.height == template.height
@@ -260,7 +268,7 @@ impl TemplateCache {
     /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
     pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
         self.preserve_work_identity(&mut template);
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: Some(Arc::new(template)),
             published_at: Instant::now(),
             error: None,
@@ -269,7 +277,7 @@ impl TemplateCache {
 
     /// Withdraws cached work and wakes long polls.
     pub(crate) fn clear(&self) {
-        self.0.send_replace(Some(TemplateState {
+        self.served.send_replace(Some(TemplateState {
             template: None,
             published_at: Instant::now(),
             error: None,
@@ -284,7 +292,7 @@ impl TemplateCache {
         network: &Network,
         now: DateTime32,
     ) -> Option<Arc<BlockTemplateResponse>> {
-        let cached = self.0.borrow();
+        let cached = self.served.borrow();
         let template = cached.as_ref()?.template.as_ref()?;
 
         // Mining on a template for another tip extends a chain Zebra has already seen a block for.

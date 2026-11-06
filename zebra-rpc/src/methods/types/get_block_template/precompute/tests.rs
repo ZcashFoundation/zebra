@@ -512,7 +512,61 @@ async fn mempool_changes_compare_the_verified_set() {
         .expect("a collateral eviction must wake the updater even when its ID was not announced");
 }
 
-/// Steady 20–100 tx/s flows use the short pause; a 9,000 tx/s burst waits for coalescing.
+/// An unchanged read cannot erase notifications received after its snapshot.
+#[tokio::test(start_paused = true)]
+async fn unchanged_membership_reads_preserve_later_admissions() {
+    let template_ids = HashSet::new();
+    let added = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    let rejected = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([2; 32]));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mempool = tower::service_fn({
+        let release = release.clone();
+        let checks = checks.clone();
+        move |request| {
+            assert_eq!(request, mempool::Request::TransactionIds);
+            let ids = if checks.fetch_add(1, Ordering::SeqCst) == 0 {
+                HashSet::new()
+            } else {
+                [added].into_iter().collect()
+            };
+            let release = release.clone();
+            async move {
+                release.notified().await;
+                Ok::<_, zebra_node_services::BoxError>(mempool::Response::TransactionIds(ids))
+            }
+        }
+    });
+    let (events, mut receiver) = broadcast::channel(2);
+    let start = Instant::now();
+    let changed = wait_for_mempool_change(
+        &mut receiver,
+        mempool,
+        &template_ids,
+        start + MEMPOOL_SHORT_PAUSE,
+        start + MEMPOOL_THROTTLE,
+    );
+    tokio::pin!(changed);
+    events
+        .send(MempoolChange::invalidated([rejected].into_iter().collect()))
+        .unwrap();
+    assert!(futures::poll!(&mut changed).is_pending());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    assert!(futures::poll!(&mut changed).is_pending());
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
+    events
+        .send(MempoolChange::added([added].into_iter().collect()))
+        .unwrap();
+    assert!(futures::poll!(&mut changed).is_pending());
+    release.notify_one();
+    assert!(futures::poll!(&mut changed).is_pending());
+    assert_eq!(checks.load(Ordering::SeqCst), 2);
+    release.notify_one();
+    assert!(futures::poll!(&mut changed).is_ready());
+    assert_eq!(start.elapsed(), MEMPOOL_SHORT_PAUSE);
+}
+
+/// Steady arrivals use the short pause, while bursts wait for coalescing.
 #[tokio::test(start_paused = true)]
 async fn mempool_arrivals_adapt_the_rebuild_pause() {
     for (interval_ms, batch_size, burst) in [(50u32, 1u32, false), (10, 1, false), (1, 9, true)] {
@@ -1423,20 +1477,20 @@ async fn pending_verification_publishes_early_work_and_failure_restores_the_tip(
                 .respond(mempool::Response::TransactionIds(
                     [added_id].into_iter().collect(),
                 ));
+            let snapshot = mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await;
             // Restoration is observed near the resumed build's end; unpaced builds wait only
             // `MEMPOOL_THROTTLE`.
             assert!(
                 restored_at.elapsed() >= awaited_build / 2,
                 "the resumed build's earlier proof time must pace the next mempool build"
             );
-            mempool
-                .expect_request(mempool::Request::FullTransactions)
-                .await
-                .respond(mempool::Response::FullTransactions {
-                    transactions: Vec::new(),
-                    transaction_dependencies: Default::default(),
-                    last_seen_tip_hash: tip_hash,
-                });
+            snapshot.respond(mempool::Response::FullTransactions {
+                transactions: Vec::new(),
+                transaction_dependencies: Default::default(),
+                last_seen_tip_hash: tip_hash,
+            });
         })
         .await
         .expect("a retained build must process mempool changes before the periodic backstop");

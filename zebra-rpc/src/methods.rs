@@ -1174,11 +1174,6 @@ where
     /// Returns the block template that [`Self::spawn_block_template_updater()`] keeps precomputed,
     /// if it extends the current chain tip, and if it isn't the template the client already has.
     ///
-    /// The precomputed template's mempool transactions can be a few seconds old, which only costs
-    /// the miner the fees of the transactions that arrived in the meantime, and the next call picks
-    /// them up. But it always extends the current tip, so miners never work on a chain that Zebra
-    /// has already seen a block for.
-    ///
     /// A long polling client waits here until the updater publishes a template it doesn't have
     /// yet, the chain tip changes, or its timestamp range expires during this request.
     ///

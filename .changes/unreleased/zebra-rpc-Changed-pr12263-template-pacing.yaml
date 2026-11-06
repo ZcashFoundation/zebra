@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: Template refreshes coalesce steady additions for 50 ms and bursts of at least 50 additions or lost notifications for one second, extended by the previous build duration ([#12263](https://github.com/ZcashFoundation/zebra/pull/12263)).
+body: Template refreshes coalesce steady additions for 50 ms and bursts of at least 50 additions or lost notifications for one second, extended by the previous build duration ([#12263](https://github.com/ZcashFoundation/zebra/pull/12263)). Refreshes track verified mempool additions and evictions, including removed dependent transactions ([#12303](https://github.com/ZcashFoundation/zebra/pull/12303)).
 time: 2026-11-05T23:33:31+01:00

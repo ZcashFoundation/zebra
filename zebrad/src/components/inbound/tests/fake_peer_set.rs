@@ -1368,7 +1368,12 @@ fn add_some_stuff_to_mempool(
     // Insert the last transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
+        .insert(
+            last_transaction.clone(),
+            Vec::new(),
+            None,
+            &mut HashSet::new(),
+        )
         .unwrap();
 
     vec![last_transaction]

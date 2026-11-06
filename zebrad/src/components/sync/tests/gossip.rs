@@ -981,6 +981,9 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             move |request| {
                 let read_state = read_state.clone();
                 async move {
+                    if matches!(request, mempool::Request::TransactionIds) {
+                        return Ok(mempool::Response::TransactionIds(Default::default()));
+                    }
                     assert!(matches!(request, mempool::Request::FullTransactions));
                     let zebra_state::ReadResponse::Tip(Some((_, hash))) = read_state
                         .oneshot(zebra_state::ReadRequest::Tip)
