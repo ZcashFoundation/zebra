@@ -31,7 +31,8 @@ use zebra_state::{CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
 /// Why a delivered block could not be converted.
 #[derive(Debug, Error)]
 pub enum ConvertError {
-    /// The bytes are not a block. The stream reader parsed only the header.
+    /// The bytes are not a block, or have bytes after the block. The stream
+    /// reader parsed only the header.
     #[error("block {hash:?} at {height:?} does not deserialize: {source}")]
     Deserialize {
         /// The expected height.
@@ -105,13 +106,25 @@ pub fn convert(
     hash: block::Hash,
     raw: &[u8],
 ) -> Result<CheckpointVerifiedBlock, ConvertError> {
-    let block: Block =
-        raw.zcash_deserialize_into()
-            .map_err(|source| ConvertError::Deserialize {
-                height,
-                hash,
-                source,
-            })?;
+    // A `get-block-range` element is exactly one serialized block: bytes
+    // after it are not part of any block.
+    let mut reader = raw;
+    let block: Block = (&mut reader)
+        .zcash_deserialize_into()
+        .and_then(|block| {
+            if reader.is_empty() {
+                Ok(block)
+            } else {
+                Err(SerializationError::Parse(
+                    "get-block-range element has bytes after the serialized block",
+                ))
+            }
+        })
+        .map_err(|source| ConvertError::Deserialize {
+            height,
+            hash,
+            source,
+        })?;
 
     // Bind the body to the header first: the stream reader verified only
     // the header hash, so until the merkle root matches, every other field
@@ -291,6 +304,27 @@ mod tests {
             matches!(error, ConvertError::Deserialize { .. }),
             "{error:?}"
         );
+    }
+
+    /// A valid block followed by padding is not a block: the padding would
+    /// otherwise be credited as delivered bytes.
+    #[test]
+    fn rejects_padding_after_the_block() {
+        let _init_guard = zebra_test::init();
+
+        let (raw, hash) = mainnet_block(5);
+        let mut padded = raw.to_vec();
+        padded.extend_from_slice(&[0u8; 1000]);
+
+        let error = convert(&Network::Mainnet, block::Height(5), hash, &padded).unwrap_err();
+        assert!(
+            matches!(error, ConvertError::Deserialize { .. }),
+            "{error:?}"
+        );
+        assert!(error.is_peer_fault());
+
+        // The same block without padding still converts.
+        convert(&Network::Mainnet, block::Height(5), hash, &raw).unwrap();
     }
 
     /// Duplicating the final transaction of an odd-length list leaves the
