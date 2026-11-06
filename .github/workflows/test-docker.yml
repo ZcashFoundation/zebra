@@ -151,7 +151,7 @@ jobs:
             env_vars: -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
             grep_patterns: -e "0.0.0.0:9999"
 
-          # Memory budget (design §6.4). A 1 GiB budget only fits a node at the tip, so a fresh
+          # Memory budget. A 1 GiB budget only fits a node at the tip, so a fresh
           # Testnet node refuses initial sync with its remedy. The budget is explicit because
           # "auto" in a 1 GiB container would refuse to start before it opens the state.
           - id: memory-1g-testnet
@@ -215,7 +215,7 @@ jobs:
           EXIT_STATUS=$(docker wait ${{ matrix.id }} || echo "Error retrieving exit status");
           echo "docker exit status: $EXIT_STATUS";
 
-          # A memory-limited container must never be OOM-killed (design §6.4)
+          # A memory-limited container must never be OOM-killed.
           if [ "$(docker inspect --format '{{.State.OOMKilled}}' ${{ matrix.id }})" = "true" ]; then
               echo "ERROR: the container was OOM-killed.";
               exit 1;
@@ -232,7 +232,7 @@ jobs:
           fi
 
   # Mines Regtest blocks with a 1 GiB memory budget in a container limited to 1.1 GiB without
-  # swap, and fails if the container is OOM-killed or RocksDB stalls or delays writes (design §6.3, F13).
+  # swap, and fails if the container is OOM-killed or RocksDB stalls or delays writes.
   test-memory-budget-regtest:
     name: Test memory budget on Regtest
     needs: [changes, build-docker-image]

@@ -441,7 +441,7 @@ impl Application for ZebradApp {
         }
 
         // A memory budget lowers glibc's malloc arena cap. Arenas never shrink, so this has to
-        // happen before the rayon and tokio threads start (design §4.7).
+        // happen before the rayon and tokio threads start (memory page, "Allocator").
         if command.cmd().is_server() {
             crate::components::resources::apply_arena_cap(&config);
         }

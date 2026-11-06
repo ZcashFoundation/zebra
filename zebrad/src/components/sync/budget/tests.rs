@@ -1,4 +1,4 @@
-//! Tests for the sync pipeline's byte bound (design §4.2, §6.1 "Pipeline (B)").
+//! Tests for the sync pipeline's byte bound (memory page, "How the budget is split").
 
 mod ownership;
 
@@ -196,7 +196,7 @@ fn is_deferred(error: &BlockDownloadVerifyError, expected: block::Hash) -> bool 
 }
 
 /// Without a memory budget the pipeline has no byte bound, so the syncer never charges, waits or
-/// defers, and the inbound downloader never drops a block (design §2.1, D1).
+/// defers, and the inbound downloader never drops a block (memory page, "Setting a budget").
 #[tokio::test]
 async fn default_limits_leave_the_pipeline_unbounded() {
     let _init_guard = zebra_test::init();
@@ -313,7 +313,7 @@ fn downloaded_block_charge_is_the_shared_block_charge() {
 }
 
 /// The oldest checkpoint range is the only one exempt from waiting, and only until it is
-/// provably fully requested (design §4.2 step 2).
+/// provably fully requested (memory page, "How the budget is split").
 #[test]
 fn oldest_range_is_fully_requested_only_when_every_height_is_covered() {
     let _init_guard = zebra_test::init();
@@ -590,7 +590,8 @@ async fn runtime_growth_wakes_waiting_sync_admission() {
 }
 
 /// Above the bound, the downloads of the oldest checkpoint range are still admitted without
-/// waiting, and the next range waits once the oldest is fully requested (design §4.2 step 2).
+/// waiting, and the next range waits once the oldest is fully requested (memory page, "How the
+/// budget is split").
 #[tokio::test(start_paused = true)]
 async fn oldest_checkpoint_range_is_admitted_above_the_limit() {
     let _init_guard = zebra_test::init();
@@ -629,7 +630,7 @@ async fn oldest_checkpoint_range_is_admitted_above_the_limit() {
 
 /// A download in the oldest range that a stuck peer never serves can't block that range: when
 /// its download round fails, the next block is admitted, and re-obtaining it never waits
-/// (design §4.2 step 2, the liveness rule).
+/// (the liveness rule, memory page, "How the budget is split").
 #[tokio::test(start_paused = true)]
 async fn stuck_peer_cannot_block_the_oldest_range() {
     let _init_guard = zebra_test::init();
@@ -771,7 +772,7 @@ async fn every_outcome_releases_the_charge_and_forgets_the_download() {
 }
 
 /// The syncer keeps the hashes a full pipeline defers, in order, and re-obtains missing blocks
-/// without waiting for the bound (design §4.2 step 2).
+/// without waiting for the bound (memory page, "How the budget is split").
 #[tokio::test(start_paused = true)]
 async fn syncer_keeps_deferred_hashes_and_reobtains_without_waiting() {
     let _init_guard = zebra_test::init();

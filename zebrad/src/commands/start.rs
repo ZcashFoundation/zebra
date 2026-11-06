@@ -675,7 +675,7 @@ impl StartCmd {
         });
 
         // A tip-only budget cannot sync to the last checkpoint, and a node already past it
-        // needs no initial sync share (design §2.3 step 3, D15).
+        // needs no initial sync share (memory page, "How the budget is split").
         if let Some(settings) = &memory_settings {
             let (profile, warning) = settings.profile_after_open(
                 memory_plan.profile,
@@ -917,7 +917,8 @@ impl StartCmd {
 
         info!("initializing mempool");
         // The mempool reads its cost limit from its config, so a budget's limit replaces it in a
-        // copy (design §4.4); an explicit limit has already won in the plan (§2.5).
+        // copy (memory page, "How the budget is split"); an explicit limit has already won in the
+        // plan (memory page, "Settings that win over the budget").
         let mempool_config = memory_plan.mempool.apply_to(&config.mempool);
         let (mempool, mempool_transaction_subscriber, mempool_transaction_verified) = Mempool::new(
             &config.network.network,
@@ -1166,7 +1167,7 @@ impl StartCmd {
 
         info!("spawning memory watchdog task");
         // Nothing reads the memory pressure yet: pausing downloads at critical pressure is phase
-        // 2 (design §4.2 item 7).
+        // 2 (memory page, "How the budget is split").
         let (memory_pressure_sender, _) =
             watch::channel(resources::watchdog::MemoryPressure::default());
         let sampled_state = read_only_state_service.clone();
@@ -1221,7 +1222,8 @@ impl StartCmd {
             .in_current_span(),
         );
 
-        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it exits.
+        // Like the health endpoint, this task only reports metrics, so Zebra doesn't stop when it
+        // exits.
         info!("spawning tip block delay metrics task");
         let tip_delay_task_handle =
             tokio::spawn(record_tip_block_delay(chain_tip_change.clone()).in_current_span());

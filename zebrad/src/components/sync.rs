@@ -772,7 +772,7 @@ where
     }
 
     /// Returns a new syncer instance like [`ChainSync::new`], whose download pipeline is bounded
-    /// by `limits` (design §4.2).
+    /// by `limits` (memory page, "How the budget is split").
     ///
     /// `checkpoint_list` is the list the checkpoint verifier uses, as returned by
     /// `zebra_consensus::router::init_checkpoint_list`. With a byte bound, the syncer always
@@ -1819,7 +1819,7 @@ where
                 Err(BlockDownloadVerifyError::PipelineFull { .. }) => {
                     // Keep this hash and the rest of the batch, in order, ahead of the extra
                     // hashes, so the syncer observes finished blocks before it asks again
-                    // (design §4.2 step 2).
+                    // (memory page, "How the budget is split").
                     debug!(
                         deferred = hashes.len() + 1 + extra_hashes.len(),
                         "sync pipeline is above its memory limit, deferring block requests",

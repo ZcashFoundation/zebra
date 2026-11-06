@@ -286,7 +286,7 @@ fn detects_this_hosts_memory() {
     assert!(effective <= meminfo_total_bytes().expect("Linux test hosts have /proc/meminfo"));
 }
 
-/// Elsewhere, detection asks for an explicit budget (D9).
+/// Elsewhere, detection asks for an explicit budget.
 #[cfg(not(target_os = "linux"))]
 #[test]
 fn asks_for_an_explicit_budget_on_other_platforms() {

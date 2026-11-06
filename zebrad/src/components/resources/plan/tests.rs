@@ -42,8 +42,8 @@ fn memory_plan_without_a_budget_keeps_todays_limits() {
     );
 }
 
-/// The smallest budgets are derived from the floors, and are the design's thresholds:
-/// 963 MiB at the tip and 1,113 MiB for initial sync (design §2.3).
+/// The smallest budgets are derived from the floors, and are the memory page's thresholds:
+/// 963 MiB at the tip and 1,113 MiB for initial sync (memory page, "How the budget is split").
 #[test]
 fn min_budgets_are_the_smallest_budgets_that_cover_the_floors() {
     let _init_guard = zebra_test::init();
@@ -76,7 +76,7 @@ fn min_budgets_are_the_smallest_budgets_that_cover_the_floors() {
 
 /// With the checkpoint sync engine, the network floor pays for its two outbound v2 connections, so
 /// the smallest budgets rise to 978 MiB at the tip and 1,129 MiB for initial sync, and every budget
-/// gives the engine at least two outbound v2 peers.
+/// gives the engine at least two outbound v2 peers (memory page, "Setting a budget").
 #[test]
 fn checkpoint_sync_min_budgets_cover_two_outbound_v2_peers() {
     let _init_guard = zebra_test::init();
@@ -164,7 +164,8 @@ fn floors_and_ceilings_are_the_designs() {
 }
 
 /// At 1 GiB, RocksDB is raised to its floor and the deficit is taken from the other
-/// components' headroom; the derived settings are the design's 1 GiB row (design §2.3).
+/// components' headroom; the derived settings are the 1 GiB row of the memory page's "What each
+/// budget gives up" table.
 #[test]
 fn one_gib_tip_only_raises_rocksdb_to_its_floor() {
     let _init_guard = zebra_test::init();
@@ -198,7 +199,7 @@ fn one_gib_tip_only_raises_rocksdb_to_its_floor() {
     );
 }
 
-/// At 2 GiB, every component gets its nominal share (design §2.3).
+/// At 2 GiB, every component gets its nominal share (memory page, "How the budget is split").
 #[test]
 fn two_gib_ibd_gives_every_component_its_nominal_share() {
     let _init_guard = zebra_test::init();
@@ -256,7 +257,8 @@ fn v2_network_limits_fit_their_share() {
     };
 
     let compact = zebra_network::QuicWindows::compact();
-    // A version 2 node serves synchronization artifacts, so its larger windows are the serving ones.
+    // A version 2 node serves synchronization artifacts, so its larger windows are the serving
+    // ones.
     let serving = zebra_network::QuicWindows::SERVING;
     for (budget, profile, expected_peers, expected_windows) in [
         (GIB, Profile::TipOnly, 1, compact),
@@ -328,7 +330,7 @@ fn surplus_above_ceilings_goes_to_rocksdb_and_the_pipeline() {
 }
 
 /// A budget below the floors lists every component its share does not cover, and names both
-/// minimums and every way out (design §2.3 step 5, D4).
+/// minimums and every way out (memory page, "How the budget is split").
 #[test]
 fn shortfall_lists_every_component_below_its_floor() {
     let _init_guard = zebra_test::init();
@@ -446,7 +448,7 @@ fn tip_only_pipeline_follows_the_measured_charge() {
     );
 }
 
-/// The arena cap is a quarter of the cores, between 2 and 16 (design §6.1).
+/// The arena cap is a quarter of the cores, between 2 and 16.
 #[test]
 fn arena_max_is_a_quarter_of_the_cores() {
     let _init_guard = zebra_test::init();
@@ -469,7 +471,7 @@ fn arena_max_is_a_quarter_of_the_cores() {
 }
 
 /// `"auto"` budgets half the effective memory, at least the initial sync minimum and at most
-/// 8 GiB, and refuses a host below the minimum (design §2.2, C8).
+/// 8 GiB, and refuses a host below the minimum (memory page, "Setting a budget").
 #[test]
 fn auto_budget_is_half_the_memory_within_the_clamp() {
     let _init_guard = zebra_test::init();
@@ -533,9 +535,9 @@ fn oversized_budgets_leave_the_host_too_little() {
     assert!(MemoryPlan::is_oversized(GIB, 512 * MIB));
 }
 
-/// The derived plan of every budget in the design's table, in both profiles, without and with
+/// The derived plan of every budget in the memory page's table, in both profiles, without and with
 /// mining, and with the version 2 checkpoint sync engine, so that a change to a share, floor or
-/// ceiling is a reviewed snapshot diff (design §6.1).
+/// ceiling is a reviewed snapshot diff.
 #[test]
 fn derived_plans_golden_table() {
     let _init_guard = zebra_test::init();
@@ -661,7 +663,7 @@ fn any_v2_inputs() -> impl Strategy<Value = PlanInputs> {
 proptest! {
     /// A derived plan never gives the components more than the budget allows, keeps every
     /// component between its floor and its ceiling, and refuses exactly the budgets whose
-    /// components' memory is below the floors (design §2.3, §6.1).
+    /// components' memory is below the floors (memory page, "How the budget is split").
     #[test]
     fn derived_plans_fit_the_budget(
         budget in any_budget(),

@@ -425,8 +425,8 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
 /// The parent lookup is bounded: when the state does not answer, the block is still dropped and the
 /// peer is still not attributed.
 ///
-/// Paused time lets the runtime advance past `PARENT_LOOKUP_TIMEOUT` as soon as the download task is
-/// the only thing waiting, so the test does not sleep for real.
+/// Paused time lets the runtime advance past `PARENT_LOOKUP_TIMEOUT` as soon as the download task
+/// is the only thing waiting, so the test does not sleep for real.
 #[tokio::test(start_paused = true)]
 async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
     let _init_guard = zebra_test::init();
@@ -713,8 +713,8 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
 /// A block at the highest height that is still within the lookahead limit is verified, not dropped.
 ///
 /// This is the guard against dropping and attributing honest near-boundary blocks:
-/// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block exactly
-/// on it is a normal download and the parent is never consulted.
+/// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block
+/// exactly on it is a normal download and the parent is never consulted.
 #[tokio::test(start_paused = true)]
 async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
@@ -828,7 +828,8 @@ async fn download_deadline_includes_readiness_and_response() {
 
 /// Above the sync pipeline's byte bound, a downloaded gossiped block is dropped without waiting,
 /// never reaches the verifier, and is never attributed to the peer that served it; with room in
-/// the bound, the block is charged until its verification ends (design §4.2 step 5).
+/// the bound, the block is charged until its verification ends (memory page, "How the budget is
+/// split").
 #[tokio::test(start_paused = true)]
 async fn gossiped_block_over_the_pipeline_bound_is_dropped_unattributed() {
     let _init_guard = zebra_test::init();

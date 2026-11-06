@@ -1,7 +1,7 @@
 //! The memory watchdog: samples the process's memory every 10 seconds, exports the memory
 //! metrics, publishes the memory pressure, returns freed heap to the OS when the pressure rises,
 //! and switches the plan to the tip-only profile when the node reaches the last checkpoint
-//! (design §5, §4.7, §2.3 step 3).
+//! (memory page, "Monitoring", "Allocator", "How the budget is split").
 //!
 //! The watchdog is advisory: the cgroup or container memory limit is the enforcer.
 
@@ -24,7 +24,7 @@ mod tests;
 /// How often the watchdog samples the process's memory.
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
 
-/// The shortest time between two `malloc_trim` calls (design §4.7, P14).
+/// The shortest time between two `malloc_trim` calls (memory page, "Allocator").
 pub const MIN_TRIM_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// The longest time the watchdog waits for a sample or a RocksDB resize, which run on blocking
@@ -88,7 +88,8 @@ pub struct ProcessMemory {
     pub rss_bytes: u64,
 
     /// The anonymous part of the resident set, `RssAnon`, in bytes: the memory the budget
-    /// shapes, without the reclaimable file-backed pages (design §1.2).
+    /// shapes, without the reclaimable file-backed pages (memory page, "What each budget gives
+    /// up").
     pub rss_anon_bytes: u64,
 
     /// The resident set's high-water mark, `VmHWM`, in bytes.
@@ -139,7 +140,7 @@ pub struct StateMemorySample {
 }
 
 /// Returns the memory a RocksDB sample says the database uses, in bytes: its memtables, block
-/// cache and table readers (design §4.1 "Soft bound").
+/// cache and table readers (memory page, "How the budget is split").
 pub fn rocksdb_usage_bytes(sample: &zebra_state::RocksDbMemorySample) -> u64 {
     let memtables = sample
         .write_buffer_manager
@@ -295,7 +296,7 @@ impl Watchdog {
                 actions.pressure_change = Some((self.pressure, pressure));
 
                 // Trim on the rising edge out of normal pressure, at most once per interval
-                // (design §4.7, P14).
+                // (memory page, "Allocator").
                 let trim_due = self.last_trim.is_none_or(|last| {
                     sample.now.saturating_duration_since(last) >= MIN_TRIM_INTERVAL
                 });
@@ -352,7 +353,7 @@ impl Watchdog {
 }
 
 /// Exports the plan's gauges: the budget, every component's share, the fixed floor, the slack
-/// and the profile (design §5).
+/// and the profile (memory page, "Monitoring").
 pub fn export_plan_metrics(plan: &MemoryPlan) {
     // The casts are metric values: f64 represents every memory size below 8 PiB exactly enough
     // for a gauge.
@@ -366,7 +367,7 @@ pub fn export_plan_metrics(plan: &MemoryPlan) {
     metrics::gauge!("zebra.memory.profile").set(plan.profile.metric_value());
 }
 
-/// Exports the process's memory gauges (design §5).
+/// Exports the process's memory gauges (memory page, "Monitoring").
 pub fn export_process_metrics(process: &ProcessMemory) {
     // The casts are metric values: f64 represents every memory size below 8 PiB exactly enough
     // for a gauge.

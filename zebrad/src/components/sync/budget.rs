@@ -1,7 +1,8 @@
 //! The sync pipeline's memory limits, derived from the memory budget.
 //!
 //! With a byte bound, every block the syncer or the inbound block downloader holds is charged
-//! until its accepted owner commits, rejects, or evicts it (design §4.2).
+//! until its accepted owner commits, rejects, or evicts it (memory page, "How the budget is
+//! split").
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -33,7 +34,7 @@ mod tests;
 ///
 /// The oldest checkpoint range is always admitted, so the `Ibd` pipeline floor is
 /// [`MAX_CHECKPOINT_BYTE_COUNT`](zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_BYTE_COUNT)
-/// times this ratio (design §2.3, §4.2 step 3).
+/// times this ratio (memory page, "How the budget is split").
 pub const MAX_CHECKPOINT_CHARGE_RATIO: u64 = 5;
 
 /// Memory limits for the block sync pipeline, derived from zebrad's memory budget.
@@ -187,7 +188,7 @@ impl PipelineBudget {
     }
 
     /// Charges `bytes` to the pipeline until the returned guard is dropped, unless that takes
-    /// the charge above the bound (design §4.2 step 5).
+    /// the charge above the bound (memory page, "How the budget is split").
     ///
     /// Returns `Ok(None)` without a byte bound, and [`OverLimit`] without charging if the bytes
     /// don't fit. Never waits.
@@ -248,7 +249,7 @@ impl Bound {
         }
     }
 
-    /// Exports the `charged` gauge and its excess over the limit (design §5).
+    /// Exports the `charged` gauge and its excess over the limit (memory page, "Monitoring").
     fn export_metrics(&self, charged: u64) {
         // Gauges are `f64`; byte counts lose precision only above 2^53 bytes.
         metrics::gauge!("sync.pipeline.charged_bytes").set(charged as f64);
@@ -308,7 +309,7 @@ pub(crate) async fn compute_downloaded_block_charge(block: Arc<Block>) -> Option
 }
 
 /// Returns the retained charge of a downloaded block: its serialized size plus its decoded
-/// structures and its share of the state's metadata (design §4.2 step 1).
+/// structures and its share of the state's metadata (memory page, "How the budget is split").
 ///
 /// Equals [`zebra_state::block_retained_charge`] with the block's transaction hashes, which only
 /// counts the hashes by their size, so it doesn't hash the transactions.
@@ -344,7 +345,7 @@ pub(super) enum PipelineEvent {
 pub(super) struct Deferred;
 
 /// The syncer's admission state for a byte-bounded pipeline, owned by its `Downloads`
-/// (design §4.2 steps 1 and 2).
+/// (memory page, "How the budget is split").
 ///
 /// Download tasks report through an unbounded channel that this state drains before each
 /// admission decision, so the per-download bookkeeping needs no lock. The channel holds at most
@@ -416,7 +417,8 @@ impl PipelineAdmission {
         &self.budget
     }
 
-    /// Waits until a new download may start, or returns [`Deferred`] (design §4.2 step 2).
+    /// Waits until a new download may start, or returns [`Deferred`] (memory page, "How the budget
+    /// is split").
     ///
     /// A download waits while the charge is above the bound and the oldest checkpoint range is
     /// provably fully requested; otherwise it is admitted at once, even above the bound. A waiting
@@ -593,7 +595,8 @@ impl PipelineAdmission {
 }
 
 /// Returns `true` if the oldest checkpoint range above `tip` is provably fully requested, or if
-/// there is no checkpoint range to protect (design §4.2 step 2, the structural liveness rule).
+/// there is no checkpoint range to protect (the structural liveness rule, memory page, "How the
+/// budget is split").
 ///
 /// The range is the heights from `tip + 1` to the next checkpoint the verifier uses. It is
 /// provably fully requested when its distinct downloaded heights plus the downloads with unknown

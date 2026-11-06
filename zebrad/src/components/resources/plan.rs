@@ -22,20 +22,21 @@ const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
 
 /// The process memory a budget reserves for costs that no limit shrinks: the runtimes, the
-/// verifying keys and Sapling parameters, and the state at open (design §2.3 step 1, D10).
+/// verifying keys and Sapling parameters, and the state at open (memory page, "How the budget is
+/// split").
 pub const FIXED_FLOOR_BYTES: u64 = 384 * MIB;
 
 /// The percentage of the budget held back for allocator retention, transient deserialization
-/// and RocksDB's soft overshoot (design §2.3 step 2).
+/// and RocksDB's soft overshoot (memory page, "How the budget is split").
 pub const SLACK_PERCENT: u64 = 15;
 
 /// How many copies of the non-finalized index maps a commit or a fork can hold at once, until
-/// they are copy-on-write (design §2.3, §3.9).
+/// they are copy-on-write (memory page, "How the budget is split").
 pub const INDEX_CLONE_FACTOR: u64 = 2;
 
 /// The heap-pinned SST index and filter blocks of the column families the block commit path
 /// point-reads, and the table reader structs of a full Mainnet database: the part of RocksDB's
-/// share that no RocksDB option bounds (design §2.3, §4.1).
+/// share that no RocksDB option bounds (memory page, "How the budget is split").
 pub const ROCKSDB_PINNED_METADATA_BYTES: u64 = 160 * MIB;
 
 /// The smallest RocksDB write buffer manager total a plan derives.
@@ -59,11 +60,12 @@ const TIP_ONLY_PIPELINE_MAX_PERCENT: u64 = 25;
 const IBD_SURPLUS_TO_ROCKSDB_PERCENT: u64 = 60;
 
 /// The percentage of the nominal shares moved from the sync pipeline to the RPC proposal cache
-/// when the node mines or serves block templates (design §2.3 step 3).
+/// when the node mines or serves block templates (memory page, "How the budget is split").
 const MINING_SHARE_PERCENT: u64 = 5;
 
 /// The mempool transaction cost units per two and a half bytes of the mempool share: in-memory
-/// transactions take 1.5 to 2.5 times their serialized size (design §2.3, R1 §2.3).
+/// transactions take 1.5 to 2.5 times their serialized size (memory page, "How the budget is
+/// split").
 const MEMPOOL_COST_PER_SHARE_BYTE_NUMERATOR: u64 = 2;
 
 /// See [`MEMPOOL_COST_PER_SHARE_BYTE_NUMERATOR`].
@@ -78,13 +80,13 @@ const MAX_MEMPOOL_TX_COST_LIMIT: u64 = 80_000_000;
 /// The smallest state orphan queue bound a plan derives.
 const MIN_QUEUED_BLOCKS_BYTES: u64 = 64 * MIB;
 
-/// The fewest and most glibc malloc arenas a plan derives (design §4.7, P8).
+/// The fewest and most glibc malloc arenas a plan derives (memory page, "Allocator").
 const MIN_ARENA_MAX: usize = 2;
 
 /// See [`MIN_ARENA_MAX`].
 const MAX_ARENA_MAX: usize = 16;
 
-/// The CPU cores per glibc malloc arena (design §4.7, P8).
+/// The CPU cores per glibc malloc arena (memory page, "Allocator").
 const CORES_PER_ARENA: usize = 4;
 
 /// The largest budget `"auto"` derives.
@@ -93,7 +95,8 @@ pub const MAX_AUTO_BUDGET_BYTES: u64 = 8 * GIB;
 /// The percentage of the effective memory `"auto"` budgets.
 const AUTO_BUDGET_PERCENT: u64 = 50;
 
-/// The memory a budget should leave the host, which the oversize warning uses (design §2.2).
+/// The memory a budget should leave the host, which the oversize warning uses (memory page,
+/// "Setting a budget").
 const HOST_RESERVED_BYTES: u64 = 512 * MIB;
 
 /// The node's memory profile, which sets the components' floors and shares.
@@ -129,7 +132,7 @@ impl Profile {
     }
 
     /// The profile a budget opens the node with: `Ibd` when the budget covers its floors, or
-    /// `TipOnly` (design §2.3 step 3).
+    /// `TipOnly` (memory page, "How the budget is split").
     pub fn for_budget(budget: u64, inputs: &PlanInputs) -> Self {
         if budget >= MemoryPlan::min_budget(Self::Ibd, inputs) {
             Self::Ibd
@@ -214,7 +217,8 @@ impl Component {
         }
     }
 
-    /// The least memory the component needs in `profile` with `inputs`, in bytes (design §2.3).
+    /// The least memory the component needs in `profile` with `inputs`, in bytes (memory page,
+    /// "How the budget is split").
     pub fn floor(self, profile: Profile, inputs: &PlanInputs) -> u64 {
         match (self, profile) {
             (Self::RocksDb, _) => {
@@ -222,7 +226,8 @@ impl Component {
                     + ROCKSDB_MIN_WRITE_BUFFER_BYTES
                     + ROCKSDB_MIN_BLOCK_CACHE_BYTES
             }
-            // The oldest checkpoint range is always admitted (design §4.2 step 2).
+            // The oldest checkpoint range is always admitted (memory page, "How the budget is
+            // split").
             (Self::Pipeline, Profile::Ibd) => {
                 MAX_CHECKPOINT_BYTE_COUNT * MAX_CHECKPOINT_CHARGE_RATIO
             }
@@ -244,7 +249,8 @@ impl Component {
         }
     }
 
-    /// The most memory the plan gives the component, in bytes (design §2.3).
+    /// The most memory the plan gives the component, in bytes (memory page, "How the budget is
+    /// split").
     pub fn ceiling(self) -> u64 {
         match self {
             Self::RocksDb => 4 * GIB,
@@ -255,7 +261,8 @@ impl Component {
         }
     }
 
-    /// The component's nominal percentage of the components' memory (design §2.3).
+    /// The component's nominal percentage of the components' memory (memory page, "How the budget
+    /// is split").
     ///
     /// In the `TipOnly` profile the pipeline has no nominal share, and the other components
     /// split what it leaves by these percentages, renormalized.
@@ -380,7 +387,7 @@ pub struct AllocatorLimits {
 
 impl AllocatorLimits {
     /// Returns the glibc malloc arena cap for a node using `cores` CPU cores:
-    /// `clamp(cores / 4, 2, 16)` (design §4.7, P8).
+    /// `clamp(cores / 4, 2, 16)` (memory page, "Allocator").
     pub fn arena_max_for_cores(cores: usize) -> usize {
         (cores / CORES_PER_ARENA).clamp(MIN_ARENA_MAX, MAX_ARENA_MAX)
     }
@@ -551,7 +558,7 @@ impl Default for MemoryPlan {
 
 impl MemoryPlan {
     /// Derives the limits of every component from a `budget` in bytes, for `profile`
-    /// (design §2.3).
+    /// (memory page, "How the budget is split").
     ///
     /// The budget less the fixed floor and the slack is split between the components by their
     /// nominal shares. A component below its floor is raised to it, taking the deficit from
@@ -571,8 +578,8 @@ impl MemoryPlan {
     }
 
     /// Returns the plan where every component gets its floor in `profile`, for a `budget`
-    /// below the floors that the operator runs with anyway (`--unsafe-low-specs`, design §2.3
-    /// step 5).
+    /// below the floors that the operator runs with anyway (`--unsafe-low-specs`, memory page,
+    /// "Setting a budget").
     pub fn clamped_to_floors(budget: u64, profile: Profile, inputs: &PlanInputs) -> Self {
         Self::from_shares(
             budget,
@@ -585,7 +592,7 @@ impl MemoryPlan {
     /// Returns the smallest budget whose plan covers every floor of `profile`, in bytes.
     ///
     /// Derived from the floors, the fixed floor and the slack, so that it changes with them:
-    /// `ceil((Σ floors + fixed) / (1 − slack))` (design §2.2).
+    /// `ceil((Σ floors + fixed) / (1 − slack))` (memory page, "Setting a budget").
     pub fn min_budget(profile: Profile, inputs: &PlanInputs) -> u64 {
         let needed = ComponentShares::floors(profile, inputs).total();
 
@@ -609,7 +616,7 @@ impl MemoryPlan {
 
     /// Returns the budget `"auto"` derives from `effective` bytes of memory available to Zebra:
     /// half of it, at least the `Ibd` minimum and at most [`MAX_AUTO_BUDGET_BYTES`]
-    /// (design §2.2, C8).
+    /// (memory page, "Setting a budget").
     ///
     /// The budget is a whole number of mebibytes, so that it reads like a configured one: half
     /// of the memory rounds down, and the minimum rounds up.
@@ -644,7 +651,7 @@ impl MemoryPlan {
     }
 
     /// Returns whether `budget` leaves the host too little of its `effective` memory: more than
-    /// three quarters of what remains after 512 MiB for the host (design §2.2).
+    /// three quarters of what remains after 512 MiB for the host (memory page, "Setting a budget").
     pub fn is_oversized(budget: u64, effective: u64) -> bool {
         let usable = effective.saturating_sub(HOST_RESERVED_BYTES);
 
@@ -681,7 +688,7 @@ impl MemoryPlan {
             }
             Profile::TipOnly => {
                 // The tip pipeline holds a lookahead of full-verification blocks, 32 MiB until
-                // the syncer has measured their charge (design §2.3 step 4).
+                // the syncer has measured their charge (memory page, "How the budget is split").
                 let floor = Component::Pipeline.floor(profile, inputs);
                 let estimate = inputs.ewma_charge.map_or(floor, |charge| {
                     charge.saturating_mul(
@@ -798,7 +805,8 @@ impl MemoryPlan {
         let network = shares.get(Component::Network);
 
         // RocksDB's bounded memory, above its pinned metadata, is split between the write
-        // buffer manager and the block cache, each at least its floor (design §2.3, §4.1).
+        // buffer manager and the block cache, each at least its floor (memory page, "How the budget
+        // is split").
         let rocksdb_bounded = rocksdb.saturating_sub(ROCKSDB_PINNED_METADATA_BYTES);
         let write_buffer_total = mul_div_floor(rocksdb_bounded, ROCKSDB_WRITE_BUFFER_PERCENT, 100)
             .max(ROCKSDB_MIN_WRITE_BUFFER_BYTES);

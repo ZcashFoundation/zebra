@@ -48,11 +48,11 @@ const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// Peers legitimately serve blocks that are genuinely far ahead of the tip while Zebra is catching
 /// up, and blocks that are genuinely older than the finalized tip, so this error is returned for
-/// every such drop. But a peer can also answer a [`BlockDownload`](zn::Request::BlockDownload) request
-/// with a canonical header and a rewritten coinbase height, because the coinbase scriptSig is
-/// excluded from the V5 transaction ID and therefore from the block hash (ZIP-244). The initial hash
-/// check still passes, so the forged height reaches these drops before consensus validation, and the
-/// verifier never scores the peer (GHSA-4f6v-mj46-gxg3).
+/// every such drop. But a peer can also answer a [`BlockDownload`](zn::Request::BlockDownload)
+/// request with a canonical header and a rewritten coinbase height, because the coinbase scriptSig
+/// is excluded from the V5 transaction ID and therefore from the block hash (ZIP-244). The initial
+/// hash check still passes, so the forged height reaches these drops before consensus validation,
+/// and the verifier never scores the peer (GHSA-4f6v-mj46-gxg3).
 ///
 /// The downloader attaches the supplying peer's address to the drop only when the parent header
 /// Zebra already holds proves the claimed height wrong (see [`advertiser_if_parent_contradicts`]),
@@ -79,15 +79,15 @@ pub enum HeightLimitError {
 impl HeightLimitError {
     /// The misbehavior score for a gossiped block whose parent proves its height was rewritten.
     ///
-    /// A rewritten coinbase height is unambiguous misbehavior whichever limit it crossed, so score it
-    /// at the ban threshold, matching the sync path (GHSA-g95h-hw6g-pvgv).
+    /// A rewritten coinbase height is unambiguous misbehavior whichever limit it crossed, so score
+    /// it at the ban threshold, matching the sync path (GHSA-g95h-hw6g-pvgv).
     pub fn misbehavior_score(&self) -> u32 {
         zn::constants::MAX_PEER_MISBEHAVIOR_SCORE
     }
 }
 
 /// A gossiped block was dropped after its download because it did not fit under the sync
-/// pipeline's byte bound (design §4.2 step 5).
+/// pipeline's byte bound (memory page, "How the budget is split").
 ///
 /// Like a full download queue, this is local load, not peer misbehavior: the drop is never
 /// attributed to the supplying peer, and the syncer downloads the block later.
@@ -113,8 +113,8 @@ pub struct PipelineFullError {
     pub limit: u64,
 }
 
-/// Returns `advertiser_addr` if the parent header Zebra already holds proves that a gossiped block's
-/// claimed `block_height` was rewritten, and `None` if there is no such proof.
+/// Returns `advertiser_addr` if the parent header Zebra already holds proves that a gossiped
+/// block's claimed `block_height` was rewritten, and `None` if there is no such proof.
 ///
 /// # Security
 ///
@@ -122,10 +122,10 @@ pub struct PipelineFullError {
 /// height, because the coinbase scriptSig is excluded from the V5 transaction ID and therefore from
 /// the block hash (ZIP-244). The hash check passes, so the forged height reaches the height limit
 /// drops before consensus validation. Peers also legitimately serve blocks that are genuinely far
-/// ahead of the tip or genuinely older than the finalized tip, so the drop is only attributed to the
-/// supplying peer when the parent header Zebra holds contradicts the claimed height: a block's height
-/// is one more than its parent's, so a held parent whose height disagrees proves the body was
-/// rewritten, whichever limit the claimed height crossed.
+/// ahead of the tip or genuinely older than the finalized tip, so the drop is only attributed to
+/// the supplying peer when the parent header Zebra holds contradicts the claimed height: a block's
+/// height is one more than its parent's, so a held parent whose height disagrees proves the body
+/// was rewritten, whichever limit the claimed height crossed.
 ///
 /// A parent Zebra does not hold, a height consistent with the parent, and a failed or timed-out
 /// lookup are all treated as no proof, so honest peers are never scored and a slow state read costs
@@ -333,8 +333,8 @@ where
     ZS::Future: Send,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
-    /// Initialize a new download stream with the provided `network`, `verifier`, and `state` services.
-    /// The `latest_chain_tip` must be linked to the provided `state` service.
+    /// Initialize a new download stream with the provided `network`, `verifier`, and `state`
+    /// services. The `latest_chain_tip` must be linked to the provided `state` service.
     ///
     /// The download deadline covers network readiness and the response. Any retry policy
     /// should be applied to `network` without a separate timeout that includes queued requests.
@@ -363,7 +363,7 @@ where
     }
 
     /// Charges gossiped blocks to the sync pipeline's byte bound, dropping those that don't fit
-    /// (design §4.2 step 5).
+    /// (memory page, "How the budget is split").
     pub fn with_pipeline_budget(mut self, pipeline_budget: PipelineBudget) -> Self {
         self.pipeline_budget = pipeline_budget;
         self
@@ -532,9 +532,9 @@ where
 
                 // # Security
                 //
-                // Attribute the drop to the supplying peer only if the parent Zebra holds proves the
-                // claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely far-ahead block
-                // has a parent Zebra does not hold yet, so it is dropped anonymously.
+                // Attribute the drop to the supplying peer only if the parent Zebra holds proves
+                // the claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely far-ahead
+                // block has a parent Zebra does not hold yet, so it is dropped anonymously.
                 let advertiser_addr = advertiser_if_parent_contradicts(
                     state,
                     block.header.previous_block_hash,
@@ -563,8 +563,8 @@ where
 
                 // # Security
                 //
-                // Attribute the drop to the supplying peer only if the parent Zebra holds proves the
-                // claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely old block is
+                // Attribute the drop to the supplying peer only if the parent Zebra holds proves
+                // the claimed height was rewritten (GHSA-4f6v-mj46-gxg3). A genuinely old block is
                 // consistent with its parent, or has a parent Zebra does not hold, so it is dropped
                 // anonymously.
                 let advertiser_addr = advertiser_if_parent_contradicts(
@@ -586,7 +586,8 @@ where
 
             // Charge the block jointly with its verifier and state commit owners, or drop it if
             // it doesn't fit, so gossip never waits for the bound: the syncer downloads the block
-            // later (design §4.2 step 5). Without a bound, skip the serialization pass.
+            // later (memory page, "How the budget is split"). Without a bound, skip the
+            // serialization pass.
             let pipeline_retention = if pipeline_budget.is_bounded() {
                 let bytes = compute_downloaded_block_charge(block.clone())
                     .await
