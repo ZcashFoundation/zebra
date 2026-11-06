@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: '`VerifyBlockError::misbehavior_score` now returns 100 for `OversizedBlock`, so peers that send blocks over the maximum block size are penalized ([#12289](https://github.com/ZcashFoundation/zebra/pull/12289)).'
+time: 2026-11-13T00:10:07.740156911+01:00
