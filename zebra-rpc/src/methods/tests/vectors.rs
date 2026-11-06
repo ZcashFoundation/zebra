@@ -6062,6 +6062,271 @@ async fn rpc_submitblock_errors() {
     // for the success case.
 }
 
+/// Only an exact body committed during verification turns a duplicate into JSON null.
+#[tokio::test]
+async fn rpc_submitblock_concurrent_duplicate() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let hash = block.hash();
+        let mut other_hash = (*block).clone();
+        Arc::make_mut(&mut other_hash.header).previous_block_hash = Hash([7; 32]);
+        let mut other_body = (*block).clone();
+        other_body.transactions.clear();
+
+        for (duplicate, committed, expected) in [
+            (true, Some(block.clone()), serde_json::Value::Null),
+            (true, None, serde_json::json!("duplicate")),
+            (
+                true,
+                Some(Arc::new(other_hash)),
+                serde_json::json!("duplicate"),
+            ),
+            (
+                true,
+                Some(Arc::new(other_body)),
+                serde_json::json!("duplicate"),
+            ),
+            (false, Some(block.clone()), serde_json::json!("rejected")),
+        ] {
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+            let mut read_state: MockService<_, _, _, BoxError> =
+                MockService::build().for_unit_tests();
+            let mut verifier: MockService<_, _, _, BoxError> =
+                MockService::build().for_unit_tests();
+            let (_logs, logs) = watch::channel(None);
+            let (rpc, queue) = RpcImpl::new(
+                Mainnet,
+                Default::default(),
+                false,
+                "0.0.1",
+                "RPC duplicate test",
+                MockService::build().for_unit_tests(),
+                state.clone(),
+                read_state.clone(),
+                verifier.clone(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                logs,
+                None,
+            );
+            queue.abort();
+            let call = tokio::spawn(async move {
+                rpc.into_rpc()
+                    .call::<_, serde_json::Value>(
+                        "submitblock",
+                        [hex::encode(&*zebra_test::vectors::BLOCK_MAINNET_1_BYTES)],
+                    )
+                    .await
+            });
+            state
+                .expect_request(zebra_state::Request::KnownBlock(hash))
+                .await
+                .respond(zebra_state::Response::KnownBlock(None));
+            // The block is initially unknown; only after verification starts does it appear
+            // in committed state. No timers or scheduler ordering stand in for that barrier.
+            verifier
+                .expect_request_that(|request| {
+                    matches!(request, zebra_consensus::Request::CommitDecoded(decoded, None)
+                        if decoded.block() == block)
+                })
+                .await
+                .respond(Err(BoxError::from(zebra_consensus::RouterError::Block {
+                    source: Box::new(if duplicate {
+                        zebra_consensus::VerifyBlockError::Commit(
+                            zebra_state::CommitBlockError::Duplicate {
+                                hash_or_height: Some(hash.into()),
+                                location: zebra_state::KnownBlock::BestChain,
+                            },
+                        )
+                    } else {
+                        zebra_consensus::VerifyBlockError::OversizedBlock
+                    }),
+                })));
+            if duplicate {
+                state
+                    .expect_request(zebra_state::Request::KnownBlock(hash))
+                    .await
+                    .respond(zebra_state::Response::KnownBlock(
+                        committed
+                            .as_ref()
+                            .map(|_| zebra_state::KnownBlock::BestChain),
+                    ));
+                read_state
+                    .expect_request(ReadRequest::AnyChainBlock(hash.into()))
+                    .await
+                    .respond(ReadResponse::Block(committed));
+            }
+            assert_eq!(call.await.unwrap().unwrap(), expected);
+        }
+    })
+    .await
+    .expect("concurrent duplicate submissions must finish");
+}
+
+/// Queued owners must commit, not merely finish contextual validation or disappear.
+#[tokio::test]
+async fn rpc_submitblock_queued_duplicate_resolution() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let hash = block.hash();
+        for (location, committed, expires) in [
+            (zebra_state::KnownBlock::Queue, Some(block.clone()), false),
+            (zebra_state::KnownBlock::WriteChannel, None, false),
+            (zebra_state::KnownBlock::Queue, None, true),
+        ] {
+            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+            let mut read_state: MockService<_, _, _, BoxError> =
+                MockService::build().for_unit_tests();
+            let mut verifier: MockService<_, _, _, BoxError> =
+                MockService::build().for_unit_tests();
+            let (_logs, logs) = watch::channel(None);
+            let (rpc, queue) = RpcImpl::new(
+                Mainnet,
+                Default::default(),
+                false,
+                "0.0.1",
+                "RPC queued duplicate test",
+                MockService::build().for_unit_tests(),
+                state.clone(),
+                read_state.clone(),
+                verifier.clone(),
+                MockSyncStatus::default(),
+                NoChainTip,
+                MockAddressBookPeers::default(),
+                logs,
+                None,
+            );
+            queue.abort();
+            let call = tokio::spawn(async move {
+                rpc.submit_block(
+                    HexData(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+                    None,
+                )
+                .await
+            });
+            state
+                .expect_request(zebra_state::Request::KnownBlock(hash))
+                .await
+                .respond(zebra_state::Response::KnownBlock(None));
+            let verification = verifier.expect_request_that(|_| true).await;
+            // Deserialization uses a blocking task: pause only once it has finished, so paused
+            // time cannot consume the resolution deadline while that worker is being scheduled.
+            tokio::time::pause();
+            if expires {
+                // Verification already used most of the submission's fixed resolution window.
+                tokio::time::advance(Duration::from_secs(9)).await;
+            }
+            verification.respond(Err(BoxError::from(zebra_consensus::RouterError::Block {
+                source: Box::new(zebra_consensus::VerifyBlockError::Commit(
+                    zebra_state::CommitBlockError::Duplicate {
+                        hash_or_height: Some(hash.into()),
+                        location: location.clone(),
+                    },
+                )),
+            })));
+            state
+                .expect_request(zebra_state::Request::KnownBlock(hash))
+                .await
+                .respond(zebra_state::Response::KnownBlock(Some(location)));
+            read_state
+                .expect_request(ReadRequest::AnyChainBlock(hash.into()))
+                .await
+                .respond(ReadResponse::Block(None));
+            assert!(!call.is_finished(), "a queued owner is not acceptance");
+            let expected = if expires {
+                tokio::time::advance(Duration::from_secs(2)).await;
+                SubmitBlockErrorResponse::Duplicate.into()
+            } else {
+                // None models the competing copy failing contextual validation and being
+                // removed from the write channel without ever reaching committed state.
+                state
+                    .expect_request(zebra_state::Request::KnownBlock(hash))
+                    .await
+                    .respond(zebra_state::Response::KnownBlock(
+                        committed
+                            .as_ref()
+                            .map(|_| zebra_state::KnownBlock::SideChain),
+                    ));
+                let expected = if committed.is_some() {
+                    SubmitBlockResponse::Accepted
+                } else {
+                    SubmitBlockErrorResponse::Duplicate.into()
+                };
+                read_state
+                    .expect_request(ReadRequest::AnyChainBlock(hash.into()))
+                    .await
+                    .respond(ReadResponse::Block(committed));
+                expected
+            };
+            assert_eq!(call.await.unwrap().unwrap(), expected);
+            tokio::time::resume();
+        }
+    })
+    .await
+    .expect("queued duplicate submissions must finish");
+}
+
+/// A block already known before verification keeps zcashd's duplicate result.
+#[tokio::test]
+async fn rpc_submitblock_preexisting_duplicate() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let (_logs, logs) = watch::channel(None);
+        let (rpc, queue) = RpcImpl::new(
+            Mainnet,
+            Default::default(),
+            false,
+            "0.0.1",
+            "RPC duplicate test",
+            MockService::build().for_unit_tests(),
+            state.clone(),
+            MockService::build().for_unit_tests(),
+            verifier.clone(),
+            MockSyncStatus::default(),
+            NoChainTip,
+            MockAddressBookPeers::default(),
+            logs,
+            None,
+        );
+        queue.abort();
+        let call = tokio::spawn(async move {
+            rpc.submit_block(
+                HexData(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+                None,
+            )
+            .await
+        });
+        state
+            .expect_request(zebra_state::Request::KnownBlock(block.hash()))
+            .await
+            .respond(zebra_state::Response::KnownBlock(Some(
+                zebra_state::KnownBlock::BestChain,
+            )));
+        assert_eq!(
+            call.await.unwrap().unwrap(),
+            SubmitBlockErrorResponse::Duplicate.into()
+        );
+        verifier.expect_no_requests().await;
+    })
+    .await
+    .expect("pre-existing duplicate submissions must finish");
+}
+
 /// Admission pressure is an operational error, not a consensus rejection.
 #[tokio::test]
 async fn rpc_submitblock_resource_pressure_is_operational() {
@@ -6077,7 +6342,7 @@ async fn rpc_submitblock_resource_pressure_is_operational() {
         },
     ] {
         let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-        let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let (_logs, logs) = watch::channel(None);
@@ -6088,7 +6353,7 @@ async fn rpc_submitblock_resource_pressure_is_operational() {
             "0.0.1",
             "RPC pressure test",
             mempool,
-            state,
+            state.clone(),
             read_state,
             verifier.clone(),
             MockSyncStatus::default(),
@@ -6104,6 +6369,10 @@ async fn rpc_submitblock_resource_pressure_is_operational() {
             )
             .await
         });
+        state
+            .expect_request_that(|request| matches!(request, zebra_state::Request::KnownBlock(_)))
+            .await
+            .respond(zebra_state::Response::KnownBlock(None));
         verifier
             .expect_request_that(|_| true)
             .await
@@ -6201,6 +6470,7 @@ async fn rpc_submitblock_requires_validated_early_relay() {
         let mut bad_merkle = block.clone();
         bad_merkle.transactions.push(block.transactions[0].clone());
 
+        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let mut verifier: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
         let (sender, mut committed) = mpsc::channel(8);
         let (_logs, logs) = watch::channel(None);
@@ -6211,7 +6481,7 @@ async fn rpc_submitblock_requires_validated_early_relay() {
             "0.0.1",
             "RPC test",
             MockService::build().for_unit_tests(),
-            MockService::build().for_unit_tests(),
+            state.clone(),
             MockService::build().for_unit_tests(),
             verifier.clone(),
             MockSyncStatus::default(),
@@ -6268,6 +6538,10 @@ async fn rpc_submitblock_requires_validated_early_relay() {
                 let bytes = candidate.zcash_serialize_to_vec().unwrap();
                 async move { rpc.submit_block(HexData(bytes), None).await }
             });
+            state
+                .expect_request(zebra_state::Request::KnownBlock(hash))
+                .await
+                .respond(zebra_state::Response::KnownBlock(None));
             let verification = verifier
                 .expect_request_that(|request| {
                     matches!(request, zebra_consensus::Request::CommitDecoded(block, Some(_))

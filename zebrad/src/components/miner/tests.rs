@@ -210,8 +210,17 @@ async fn internal_miner_does_not_extend_its_accepted_public_tip() {
         });
         let mempool: MockService<_, _, _, zebra_node_services::BoxError> =
             MockService::build().for_unit_tests();
-        let state: MockService<_, _, _, zebra_state::BoxError> =
-            MockService::build().for_unit_tests();
+        let known_tip = tip_receiver.clone();
+        let state = tower::service_fn(move |request| {
+            let zebra_state::Request::KnownBlock(hash) = request else {
+                panic!("submission admission only queries whether the exact block is known");
+            };
+            std::future::ready(Ok::<_, zebra_state::BoxError>(
+                zebra_state::Response::KnownBlock(
+                    (known_tip.borrow().1 == hash).then_some(zebra_state::KnownBlock::BestChain),
+                ),
+            ))
+        });
         let mut sync_status = MockSyncStatus::default();
         sync_status.set_is_close_to_tip(true);
         let mut peers = MockAddressBookPeers::default();
