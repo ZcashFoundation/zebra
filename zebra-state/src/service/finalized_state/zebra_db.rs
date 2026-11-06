@@ -49,6 +49,7 @@ pub mod block;
 pub mod chain;
 pub mod metrics;
 pub mod shielded;
+pub mod sync_meta;
 pub mod transparent;
 
 #[cfg(any(test, feature = "proptest-impl"))]

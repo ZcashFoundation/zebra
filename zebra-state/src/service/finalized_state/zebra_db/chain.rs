@@ -306,6 +306,8 @@ impl DiskWriteBatch {
             &BlockInfo::new(new_value_pool, block_size as u32),
         );
 
+        self.prepare_sync_metadata_batch(db, finalized, block_size);
+
         Ok(())
     }
 }

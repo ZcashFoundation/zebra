@@ -442,6 +442,9 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: DeferredPoolBalanceChange,
+    /// The block's authorizing data root, if the checkpoint verifier already
+    /// computed it from this block body.
+    pub(super) auth_data_root: Option<AuthDataRoot>,
 }
 
 impl FinalizedBlock {
@@ -451,10 +454,13 @@ impl FinalizedBlock {
         treestate: Treestate,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Self {
+        let auth_data_root = block.precomputed_auth_data_root();
+
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
             deferred_pool_balance_change,
+            auth_data_root,
         )
     }
 
@@ -468,6 +474,7 @@ impl FinalizedBlock {
             SemanticallyVerifiedBlock::from(block),
             treestate,
             deferred_pool_balance_change,
+            None,
         )
     }
 
@@ -476,6 +483,7 @@ impl FinalizedBlock {
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
+        auth_data_root: Option<AuthDataRoot>,
     ) -> Self {
         Self {
             block: block.block,
@@ -485,6 +493,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
+            auth_data_root,
         }
     }
 }

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'The first start after upgrading converts the state database to format 29.1.0 once, in the background: it reads every finalized block to record its size and transaction, output and note counts for version 2 peers. Zebra keeps syncing and serving while it runs. On Mainnet it reads about 3.5 million blocks, which we expect to take about half an hour on a 32-thread machine with an SSD (estimated from timed Mainnet samples), and longer with fewer CPU threads or a slower disk. Until it finishes, `get-hashes` requests are answered only up to the highest converted height.'
+time: 2026-11-06T03:43:10.000000000Z
