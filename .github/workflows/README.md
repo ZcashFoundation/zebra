@@ -216,7 +216,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 ### Main Workflows
 
 - **Unit Tests** (`tests-unit.yml`): OS matrix unit tests via nextest
-  Source PRs targeting upstream `main` use workspace optimisation level 1; dependencies keep their
+  Source PRs targeting upstream `main` use workspace optimisation level 0; dependencies keep their
   configured profiles. The merge queue validates level 3 before merge. Other contexts, including
   `next` PRs and forks' own repositories, retain the unmodified release command.
 - **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks

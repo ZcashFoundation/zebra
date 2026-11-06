@@ -117,9 +117,9 @@ jobs:
             metadata=$(cargo metadata --locked --no-deps --format-version=1)
             packages=$(jq -er '.packages[].name' <<< "$metadata")
             while IFS= read -r package; do
-              profile_args+=(--config "profile.release.package.\"$package\".opt-level=1")
+              profile_args+=(--config "profile.release.package.\"$package\".opt-level=0")
             done <<< "$packages"
-            echo "Using opt-level=1 for workspace tests; dependency profiles are unchanged"
+            echo "Using opt-level=0 for workspace tests; dependency profiles are unchanged"
           fi
           echo "Running the tests on $(nproc) CPUs"
           NEXTEST_TEST_THREADS=$((2 * $(nproc))) cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all "${profile_args[@]}"
