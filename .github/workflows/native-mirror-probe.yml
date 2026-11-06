@@ -1,0 +1,65 @@
+name: Native mirror probe (disposable)
+
+on:
+  push:
+    branches: [bench/native-mirror-12329]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Pair ${{ matrix.pair }} / ${{ matrix.mirror }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        pair: [1, 2, 3, 4]
+        mirror: [control, canonical]
+    env:
+      MIRROR: ${{ matrix.mirror }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Record runner and validate mirror template
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'source=%s run=%s attempt=%s image=%s arch=%s hosting=%s mirror=%s\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "${ImageVersion:?runner image version is required}" \
+            "$RUNNER_ARCH" "$RUNNER_ENVIRONMENT" "$MIRROR"
+          sha256sum .github/scripts/apt-install.sh
+          apt-get --version
+          cat /etc/apt/sources.list.d/ubuntu.sources
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          release = dict(line.split('=', 1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
+          assert release['ID'].strip('"') == 'ubuntu' and release['VERSION_ID'].strip('"') == '26.04'
+          assert os.environ['RUNNER_ENVIRONMENT'] == 'github-hosted' and os.environ['RUNNER_ARCH'] == 'X64'
+          assert 'mirror+file:/etc/apt/apt-mirrors.txt' in Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
+          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
+          actual = Path('/etc/apt/apt-mirrors.txt').read_text()
+          print('Original mirror template:', repr(actual))
+          assert actual == expected, 'unknown image mirror template; sample invalid, leave configuration untouched'
+          candidate = expected.replace('priority:1', 'priority:0', 1).replace('priority:2', 'priority:1', 1).replace('priority:0', 'priority:2', 1)
+          Path(os.environ['RUNNER_TEMP'], 'apt-mirrors-candidate.txt').write_text(candidate)
+          PY
+      - name: Select the trial preference
+        shell: bash
+        run: |
+          if [[ "$MIRROR" == canonical ]]; then
+            sudo install -m 0644 "$RUNNER_TEMP/apt-mirrors-candidate.txt" /etc/apt/apt-mirrors.txt
+          fi
+          cat /etc/apt/apt-mirrors.txt
+      - name: Install the unchanged native dependencies
+        shell: bash
+        run: bash -x .github/scripts/apt-install.sh clang protobuf-compiler librocksdb-dev
+      - name: Record installed package versions
+        shell: bash
+        run: dpkg-query -W -f='${binary:Package}\t${Version}\n' clang protobuf-compiler librocksdb-dev
