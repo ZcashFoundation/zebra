@@ -264,7 +264,9 @@ where
                     .verify(block, Some(notifications))
                     .map_err(Into::into)
                     .boxed(),
-                Request::Commit(_) | Request::CommitDecoded(_, None) => {
+                Request::Commit(_)
+                | Request::CommitEarlyRelay(_)
+                | Request::CommitDecoded(_, None) => {
                     self.checkpoint.call(block).map_err(Into::into).boxed()
                 }
                 Request::CheckProposal(_) => {

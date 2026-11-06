@@ -110,6 +110,7 @@ async fn verify(
     let state = service_fn(|request| async move {
         Ok::<_, BoxError>(match request {
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::EarlyRelay { .. } => zebra_state::Response::EarlyRelay(None),
             zebra_state::Request::MiningCandidate(_) => {
                 return Err("early mining is disabled in this fixture".into());
             }
