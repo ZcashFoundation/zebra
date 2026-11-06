@@ -1,3 +1,18 @@
+# Version 5 transactions
+
+Status (Zebra 7.0.0): **Superseded**.
+
+Code: [`zebra-chain::transaction`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction.rs) and [serialization](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/transaction/serialize.rs).
+
+- Versions 5 and 6 remain supported.
+- The wrapper holds `zcash_primitives::transaction::Transaction`, not an enum.
+- Production serialization delegates to `zcash_primitives`.
+- Zebra's Sapling/Orchard/Ironwood codecs require tests or `proptest-impl`.
+- Version 6 supports Orchard and [Ironwood from NU6.3](https://zips.z.cash/zip-0258).
+- [Input/output-presence checks](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/transaction/check.rs) remain in semantic verification, not the parser.
+
+---
+
 - Feature Name: `v5_transaction`
 - Start Date: 2021-03-11
 - Design PR: [ZcashFoundation/zebra#1886](https://github.com/ZcashFoundation/zebra/pull/1886)
