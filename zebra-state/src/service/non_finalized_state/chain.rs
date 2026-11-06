@@ -1908,12 +1908,7 @@ impl Chain {
         );
 
         // add work to partial cumulative work
-        let block_work = block
-            .header
-            .difficulty_threshold
-            .to_work()
-            .expect("work has already been validated");
-        self.partial_cumulative_work += block_work;
+        self.partial_cumulative_work += contextually_valid.work();
 
         // Apply fee-paying transactions before coinbase credits, preserving their original locations.
         // Coinbase outputs cannot be spent in this block because they are immature.
@@ -2088,12 +2083,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
         // Finalized roots remain part of the common work prefix, even after physical removal.
         if position == RevertPosition::Tip {
-            let block_work = block
-                .header
-                .difficulty_threshold
-                .to_work()
-                .expect("work has already been validated");
-            self.partial_cumulative_work -= block_work;
+            self.partial_cumulative_work -= contextually_valid.work();
         }
 
         let transactions = block.transactions.iter().zip(transaction_hashes.iter());

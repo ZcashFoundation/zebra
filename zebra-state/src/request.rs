@@ -22,6 +22,7 @@ use zebra_chain::{
     transaction::{self, UnminedTx},
     transparent,
     value_balance::{ValueBalance, ValueBalanceError},
+    work::difficulty::Work,
 };
 
 /// Allow *only* these unused imports, so that rustdoc link resolution
@@ -540,6 +541,15 @@ impl From<&SemanticallyVerifiedBlock> for SemanticallyVerifiedBlock {
 // This allows moving work out of the single-threaded state service.
 
 impl ContextuallyVerifiedBlock {
+    /// Returns this block's semantically validated work.
+    pub(crate) fn work(&self) -> Work {
+        self.block
+            .header
+            .difficulty_threshold
+            .to_work()
+            .expect("work has already been validated")
+    }
+
     /// Conservative retained-content charge for caches, including decoded metadata and output scripts.
     ///
     /// Shared allocations are charged per owner. This is a resource bound, not allocator RSS.

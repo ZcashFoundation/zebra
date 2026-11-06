@@ -763,7 +763,7 @@ impl NonFinalizedState {
         if parent_chain.is_empty() {
             return None;
         }
-        // Proposal checks extend a private copy, which drops the blocks finalization kept.
+        // Match at the first unfinalized height, even if the proposal still keeps older roots.
         let root_height = self
             .finalized_height
             .and_then(|height| height.next().ok())
@@ -774,8 +774,8 @@ impl NonFinalizedState {
         let candidate = prepared.as_ref()?;
         let proposal = candidate.tip_block()?;
         if Arc::strong_count(candidate) != 1
-            || candidate.non_finalized_root_height() > root_height
-            || parent_chain.hash_by_height(root_height) != candidate.hash_by_height(root_height)
+            || candidate.hash_by_height(root_height)
+                != Some(parent_chain.hash_by_height(root_height)?)
             || candidate.non_finalized_tip_height()
                 != parent_chain.non_finalized_tip_height().next().ok()?
             || !candidate.can_rebind_tip()
@@ -792,13 +792,7 @@ impl NonFinalizedState {
                     chain.pop_roots_through(height);
                 }
                 // The current parent supplies the common origin, even after an empty-state gap.
-                chain.partial_cumulative_work = parent_chain.partial_cumulative_work
-                    + block
-                        .block
-                        .header
-                        .difficulty_threshold
-                        .to_work()
-                        .expect("a prevalidated block has valid work");
+                chain.partial_cumulative_work = parent_chain.partial_cumulative_work + block.work();
                 Some(chain)
             }
             // The chain is unchanged, so the next proposal can still replay it.

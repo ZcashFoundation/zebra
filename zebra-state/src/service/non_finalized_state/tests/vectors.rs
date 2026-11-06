@@ -543,6 +543,151 @@ fn prepared_commit_preserves_fork_choice_across_external_finalization() -> Resul
     Ok(())
 }
 
+/// Prepared chains can lag finalized database writes once the reorg window is full.
+#[test]
+fn prepared_chain_rebinds_beyond_the_finalization_window() -> Result<()> {
+    use crate::{tests::setup::new_state_with_mainnet_genesis, MAX_BLOCK_REORG_HEIGHT};
+
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, _) = new_state_with_mainnet_genesis();
+    let mut next: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    for _ in 0..=MAX_BLOCK_REORG_HEIGHT {
+        state.commit_prevalidated_contextual(
+            next.clone().prepare().test_with_zero_spent_utxos(),
+            &finalized.db,
+            None,
+        )?;
+        next = next.make_fake_child();
+    }
+
+    for finalized_count in [1, 1, 2] {
+        let parent = state.best_chain().expect("the chain is non-empty").clone();
+        let proposal = next.clone().prepare().test_with_zero_spent_utxos();
+        state.store_prepared((*parent).clone().push(proposal.clone())?);
+        let mut expected = (*parent).clone();
+        for _ in 0..finalized_count {
+            let height = state.root_height().expect("unfinalized roots remain");
+            let finalizable = state.finalize_keeping_best_chain(height);
+            finalized.commit_finalized_direct(finalizable, None, "test")?;
+            expected.pop_root();
+        }
+        // Also cover a writer that has already removed its retained roots.
+        if finalized_count == 2 {
+            state.pop_finalized_roots();
+        }
+        let retired_parent = state
+            .best_chain()
+            .expect("unfinalized blocks remain")
+            .clone();
+        let mut solved_block = Block::clone(&proposal.block);
+        let mut header = block::Header::clone(&solved_block.header);
+        header.nonce[0] ^= 1;
+        solved_block.header = Arc::new(header);
+        let mut solved = proposal;
+        solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+        next = solved.block.make_fake_child();
+        expected = expected.push(solved.clone())?;
+
+        state.commit_prevalidated_contextual(solved, &finalized.db, None)?;
+        assert!(state
+            .best_chain()
+            .expect("the solved block was committed")
+            .eq_internal_state(&expected));
+        assert_eq!(
+            state.root_height(),
+            Some(expected.non_finalized_root_height())
+        );
+        assert_eq!(state.best_chain_len(), Some(u32::try_from(expected.len())?));
+        assert_eq!(
+            parent.non_finalized_tip_hash(),
+            retired_parent.non_finalized_tip_hash()
+        );
+        let retired = state
+            .prepared()
+            .take()
+            .expect("rebinding retires the parent rather than leaving the proposal cached");
+        assert!(Arc::ptr_eq(&retired, &retired_parent));
+    }
+
+    Ok(())
+}
+
+/// Root normalization does not allow shared, mismatched, or incomplete prepared chains to rebind.
+#[test]
+fn prepared_chain_rebinding_preserves_push_fallbacks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let (base, blocks, _, _) = large_transfer_chain(&[&[0], &[1], &[0]])?;
+    let published = base.push(blocks[0].clone())?.push(blocks[1].clone())?;
+    let proposal = blocks[2].clone();
+    let prepared = published.clone().push(proposal.clone())?;
+    let (other_base, other_blocks, _, _) = large_transfer_chain(&[&[1], &[1], &[0]])?;
+    let mut other_root = other_base;
+    for block in other_blocks {
+        other_root = other_root.push(block)?;
+    }
+    let mut solved_block = Block::clone(&proposal.block);
+    let mut header = block::Header::clone(&solved_block.header);
+    header.nonce = [0x55; 32].into();
+    solved_block.header = Arc::new(header);
+    let mut solved = proposal.clone();
+    solved.rebind(Arc::new(solved_block), std::time::Instant::now());
+    let expected = published.clone().push(solved.clone())?;
+
+    let mut later_root = prepared.clone();
+    later_root.pop_root();
+    let mut without_parent_history = prepared.clone();
+    without_parent_history.pop_root();
+    without_parent_history.pop_root();
+    let mut changed_proposal = proposal;
+    let mut changed_block = Block::clone(&changed_proposal.block);
+    let mut changed_header = block::Header::clone(&changed_block.header);
+    changed_header.time += chrono::Duration::seconds(1);
+    changed_block.header = Arc::new(changed_header);
+    changed_proposal.rebind(Arc::new(changed_block), std::time::Instant::now());
+    let changed_prepared = published.clone().push(changed_proposal)?;
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
+
+    for (candidate, shared) in [
+        (prepared, true),
+        (other_root, false),
+        (later_root, false),
+        (without_parent_history, false),
+        (published.clone(), false),
+        (changed_prepared, false),
+    ] {
+        let mut state = NonFinalizedState::new(&network);
+        state.insert(Arc::new(published.clone()));
+        state.store_prepared(candidate);
+        let cached = state
+            .prepared()
+            .as_ref()
+            .expect("a proposal is cached")
+            .clone();
+        let original = Arc::downgrade(&cached);
+        let reader = shared.then_some(cached);
+        state.commit_prevalidated_contextual(solved.clone(), &finalized_state.db, None)?;
+        assert!(state
+            .best_chain()
+            .expect("the solved block was committed")
+            .eq_internal_state(&expected));
+        assert!(std::sync::Weak::ptr_eq(
+            &original,
+            &Arc::downgrade(
+                state
+                    .prepared()
+                    .as_ref()
+                    .expect("fallback keeps the candidate")
+            ),
+        ));
+        drop(reader);
+    }
+
+    Ok(())
+}
+
 /// Run with `RUST_LOG=info` and `--ignored --nocapture`; fixture setup is excluded from timings.
 #[test]
 #[ignore = "microbenchmark"]
