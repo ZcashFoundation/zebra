@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Experimental early-relay connections can negotiate compact blocks using mempool transactions, with bounded missing-transaction recovery and full-block fallback; ordinary peers receive no new messages.
+time: 2026-10-23T03:22:51.918523103+02:00
