@@ -17,8 +17,12 @@ use proptest::prelude::*;
 use tokio::sync::{mpsc, watch};
 
 use zebra_chain::{
-    block::{self, Block, Header},
-    parameters::{checkpoint::list::CheckpointList, Network},
+    block::{self, Block, Header, SyncHashEntry},
+    parameters::{
+        checkpoint::list::CheckpointList,
+        known_hashes::{chunk_pin, KnownHashListSpec},
+        Network,
+    },
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 use zebra_network::{
@@ -29,7 +33,13 @@ use zebra_network::{
 use zebra_state as zs;
 
 use super::*;
-use crate::{components::checkpoint_sync::anchors::Anchors, BoxError};
+use crate::{
+    components::checkpoint_sync::{
+        anchors::Anchors,
+        known_hashes::{ChunkPins, HashPeer, KnownHashes, PinnedList},
+    },
+    BoxError,
+};
 
 // The window
 
@@ -410,6 +420,57 @@ impl RangeStream for MockStream {
     }
 }
 
+impl TestChain {
+    /// The `get-hashes` entries of the chain's blocks `start..start + count`.
+    fn entries(&self, start: block::Height, count: u32) -> Vec<SyncHashEntry> {
+        self.blocks
+            .range(start..)
+            .take(count as usize)
+            .map(|(_, (raw, _, _))| {
+                let block: Block = raw.zcash_deserialize_into().unwrap();
+                SyncHashEntry::for_block(&block, raw.len())
+            })
+            .collect()
+    }
+
+    /// A known-hash list of the whole chain, in chunks of 4 heights.
+    fn known_hash_list(&self) -> Arc<dyn ChunkPins> {
+        let max_height = *self.blocks.keys().last().unwrap();
+        let entries = self.entries(block::Height(0), max_height.0 + 1);
+        let chunk_heights = 4;
+        let spec = KnownHashListSpec {
+            max_height,
+            chunk_heights,
+            chunk_hashes: entries
+                .chunks(chunk_heights as usize)
+                .map(chunk_pin)
+                .collect::<Vec<_>>()
+                .into(),
+        };
+
+        Arc::new(PinnedList {
+            spec,
+            network: Network::Mainnet,
+        })
+    }
+}
+
+impl HashPeer for MockPeer {
+    type Id = ConnectionId;
+
+    fn id(&self) -> ConnectionId {
+        self.id
+    }
+
+    async fn get_hashes(
+        &self,
+        start: block::Height,
+        count: u32,
+    ) -> Result<Vec<SyncHashEntry>, SyncPeerError> {
+        Ok(self.chain.entries(start, count))
+    }
+}
+
 /// Serializes `raw` with its coinbase duplicated: the header and the coinbase
 /// height are unchanged, but the body no longer matches the header.
 fn corrupt(raw: &[u8]) -> Bytes {
@@ -684,10 +745,21 @@ async fn run_engine_with(
     fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
     hints_gate: Option<watch::Receiver<bool>>,
 ) -> Harness {
-    let chain = peers[0].chain.clone();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(peers));
+    run_engine_on(peers_rx, fail, hints_gate, None).await
+}
+
+/// Runs the engine from height 1 to 10 on `peers`, with the known-hash
+/// source `hashes`.
+async fn run_engine_on(
+    peers_rx: watch::Receiver<Arc<[MockPeer]>>,
+    fail: impl Fn(block::Height, u32) -> Option<MockFailure> + Send + 'static,
+    hints_gate: Option<watch::Receiver<bool>>,
+    hashes: Option<Box<dyn HashSource>>,
+) -> Harness {
+    let chain = peers_rx.borrow()[0].chain.clone();
     let (commits_tx, mut commits_rx) = mpsc::unbounded_channel();
     let (lengths_tx, mut lengths_rx) = mpsc::channel(16);
-    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(peers));
     let charged = Charged::default();
 
     let outcome = tokio::time::timeout(
@@ -704,6 +776,7 @@ async fn run_engine_with(
             unit_lengths: lengths_tx,
             charged: charged.clone(),
             blamed: BTreeSet::new(),
+            hashes,
         }
         .run(),
     )
@@ -752,6 +825,7 @@ async fn engine_syncs_to_the_target() {
             exit: EngineExit::TargetReached,
             base: block::Height(11),
             blamed: BTreeSet::new(),
+            known_hash_units: 0,
         }
     );
     assert_eq!(harness.committed.len(), 10, "each height is committed once");
@@ -999,6 +1073,7 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
             exit: EngineExit::NoProgress,
             base: block::Height(3),
             blamed: BTreeSet::new(),
+            known_hash_units: 0,
         },
         "lying peers make the engine hand back, not fail"
     );
@@ -1032,6 +1107,7 @@ async fn engine_stops_when_the_state_write_task_is_gone() {
             unit_lengths: lengths_tx,
             charged: Charged::default(),
             blamed: BTreeSet::new(),
+            hashes: None,
         }
         .run(),
     )
@@ -1044,6 +1120,7 @@ async fn engine_stops_when_the_state_write_task_is_gone() {
             exit: EngineExit::Shutdown,
             base: block::Height(1),
             blamed: BTreeSet::new(),
+            known_hash_units: 0,
         }
     );
 }
@@ -1096,6 +1173,7 @@ async fn engine_hands_back_without_peers() {
         unit_lengths: lengths_tx,
         charged: charged.clone(),
         blamed: BTreeSet::new(),
+        hashes: None,
     }
     .run()
     .await;
@@ -1106,6 +1184,7 @@ async fn engine_hands_back_without_peers() {
             exit: EngineExit::TooFewPeers,
             base: block::Height(1),
             blamed: BTreeSet::new(),
+            known_hash_units: 0,
         }
     );
     assert_eq!(charged.load(Ordering::SeqCst), 0, "nothing stays charged");
@@ -1143,6 +1222,7 @@ async fn engine_skips_blamed_peers() {
             unit_lengths: lengths_tx,
             charged: Charged::default(),
             blamed: [blamed_peer.ip].into_iter().collect(),
+            hashes: None,
         }
         .run(),
     )
@@ -1160,4 +1240,124 @@ async fn engine_skips_blamed_peers() {
         0,
         "the blamed peer's new connection is not asked for blocks"
     );
+}
+
+/// Known-hash entries for the test chain, resident from `from` up, with a
+/// wrong hash at `wrong`.
+#[derive(Debug)]
+struct FixedEntries {
+    entries: Vec<SyncHashEntry>,
+    from: block::Height,
+    wrong: Option<block::Height>,
+}
+
+impl HashSource for FixedEntries {
+    fn max_height(&self) -> block::Height {
+        block::Height(10)
+    }
+
+    fn entry(&self, height: block::Height) -> Option<SyncHashEntry> {
+        if height < self.from {
+            return None;
+        }
+        let mut entry = *self.entries.get(height.0 as usize)?;
+        if Some(height) == self.wrong {
+            entry.hash = block::Hash([0xab; 32]);
+        }
+        Some(entry)
+    }
+
+    fn request(&mut self, _start: block::Height, _end: block::Height) {}
+
+    fn changed(
+        &mut self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), BoxError>> + Send + '_>>
+    {
+        Box::pin(std::future::pending())
+    }
+
+    fn release_below(&mut self, _height: block::Height) {}
+}
+
+/// With the known-hash list resident, the engine plans its units at known
+/// hashes, with exact sizes ending anywhere, and commits every block as with
+/// checkpoint anchors.
+#[tokio::test]
+async fn engine_anchors_units_at_known_hashes() {
+    let _init_guard = zebra_test::init();
+
+    let chain = TestChain::new();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(honest_pair(&chain)));
+
+    // The supervisor starts fetching before it claims block download: here the chunks are
+    // fetched, verified against their pins, and resident before the run starts.
+    let mut hashes = KnownHashes::with_pins(chain.known_hash_list(), peers_rx.clone());
+    hashes.request(block::Height(1), block::Height(10));
+    while hashes.entry(block::Height(10)).is_none() {
+        tokio::time::timeout(Duration::from_secs(10), hashes.changed())
+            .await
+            .expect("the chunks are fetched")
+            .expect("the source does not fail");
+    }
+
+    let harness = run_engine_on(peers_rx, |_, _| None, None, Some(Box::new(hashes))).await;
+
+    assert_eq!(harness.outcome.exit, EngineExit::TargetReached);
+    assert_eq!(harness.outcome.base, block::Height(11));
+    assert!(
+        harness.outcome.known_hash_units > 0,
+        "units are anchored at known hashes: {:?}",
+        harness.outcome
+    );
+    assert_eq!(
+        harness.committed.iter().copied().collect::<BTreeSet<_>>(),
+        all_heights()
+    );
+    assert_eq!(harness.committed.len(), 10, "each height is committed once");
+}
+
+/// Units whose known-hash entries are not resident are anchored at
+/// checkpoints.
+#[tokio::test]
+async fn engine_falls_back_to_checkpoints_without_entries() {
+    let _init_guard = zebra_test::init();
+
+    let chain = TestChain::new();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(honest_pair(&chain)));
+    let hashes = FixedEntries {
+        entries: chain.entries(block::Height(0), 11),
+        from: block::Height(11),
+        wrong: None,
+    };
+
+    let harness = run_engine_on(peers_rx, |_, _| None, None, Some(Box::new(hashes))).await;
+
+    assert_eq!(harness.outcome.exit, EngineExit::TargetReached);
+    assert_eq!(harness.outcome.known_hash_units, 0);
+    assert_eq!(harness.unit_lengths, vec![5, 5], "checkpoint intervals");
+}
+
+/// A block chained to a checkpoint that is not the known-hash list's entry
+/// means the list and the checkpoints disagree: a defect.
+#[tokio::test]
+async fn engine_stops_when_the_list_disagrees_with_the_checkpoints() {
+    let _init_guard = zebra_test::init();
+
+    let chain = TestChain::new();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(honest_pair(&chain)));
+    // No entry at the frontier, so the frontier unit is anchored at a checkpoint.
+    let hashes = FixedEntries {
+        entries: chain.entries(block::Height(0), 11),
+        from: block::Height(2),
+        wrong: Some(block::Height(3)),
+    };
+
+    let harness = run_engine_on(peers_rx, |_, _| None, None, Some(Box::new(hashes))).await;
+
+    assert!(
+        matches!(&harness.outcome.exit, EngineExit::Defect(defect) if defect.contains("known-hash list")),
+        "{:?}",
+        harness.outcome
+    );
+    assert!(harness.outcome.base <= block::Height(3));
 }

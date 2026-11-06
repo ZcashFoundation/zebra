@@ -1291,3 +1291,150 @@ fn new_peers_start_below_the_measured_peers() {
     assert!(scheduler.peers[&peer(2)].rate < measured);
     assert!(!scheduler.peers[&peer(2)].measured);
 }
+
+/// A known-hash source whose entries become resident when the test says so,
+/// and which records what the scheduler asked of it.
+#[derive(Debug, Default)]
+struct SwitchedEntries {
+    resident: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    requested_from: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    released_below: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl SwitchedEntries {
+    /// Every height has a 1 MiB block.
+    fn entry_at(height: block::Height) -> SyncHashEntry {
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&height.0.to_le_bytes());
+        SyncHashEntry {
+            hash: block::Hash(hash),
+            size: MIB,
+            txs: 1,
+            txouts: 1,
+            notes: 0,
+        }
+    }
+}
+
+impl HashSource for SwitchedEntries {
+    fn max_height(&self) -> block::Height {
+        block::Height(10_000_000)
+    }
+
+    fn entry(&self, height: block::Height) -> Option<SyncHashEntry> {
+        self.resident
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| Self::entry_at(height))
+    }
+
+    fn request(&mut self, start: block::Height, _end: block::Height) {
+        self.requested_from
+            .store(start.0, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn changed(&mut self) -> Pin<Box<dyn Future<Output = Result<(), BoxError>> + Send + '_>> {
+        Box::pin(std::future::pending())
+    }
+
+    fn release_below(&mut self, height: block::Height) {
+        self.released_below
+            .store(height.0, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Units start at checkpoint anchors while the known-hash entries are not
+/// resident, and at known hashes, with exact sizes, once they are. The source
+/// is asked for the entries from the commit frontier up, and releases those
+/// below it.
+#[test]
+fn units_fall_back_to_checkpoints_until_known_hashes_are_resident() {
+    use std::sync::atomic::Ordering;
+
+    let _init_guard = zebra_test::init();
+
+    let anchors = mainnet_anchors();
+    let config = EngineConfig::default();
+    let target = anchors.final_height();
+    let source = SwitchedEntries::default();
+    let resident = source.resident.clone();
+    let requested_from = source.requested_from.clone();
+    let released_below = source.released_below.clone();
+    let mut scheduler = scheduler(&config, block::Height(1), target, Instant::now())
+        .with_hash_source(Box::new(source));
+    assert_eq!(requested_from.load(Ordering::SeqCst), 1);
+
+    // Not resident: the frontier unit is a checkpoint interval.
+    assert!(scheduler.plan_unit());
+    let first = scheduler.units[&scheduler.queue.first().unwrap().1].unit;
+    assert_eq!(first.anchor, Anchor::Checkpoint);
+    assert_eq!(anchors.hash(first.end), Some(first.end_hash));
+    assert_eq!(scheduler.known_hash_units(), 0);
+
+    // Resident: the next unit is anchored at a known hash, deep, so 64 blocks of 1 MiB.
+    resident.store(true, Ordering::SeqCst);
+    assert!(scheduler.plan_unit());
+    let second = scheduler
+        .units
+        .values()
+        .map(|state| state.unit)
+        .find(|unit| unit.start == first.end.next().unwrap())
+        .expect("the next unit is planned");
+    assert_eq!(second.anchor, Anchor::KnownHash);
+    assert_eq!(second.est_bytes, DEEP_UNIT_BYTES);
+    assert_eq!(second.end.0 - second.start.0 + 1, 64);
+    assert_eq!(second.end_hash, SwitchedEntries::entry_at(second.end).hash);
+    assert_eq!(scheduler.known_hash_units(), 1);
+    assert_eq!(
+        scheduler.known_hash(second.end),
+        Some(SwitchedEntries::entry_at(second.end))
+    );
+
+    // The frontier moves: the entries below it are released, and the source is asked for the
+    // entries above it.
+    let base = first.end.next().unwrap();
+    scheduler.set_frontier(base);
+    assert_eq!(released_below.load(Ordering::SeqCst), base.0);
+    assert_eq!(requested_from.load(Ordering::SeqCst), base.0);
+
+    // A failed source is dropped: units fall back to checkpoint anchors.
+    scheduler.drop_hash_source();
+    assert!(scheduler.plan_unit());
+    let third = scheduler
+        .units
+        .values()
+        .map(|state| state.unit)
+        .find(|unit| unit.start == second.end.next().unwrap())
+        .expect("the next unit is planned");
+    assert_eq!(third.anchor, Anchor::Checkpoint);
+    assert_eq!(scheduler.known_hash(third.end), None);
+}
+
+/// With the entries resident from the start, the frontier unit is anchored
+/// at a known hash and holds 16 MiB of blocks.
+#[test]
+fn the_frontier_unit_at_a_known_hash_is_small() {
+    let _init_guard = zebra_test::init();
+
+    let anchors = mainnet_anchors();
+    let config = EngineConfig::default();
+    let source = SwitchedEntries::default();
+    source
+        .resident
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut scheduler = scheduler(
+        &config,
+        block::Height(1),
+        anchors.final_height(),
+        Instant::now(),
+    )
+    .with_hash_source(Box::new(source));
+
+    assert!(scheduler.plan_unit());
+    let frontier = scheduler.units[&scheduler.queue.first().unwrap().1].unit;
+    assert_eq!(frontier.anchor, Anchor::KnownHash);
+    assert_eq!(
+        (frontier.start, frontier.end),
+        (block::Height(1), block::Height(16))
+    );
+    assert_eq!(frontier.est_bytes, FRONTIER_UNIT_BYTES);
+}
