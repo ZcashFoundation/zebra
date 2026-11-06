@@ -42,6 +42,8 @@ use crate::{
     BoxError, MisbehaviorReport, PeerSocketAddr,
 };
 
+mod sync_peer;
+
 /// Every loopback exchange finishes in well under this.
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -138,6 +140,7 @@ impl RawServer {
                 local_services: PeerServices::NODE_NETWORK,
                 object_permits: global_object_permits(),
             },
+            ObjectSizes::spawn(),
             None,
         );
 

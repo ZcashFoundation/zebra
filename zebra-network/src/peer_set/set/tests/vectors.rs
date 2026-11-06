@@ -597,7 +597,7 @@ async fn block_adverts_skip_version_2_peers() {
 async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::Endpoint; 2])) {
     use crate::{
         peer::v2::{
-            connection::{global_object_permits, spawn_connection, ConnectionParams},
+            connection::{global_object_permits, spawn_connection, ConnectionParams, ObjectSizes},
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
@@ -673,6 +673,7 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         dialer_handshake.expect("the handshake completes"),
         counter.track_connection(),
         params.clone(),
+        ObjectSizes::spawn(),
         None,
     )
     .0;
@@ -681,6 +682,7 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         listener_handshake.expect("the handshake completes"),
         counter.track_connection(),
         params,
+        ObjectSizes::spawn(),
         None,
     )
     .0;

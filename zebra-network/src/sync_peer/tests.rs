@@ -17,7 +17,7 @@ use crate::{
     constants::MAX_PEER_MISBEHAVIOR_SCORE,
     peer::{
         v2::{
-            connection::{spawn_connection, ConnectionParams},
+            connection::{spawn_connection, ConnectionParams, ObjectSizes},
             handshake::{CompletedHandshake, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
@@ -81,6 +81,7 @@ pub(super) async fn fixture() -> Fixture {
     let remote_tip_height = node_handshake.connection_info.remote.start_height();
     let misbehavior = MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8);
     let mut counter = ActiveConnectionCounter::new_counter();
+    let object_sizes = ObjectSizes::spawn();
     let (client, closer) = spawn_connection(
         node.clone(),
         node_handshake,
@@ -101,6 +102,7 @@ pub(super) async fn fixture() -> Fixture {
             local_services: crate::protocol::external::types::PeerServices::NODE_NETWORK,
             object_permits: crate::peer::v2::connection::global_object_permits(),
         },
+        object_sizes.clone(),
         None,
     );
     let peer = SyncPeer::new(
@@ -111,6 +113,7 @@ pub(super) async fn fixture() -> Fixture {
         node,
         misbehavior,
         closer,
+        object_sizes,
     );
 
     Fixture {
