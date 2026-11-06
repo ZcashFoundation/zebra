@@ -769,9 +769,11 @@ where
                     .clone()
                     .try_acquire_owned()
                     .expect("requests are only taken while a permit is available, and only this task takes permits");
+                // The guard is created before the task is spawned, so if the task is aborted
+                // before it first runs, dropping it still answers the client.
                 self.tasks.spawn(outbound::drive(
                     request,
-                    tx,
+                    outbound::ResponseGuard::new(tx),
                     permit,
                     outbound::RequestContext {
                         connection: self.connection.clone(),
