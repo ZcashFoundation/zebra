@@ -83,7 +83,10 @@ const SHORT_ANSWER_MARGIN: Duration = Duration::from_millis(100);
 /// The request is checked against the draft's bounds before anything is
 /// sent: one outside them fails with [`PeerError::RequestOutOfBounds`],
 /// without a stream, and the connection stays open.
-pub(super) async fn fetch_object(
+///
+/// The connection's own requests and its [`SyncPeer`](crate::SyncPeer) pass
+/// the connection's one [`ObjectSizes`].
+pub(crate) async fn fetch_object(
     connection: &Connection,
     sizes: &ObjectSizes,
     deadline: tokio::time::Instant,
@@ -163,7 +166,7 @@ pub(super) async fn fetch_object(
 /// reach it over a channel; it exits when the connection task and every
 /// request task have dropped their handles.
 #[derive(Clone, Debug)]
-pub(in crate::peer::v2::connection) struct ObjectSizes {
+pub(crate) struct ObjectSizes {
     checks: mpsc::Sender<SizeCheck>,
 }
 
@@ -178,7 +181,7 @@ struct SizeCheck {
 
 impl ObjectSizes {
     /// Spawns a size task for a new connection.
-    pub(in crate::peer::v2::connection) fn spawn() -> Self {
+    pub(crate) fn spawn() -> Self {
         // Each in-flight request waits for at most one answer.
         let (checks, receiver) = mpsc::channel(MAX_OUTBOUND_REQUEST_STREAMS);
         tokio::spawn(run(receiver));

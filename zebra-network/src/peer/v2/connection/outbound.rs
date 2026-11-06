@@ -46,7 +46,7 @@ use super::{close_error, Event, Events};
 
 mod object;
 
-pub(super) use object::ObjectSizes;
+pub(crate) use object::{fetch_object, ObjectSizes};
 
 /// The longest `addrv2` record: time, a 9-byte services CompactSize, the
 /// network ID, a 3-byte length, the 512-byte address maximum, and the port.
@@ -240,7 +240,7 @@ pub(super) async fn drive(
 
 /// Why a request failed.
 #[derive(Debug, thiserror::Error)]
-enum Failure {
+pub(crate) enum Failure {
     /// The response did not complete in time.
     #[error("response timed out")]
     Timeout,

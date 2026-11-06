@@ -75,6 +75,8 @@ mod announcements;
 mod inbound;
 mod outbound;
 
+pub(crate) use outbound::{fetch_object, Failure, ObjectSizes};
+
 pub(crate) use outbound::{RequestSend, ResponseStream};
 
 #[cfg(test)]
@@ -439,11 +441,16 @@ pub(super) fn close_error(reason: String, code: ErrorCode) -> PeerError {
 ///
 /// `exit_notifier` is dropped when the connection task ends, however it
 /// ends, so a caller holding the receiver learns the connection is gone.
+///
+/// `object_sizes` is the connection's own size task, shared with the
+/// connection's [`SyncPeer`](crate::SyncPeer) so that every `get-object`
+/// answer on the connection is checked against the same earlier sizes.
 pub fn spawn_connection<S>(
     connection: Connection,
     completed: CompletedHandshake,
     connection_tracker: ConnectionTracker,
     params: ConnectionParams<S>,
+    object_sizes: ObjectSizes,
     exit_notifier: Option<tokio::sync::oneshot::Sender<()>>,
 ) -> (Client, ConnectionCloser)
 where
@@ -517,7 +524,7 @@ where
         overloads: Arc::new(Overloads::new()),
         objects,
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
-        object_sizes: outbound::ObjectSizes::spawn(),
+        object_sizes,
         tasks: JoinSet::new(),
         events,
         fatal_rx,
@@ -604,7 +611,7 @@ struct ConnectionTask<S> {
     /// Bounds how many of this node's requests are in flight to the peer at once.
     outbound_permits: Arc<Semaphore>,
     /// The object sizes the peer gave in its `get-object` answers to this node.
-    object_sizes: outbound::ObjectSizes,
+    object_sizes: ObjectSizes,
     tasks: JoinSet<()>,
     events: Events,
     /// Connection-closing events from the stream tasks and this node's

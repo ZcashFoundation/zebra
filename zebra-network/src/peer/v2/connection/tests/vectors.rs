@@ -36,7 +36,8 @@ use crate::{
                     MAX_OBJECT_STREAMS_PER_PEER, RESPONSE_BYTES_LIMIT,
                 },
                 outbound::{
-                    drive, RequestContext, RequestSend, ResponseGuard, MAX_OUTBOUND_REQUEST_STREAMS,
+                    drive, ObjectSizes, RequestContext, RequestSend, ResponseGuard,
+                    MAX_OUTBOUND_REQUEST_STREAMS,
                 },
                 spawn_connection, ConnectionParams, Event, Events, Overloads, EVENT_QUEUE,
                 MAX_UNKNOWN_HANDSHAKE_RECORDS,
@@ -289,6 +290,7 @@ fn spawn_node_scored(
             local_services: PeerServices::NODE_NETWORK,
             object_permits: global_object_permits(),
         },
+        ObjectSizes::spawn(),
         None,
     )
     .0;
@@ -3697,7 +3699,7 @@ async fn response_violations_are_never_crowded_out() {
                 genesis_hash: network.genesis_hash(),
                 misbehavior,
                 events,
-                object_sizes: crate::peer::v2::connection::outbound::ObjectSizes::spawn(),
+                object_sizes: ObjectSizes::spawn(),
             };
             let (driven, ()) = tokio::join!(
                 tokio::time::timeout(

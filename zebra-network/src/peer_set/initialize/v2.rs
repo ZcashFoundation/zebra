@@ -43,7 +43,7 @@ use crate::{
             addr_relay::AddrRelay,
             connection::{
                 global_block_range_permits, global_hashes_permits, global_object_permits,
-                spawn_connection, ConnectionParams,
+                spawn_connection, ConnectionParams, ObjectSizes,
             },
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
@@ -1036,11 +1036,15 @@ where
     let services = completed.connection_info.remote.services();
     let remote_tip_height = completed.connection_info.remote.start_height();
     let misbehavior = shared.connection_params.misbehavior.clone();
+    // The connection task and its `SyncPeer` share one size task, so both request paths check
+    // `get-object` sizes against the same earlier answers.
+    let object_sizes = ObjectSizes::spawn();
     let (client, closer): (peer::Client, _) = spawn_connection(
         connection.clone(),
         completed,
         connection_tracker,
         shared.connection_params,
+        object_sizes.clone(),
         exit_notifier,
     );
     let connection_info = client.connection_info.clone();
@@ -1053,6 +1057,7 @@ where
             connection,
             misbehavior,
             closer,
+            object_sizes,
         ));
     }
 
