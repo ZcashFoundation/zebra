@@ -396,8 +396,9 @@ where
     cancel_handles: HashMap<D::Key, oneshot::Sender<CancelClientWork>>,
 
     /// The keys of every connected peer, ready or busy: the keys of `ready_services` and
-    /// `cancel_handles`. The dialers check it, so they don't dial a connection this peer set
-    /// would drop.
+    /// `cancel_handles`. The dialers check it, so they dial fewer connections this peer set
+    /// would drop. Pending handshakes aren't in it, so this peer set still drops a racing
+    /// duplicate itself.
     connected_peers: watch::Sender<Arc<HashSet<D::Key>>>,
 
     // Peer Validation
