@@ -1,4 +1,5 @@
-//! Regression tests for the fixed-width to variable-width v33 migration.
+//! Regression tests for the fixed-width to variable-width v33 migration, which runs above the v32
+//! snapshot barrier.
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
@@ -56,6 +57,7 @@ const EXPECTED_FAMILIES: &[&str] = &[
     "ironwood_note_commitment_subtree",
     "history_tree",
     "block_info",
+    "snapshot_base",
 ];
 
 type Records = BTreeMap<String, Vec<(Vec<u8>, Vec<u8>)>>;
@@ -74,6 +76,14 @@ fn running_version() -> Version {
 fn v30() -> Version {
     let mut version = running_version();
     version.major = 30;
+    version.minor = 1;
+    version
+}
+
+fn v32() -> Version {
+    let mut version = running_version();
+    version.major = 32;
+    version.minor = 0;
     version
 }
 
@@ -131,6 +141,10 @@ fn seed_legacy_records(db: &ZebraDb) -> Records {
 
     for (family_index, family) in AFFECTED_FAMILIES.iter().enumerate() {
         let salt = u8::try_from(family_index + 1).unwrap();
+        if family.name == "snapshot_base" {
+            records.insert(family.name.to_string(), Vec::new());
+            continue;
+        }
         let mut family_records = vec![(
             example_part(family.key, salt),
             example_part(family.value, salt.wrapping_add(1)),
@@ -219,9 +233,13 @@ fn assert_records(db: &ZebraDb, expected: &Records) {
 }
 
 fn apply_height_upgrade(db: &ZebraDb) {
+    apply_height_upgrade_from(db, v30());
+}
+
+fn apply_height_upgrade_from(db: &ZebraDb, disk_version: Version) {
     let initial_tip = prepare(db).unwrap();
     let (_sender, receiver) = bounded(1);
-    let change = DbFormatChange::open_database(&running_version(), Some(v30()));
+    let change = DbFormatChange::open_database(&running_version(), Some(disk_version));
     change
         .apply_format_upgrade(db, initial_tip, &receiver)
         .unwrap();
@@ -232,6 +250,39 @@ fn apply_height_upgrade(db: &ZebraDb) {
 fn family_list_covers_every_height_dependent_column_family() {
     let actual: Vec<_> = AFFECTED_FAMILIES.iter().map(|family| family.name).collect();
     assert_eq!(actual, EXPECTED_FAMILIES);
+}
+
+#[test]
+fn upgrade_chain_runs_variable_heights_after_the_snapshot_barrier() {
+    let running = running_version();
+    assert_eq!((running.major, running.minor, running.patch), (33, 0, 0));
+    let chain: Vec<_> = super::super::format_upgrades(Some(v30()))
+        .map(|upgrade| (upgrade.version(), upgrade.needs_migration()))
+        .collect();
+    assert_eq!(
+        chain,
+        vec![
+            (Version::new(32, 0, 0), false),
+            (Version::new(33, 0, 0), true)
+        ]
+    );
+
+    let sources = super::super::restorable_db_source_versions(33);
+    assert_eq!(&sources[..3], &[32, 30, 29]);
+    for disk_version in [v30(), v32()] {
+        assert!(
+            !super::super::can_read_without_migration(&disk_version, &running_version()),
+            "{disk_version} has fixed-width heights"
+        );
+        assert!(is_required(&DbFormatChange::open_database(
+            &running_version(),
+            Some(disk_version)
+        )));
+    }
+    assert!(super::super::can_read_without_migration(
+        &running_version(),
+        &running_version()
+    ));
 }
 
 #[test]
@@ -258,6 +309,65 @@ fn migration_rewrites_all_records_collisions_and_survives_reopen() {
 
     let reopened = open_test_db(&config);
     assert_records(&reopened, &expected);
+}
+
+#[test]
+fn snapshot_born_v32_database_upgrades_and_preserves_history_floors() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = test_config(&cache);
+    config.prune_blocks_older_than = Some(crate::constants::MIN_PRUNING_RETENTION);
+    let db = open_test_db(&config);
+    let base = crate::SnapshotBase {
+        window_start: Height(2),
+        height: Height(2),
+        block_hash: zebra_chain::block::Hash([0x22; 32]),
+        manifest: zebra_chain::state_snapshot::ObjectHash([0x33; 32]),
+        deferred_checks: 0,
+    };
+    let live = db.disk_db().inner();
+    live.put_cf(
+        live.cf_handle("hash_by_height").unwrap(),
+        legacy_height(base.height),
+        base.block_hash.as_bytes(),
+    )
+    .unwrap();
+    live.put_cf(
+        live.cf_handle("tx_by_loc").unwrap(),
+        legacy_location(TransactionLocation::from_usize(base.height, 0)),
+        [0x44; 8],
+    )
+    .unwrap();
+    live.put_cf(
+        live.cf_handle("snapshot_base").unwrap(),
+        [],
+        legacy_part(Part::SnapshotBase, &base.as_bytes()),
+    )
+    .unwrap();
+    // Snapshot imports before format 33 wrote fixed-width records into `state/v32`.
+    db.update_format_version_on_disk(&v32()).unwrap();
+
+    apply_height_upgrade_from(&db, v32());
+
+    assert_eq!(
+        db.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+    let marker = live.cf_handle("snapshot_base").unwrap();
+    let migrated = live.get_pinned_cf(&marker, []).unwrap().unwrap();
+    assert_eq!(crate::SnapshotBase::decode(&migrated).unwrap(), base);
+    let history = db.history_capabilities().unwrap();
+    assert_eq!(history.lowest_retained_height, Height(2));
+    assert_eq!(history.lowest_known_height, Height(2));
+    assert_eq!(history.snapshot_base, Some(base));
+    drop(migrated);
+    drop(db);
+
+    let restarted = open_test_db(&config);
+    assert_eq!(
+        restarted.history_capabilities().unwrap().snapshot_base,
+        Some(base)
+    );
 }
 
 #[test]
@@ -427,6 +537,28 @@ fn read_only_open_and_refresh_preserve_completed_migration_checkpoint() {
 }
 
 #[test]
+fn restart_after_the_rewrite_removes_completed_migration_checkpoint() {
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let db = open_test_db(&config);
+    let (checkpoint, temporary) = checkpoint_paths(&db);
+    db.disk_db().create_checkpoint(&checkpoint).unwrap();
+    db.update_format_version_on_disk(&running_version())
+        .unwrap();
+    assert!(checkpoint.exists());
+    drop(db);
+
+    let restarted = open_test_db(&config);
+    assert!(!checkpoint.exists());
+    assert!(!temporary.exists());
+    assert_eq!(
+        restarted.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+}
+
+#[test]
 fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
@@ -514,7 +646,7 @@ fn stale_same_identity_checkpoint_is_rejected_before_replacing_newer_state() {
 }
 
 #[test]
-fn versionless_rename_gap_runs_the_v31_migration_instead_of_inferring_current() {
+fn versionless_rename_gap_runs_the_height_migration_instead_of_inferring_current() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
     let config = test_config(&cache);
@@ -539,7 +671,7 @@ fn versionless_rename_gap_runs_the_v31_migration_instead_of_inferring_current() 
         std::fs::remove_file(legacy_path.join("version")).unwrap();
     }
 
-    let current_path = config.db_path(STATE_DATABASE_KIND, 32, &network);
+    let current_path = config.db_path(STATE_DATABASE_KIND, 33, &network);
     std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
     std::fs::rename(legacy_path, &current_path).unwrap();
 
@@ -671,22 +803,28 @@ fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     let config = test_config(&cache);
     let db = open_test_db(&config);
     seed_legacy_records(&db);
+    let before = snapshot(&db);
     db.update_format_version_on_disk(&v30()).unwrap();
-    let _initial_tip = prepare(&db).unwrap();
-    let live_path = db.path().to_path_buf();
     let checkpoint = checkpoint_paths(&db).0;
-    drop(db);
 
-    std::fs::remove_dir_all(live_path).unwrap();
-    let replacement = open_test_db(&config);
-    seed_legacy_records(&replacement);
-    replacement.update_format_version_on_disk(&v30()).unwrap();
-    let error = prepare(&replacement).unwrap_err();
+    let other_cache = tempfile::tempdir().unwrap();
+    let other = open_test_db(&test_config(&other_cache));
+    seed_legacy_records(&other);
+    let other_checkpoint = other_cache.path().join("other-checkpoint");
+    other
+        .disk_db()
+        .create_checkpoint(&other_checkpoint)
+        .unwrap();
+    drop(other);
+    std::fs::rename(other_checkpoint, &checkpoint).unwrap();
+
+    let error = prepare(&db).unwrap_err();
     assert!(
         matches!(error, crate::StateInitError::HistoryRead { .. }),
         "unexpected error: {error}"
     );
-    assert_eq!(replacement.format_version_on_disk().unwrap(), Some(v30()));
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(v30()));
+    assert_records(&db, &before);
     assert!(checkpoint.exists());
 }
 
@@ -898,8 +1036,8 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
     assert!(!old_path.exists());
     assert!(!checkpoint_paths(&upgraded.db).0.exists());
     assert_eq!(
-        upgraded.db.format_version_on_disk().unwrap().unwrap().major,
-        33
+        upgraded.db.format_version_on_disk().unwrap(),
+        Some(running_version())
     );
     assert_records(&upgraded.db, &upgraded_records);
     assert_eq!(upgraded.db.finalized_value_pool(), expected_pools);

@@ -26,7 +26,8 @@ use zebra_chain::{
 use crate::{
     constants::state_database_format_version_in_code,
     service::finalized_state::{
-        DiskWriteBatch, FinalizedState, HistoryTreeParts, IntoDisk, RawBytes, ReadDisk, WriteDisk,
+        height_from_bytes_prefix, DiskWriteBatch, FinalizedState, HistoryTreeParts, IntoDisk,
+        OutputLocation, RawBytes, ReadDisk, TransactionLocation, WriteDisk,
     },
     state_snapshot::{
         export::{
@@ -225,9 +226,20 @@ fn tx_loc(height: u32, index: u16) -> Vec<u8> {
     [&Height(height).as_bytes()[..], &index.to_be_bytes()].concat()
 }
 
-/// Returns the height in the first three bytes of an on-disk key or value.
+/// Returns the height in the first bytes of an on-disk key or value.
 fn height_of(bytes: &[u8]) -> u32 {
-    u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]])
+    height_from_bytes_prefix(bytes).unwrap().0 .0
+}
+
+/// Returns the transaction-location prefix of an output-location key.
+fn tx_prefix(bytes: &[u8]) -> &[u8] {
+    let (_, rest) = TransactionLocation::from_bytes_prefix(bytes).unwrap();
+    &bytes[..bytes.len() - rest.len()]
+}
+
+/// Returns the transaction location after an address location in an address transaction key.
+fn address_tx_suffix(bytes: &[u8]) -> &[u8] {
+    OutputLocation::from_bytes_prefix(bytes).unwrap().1
 }
 
 /// Reads the snapshot `manifest` back from `store`: checks every piece's hash
@@ -286,7 +298,7 @@ fn expected_rows(config: &Config, network: &Network, window_start: Height) -> Ro
     let in_window = |height: u32| height == 0 || (window_start.0..=TIP.0).contains(&height);
     let unspent: BTreeSet<Vec<u8>> = cf_rows(&state, "utxo_by_out_loc")
         .keys()
-        .map(|key| key[..5].to_vec())
+        .map(|key| tx_prefix(key).to_vec())
         .collect();
     let shipped_tx = |tx_loc: &[u8]| in_window(height_of(tx_loc)) || unspent.contains(tx_loc);
 
@@ -319,7 +331,7 @@ fn expected_rows(config: &Config, network: &Network, window_start: Height) -> Ro
                 .collect(),
             ComponentId::AddressTxs => rows
                 .into_iter()
-                .filter(|(key, _)| in_window(height_of(&key[8..])))
+                .filter(|(key, _)| in_window(height_of(address_tx_suffix(key))))
                 .collect(),
             ComponentId::SaplingTree | ComponentId::OrchardTree | ComponentId::IronwoodTree => {
                 let subtrees = match component {
@@ -530,10 +542,10 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
     assert!(!exported[&ComponentId::AddressTxs].is_empty());
     assert!(exported[&ComponentId::AddressTxs]
         .iter()
-        .all(|(key, _)| height_of(&key[8..]) >= WINDOW_START.0));
+        .all(|(key, _)| height_of(address_tx_suffix(key)) >= WINDOW_START.0));
     assert!(exported[&ComponentId::AddressUtxos]
         .iter()
-        .any(|(key, _)| height_of(&key[8..]) < WINDOW_START.0));
+        .any(|(key, _)| height_of(address_tx_suffix(key)) < WINDOW_START.0));
 
     // The genesis trees are below the window, and the tip tree is the genesis tree.
     for component in [
@@ -678,7 +690,7 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
                 batch,
                 balances_cf,
                 &key,
-                &[&value[..16], &[0; 8]].concat(),
+                &[&value[..value.len() - 8], &[0; 8]].concat(),
             );
         }
     });
@@ -736,7 +748,7 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
         );
         // Before the `received` total, address balances were the balance and the location.
         for (key, value) in cf_rows(state, balances_cf) {
-            insert(state, batch, balances_cf, &key, &value[..16]);
+            insert(state, batch, balances_cf, &key, &value[..value.len() - 8]);
         }
 
         // Formats before 1.4.0 keyed the Sprout tip tree by the heights it changed at, and the
@@ -762,10 +774,10 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
         .all(|value| value.len() < 60));
     assert!(cf_rows(&source, "sprout_note_commitment_tree")
         .keys()
-        .all(|key| key.len() == 3));
+        .all(|key| key.len() == 2));
     assert!(cf_rows(&source, balances_cf)
         .values()
-        .all(|value| value.len() == 16));
+        .all(|value| value.len() == 15));
     assert_eq!(
         source.db.sprout_tree_for_tip(),
         open_state(&current, &Network::Mainnet)
@@ -813,7 +825,7 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
     assert!(!exported[&ComponentId::AddressBalances].is_empty());
     assert!(exported[&ComponentId::AddressBalances]
         .iter()
-        .all(|(_key, value)| value.len() == 24 && value[16..] == [0; 8]));
+        .all(|(_key, value)| value.len() == 23 && value[15..] == [0; 8]));
 }
 
 /// A Regtest snapshot carries the network's parameters hash, so its manifest

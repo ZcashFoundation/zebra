@@ -45,7 +45,7 @@ fn interrupted_upgrade_preserves_spending_index_layout() {
             )
             .unwrap();
     }
-    let disk_version = Version::parse("28.0.0+indexer").unwrap();
+    let disk_version = Version::parse("32.0.0+indexer").unwrap();
     state
         .db
         .update_format_version_on_disk(&disk_version)
