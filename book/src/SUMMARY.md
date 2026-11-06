@@ -12,6 +12,7 @@
     - [Startup and sync](user/startup.md)
     - [Syncing from a state snapshot](user/snapshots.md)
     - [Version 2 peer-to-peer protocol (beta)](user/p2p-v2.md)
+    - [Spentness hints (experimental)](user/spentness-hints.md)
   - [Upgrading Zebra](user/upgrading.md)
   - [Zebra with Docker](user/docker.md)
   - [Tracing and logging](user/tracing.md)
