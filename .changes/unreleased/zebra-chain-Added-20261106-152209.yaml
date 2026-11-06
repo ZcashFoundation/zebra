@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Add Block::zcash_deserialize_parallel for bounded parallel transaction decoding of large blocks.
+time: 2026-11-06T15:22:09.416086623+01:00

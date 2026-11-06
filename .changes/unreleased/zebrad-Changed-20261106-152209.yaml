@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce cold submitblock latency by decoding large blocks in parallel.
+time: 2026-11-06T15:22:09.424353958+01:00
