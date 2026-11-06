@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added read-only committed-tip header and authorization-commitment checks for compact-block reconstruction ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).
+time: 2026-11-05T06:30:56.654490872+01:00
