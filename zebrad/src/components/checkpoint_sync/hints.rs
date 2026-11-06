@@ -467,8 +467,9 @@ enum PeerFailure {
 /// `expected_len` drops the peer before any data is kept, and a `size` that
 /// changes or falls below the delivered bytes is a protocol violation
 /// (zips#1344, "`get-object`"). The buffer is allocated once, at exactly
-/// `expected_len`, after the first answer claims that size, and is never
-/// copied.
+/// `expected_len`, after the first non-empty answer that claims that size,
+/// and is never copied: a peer that claims the size but sends no data makes
+/// the node allocate nothing.
 ///
 /// The download, not the hash check, must finish within
 /// [`whole_object_timeout`], so a slow peer is dropped however it paces its
@@ -546,18 +547,26 @@ async fn fetch_whole<P: ArtifactPeer>(
             return Err(PeerFailure::Violation(reason));
         }
 
-        let buffer = bytes.get_or_insert_with(|| {
-            let len = usize::try_from(expected_len)
-                .expect("artifact_len bounds the length by MAX_ARTIFACT_LEN, which fits usize");
-            // `RepeatN` has a trusted length, so this allocates the `Arc`
-            // once, at its final size.
-            std::iter::repeat_n(0, len).collect()
-        });
-        let buffer = Arc::get_mut(buffer).expect("the buffer is not shared until it is complete");
-        // `end <= size == expected_len`, which fits usize (checked at allocation).
-        let end_index = filled + data.len();
-        buffer[filled..end_index].copy_from_slice(&data);
-        filled = end_index;
+        // An empty answer is legal (a short answer cut off right after its size), but it must
+        // not make the node allocate the whole artifact for no data.
+        if !data.is_empty() {
+            let buffer = bytes.get_or_insert_with(|| {
+                #[cfg(test)]
+                tests::BUFFER_ALLOCATIONS.with(|count| count.set(count.get() + 1));
+
+                let len = usize::try_from(expected_len)
+                    .expect("artifact_len bounds the length by MAX_ARTIFACT_LEN, which fits usize");
+                // `RepeatN` has a trusted length, so this allocates the `Arc`
+                // once, at its final size.
+                std::iter::repeat_n(0, len).collect()
+            });
+            let buffer =
+                Arc::get_mut(buffer).expect("the buffer is not shared until it is complete");
+            // `end <= size == expected_len`, which fits usize (checked at allocation).
+            let end_index = filled + data.len();
+            buffer[filled..end_index].copy_from_slice(&data);
+            filled = end_index;
+        }
 
         if end == size {
             break;
@@ -571,7 +580,8 @@ async fn fetch_whole<P: ArtifactPeer>(
         }
     }
 
-    let bytes = bytes.expect("the loop ends only after storing an answer");
+    // Only a zero-length object completes without data, and its bytes are empty.
+    let bytes = bytes.unwrap_or_else(|| Arc::from([]));
     let hashed = bytes.clone();
     let actual = tokio::task::spawn_blocking(move || ObjectHash::of(&hashed))
         .await
