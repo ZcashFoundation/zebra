@@ -1196,12 +1196,7 @@ where
             let alternate_addrs = connected_addr
                 .get_alternate_addrs(remote_canonical_addr)
                 .map(|addr| {
-                    // Assume the connecting node is a server node, and it's available now.
-                    MetaAddr::new_gossiped_meta_addr(
-                        addr,
-                        PeerServices::NODE_NETWORK,
-                        DateTime32::now(),
-                    )
+                    MetaAddr::new_gossiped_meta_addr(addr, remote_services, DateTime32::now())
                 });
 
             let server = Connection::new(
