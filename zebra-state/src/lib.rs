@@ -63,6 +63,7 @@ pub use response::{
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
+    early_relay::{EarlyRelayCache, EarlyRelayGuard},
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,

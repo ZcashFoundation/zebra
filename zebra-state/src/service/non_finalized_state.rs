@@ -430,11 +430,7 @@ impl NonFinalizedState {
         notifications: Option<&MinedBlockNotifications>,
     ) -> Result<(), ValidateContextError> {
         // Local invalidation refers to solved hashes, which proposals do not bind.
-        if self
-            .invalidated_blocks
-            .values()
-            .any(|blocks| blocks.iter().any(|block| block.hash == contextual.hash))
-        {
+        if self.is_block_invalidated(contextual.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: contextual.hash,
             });
@@ -667,11 +663,7 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self
-            .invalidated_blocks
-            .values()
-            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
-        {
+        if self.is_block_invalidated(prepared.hash) {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });
@@ -988,6 +980,13 @@ impl NonFinalizedState {
     /// Returns true if this [`NonFinalizedState`] contains no chains.
     pub fn is_chain_set_empty(&self) -> bool {
         self.chain_count() == 0
+    }
+
+    /// Returns whether local invalidation excludes this block or one of its retained descendants.
+    pub(super) fn is_block_invalidated(&self, hash: block::Hash) -> bool {
+        self.invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == hash))
     }
 
     /// Return the invalidated blocks.
