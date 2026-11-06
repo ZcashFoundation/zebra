@@ -44,11 +44,12 @@ preceding major version, not format 27 or older. Do not rename a database
 directory manually to claim compatibility.
 
 Current builds use database format **32.0.0**, with finalized state under
-`<cache_dir>/state/v32/<network>/`. [Block-body pruning](pruning.md) is configured separately.
-When no v32 database exists, startup moves the newest reusable v30 or v29 database there and runs
-the registered upgrades. This happens even with pruning disabled and leaves no source backup for
-an older binary. A never-pruned, never-snapshot-imported archive can be moved back for Zebra 7.0.0;
-read [format 32 and recovery](pruning.md#format-32-recovery-and-copies) before upgrading.
+`<cache_dir>/state/v32/<network>/`. [Block-body pruning](pruning.md) is configured separately. When
+no v32 database exists, startup moves the newest reusable v31, v30 or v29 database there and runs
+the registered upgrades. This happens even with pruning disabled and leaves no source backup for an
+older binary. A never-pruned, never-snapshot-imported, never-hinted archive can be moved back for
+Zebra 7.0.0; read [format 32 and recovery](pruning.md#format-32-recovery-and-copies) before
+upgrading.
 
 Restore into a fresh cache root. Keep an independent backup for rollback:
 reuse moves the database rather than copying it. See [upgrading](upgrading.md)

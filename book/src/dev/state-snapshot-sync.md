@@ -248,13 +248,12 @@ penalty. `SchedulerConfig` carries these values.
 ## State changes
 
 - A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height,
-  block_hash, manifest, deferred_checks }` (71 bytes on disk). The intermediate 30.1.0 upgrade adds
+  block_hash, manifest, deferred_checks }` (71 bytes on disk). The intermediate 31.1.0 upgrade adds
   the column family without rewriting records because `create_missing_column_families` already
   creates it. The current 32.0.0 major format puts snapshot-born databases in `state/v32`, enforcing
-  the compatibility barrier instead of relying on operators not to open them with older 30.x builds.
-  Existing v30 and older registered sources move to v32 and run every intervening upgrade. Format
-  v31 remains reserved for #12182's variable-height record migration. Snapshot-born databases must
-  not be renamed to v30, v31, v29, or any older directory: those readers cannot tell that the
+  the compatibility barrier instead of relying on operators not to open them with older 31.x builds.
+  Existing v31 and older registered sources move to v32 and run every intervening upgrade.
+  Snapshot-born databases must not be renamed to v31, v30, v29, or any older directory: those readers cannot tell that the
   history below `L` is missing.
 - `HistoryCapabilities` gains `lowest_known_height` and `snapshot_base: Option<SnapshotBase>`. With
   a marker, the retained floor is `max(L, first body)` and the database counts as pruned.

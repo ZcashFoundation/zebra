@@ -127,8 +127,8 @@ impl DiskWriteBatch {
         tip: Option<Height>,
         witness: &mut PruningWitness,
     ) -> Result<Option<Height>, BoxError> {
-        if db.major_version() < 30 {
-            return Err("body deletion requires database format v30 or newer".into());
+        if db.major_version() < 31 {
+            return Err("body deletion requires database format v31 or newer".into());
         }
         if !ready {
             return Err(
