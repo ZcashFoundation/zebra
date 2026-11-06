@@ -23,7 +23,7 @@ use std::{
 
 use tokio::time::Instant;
 
-use zebra_chain::block;
+use zebra_chain::block::{self, MAX_BLOCK_BYTES};
 use zebra_network::sync_peer::{ConnectionId, BULK_STREAMS_PER_PEER};
 
 use super::{
@@ -59,7 +59,8 @@ pub struct Unit {
     pub end_hash: block::Hash,
     /// How `end_hash` is trusted.
     pub anchor: Anchor,
-    /// The request's `max_bytes`: 64 MiB in IBD-1.
+    /// The request's `max_bytes`: the estimate, at least [`MAX_BLOCK_BYTES`],
+    /// so that a response stays within the charge admission made for it.
     pub max_bytes: u32,
     /// The estimated (IBD-1) or exact (IBD-2) serialized size of the unit.
     pub est_bytes: u64,
@@ -863,16 +864,26 @@ impl Scheduler {
         let id = UnitId(self.next_unit);
         self.next_unit += 1;
 
+        // A response holds at most `max_bytes` after its first block, so a
+        // larger estimate only means the unit will be truncated.
+        let est_bytes = est_bytes.min(u64::from(MAX_UNIT_BYTES));
+        // Admission charges only the estimate, so asking for no more than it
+        // keeps a peer's bodies, inflated or not, within the lookahead charge,
+        // up to two blocks per stream. At least one maximum-size block, so
+        // that a small unit is not truncated after every block. An honest
+        // response that exceeds its estimate is truncated and resumed.
+        let max_bytes = u32::try_from(est_bytes.max(MAX_BLOCK_BYTES)).expect(
+            "the estimate is capped at MAX_UNIT_BYTES, a u32, which exceeds MAX_BLOCK_BYTES",
+        );
+
         let unit = Unit {
             id,
             start,
             end,
             end_hash,
             anchor,
-            max_bytes: MAX_UNIT_BYTES,
-            // A response holds at most `max_bytes` after its first block,
-            // so a larger estimate only means the unit will be truncated.
-            est_bytes: est_bytes.min(u64::from(MAX_UNIT_BYTES)),
+            max_bytes,
+            est_bytes,
         };
         self.units.insert(
             id,
