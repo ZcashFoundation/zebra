@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `ZebraDb::utxos_by_location`, which iterates the finalized UTXO set in output-location order.
+time: 2026-11-05T16:30:08.395855648-05:00

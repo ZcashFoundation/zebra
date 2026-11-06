@@ -185,6 +185,32 @@ impl ZebraDb {
         Some(utxo)
     }
 
+    /// Iterates the complete finalized UTXO set in output-location order.
+    ///
+    /// Offline tools that need the exact UTXO set at a block, such as spentness-hint
+    /// generation, must use a database that does not change during the iteration.
+    pub fn utxos_by_location(
+        &self,
+    ) -> impl Iterator<Item = (OutputLocation, transparent::OrderedUtxo)> + '_ {
+        let utxo_by_out_loc = self
+            .db
+            .cf_handle("utxo_by_out_loc")
+            .expect("the state schema always contains utxo_by_out_loc");
+
+        self.db.zs_forward_range_iter(&utxo_by_out_loc, ..).map(
+            |(output_location, output): (OutputLocation, transparent::Output)| {
+                (
+                    output_location,
+                    transparent::OrderedUtxo::new(
+                        output,
+                        output_location.height(),
+                        output_location.transaction_index().as_usize(),
+                    ),
+                )
+            },
+        )
+    }
+
     /// Returns the unspent transparent outputs for a [`transparent::Address`] in the finalized
     /// chain `query_height_range`, at most `limit` of them.
     ///
