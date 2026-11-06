@@ -45,6 +45,12 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.1.0: adds the `sync_meta_by_height` column family: 64 bytes of per-block synchronization
+///   metadata (size, transaction and note commitment counts, ZIP 221 per-pool transaction counts,
+///   the ZIP 244 authorizing data root, and the cumulative transparent output count, which gives
+///   every transparent output the global ordinal used by spentness hints). It is served to
+///   version 2 peers by `get-hashes`, written in each block's batch, and backfilled for existing
+///   blocks by a format upgrade.
 /// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
 ///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
 ///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
@@ -58,7 +64,7 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
