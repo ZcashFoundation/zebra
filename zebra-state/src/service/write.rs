@@ -147,6 +147,8 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    /// Excludes authentication against a snapshot during retention-changing mutations.
+    early_relay: Arc<super::early_relay::EarlyRelayState>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -202,6 +204,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        early_relay: Arc<super::early_relay::EarlyRelayState>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -232,6 +235,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    early_relay,
                 }
                 .run()
             })
@@ -272,6 +276,7 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            early_relay,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -279,6 +284,7 @@ impl WriteBlockWorkerTask {
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
         while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+            let _context_update = early_relay.updating_context();
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -320,6 +326,7 @@ impl WriteBlockWorkerTask {
             {
                 Ok(permit) => permit.flatten(),
                 Err(error) => {
+                    drop(_context_update);
                     // Publish the reset before replying so an immediate retry can make progress.
                     let _ = invalid_block_reset_sender.send((
                         finalized_state.db.finalized_tip_height(),
@@ -330,15 +337,18 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            // Try committing the block
-            match finalized_state.commit_finalized(
-                ordered_block,
+            // Try committing the block, but keep notifications until its context is published.
+            let (checkpoint_verified, rsp_tx, _) = ordered_block;
+            let height = checkpoint_verified.height;
+            let result = match finalized_state.commit_finalized(
+                checkpoint_verified,
                 prev_finalized_note_commitment_trees.take(),
-                committed_permit,
             ) {
                 Ok((tip_block, note_commitment_trees)) => {
+                    let hash = tip_block.hash;
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+                    Ok(hash)
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -362,10 +372,18 @@ impl WriteBlockWorkerTask {
                         info!(
                             "StateService closed the block reset channel. Is Zebra shutting down?"
                         );
+                        drop(_context_update);
+                        let _ = rsp_tx.send(Err(error));
                         return;
                     }
+                    Err(error)
                 }
+            };
+            drop(_context_update);
+            if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
+                permit.send((*hash, height));
             }
+            let _ = rsp_tx.send(result);
         }
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
@@ -379,6 +397,7 @@ impl WriteBlockWorkerTask {
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+            let _context_update = early_relay.updating_context();
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child, queued_at) => {
                     Some((queued_child, queued_at))
@@ -487,6 +506,10 @@ impl WriteBlockWorkerTask {
                     parent_error_map.shift_remove_index(0);
                 }
 
+                // Failed commits leave the read snapshot unchanged. Release authentication
+                // before either notification can wake an immediate replay.
+                drop(_context_update);
+
                 // Signal the StateService to drop this hash from
                 // `non_finalized_block_write_sent_hashes`, so a subsequent
                 // re-delivery of a block at the same hash is not short-circuited
@@ -508,13 +531,6 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
-
-            // Committing blocks to the finalized state keeps the same chain,
-            // so we can update the chain seen by the rest of the application now.
-            //
-            // TODO: if this causes state request errors due to chain conflicts,
-            //       fix the `service::read` bugs,
-            //       or do the channel update after the finalized state commit
             let phase_start = Instant::now();
             let tip_block_height = update_latest_chain_channels(
                 non_finalized_state,
@@ -529,23 +545,15 @@ impl WriteBlockWorkerTask {
                 "phase" => "update_latest_chain_channels"
             )
             .record(phase_start.elapsed().as_secs_f64());
-
-            // Ownership stays in this writer even if the caller dropped its response future.
-            // Notify side-chain commits too, using the committed block rather than the best tip.
-            if let Some(permit) = committed_permit {
-                permit.send((child_hash, child_height));
-            }
-
-            // Update the caller with the result.
-            let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
-
             let phase_start = Instant::now();
+            let mut finalized = false;
             while non_finalized_state
                 .best_chain_len()
                 .expect("just successfully inserted a non-finalized block above")
                 > MAX_BLOCK_REORG_HEIGHT
             {
                 tracing::trace!("finalizing block past the reorg limit");
+                finalized = true;
                 let contextually_verified_with_trees = non_finalized_state.finalize();
                 prev_finalized_note_commitment_trees = finalized_state
                             .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
@@ -558,6 +566,23 @@ impl WriteBlockWorkerTask {
                 "phase" => "finalization"
             )
             .record(phase_start.elapsed().as_secs_f64());
+            // Publish the tip before disk I/O, but keep authentication excluded until pruning
+            // removes obsolete forks and roots from the read snapshot. A single watch value
+            // replaces the intermediate snapshot; no notifications accumulate during finalization.
+            if finalized {
+                let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+            }
+
+            drop(_context_update);
+
+            // Ownership stays in this writer even if the caller dropped its response future.
+            // Notify side-chain commits too, using the committed block rather than the best tip.
+            if let Some(permit) = committed_permit {
+                permit.send((child_hash, child_height));
+            }
+
+            // Update the caller with the result.
+            let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
             // Update the metrics if semantic and contextual validation passes
             //
