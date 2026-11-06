@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Updated Halo2 to parallelize public instance commitments in proof batches larger than two while preserving proof verification results.
+time: 2026-11-05T05:55:21.754772319+01:00
