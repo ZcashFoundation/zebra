@@ -406,6 +406,9 @@ impl StartCmd {
     /// A pruned node that retains at least `NODE_NETWORK_LIMITED_BLOCKS` recent blocks advertises
     /// limited service instead, which only version 2 peers are told about. Pruning keeps at least
     /// the configured retention of recent bodies, so the advertisement holds while the node syncs.
+    ///
+    /// A node bootstrapped from a state snapshot has no bodies below the snapshot height, so it
+    /// starts without limited service, and [`Self::limited_service_from`] says when it gains it.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
@@ -418,17 +421,42 @@ impl StartCmd {
                 ));
             }
             services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
-            if config
-                .state
-                .prune_blocks_older_than
-                .is_some_and(|retention| {
-                    retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
-                })
-            {
+            if Self::retains_limited_blocks(config) && history.snapshot_base.is_none() {
                 services.insert(zebra_network::types::PeerServices::NODE_NETWORK_LIMITED);
             }
         }
         Ok(services)
+    }
+
+    /// Returns whether the configured pruning retains at least the recent blocks that limited
+    /// service promises.
+    fn retains_limited_blocks(config: &ZebradConfig) -> bool {
+        config
+            .state
+            .prune_blocks_older_than
+            .is_some_and(|retention| {
+                retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+            })
+    }
+
+    /// Returns the best chain tip height from which a node bootstrapped from a state snapshot
+    /// advertises limited service to version 2 peers, or `None` for any other node.
+    ///
+    /// The node has every body from the snapshot height `H`, so it holds the recent blocks
+    /// limited service promises once its tip is `NODE_NETWORK_LIMITED_BLOCKS` above `H`. It waits
+    /// until those blocks are finalized, `MAX_BLOCK_REORG_HEIGHT` more, because non-finalized
+    /// blocks can be reorged away.
+    pub(super) fn limited_service_from(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Option<Height> {
+        let base = history.snapshot_base?;
+        if !Self::retains_limited_blocks(config) {
+            return None;
+        }
+        let blocks = zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+            .checked_add(zebra_state::MAX_BLOCK_REORG_HEIGHT)?;
+        base.height.0.checked_add(blocks).map(Height)
     }
 
     /// Starts the node, rejecting incompatible pruning settings before opening writable state.
@@ -684,6 +712,14 @@ impl StartCmd {
             );
         }
         let local_services = Self::network_services(&config, history)?;
+        let limited_service_from = Self::limited_service_from(&config, history);
+        if let Some(height) = limited_service_from {
+            info!(
+                height = height.0,
+                "advertising limited service to version 2 peers from this chain tip height, once \
+                 the recent blocks above the snapshot height are committed"
+            );
+        }
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
@@ -745,6 +781,7 @@ impl StartCmd {
         let network_config = zebra_network::Config {
             v2_sync_peers,
             object_source,
+            v2_limited_service_from: limited_service_from,
             ..config.network.clone()
         };
 

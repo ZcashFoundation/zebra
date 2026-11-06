@@ -181,6 +181,54 @@ fn pruned_network_services_clear_archive_capability() {
     }
 }
 
+/// A node bootstrapped from a state snapshot starts without limited service, and gains it once
+/// its finalized blocks above the snapshot height cover the limited-service window.
+#[test]
+fn snapshot_nodes_advertise_limited_service_above_the_snapshot_window() {
+    use zebra_chain::{block::Height, state_snapshot::ObjectHash};
+    use zebra_network::{constants::NODE_NETWORK_LIMITED_BLOCKS, types::PeerServices};
+    use zebra_state::{HistoryCapabilities, SnapshotBase, MAX_BLOCK_REORG_HEIGHT};
+
+    let mut config = crate::config::ZebradConfig::default();
+    config.state.prune_blocks_older_than = Some(MIN_PRUNING_RETENTION);
+    const _: () = assert!(MIN_PRUNING_RETENTION >= NODE_NETWORK_LIMITED_BLOCKS);
+    let base = SnapshotBase {
+        window_start: Height(1_000),
+        height: Height(3_303),
+        block_hash: zebra_chain::block::Hash([1; 32]),
+        manifest: ObjectHash([2; 32]),
+        deferred_checks: 0,
+    };
+    let snapshot = HistoryCapabilities {
+        lowest_retained_height: base.height,
+        lowest_known_height: base.window_start,
+        snapshot_base: Some(base),
+    };
+
+    assert_eq!(
+        super::StartCmd::network_services(&config, snapshot).unwrap(),
+        PeerServices::empty(),
+        "a snapshot-born node starts without limited service",
+    );
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, snapshot),
+        Some(Height(
+            base.height.0 + NODE_NETWORK_LIMITED_BLOCKS + MAX_BLOCK_REORG_HEIGHT
+        )),
+    );
+
+    // Other nodes keep the services they start with.
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, HistoryCapabilities::default()),
+        None,
+    );
+    config.state.prune_blocks_older_than = Some(1_001);
+    assert_eq!(
+        super::StartCmd::limited_service_from(&config, snapshot),
+        None
+    );
+}
+
 #[test]
 fn pruned_history_rejects_both_sidecar_modes() {
     use zebra_chain::block::Height;

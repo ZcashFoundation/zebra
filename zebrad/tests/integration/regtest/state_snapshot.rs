@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 use tempfile::TempDir;
 use zebra_chain::{
     amount::Amount,
-    block::{self, Height},
+    block::{self, Block, Height},
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network,
@@ -302,6 +302,13 @@ async fn get_block_error(client: &RpcRequestClient, height: u32, verbosity: u8) 
         ));
     }
     Ok(response["error"].clone())
+}
+
+/// Submits `block` to `client`'s node, which may already have it from gossip.
+async fn submit_unless_known(client: &RpcRequestClient, block: &Block) {
+    if let Err(error) = client.submit_block(block.clone()).await {
+        tracing::info!(%error, "the node already had the block, or is verifying it");
+    }
 }
 
 /// Checks that a formerly retained body has been deleted by ongoing pruning.
@@ -691,6 +698,12 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
                 )?;
             }
             if stage == Stage::StateInitialized {
+                // B has no bodies below `H`, so it advertises limited service to version 2 peers
+                // only once the limited-service window above `H` is finalized.
+                node_b.expect_stdout_line_matches(format!(
+                    "advertising limited service to version 2 peers.*height={}",
+                    H + NODE_NETWORK_LIMITED_BLOCKS + MAX_BLOCK_REORG_HEIGHT
+                ))?;
                 // Capture transport counters before A's restart resets them. Bootstrap has finished,
                 // so these counts are stable and exclude ordinary block sync.
                 let (metrics_a, metrics_b) =
@@ -867,8 +880,10 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .await
             .map_err(|err| eyre!(err))?;
         assert_eq!(spent, Value::Null);
-        // A accepts the block too, by gossip from B. Submitting it to A directly would race A's own
-        // verification of the gossiped block, which `submitblock` reports as a rejection.
+        // A accepts the block too. B does not advertise limited service until its blocks above
+        // `H` cover the limited-service window, so A may not fetch B's gossiped blocks yet, and
+        // the block is submitted to A directly.
+        submit_unless_known(&a, &mined).await;
         wait_for_height(&a, tip, RELAY_TIMEOUT, "node A").await?;
         assert_eq!(block_hash(&a, tip).await?, spend_block_hash);
 
@@ -923,6 +938,12 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .map_err(|err| eyre!(err))?
             .expect("the new retained floor has a body");
         assert_eq!(retained.coinbase_height(), Some(Height(H + 1)));
+        let ongoing_block = b
+            .get_block(i32::try_from(ongoing_tip)?)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("the generated block is readable");
+        submit_unless_known(&a, &ongoing_block).await;
         wait_for_height(&a, ongoing_tip, RELAY_TIMEOUT, "node A").await?;
         assert_eq!(block_hash(&a, ongoing_tip).await?, best_block_hash);
 

@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Added `Config::v2_limited_service_from`, a runtime-only chain tip height from which version 2 handshakes advertise `NODE_NETWORK_LIMITED`, so a node can start advertising limited service once it holds the recent blocks it promises.
+time: 2026-11-06T23:54:15.000000000Z
