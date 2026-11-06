@@ -181,7 +181,11 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: true
-      matrix: ${{ fromJson(needs.crates-matrix.outputs.matrix) }}
+      matrix:
+        crate: ${{ fromJson(needs.crates-matrix.outputs.matrix).crate }}
+        # The binary's higher MSRV is checked separately in lint.yml.
+        exclude:
+          - crate: zebrad
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -201,16 +205,12 @@ jobs:
           # One cache for the whole matrix, see the `build` job above.
           cache-shared-key: crate-build-msrv
           cache-on-failure: true
-          # `zebrad` can't seed this matrix: the build step below skips it, so
-          # that leg compiles nothing. `zebra-rpc` has the widest closure of
-          # the crates that do build here.
+          # `zebra-rpc` has the widest dependency closure of the library crates.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
-        # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
-        if: matrix.crate != 'zebrad'
         env:
           CRATE: ${{ matrix.crate }}
         run: cargo build --package "$CRATE" --all-features --all-targets
