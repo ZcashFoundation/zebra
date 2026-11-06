@@ -475,7 +475,11 @@ async fn init_with_checkpoint_tip_verifies_like_init() -> Result<(), Report> {
     .await;
 
     // A tip at a checkpoint height with a hash that is not the checkpoint's is ignored.
-    checkpoint_tip_sender.send_replace(Some((block::Height(0), block::Hash([0; 32]))));
+    checkpoint_tip_sender.send_replace(Some(crate::CommittedTip {
+        height: block::Height(0),
+        hash: block::Hash([0; 32]),
+        hand_back: Some(1),
+    }));
 
     let block_verifier_router =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);

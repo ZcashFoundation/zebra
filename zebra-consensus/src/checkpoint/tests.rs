@@ -1205,6 +1205,16 @@ async fn mined_checkpoint_retains_notification_after_caller_drop() {
     .expect("checkpoint notifications must survive caller cancellation");
 }
 
+/// `tip`, published at a new engine hand-back.
+fn hand_back((height, hash): (block::Height, block::Hash)) -> CommittedTip {
+    static NEXT_HAND_BACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    CommittedTip {
+        height,
+        hash,
+        hand_back: Some(NEXT_HAND_BACK.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+    }
+}
+
 /// Returns the continuous Mainnet test blocks from genesis to `max_height`, with their hashes.
 fn mainnet_blocks(max_height: u32) -> Result<Vec<(Arc<Block>, block::Hash)>, Report> {
     let blocks: Vec<_> = Mainnet
@@ -1273,7 +1283,7 @@ async fn fast_forward_to_committed_checkpoint() -> Result<(), Report> {
 
     // The engine commits up to the checkpoint at 5, and publishes it. A single readiness check
     // applies it and verifies the blocks queued after it, without any new request.
-    checkpoint_tip_sender.send_replace(Some(tip(5)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(5))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -1353,7 +1363,7 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
 
     let ignored = [
         // A checkpoint height with the wrong hash.
-        Some((block::Height(5), blocks[4].1)),
+        Some(hand_back((block::Height(5), blocks[4].1))),
         // No committed checkpoint.
         None,
     ];
@@ -1369,10 +1379,10 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
 
     // The checkpoint at the verifier's progress, and one below it, are applied: the committed
     // tip comes from the state, and the verifier's progress may be speculative.
-    checkpoint_tip_sender.send_replace(Some(tip(2)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(2))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_two);
-    checkpoint_tip_sender.send_replace(Some(tip(0)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(0))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -1380,17 +1390,17 @@ async fn fast_forward_ignores_invalid_checkpoint_tips() -> Result<(), Report> {
     );
 
     // A valid tip is still applied after the ignored ones, and so is a later lower tip.
-    checkpoint_tip_sender.send_replace(Some(tip(5)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(5))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     let at_five = InitialTip(block::Height(5));
     assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_five);
 
-    checkpoint_tip_sender.send_replace(Some(tip(2)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(2))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at_two);
 
     // The final checkpoint finishes verification, and nothing moves it afterwards.
-    checkpoint_tip_sender.send_replace(Some(tip(8)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(8))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -1444,7 +1454,7 @@ async fn fast_forward_at_or_below_progress_discards_stale_commit_failures() -> R
             .expect("the verifier holds the receiver");
 
         // The engine hands back at the state tip.
-        checkpoint_tip_sender.send_replace(Some(tip(committed)));
+        checkpoint_tip_sender.send_replace(Some(hand_back(tip(committed))));
         checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
         let at_committed = InitialTip(block::Height(committed.try_into().unwrap()));
         assert_eq!(
@@ -1464,6 +1474,79 @@ async fn fast_forward_at_or_below_progress_discards_stale_commit_failures() -> R
             "a failure from before the hand-back is discarded"
         );
     }
+
+    Ok(())
+}
+
+/// A later tip of an applied hand-back, or a tip without a hand-back, is a commit that landed
+/// after the hand-back: it only moves the verifier forward, so it can't rewind the legacy
+/// syncer's progress. A hand-back the verifier has not seen yet still applies in either
+/// direction, at its latest tip.
+#[tokio::test(flavor = "multi_thread")]
+async fn fast_forward_moves_late_tips_only_forward() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let blocks = mainnet_blocks(8)?;
+    let tip = |height: usize| (block::Height(height.try_into().unwrap()), blocks[height].1);
+    let late = |first: CommittedTip, height: usize| CommittedTip {
+        height: block::Height(height.try_into().unwrap()),
+        hash: blocks[height].1,
+        hand_back: first.hand_back,
+    };
+    let at = |height: u32| InitialTip(block::Height(height));
+
+    let state_service = MockService::build().for_unit_tests();
+    let (checkpoint_tip_sender, checkpoint_tip) = watch::channel(None);
+    let mut checkpoint_verifier = CheckpointVerifier::from_list(
+        [tip(0), tip(2), tip(5), tip(8)],
+        &Mainnet,
+        Some(tip(2)),
+        state_service.clone(),
+    )
+    .map_err(|e| eyre!(e))?
+    .with_checkpoint_tip(checkpoint_tip);
+
+    let first = hand_back(tip(5));
+    checkpoint_tip_sender.send_replace(Some(first));
+    checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+    assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at(5));
+
+    // A late tip at or below the verifier's progress is ignored, one above it is applied.
+    for (late_tip, progress) in [
+        (late(first, 4), 5),
+        (late(first, 5), 5),
+        (late(first, 6), 6),
+        (
+            CommittedTip {
+                hand_back: None,
+                ..late(first, 3)
+            },
+            6,
+        ),
+        (
+            CommittedTip {
+                hand_back: None,
+                ..late(first, 7)
+            },
+            7,
+        ),
+    ] {
+        checkpoint_tip_sender.send_replace(Some(late_tip));
+        checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+        assert_eq!(
+            checkpoint_verifier.previous_checkpoint_height(),
+            at(progress),
+            "{late_tip:?}"
+        );
+    }
+
+    // A new hand-back replaced by its own later tip before the verifier saw it is applied below
+    // the verifier's progress.
+    let second = hand_back(tip(3));
+    checkpoint_tip_sender.send_replace(Some(second));
+    checkpoint_tip_sender.send_replace(Some(late(second, 4)));
+    checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
+    assert_eq!(checkpoint_verifier.previous_checkpoint_height(), at(4));
 
     Ok(())
 }
@@ -1498,7 +1581,7 @@ async fn fast_forward_to_mid_interval_tip() -> Result<(), Report> {
 
     // The engine committed up to 3, and a commit failed at 4: it hands back at 3, in the
     // interval that ends at the checkpoint at 5.
-    checkpoint_tip_sender.send_replace(Some(tip(3)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(3))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -1580,7 +1663,7 @@ async fn fast_forward_to_wrong_mid_interval_tip_rejects_blocks() -> Result<(), R
 
     // A tip at 3 with block 1's hash.
     let wrong_hash = blocks[1].1;
-    checkpoint_tip_sender.send_replace(Some((block::Height(3), wrong_hash)));
+    checkpoint_tip_sender.send_replace(Some(hand_back((block::Height(3), wrong_hash))));
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(
         checkpoint_verifier.previous_checkpoint_height(),
@@ -1641,7 +1724,7 @@ async fn fast_forward_applies_tip_sent_before_sender_drop() -> Result<(), Report
     .map_err(|e| eyre!(e))?
     .with_checkpoint_tip(checkpoint_tip);
 
-    checkpoint_tip_sender.send_replace(Some(tip(5)));
+    checkpoint_tip_sender.send_replace(Some(hand_back(tip(5))));
     drop(checkpoint_tip_sender);
     checkpoint_verifier.ready().await.map_err(|e| eyre!(e))?;
     assert_eq!(

@@ -3,12 +3,16 @@
 
 use std::{sync::Arc, time::Duration};
 
+use futures::FutureExt;
 use tokio::sync::{mpsc, watch};
 
 use zebra_chain::{block, chain_tip::mock::MockChainTip, parameters::Network};
 
 use super::{
-    engine::tests::{mock_state, mock_state_with_tip, Behaviour, MockFailure, MockPeer, TestChain},
+    engine::tests::{
+        mock_state, mock_state_with_stall, mock_state_with_tip, Behaviour, MockFailure, MockPeer,
+        TestChain,
+    },
     *,
 };
 
@@ -76,7 +80,11 @@ async fn supervisor_claims_runs_and_hands_back() {
     .unwrap();
     assert_eq!(
         *checkpoint_tip.borrow_and_update(),
-        Some((block::Height(10), chain.hash(10)))
+        Some(CommittedTip {
+            height: block::Height(10),
+            hash: chain.hash(10),
+            hand_back: Some(1),
+        })
     );
 
     let mut lengths = Vec::new();
@@ -196,7 +204,11 @@ async fn supervisor_hands_back_at_the_durable_tip_after_a_mid_interval_failure()
     assert!(legacy.owner.borrow().is_legacy());
     assert_eq!(
         *checkpoint_tip.borrow(),
-        Some((block::Height(2), chain.hash(2))),
+        Some(CommittedTip {
+            height: block::Height(2),
+            hash: chain.hash(2),
+            hand_back: Some(1),
+        }),
         "the verifier resumes at the state tip, not at the checkpoint below it"
     );
 }
@@ -243,4 +255,96 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
 
     supervisor.blamed = [ips[0]].into_iter().collect();
     assert!(supervisor.claim_target(block::Height(0)).is_some());
+}
+
+/// A commit that an engine run timed out on can land after the hand-back:
+/// the supervisor republishes the state tip, so the checkpoint verifier does
+/// not wait for heights the state already has.
+#[tokio::test]
+async fn supervisor_republishes_a_tip_that_a_timed_out_commit_moves_after_hand_back() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let chain = TestChain::new();
+    let peers: Vec<MockPeer> = (1..=2)
+        .map(|id| MockPeer::new(id, chain.clone(), Behaviour::Honest))
+        .collect();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(peers));
+
+    let (latest_chain_tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(block::Height(0));
+    tip_sender.send_best_tip_hash(chain.hash(0));
+
+    // The state's write task stalls on height 6 until the test releases it,
+    // past both of the engine's commit timeouts, then commits 6 to 10, which
+    // it had already queued.
+    let (release_tx, release_rx) = watch::channel(false);
+    let (commits_tx, _commits_rx) = mpsc::unbounded_channel();
+    let state = mock_state_with_stall(
+        commits_tx,
+        |_, _| None,
+        Some(tip_sender),
+        move |height, attempt| {
+            let mut release = release_rx.clone();
+            (height.0 == 6 && attempt == 0).then(|| {
+                async move {
+                    let _ = release.wait_for(|released| *released).await;
+                }
+                .boxed()
+            })
+        },
+    );
+
+    let (engine_side, mut legacy, mut checkpoint_tip) = ownership_channels();
+    let (_gate_tx, gate_rx) = watch::channel(true);
+    let mut supervisor = Supervisor::new(
+        EngineConfig::default(),
+        Network::Mainnet,
+        peers_rx,
+        state,
+        latest_chain_tip,
+        engine_side,
+        Some(gate_rx),
+    );
+    supervisor.anchors = Anchors::new(&chain.list);
+    legacy.ack.send_replace(1);
+    let task = tokio::spawn(supervisor.run());
+
+    // The run gives up on the stalled commits, and hands back at 5.
+    legacy
+        .owner
+        .wait_for(|owner| !owner.is_legacy())
+        .await
+        .unwrap();
+    legacy.owner.wait_for(SyncOwner::is_legacy).await.unwrap();
+    assert_eq!(
+        *checkpoint_tip.borrow_and_update(),
+        Some(CommittedTip {
+            height: block::Height(5),
+            hash: chain.hash(5),
+            hand_back: Some(1),
+        })
+    );
+
+    // The stalled commits land after the hand-back, and the verifier's tip
+    // follows them.
+    release_tx.send_replace(true);
+    tokio::time::timeout(
+        Duration::from_secs(600),
+        checkpoint_tip.wait_for(|tip| tip.is_some_and(|tip| tip.height == block::Height(10))),
+    )
+    .await
+    .expect("the supervisor republishes the late commits")
+    .unwrap();
+    assert_eq!(
+        *checkpoint_tip.borrow(),
+        Some(CommittedTip {
+            height: block::Height(10),
+            hash: chain.hash(10),
+            hand_back: Some(1),
+        })
+    );
+
+    assert!(!task.is_finished(), "the supervisor keeps running");
+    task.abort();
 }
