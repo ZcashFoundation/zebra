@@ -927,3 +927,142 @@ async fn failing_dns_returns_cached_peers() {
 
     assert_eq!(peers, cached_peers);
 }
+
+/// The path-taking peer cache functions read and write the same files as the ones that use the
+/// configured cache path, and leave other files alone.
+#[tokio::test]
+async fn peer_cache_at_a_path_matches_the_configured_cache() {
+    let _init_guard = zebra_test::init();
+
+    let peer_cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: crate::config::CacheDir::custom_path(peer_cache_dir.path()),
+        ..Config::default()
+    };
+    let configured_path = config
+        .cache_dir
+        .peer_cache_file_path(&config.network)
+        .expect("the cache directory is enabled");
+    let other_path = peer_cache_dir.path().join("other.peers");
+
+    let peers = |addrs: &[&str]| -> std::collections::HashSet<crate::PeerSocketAddr> {
+        addrs
+            .iter()
+            .map(|addr| addr.parse().expect("test peer addresses are valid"))
+            .collect()
+    };
+    let configured_peers = peers(&["127.1.1.1:8233", "127.1.1.2:8233"]);
+    let other_peers = peers(&["127.2.2.2:8233"]);
+
+    config
+        .update_peer_cache(configured_peers.clone())
+        .await
+        .expect("writing the temporary peer cache should succeed");
+    config
+        .update_peer_cache_at(other_path.clone(), other_peers.clone())
+        .await
+        .expect("writing the temporary peer cache should succeed");
+
+    assert_eq!(
+        config
+            .load_peer_cache_at(&configured_path)
+            .await
+            .expect("the configured cache exists"),
+        configured_peers,
+    );
+    assert_eq!(
+        config.load_peer_cache().await.expect("the cache exists"),
+        configured_peers,
+        "writing another path leaves the configured cache alone",
+    );
+    assert_eq!(
+        config
+            .load_peer_cache_at(&other_path)
+            .await
+            .expect("the other cache exists"),
+        other_peers,
+    );
+
+    // An empty list keeps the previous file, and a missing file loads as empty.
+    config
+        .update_peer_cache_at(other_path.clone(), Default::default())
+        .await
+        .expect("an empty list is not written");
+    assert_eq!(
+        config
+            .load_peer_cache_at(&other_path)
+            .await
+            .expect("the other cache exists"),
+        other_peers,
+    );
+    assert!(config
+        .load_peer_cache_at(&peer_cache_dir.path().join("missing.peers"))
+        .await
+        .expect("a missing cache is not an error")
+        .is_empty());
+}
+
+/// The advertised version 2 address is the external IP with the version 2 port, or a specific
+/// version 2 listener, and never an unspecified listener.
+#[test]
+fn v2_advertised_addr_prefers_the_external_ip() {
+    let _init_guard = zebra_test::init();
+
+    let config = |v2_listen_addr: Option<&str>, external_addr: Option<&str>| Config {
+        v2_listen_addr: v2_listen_addr.map(|addr| addr.parse().expect("valid address")),
+        external_addr: external_addr.map(|addr| addr.parse().expect("valid address")),
+        ..Config::default()
+    };
+    let addr = |addr: &str| -> std::net::SocketAddr { addr.parse().expect("valid address") };
+
+    assert_eq!(
+        config(None, Some("203.0.113.1:8233")).v2_advertised_addr(),
+        None
+    );
+    assert_eq!(
+        config(Some("[::]:8233"), Some("203.0.113.1:9999")).v2_advertised_addr(),
+        Some(addr("203.0.113.1:8233")),
+    );
+    assert_eq!(
+        config(Some("198.51.100.1:8233"), None).v2_advertised_addr(),
+        Some(addr("198.51.100.1:8233")),
+    );
+    assert_eq!(config(Some("[::]:8233"), None).v2_advertised_addr(), None);
+    assert_eq!(
+        config(Some("0.0.0.0:8233"), None).v2_advertised_addr(),
+        None
+    );
+}
+
+/// Version 2 discovery is on by default, survives a round trip, and dials a share of the
+/// initial target size.
+#[test]
+fn v2_peer_discovery_defaults_on_and_round_trips() {
+    let _init_guard = zebra_test::init();
+
+    let default = Config::default();
+    assert!(default.v2_peer_discovery);
+
+    let config: Config = toml::from_str("v2_peer_discovery = false").expect("a valid config");
+    assert!(!config.v2_peer_discovery);
+    let round_trip: Config =
+        toml::from_str(&toml::to_string(&config).expect("serializes")).expect("deserializes");
+    assert_eq!(round_trip, config);
+
+    let v2 = Config {
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        ..Config::default()
+    };
+    assert_eq!(v2.v2_outbound_target(), v2.peerset_initial_target_size / 2);
+    let tiny = Config {
+        peerset_initial_target_size: 1,
+        ..v2
+    };
+    assert_eq!(tiny.v2_outbound_target(), 1);
+    assert_eq!(
+        Config::default().v2_outbound_target(),
+        0,
+        "no endpoint, no slots"
+    );
+}

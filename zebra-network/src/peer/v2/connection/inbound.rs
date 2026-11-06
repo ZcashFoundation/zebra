@@ -55,6 +55,7 @@ use crate::{
             wire::{Violation, WireError},
         },
     },
+    v2_address_book::V2BookHandle,
     BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
@@ -143,7 +144,9 @@ const MAX_TX_LOOKUPS_PER_RESPONSE: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 /// Serves one bidirectional stream the peer opened.
 ///
 /// `get_addr_allowed` is cleared by the first `get-addr` request it lets
-/// through; a `get-addr` request is refused while it is clear.
+/// through; a `get-addr` request is refused while it is clear. The `get-addr`
+/// answer comes from `address_book`.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn serve<S>(
     send: SendStream,
     mut recv: RecvStream,
@@ -151,6 +154,7 @@ pub(super) async fn serve<S>(
     permits: Arc<Semaphore>,
     overloads: Arc<Overloads>,
     get_addr_allowed: Arc<AtomicBool>,
+    address_book: Option<V2BookHandle>,
     events: Events,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -175,6 +179,7 @@ pub(super) async fn serve<S>(
             permits,
             &overloads,
             &get_addr_allowed,
+            address_book.as_ref(),
         ),
     )
     .await;
@@ -236,6 +241,7 @@ async fn serve_inner<S>(
     permits: Arc<Semaphore>,
     overloads: &Overloads,
     get_addr_allowed: &AtomicBool,
+    address_book: Option<&V2BookHandle>,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -316,7 +322,7 @@ where
             if !get_addr_allowed.swap(false, Ordering::Relaxed) {
                 return Err(Outcome::Refuse(ErrorCode::Refused));
             }
-            serve_addr(response, inbound_service).await
+            serve_addr(response, address_book).await
         }
         WireRequest::Mempool => serve_mempool(response, inbound_service).await,
     }?;
@@ -742,16 +748,24 @@ async fn write_entry<T: zebra_chain::serialization::ZcashSerialize>(
     Ok(bytes.len())
 }
 
-/// Serves a `get-addr` request with the addresses the inbound service
-/// supplies (already sanitized by the address book).
-async fn serve_addr<S>(response: &mut ResponseSend, service: Inbound<'_, S>) -> Result<(), Outcome>
-where
-    S: Service<Request, Response = Response, Error = BoxError>,
-{
-    let answer = call_service(service, Request::Peers).await?;
-    let addrs: Vec<_> = match answer {
-        Response::Peers(addrs) => addrs.into_iter().take(MAX_ADDRS_PER_RESPONSE).collect(),
-        _ => Vec::new(),
+/// Serves a `get-addr` request from the version 2 address segment's sample, which is
+/// sanitized and only has addresses learned over version 2 (draft, "Network IDs"), or with no
+/// addresses if the connection has no segment.
+///
+/// The inbound service is never asked: it answers from the legacy address book, whose
+/// addresses may not accept QUIC.
+async fn serve_addr(
+    response: &mut ResponseSend,
+    address_book: Option<&V2BookHandle>,
+) -> Result<(), Outcome> {
+    let addrs: Vec<_> = match address_book {
+        Some(book) => book
+            .get_addr_sample()
+            .await
+            .into_iter()
+            .take(MAX_ADDRS_PER_RESPONSE)
+            .collect(),
+        None => Vec::new(),
     };
     let body = encode_addr_response(&addrs)?;
     response.write(&body).await

@@ -171,6 +171,7 @@ mod protocol;
 pub mod protocol;
 
 mod quic;
+mod v2_address_book;
 
 #[allow(unused)]
 pub(crate) use peer_set::PeerSet;

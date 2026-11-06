@@ -1,8 +1,8 @@
 //! The version 2 connection task.
 //!
 //! After the handshake, one task owns a connection for its whole life: the
-//! QUIC connection, the open handshake stream, the cache of addresses the
-//! peer announced, and the announcement writers. It accepts the peer's
+//! QUIC connection, the open handshake stream, the peer's address announcement
+//! budget, and the announcement writers. It accepts the peer's
 //! streams, serves the peer's requests through the inbound service, drives
 //! this node's requests to the peer, and presents the connection to the
 //! peer set as an ordinary [`peer::Client`](crate::peer::Client).
@@ -28,27 +28,29 @@ use futures::{
 use quinn::{Connection, RecvStream, SendStream, VarInt};
 use rand::RngExt;
 use tokio::{
-    sync::{mpsc, Semaphore},
+    sync::{mpsc, watch, Semaphore},
     task::JoinSet,
 };
 use tokio_util::codec::FramedRead;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedTxId};
+use zebra_chain::{
+    block, diagnostic::task::CheckForPanics, serialization::DateTime32, transaction::UnminedTxId,
+};
 
 use crate::{
     meta_addr::MetaAddr,
     peer::{
-        connection::{overload_drop_connection_probability, Handler},
-        CancelHeartbeatTask, Client, ClientRequest, ConnectionInfo, ErrorSlot, PeerError,
+        connection::overload_drop_connection_probability, CancelHeartbeatTask, Client,
+        ClientRequest, ConnectionInfo, ErrorSlot, MustUseClientResponseSender, PeerError,
         SharedPeerError,
     },
     peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
         internal::{Request, Response},
         v2::{
-            announcement::encode_tx_record,
+            announcement::{clamp_relayed_time, encode_addr_record, encode_tx_record},
             handshake::decode_record,
             record::RecordCodec,
             types::{ErrorCode, StreamType},
@@ -56,11 +58,17 @@ use crate::{
         },
     },
     quic::app_error_code,
-    BoxError, PeerSocketAddr,
+    v2_address_book::{V2BookHandle, Via},
+    BanList, BoxError, PeerSocketAddr,
 };
 
-use super::{handshake::CompletedHandshake, misbehavior::MisbehaviorScores};
+use super::{
+    addr_relay::{AddrRelayHandle, Registration, RELAY_CHANNEL_SIZE},
+    handshake::CompletedHandshake,
+    misbehavior::MisbehaviorScores,
+};
 
+mod addr_budget;
 mod announcements;
 mod inbound;
 mod outbound;
@@ -68,6 +76,7 @@ mod outbound;
 #[cfg(test)]
 mod tests;
 
+use addr_budget::AddrTokenBucket;
 use announcements::{AnnouncementPermits, AnnouncementWriter};
 
 /// What this node provides to every version 2 connection.
@@ -86,6 +95,22 @@ pub struct ConnectionParams<S> {
     /// The misbehavior scores of every version 2 peer, which report peers to
     /// ban to the address book.
     pub misbehavior: MisbehaviorScores,
+
+    /// The version 2 address segment, which takes the addresses peers relay and answers their
+    /// `get-addr` requests, or `None` for a connection that neither records nor serves
+    /// addresses.
+    pub(crate) address_book: Option<V2BookHandle>,
+
+    /// Whether this node asks the peers it dialled for addresses, once each (draft,
+    /// "`get-addr`").
+    pub discovery: bool,
+
+    /// The banned peers, whose addresses are neither kept nor relayed.
+    pub bans: watch::Receiver<BanList>,
+
+    /// The hub that relays addresses between version 2 peers and advertises
+    /// this node's own; `None` for a connection that relays nothing.
+    pub addr_relay: Option<AddrRelayHandle>,
 }
 
 /// Something a stream task needs the connection task to act on.
@@ -100,8 +125,7 @@ enum Event {
         code: ErrorCode,
     },
 
-    /// Addresses from the peer: announced, or left over from a `get-addr`
-    /// answer after the client's sample; cached for `Request::Peers`.
+    /// Addresses the peer announced, for the version 2 address segment.
     Addresses(Vec<MetaAddr>),
 
     /// Close the connection because the peer's requests overloaded the
@@ -176,7 +200,7 @@ impl Events {
         let _ = self.fatal.try_send(event);
     }
 
-    /// Hands addresses the peer sent to the connection task's cache, best
+    /// Hands addresses the peer announced to the connection task, best
     /// effort: they are dropped if the connection task is behind.
     fn addresses(&self, addrs: Vec<MetaAddr>) {
         if let Err(mpsc::error::TrySendError::Full(_)) =
@@ -352,11 +376,20 @@ where
 
     let connection_span = tracing::debug_span!("v2_connection", %addr_label);
 
+    // Register with the relay hub here, before the task runs, so the hub's messages wait in the
+    // channel for the task.
+    let (relay_rx, relay_registration) = match (&params.addr_relay, transient_addr) {
+        (Some(addr_relay), Some(peer)) => {
+            let (relay_tx, relay_rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+            (Some(relay_rx), Some(addr_relay.register(peer, relay_tx)))
+        }
+        _ => (None, None),
+    };
+
     let is_inbound = connection_info.connected_addr.is_inbound();
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
-        sent_get_addr: false,
         get_addr_allowed: Arc::new(AtomicBool::new(is_inbound)),
         connection_info: connection_info.clone(),
         transient_addr,
@@ -366,8 +399,11 @@ where
         client_rx: server_rx.into(),
         error_slot: error_slot.clone(),
         _connection_tracker: connection_tracker,
-        cached_addrs: Vec::new(),
+        addr_budget: AddrTokenBucket::new(tokio::time::Instant::now()),
+        relay_rx,
+        relay_registration,
         tx_announcer: None,
+        addr_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
         inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
         overloads: Arc::new(Overloads::new()),
@@ -418,8 +454,6 @@ struct ConnectionTask<S> {
     connection: Connection,
     /// Whether the peer dialled this node.
     is_inbound: bool,
-    /// Whether this node has sent the peer its one `get-addr` request.
-    sent_get_addr: bool,
     /// Whether the peer may still send a `get-addr` request: only once, and
     /// only on a connection the peer dialled (draft, "`get-addr`"). Shared
     /// with the request stream tasks.
@@ -434,11 +468,18 @@ struct ConnectionTask<S> {
     error_slot: ErrorSlot,
     /// Reduces the open connection count when dropped.
     _connection_tracker: ConnectionTracker,
-    cached_addrs: Vec<MetaAddr>,
+    /// The budget for the address records the peer announces, on all its address announcement
+    /// streams.
+    addr_budget: AddrTokenBucket,
+    /// The addresses the relay hub has for the peer; `None` without a hub, or once it is gone.
+    relay_rx: Option<mpsc::Receiver<Vec<MetaAddr>>>,
+    /// This connection's registration with the relay hub.
+    relay_registration: Option<Registration>,
     /// This node's transaction announcement stream to the peer, opened on first use. Block
-    /// announcements need a header the internal request does not carry, and address
-    /// announcements wait for address relay.
+    /// announcements need a header the internal request does not carry.
     tx_announcer: Option<AnnouncementWriter>,
+    /// This node's address announcement stream to the peer, opened on first use.
+    addr_announcer: Option<AnnouncementWriter>,
     announcement_permits: AnnouncementPermits,
     /// Bounds how many of the peer's requests are in the inbound service at once.
     inbound_permits: Arc<Semaphore>,
@@ -480,6 +521,9 @@ where
 {
     /// The event loop.
     async fn run(mut self) {
+        if !self.is_inbound && self.params.discovery {
+            self.spawn_get_addr();
+        }
         let exit = self.run_loop().await;
 
         tracing::debug!(error = %exit.error, code = ?exit.code, "closing version 2 connection");
@@ -503,6 +547,13 @@ where
         }
 
         self.tx_announcer = None;
+        self.addr_announcer = None;
+        self.relay_rx = None;
+        if let (Some(addr_relay), Some(registration)) =
+            (&self.params.addr_relay, self.relay_registration.take())
+        {
+            addr_relay.deregister(registration);
+        }
 
         // Dropping `tasks` aborts the stream tasks: after `close` nothing they do can reach the
         // peer, every `ResponseGuard` answers its client on drop, and the stream tasks are already
@@ -533,6 +584,12 @@ where
                         return exit;
                     }
                 }
+
+                relayed = recv_relayed(&mut self.relay_rx), if self.relay_rx.is_some() => match relayed {
+                    Some(addrs) => self.announce_addresses(addrs),
+                    // The hub dropped this connection, or has exited.
+                    None => self.relay_rx = None,
+                },
 
                 record = self.handshake_recv.next(), if self.handshake_paused_until.is_none() => {
                     if let Some(exit) = self.handle_handshake_record(record) {
@@ -657,11 +714,11 @@ where
             Event::Addresses(addrs) => {
                 // # Security
                 //
-                // Announced addresses, and the part of a `get-addr` answer the client did not
-                // get, only enter the cache, which Zebra's components drain through
-                // `Request::Peers` as a bounded random sample; the peer cannot fill the address
-                // book directly.
-                Handler::update_addr_cache(&mut self.cached_addrs, &addrs, None);
+                // Announced addresses pass the peer's address budget, are offered for relay to
+                // other version 2 peers, and go to the version 2 address segment, which admits
+                // them through its intake rules and buckets; the peer cannot fill the address
+                // books directly, and version 2 addresses never reach the legacy one.
+                self.accept_announced_addresses(addrs);
                 None
             }
             // Like the legacy connection, an overload drop blames the inbound service's load,
@@ -688,8 +745,49 @@ where
             self.inbound_permits.clone(),
             self.overloads.clone(),
             self.get_addr_allowed.clone(),
+            self.params.address_book.clone(),
             self.events.clone(),
         ));
+    }
+
+    /// Sends the peer this node's one `get-addr` request, on a connection this node dialled
+    /// (draft, "`get-addr`"), and hands the whole answer to the version 2 address segment.
+    ///
+    /// The request is driven like a client's, so an oversized or malformed answer is penalized
+    /// or closes the connection in the same way.
+    fn spawn_get_addr(&mut self) {
+        let (Some(book), Some(source)) = (self.params.address_book.clone(), self.transient_addr)
+        else {
+            return;
+        };
+        let Ok(permit) = self.outbound_permits.clone().try_acquire_owned() else {
+            // Only this task takes permits, and it takes none before this.
+            return;
+        };
+        let (tx, rx) = oneshot::channel();
+        let request = Request::Peers;
+        let tx = MustUseClientResponseSender::new(tx, &request, None, Some(source));
+        // The guard is created before the task is spawned, so if the task is aborted before it
+        // first runs, dropping it still answers `rx`.
+        let guard = outbound::ResponseGuard::new(tx);
+        let context = self.request_context();
+        self.tasks.spawn(async move {
+            outbound::drive(request, guard, permit, context).await;
+            if let Ok(Ok(Response::Peers(addrs))) = rx.await {
+                book.intake(source, addrs, Via::GetAddr);
+            }
+        });
+    }
+
+    /// What a request this node sends to the peer needs from the connection.
+    fn request_context(&self) -> outbound::RequestContext {
+        outbound::RequestContext {
+            connection: self.connection.clone(),
+            transient_addr: self.transient_addr,
+            genesis_hash: self.params.genesis_hash,
+            misbehavior: self.params.misbehavior.clone(),
+            events: self.events.clone(),
+        }
     }
 
     /// Handles a request from Zebra's components.
@@ -711,20 +809,11 @@ where
         .increment(1);
 
         let response = match request {
-            // Serve peers from the cache first, as the legacy connection does. To impede
-            // address-based fingerprinting, `get-addr` is only sent on a connection this node
-            // dialled, at most once (draft, "`get-addr`"); otherwise the cache is all there is,
-            // even if it is empty.
-            Request::Peers
-                if !self.cached_addrs.is_empty() || self.is_inbound || self.sent_get_addr =>
-            {
-                let addrs = Handler::update_addr_cache(
-                    &mut self.cached_addrs,
-                    &[],
-                    crate::constants::PEER_ADDR_RESPONSE_LIMIT,
-                );
-                Ok(Response::Peers(addrs))
-            }
+            // The legacy address book's crawler does not ask version 2 peers for addresses: their
+            // records are QUIC endpoints, which the connection hands to the version 2 address
+            // segment instead. The peer set does not route this request here, so this only
+            // answers a direct caller.
+            Request::Peers => Ok(Response::Peers(Vec::new())),
 
             // The transport measures round-trip time; no message is needed.
             Request::Ping(_) => Ok(Response::Pong(self.connection.rtt())),
@@ -761,33 +850,117 @@ where
 
             // Everything else is a request stream, driven in its own task.
             request => {
-                if matches!(request, Request::Peers) {
-                    self.sent_get_addr = true;
-                }
                 let permit = self
                     .outbound_permits
                     .clone()
                     .try_acquire_owned()
                     .expect("requests are only taken while a permit is available, and only this task takes permits");
+                let context = self.request_context();
                 // The guard is created before the task is spawned, so if the task is aborted
                 // before it first runs, dropping it still answers the client.
                 self.tasks.spawn(outbound::drive(
                     request,
                     outbound::ResponseGuard::new(tx),
                     permit,
-                    outbound::RequestContext {
-                        connection: self.connection.clone(),
-                        transient_addr: self.transient_addr,
-                        genesis_hash: self.params.genesis_hash,
-                        misbehavior: self.params.misbehavior.clone(),
-                        events: self.events.clone(),
-                    },
+                    context,
                 ));
                 return;
             }
         };
 
         let _ = tx.send(response);
+    }
+
+    /// Applies the peer's address budget to a batch of addresses it
+    /// announced, drops banned ones, offers the rest to the relay hub with
+    /// their times clamped, and hands them to the version 2 address segment.
+    ///
+    /// # Security
+    ///
+    /// Records over the budget are dropped without penalty (draft,
+    /// "Misbehavior and Banning": rate limits), so a peer can't flood the
+    /// relay hub or the address segment, whichever of its streams it uses.
+    ///
+    /// Announced addresses are version 2 (QUIC) endpoints, so they are only
+    /// relayed to other version 2 peers and recorded in the version 2 address
+    /// segment: they never reach the legacy address book, whose entries are
+    /// dialled over TCP.
+    fn accept_announced_addresses(&mut self, addrs: Vec<MetaAddr>) {
+        let now = tokio::time::Instant::now();
+        let wall_now = DateTime32::now();
+        let bans = self.params.bans.borrow().clone();
+
+        let mut rate_limited: u64 = 0;
+        let mut accepted = Vec::with_capacity(addrs.len());
+        for addr in addrs {
+            if !self.addr_budget.try_take(now) {
+                rate_limited += 1;
+                continue;
+            }
+            if bans.is_banned(addr.addr().ip()) {
+                continue;
+            }
+            accepted.push(addr);
+        }
+        if rate_limited > 0 {
+            metrics::counter!("zcash.net.v2.addresses.rate_limited").increment(rate_limited);
+        }
+
+        // How many records arrived together depends on network timing, not on the peer, so
+        // every accepted record is offered; the budget bounds the rate.
+        let Some(source) = self.transient_addr else {
+            return;
+        };
+        if accepted.is_empty() {
+            return;
+        }
+        if let Some(addr_relay) = &self.params.addr_relay {
+            let clamped = accepted
+                .iter()
+                .map(|addr| with_clamped_time(addr.clone(), wall_now))
+                .collect();
+            addr_relay.offer(source, clamped);
+        }
+        // The segment clamps the times itself, and counts the records it clamped.
+        if let Some(book) = &self.params.address_book {
+            book.intake(source, accepted, Via::Announcement);
+        }
+    }
+
+    /// Queues the addresses the relay hub has for the peer as one batch of
+    /// address announcement records, opening the stream on first use or after
+    /// the previous writer ended. Addresses banned since they were offered are
+    /// skipped.
+    fn announce_addresses(&mut self, addrs: Vec<MetaAddr>) {
+        let bans = self.params.bans.borrow().clone();
+        let mut batch = Vec::new();
+        for addr in addrs {
+            if bans.is_banned(addr.addr().ip()) {
+                continue;
+            }
+            // Relayed addresses always have their services and time, and a record is far under
+            // the record limit; a failure is logged and the address skipped.
+            match encode_addr_record(&addr).and_then(RecordCodec::encode_record) {
+                Ok(record) => batch.extend_from_slice(&record),
+                Err(error) => tracing::debug!(%error, "skipping unencodable address"),
+            }
+        }
+        if batch.is_empty() {
+            return;
+        }
+
+        let writer = self.addr_announcer.get_or_insert_with(|| {
+            AnnouncementWriter::spawn(
+                self.connection.clone(),
+                StreamType::AddressAnnouncements,
+                &mut self.tasks,
+                crate::constants::REQUEST_TIMEOUT,
+            )
+        });
+        if writer.announce(batch.into()).is_err() {
+            // The writer's stream ended; the next batch opens a replacement.
+            self.addr_announcer = None;
+        }
     }
 
     /// Queues one batch of transaction announcement records, opening the
@@ -846,6 +1019,28 @@ where
             error,
             code: ErrorCode::NoError,
         }
+    }
+}
+
+/// Receives the relay hub's next batch for the peer, or waits forever
+/// without a hub.
+async fn recv_relayed(
+    relay_rx: &mut Option<mpsc::Receiver<Vec<MetaAddr>>>,
+) -> Option<Vec<MetaAddr>> {
+    match relay_rx {
+        Some(relay_rx) => relay_rx.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// `addr` with its relayed time clamped (draft, "addrv2 Records"). An address
+/// without a time is kept as it is; decoded records always have one.
+fn with_clamped_time(addr: MetaAddr, now: DateTime32) -> MetaAddr {
+    match (addr.services(), addr.last_seen()) {
+        (Some(services), Some(time)) => {
+            MetaAddr::new_gossiped_meta_addr(addr.addr(), services, clamp_relayed_time(time, now))
+        }
+        _ => addr,
     }
 }
 

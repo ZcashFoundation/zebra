@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added version 2 address relay. Zebra now forwards fresh version 2 address announcements to two of its version 2 peers, rate-limits the announcements it receives, and advertises its own version 2 address (`external_addr` with the `v2_listen_addr` port, or a routable `v2_listen_addr`).'
+time: 2026-11-05T12:01:00.000000000+01:00
