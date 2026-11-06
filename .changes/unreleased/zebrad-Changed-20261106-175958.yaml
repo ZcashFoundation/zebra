@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Keep negotiated early relay available across consecutive committed tips without waiting for stale-candidate cleanup.
+time: 2026-11-06T17:59:58.024095858+01:00

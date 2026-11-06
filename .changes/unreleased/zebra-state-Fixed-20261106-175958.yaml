@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Release stale early-relay publication reservations synchronously when the committed tip changes, without depending on cleanup-task scheduling.
+time: 2026-11-06T17:59:58.028244972+01:00
