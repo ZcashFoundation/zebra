@@ -747,8 +747,9 @@ async fn compact_recovery_expiry_releases_snapshot_before_stalled_close() {
     .expect("the retention deadline cancels backpressured recovery before closing");
 }
 
-/// A compact block completes a pending tip poll like a singleton block inventory, and a later tip
-/// poll from the announced block's parent is answered without holding the request slot.
+/// A compact block completes a pending tip poll, and a later tip poll from the announced block's
+/// parent is answered without holding the request slot. Both get no hashes, so the syncer doesn't
+/// verify the block the inbound downloader is already fetching.
 #[tokio::test]
 async fn compact_announcement_answers_tip_polls() {
     let _init_guard = zebra_test::init();
@@ -814,14 +815,14 @@ async fn compact_announcement_answers_tip_polls() {
             .respond(Response::Nil);
         assert_eq!(
             first_poll.await.unwrap().unwrap(),
-            Response::BlockHashes(vec![block.hash()]),
+            Response::BlockHashes(vec![]),
             "the announcement completes the pending tip poll",
         );
 
         let second_poll = find_blocks(&mut client);
         assert_eq!(
             second_poll.await.unwrap().unwrap(),
-            Response::BlockHashes(vec![block.hash()]),
+            Response::BlockHashes(vec![]),
             "a tip poll from the announced block's parent is answered locally",
         );
         assert!(

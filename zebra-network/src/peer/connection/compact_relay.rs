@@ -64,12 +64,11 @@ pub(super) struct CompactRelay {
 }
 
 impl CompactRelay {
-    /// Returns the hash of the received compact block that extends `parent`, if there is one.
-    pub(super) fn announced_child(&self, parent: block::Hash) -> Option<block::Hash> {
+    /// Returns true if an admitted compact block that extends `parent` is retained.
+    pub(super) fn announces_child_of(&self, parent: block::Hash) -> bool {
         self.received
             .as_ref()
-            .filter(|(block, _, _)| block.header.previous_block_hash == parent)
-            .map(|(block, _, _)| block.header.hash())
+            .is_some_and(|(block, _, _)| block.header.previous_block_hash == parent)
     }
 
     pub(super) fn clear_sent(&mut self) {

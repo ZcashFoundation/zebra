@@ -429,12 +429,14 @@ impl Handler {
                 }
                 Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
-            // A compact block announces the peer's new tip, like a singleton block inventory.
-            // Complete the tip poll with it, and also handle the announcement.
+            // A compact block announces the peer's new tip, so the peer won't answer the tip poll
+            // until it commits that block. The inbound downloader fetches the announced block, so
+            // complete the poll with no hashes, which keeps the syncer from verifying it again,
+            // and handle the announcement. The peer's inventory after its commit still reaches
+            // the syncer if the announcement isn't admitted.
             (Handler::FindBlocks, Message::CompactBlock(block)) => {
-                let hash = block.header.hash();
                 ignored_msg = Some(Message::CompactBlock(block));
-                Handler::Finished(Ok(Response::BlockHashes(vec![hash])))
+                Handler::Finished(Ok(Response::BlockHashes(Vec::new())))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
@@ -1361,21 +1363,15 @@ where
                          })
             }
 
-            // The peer only answers a tip poll after it commits the block it just announced, and
-            // the poll would hold this connection's request slot until then. The answer is that
-            // block, so give it now.
+            // The peer only answers a tip poll after it commits the admitted compact block it just
+            // announced, and the poll would hold this connection's request slot until then. The
+            // inbound downloader already has that block, so answer with no hashes now.
             (AwaitingRequest, FindBlocks { known_blocks, stop: None })
                 if known_blocks
                     .first()
-                    .and_then(|tip| self.compact.announced_child(*tip))
-                    .is_some() =>
+                    .is_some_and(|tip| self.compact.announces_child_of(*tip)) =>
             {
-                let tip = known_blocks.first().expect("the guard checked the locator tip");
-                let child = self
-                    .compact
-                    .announced_child(*tip)
-                    .expect("the guard checked the announced child");
-                Ok(Handler::Finished(Ok(Response::BlockHashes(vec![child]))))
+                Ok(Handler::Finished(Ok(Response::BlockHashes(Vec::new()))))
             }
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
                 self
