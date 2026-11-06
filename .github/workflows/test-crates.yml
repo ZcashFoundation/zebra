@@ -77,7 +77,6 @@ jobs:
           # This job only runs `cargo tree` to build the matrix, so a cache here
           # only consumes quota.
           cache: false
-      - uses: ./.github/actions/setup-zebra-build
 
       # This step dynamically creates a JSON containing the values of each crate
       # in the workspace, including crates outside `default-members`.
