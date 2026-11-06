@@ -75,9 +75,9 @@ fn running_version() -> Version {
     crate::constants::state_database_format_version_in_code()
 }
 
-fn v30() -> Version {
+fn v31() -> Version {
     let mut version = running_version();
-    version.major = 30;
+    version.major = 31;
     version.minor = 1;
     version
 }
@@ -235,7 +235,7 @@ fn assert_records(db: &ZebraDb, expected: &Records) {
 }
 
 fn apply_height_upgrade(db: &ZebraDb) {
-    apply_height_upgrade_from(db, v30());
+    apply_height_upgrade_from(db, v31());
 }
 
 fn apply_height_upgrade_from(db: &ZebraDb, disk_version: Version) {
@@ -258,7 +258,7 @@ fn family_list_covers_every_height_dependent_column_family() {
 fn upgrade_chain_runs_variable_heights_after_the_snapshot_barrier() {
     let running = running_version();
     assert_eq!((running.major, running.minor, running.patch), (33, 0, 0));
-    let chain: Vec<_> = super::super::format_upgrades(Some(v30()))
+    let chain: Vec<_> = super::super::format_upgrades(Some(v31()))
         .map(|upgrade| (upgrade.version(), upgrade.needs_migration()))
         .collect();
     assert_eq!(
@@ -270,8 +270,8 @@ fn upgrade_chain_runs_variable_heights_after_the_snapshot_barrier() {
     );
 
     let sources = super::super::restorable_db_source_versions(33);
-    assert_eq!(&sources[..3], &[32, 30, 29]);
-    for disk_version in [v30(), v32()] {
+    assert_eq!(&sources[..4], &[32, 31, 30, 29]);
+    for disk_version in [v31(), v32()] {
         assert!(
             !super::super::can_read_without_migration(&disk_version, &running_version()),
             "{disk_version} has fixed-width heights"
@@ -295,7 +295,7 @@ fn migration_rewrites_all_records_collisions_and_survives_reopen() {
     let db = open_test_db(&config);
     let legacy = seed_legacy_records(&db);
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
 
     apply_height_upgrade(&db);
 
@@ -380,7 +380,7 @@ fn migration_merges_legacy_balance_operands_before_converting() {
     let legacy = DiskDb::new_for_variable_height_upgrade(
         &config,
         STATE_DATABASE_KIND,
-        &v30(),
+        &v31(),
         &Network::Mainnet,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
@@ -440,7 +440,7 @@ fn migration_merges_legacy_balance_operands_before_converting() {
     let reopened = DiskDb::new(
         &config,
         STATE_DATABASE_KIND,
-        &v30(),
+        &v31(),
         &Network::Mainnet,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
@@ -457,13 +457,13 @@ fn migration_merges_legacy_balance_operands_before_converting() {
 }
 
 #[test]
-fn read_only_open_rejects_unmigrated_v30_records() {
+fn read_only_open_rejects_unmigrated_v31_records() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
     let config = test_config(&cache);
     let db = open_test_db(&config);
     seed_legacy_records(&db);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
     drop(db);
 
     let error = ZebraDb::new(
@@ -489,7 +489,7 @@ fn read_only_open_rejects_unmigrated_v30_records() {
                 .join("version")
         )
         .unwrap(),
-        v30().to_string()
+        v31().to_string()
     );
 }
 
@@ -500,7 +500,7 @@ fn read_only_open_and_refresh_preserve_completed_migration_checkpoint() {
     let config = test_config(&cache);
     let primary = open_test_db(&config);
     seed_legacy_records(&primary);
-    primary.update_format_version_on_disk(&v30()).unwrap();
+    primary.update_format_version_on_disk(&v31()).unwrap();
     apply_height_upgrade(&primary);
     let (checkpoint, _) = checkpoint_paths(&primary);
     primary.disk_db().create_checkpoint(&checkpoint).unwrap();
@@ -568,7 +568,7 @@ fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
     let db = open_test_db(&config);
     let legacy = seed_legacy_records(&db);
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
 
     let _initial_tip = prepare(&db).unwrap();
     let source = open_source(&db).unwrap();
@@ -591,7 +591,7 @@ fn interrupted_migration_restarts_from_its_immutable_checkpoint() {
         Upgrade.run(Height(0), &db, &receiver),
         Err(CancelFormatChange)
     );
-    assert_eq!(db.format_version_on_disk().unwrap(), Some(v30()));
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(v31()));
     assert!(checkpoint_paths(&db).0.exists());
 
     apply_height_upgrade(&db);
@@ -605,7 +605,7 @@ fn stale_same_identity_checkpoint_is_rejected_before_replacing_newer_state() {
     let config = test_config(&cache);
     let db = open_test_db(&config);
     seed_legacy_records(&db);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
     let checkpoint = checkpoint_paths(&db).0;
     db.disk_db().create_checkpoint(&checkpoint).unwrap();
     let stale_source = DiskDb::open_read_only(&checkpoint).unwrap();
@@ -656,7 +656,7 @@ fn versionless_rename_gap_runs_the_height_migration_instead_of_inferring_current
     let legacy = ZebraDb::new(
         &config,
         STATE_DATABASE_KIND,
-        &v30(),
+        &v31(),
         &network,
         true,
         STATE_COLUMN_FAMILIES_IN_CODE
@@ -806,7 +806,7 @@ fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
     let db = open_test_db(&config);
     seed_legacy_records(&db);
     let before = snapshot(&db);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
     let checkpoint = checkpoint_paths(&db).0;
 
     let other_cache = tempfile::tempdir().unwrap();
@@ -825,13 +825,13 @@ fn checkpoint_from_a_different_database_is_rejected_before_mutation() {
         matches!(error, crate::StateInitError::HistoryRead { .. }),
         "unexpected error: {error}"
     );
-    assert_eq!(db.format_version_on_disk().unwrap(), Some(v30()));
+    assert_eq!(db.format_version_on_disk().unwrap(), Some(v31()));
     assert_records(&db, &before);
     assert!(checkpoint.exists());
 }
 
 #[test]
-fn pruned_v30_records_migrate_without_full_history() {
+fn pruned_v31_records_migrate_without_full_history() {
     let _guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
     let mut config = test_config(&cache);
@@ -850,7 +850,7 @@ fn pruned_v30_records_migrate_without_full_history() {
         legacy.get_mut(name).unwrap().push(record);
     }
     let expected = expected_records(&legacy);
-    db.update_format_version_on_disk(&v30()).unwrap();
+    db.update_format_version_on_disk(&v31()).unwrap();
 
     assert!(!Upgrade.requires_full_history());
     apply_height_upgrade(&db);
@@ -969,8 +969,8 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
 
     let cache = tempfile::tempdir().unwrap();
     let config = test_config(&cache);
-    let old_version = v30();
-    let old_path = config.db_path(STATE_DATABASE_KIND, 30, &network);
+    let old_version = v31();
+    let old_path = config.db_path(STATE_DATABASE_KIND, 31, &network);
     let legacy = DiskDb::new(
         &config,
         STATE_DATABASE_KIND,
@@ -1008,7 +1008,7 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
     drop(legacy);
     let mut old_version = old_version;
     old_version.build = old_build;
-    write_database_format_version_to_disk(&config, STATE_DATABASE_KIND, 30, &old_version, &network)
+    write_database_format_version_to_disk(&config, STATE_DATABASE_KIND, 31, &old_version, &network)
         .unwrap();
     tokio::time::timeout(
         Duration::from_secs(30),
@@ -1017,7 +1017,7 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
     .await
     .unwrap()
     .unwrap();
-    assert!(old_path.exists(), "cleanup protects the reusable v30 cache");
+    assert!(old_path.exists(), "cleanup protects the reusable v31 cache");
 
     let mut upgraded = FinalizedState::new(
         &config,
@@ -1149,8 +1149,8 @@ fn current_chain_records() -> (Records, Vec<Arc<Block>>, String) {
 fn family_exists_at(name: &str, version: &Version) -> bool {
     let added = match name {
         "sync_meta_by_height" => Version::new(29, 1, 0),
-        "spentness_journal" | "spentness_artifact" => Version::new(29, 2, 0),
-        "snapshot_base" => Version::new(30, 1, 0),
+        "spentness_journal" | "spentness_artifact" => Version::new(30, 0, 0),
+        "snapshot_base" => Version::new(31, 1, 0),
         _ => Version::new(0, 0, 0),
     };
     Version::new(version.major, version.minor, version.patch) >= added
@@ -1224,11 +1224,11 @@ async fn open_and_wait(config: &Config) -> FinalizedState {
 }
 
 /// Every registered format from 29.0 to 32.0 stores fixed-width heights, and each upgrades to the
-/// running format: 29.0 -> 29.1 -> 29.2 -> 30.0 -> 30.1 -> 32.0 -> 33.0.
+/// running format: 29.0 -> 29.1 -> 30.0 -> 31.0 -> 31.1 -> 32.0 -> 33.0.
 ///
 /// A database created at each version moves from its own directory to the running directory, and
 /// the height rewrite runs first, so the 29.1 backfill reads the blocks with the current codec. A
-/// 29.0 database has no synchronization metadata, and from 29.2 on a database can hold the
+/// 29.0 database has no synchronization metadata, and from 30.0 on a database can hold the
 /// checkpoint sync column families, whose heights and output locations the rewrite converts.
 #[tokio::test]
 async fn every_registered_format_upgrades_through_the_height_rewrite() {
@@ -1251,17 +1251,17 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
         .collect();
     assert_eq!(
         chain,
-        [(29, 1), (29, 2), (30, 0), (30, 1), (32, 0), (33, 0)]
+        [(29, 1), (30, 0), (31, 0), (31, 1), (32, 0), (33, 0)]
             .map(|(major, minor)| Version::new(major, minor, 0)),
-        "the upgrade ladder skips the unused format 31"
+        "the upgrade ladder runs every registered format in order"
     );
 
-    for (major, minor) in [(29, 0), (29, 1), (29, 2), (30, 0), (30, 1), (32, 0)] {
+    for (major, minor) in [(29, 0), (29, 1), (30, 0), (31, 0), (31, 1), (32, 0)] {
         let cache = tempfile::tempdir().unwrap();
         let config = test_config(&cache);
         let mut source_records = current_records.clone();
         let mut expected = current_records.clone();
-        let has_spentness_hints = (major, minor) >= (29, 2);
+        let has_spentness_hints = (major, minor) >= (30, 0);
         if (major, minor) == (29, 0) {
             // Format 29.0 has no synchronization metadata, and the upgrade backfills it.
             source_records.insert("sync_meta_by_height".to_string(), Vec::new());
@@ -1348,7 +1348,7 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
     }
 }
 
-/// When v30 and v32 sources both exist, startup upgrades the newer v32 source and leaves the v30
+/// When v31 and v32 sources both exist, startup upgrades the newer v32 source and leaves the v31
 /// one for old-database cleanup.
 #[tokio::test]
 async fn newest_fixed_width_source_is_upgraded() {
@@ -1358,7 +1358,7 @@ async fn newest_fixed_width_source_is_upgraded() {
     let config = test_config(&cache);
     let build = semver::BuildMetadata::new(&build).unwrap();
 
-    let mut older = v30();
+    let mut older = v31();
     older.build = build.clone();
     let mut older_records = current_records.clone();
     older_records.insert("hash_by_height".to_string(), Vec::new());
@@ -1369,7 +1369,7 @@ async fn newest_fixed_width_source_is_upgraded() {
 
     let upgraded = open_and_wait(&config).await;
     assert!(config
-        .db_path(STATE_DATABASE_KIND, 30, &Network::Mainnet)
+        .db_path(STATE_DATABASE_KIND, 31, &Network::Mainnet)
         .exists());
     assert!(!config
         .db_path(STATE_DATABASE_KIND, 32, &Network::Mainnet)
@@ -1428,11 +1428,11 @@ async fn interrupted_rewrite_resumes_on_open_despite_converted_families() {
     let (current_records, _blocks, build) = current_chain_records();
     let cache = tempfile::tempdir().unwrap();
     let config = test_config(&cache);
-    let mut version = v30();
+    let mut version = v31();
     version.build = semver::BuildMetadata::new(&build).unwrap();
     write_legacy_database(&config, &version, &current_records);
 
-    let legacy_path = config.db_path(STATE_DATABASE_KIND, 30, &Network::Mainnet);
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 31, &Network::Mainnet);
     let current_path = config.db_path(STATE_DATABASE_KIND, 33, &Network::Mainnet);
     std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
     std::fs::rename(&legacy_path, &current_path).unwrap();

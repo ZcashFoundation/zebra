@@ -185,9 +185,9 @@ The node's history starts at the window start `L`:
   and pruning never retains fewer. It never advertises `NODE_NETWORK`.
 - The database records where its history starts, so a restart continues from the installed state
   without downloading anything again. Its format version is 33.0.0 in `state/v33`: never open it
-  with an older Zebra build, and never move it to `v32`, `v30`, `v29`, or any older directory.
-  Those builds cannot decode its records, and the oldest cannot tell that the history below `L` is
-  missing.
+  with an older Zebra build, and never move it to `v32`, `v31`, `v30`, `v29`, or any older
+  directory. Those builds cannot decode its records, and the oldest cannot tell that the history
+  below `L` is missing.
 
 Pruning, `copy-state`, zcashd-compat mode, and the `indexer` feature treat a snapshot-born
 database like a pruned one: see [pruned mining nodes](pruning.md).

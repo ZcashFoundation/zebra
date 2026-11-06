@@ -136,7 +136,7 @@ resumes the remaining work.
 
 The setting `[state] delete_old_database` (default `true`) makes each start
 delete older major-version directories under the cache directory, except
-registered reusable source directories (`v25` through `v30` and `v32` for
+registered reusable source directories (`v25` through `v32` for
 format 33).
 Setting it to `false` keeps every directory, but does not prevent the rename
 above. Renaming or symlinking a versioned directory by hand does not convert
@@ -184,7 +184,7 @@ it opens a newer minor or patch format and records the downgrade (`trying to ope
 newer database format: data should be compatible`).
 
 Snapshot-born state uses a versioned directory barrier and a `snapshot_base`
-marker. Never open it with an older build or rename it to v32, v30, v29, or any
+marker. Never open it with an older build or rename it to v32, v31, v30, v29, or any
 older directory: those builds cannot decode its records or would treat its
 incomplete history as an archive. Keep
 running a snapshot-aware release, or recover from a separate compatible archive
@@ -219,19 +219,20 @@ release after it. See [format 33 and recovery](pruning.md#format-33-recovery-and
 
 ## Zebra 7.1.0
 
-- **State formats 29, 30, and 32 → 33.** With no existing v33 database, the first
-  start moves the newest reusable source to `state/v33/<network>` without a
-  resync, preferring v32, then v30, then v29. Every intervening upgrade runs in
-  order: the 30.1 upgrade adds the `snapshot_base` column family, the v32
-  upgrade adds the snapshot directory barrier, and the v33 upgrade rewrites the
-  fixed-height records of every earlier format. No release uses format 31. Keep
-  a separate stopped-node source backup before upgrading if rollback matters:
-  disabling old-database cleanup does not preserve the moved directory, and v32
-  and older readers cannot decode migrated v33 records.
+- **State formats 29, 30, 31, and 32 → 33.** With no existing v33 database, the
+  first start moves the newest reusable source to `state/v33/<network>` without
+  a resync, preferring v32, then v31, then v30, then v29. Every intervening
+  upgrade runs in order: the v30 upgrade adds the spentness hint column
+  families, the v31 upgrade isolates pruned state, the 31.1 upgrade adds the
+  `snapshot_base` column family, the v32 upgrade adds the snapshot directory
+  barrier, and the v33 upgrade rewrites the fixed-height records of every
+  earlier format. Keep a separate stopped-node source backup before upgrading if
+  rollback matters: disabling old-database cleanup does not preserve the moved
+  directory, and v32 and older readers cannot decode migrated v33 records.
 - **Snapshot-born state is not downgrade-compatible.** Format 33 holds a
   `snapshot_base` marker recording where an imported snapshot's history starts.
-  Never open that state with an older build, and never move it to `v32`, `v30`,
-  `v29`, or any older directory: those builds cannot decode its records or
+  Never open that state with an older build, and never move it to `v32`, `v31`,
+  `v30`, `v29`, or any older directory: those builds cannot decode its records or
   would treat its missing pre-window bodies as a complete archive. A
   snapshot-born node must keep running a snapshot-aware release or recover from
   a separate compatible archive backup or a full sync. State snapshots now use

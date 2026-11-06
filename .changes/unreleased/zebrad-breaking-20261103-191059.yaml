@@ -2,10 +2,10 @@ project: zebrad
 kind: breaking
 body: >-
   Replaced fixed three-byte block heights with canonical variable-width encoding in state format
-  v33, above the v32 snapshot barrier. Startup prefers reusable v32 sources, with v30/v29
+  v33, above the v32 snapshot barrier. Startup prefers reusable v32 sources, with v31/v30/v29
   fallbacks, and rewrites every earlier format's records, including snapshot-born state, before
   serving reads or committing blocks. Keep a stopped-node source backup: the rewrite is one-way,
-  and renaming migrated state back to v32, v30 or v29 is not a valid rollback. Pruned databases
+  and renaming migrated state back to v32, v31, v30 or v29 is not a valid rollback. Pruned databases
   migrate retained records without an archive resync. Direct database readers must support v33
   and wait for the writer to finish. State snapshots now use snapshot format 2, which older
   releases reject.

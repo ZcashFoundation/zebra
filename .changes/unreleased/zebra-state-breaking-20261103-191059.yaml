@@ -7,7 +7,7 @@ body: >-
   locations, and their transparent address composites and balance values are now `Vec<u8>` instead
   of fixed arrays. State format v33 migrates every affected key and value in 27 column
   families, including the checkpoint sync metadata and spentness journal, above the v32 snapshot
-  barrier and before older pending upgrades, and prefers reusable v32 sources with v30/v29
+  barrier and before older pending upgrades, and prefers reusable v32 sources with v31/v30/v29
   fallbacks. Direct readers must use v33-or-newer code and wait for the writer to finish. v32 and
   older readers cannot decode v33 records. `SNAPSHOT_FORMAT` is now 2, because state snapshots
   carry the new record encoding.
