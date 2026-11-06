@@ -104,7 +104,7 @@ jobs:
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.crate }} crate
+    name: Build ${{ matrix.crate }} crate, ${{ matrix.features }}
     needs: [changes, crates-matrix]
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
@@ -115,7 +115,12 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: true
-      matrix: ${{ fromJson(needs.crates-matrix.outputs.matrix) }}
+      # One job per crate ran all four configurations in a row, up to 8 minutes for the slowest
+      # crates. Two jobs per crate split them, pairing the configurations that share the most
+      # build artifacts.
+      matrix:
+        crate: ${{ fromJson(needs.crates-matrix.outputs.matrix).crate }}
+        features: [default-features, no-default-and-all-features]
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -126,40 +131,41 @@ jobs:
         with:
           toolchain: 1.97.0
           components: clippy
-          # One cache for the whole matrix instead of one per crate. These jobs
+          # One cache per half of the matrix instead of one per job. These jobs
           # compile overlapping subsets of the same dependency graph, so 12
           # per-crate caches stored ~12 GB of near-duplicate artifacts and blew
           # through the repo's default 10 GB quota on their own.
-          cache-shared-key: crate-build
+          cache-shared-key: crate-build-${{ matrix.features }}
           cache-on-failure: true
-          # Only main writes the shared cache, and only from the crate with the
+          # Only main writes the shared caches, and only from the crate with the
           # widest dependency closure, so the other legs restore a superset
           # rather than whichever leg happened to finish first.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebrad' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
-      # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
-      # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
-      #
       # Some Zebra crates do not have any features, and most don't have any default features.
       # Some targets activate features, but we still need to be able to build without them.
       - name: Build ${{ matrix.crate }} crate with default features
+        if: matrix.features == 'default-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} -- -D warnings
           cargo build --package ${{ matrix.crate }}
 
       - name: Build ${{ matrix.crate }} crate with no default features and all targets
+        if: matrix.features == 'no-default-and-all-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --no-default-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --no-default-features --all-targets
 
       - name: Build ${{ matrix.crate }} crate with default features and all targets
+        if: matrix.features == 'default-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-targets
 
       - name: Build ${{ matrix.crate }} crate with all features and all targets
+        if: matrix.features == 'no-default-and-all-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
