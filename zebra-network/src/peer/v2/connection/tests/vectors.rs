@@ -28,14 +28,16 @@ use crate::{
             addr_relay::{AddrRelay, AddrRelayHandle, Timings},
             connection::{
                 announcements::AnnouncementWriter,
+                global_object_permits,
                 inbound::{
                     global_block_range_permits, global_hashes_permits,
-                    serve as serve_request_stream, BlockRangeServing, StreamPermits,
+                    serve as serve_request_stream, BlockRangeServing, ObjectServing, StreamPermits,
                     INBOUND_REQUEST_CONCURRENCY, MAX_LOOKUP_CALLS_PER_RESPONSE,
-                    RESPONSE_BYTES_LIMIT,
+                    MAX_OBJECT_STREAMS_PER_PEER, RESPONSE_BYTES_LIMIT,
                 },
                 outbound::{
-                    drive, RequestContext, RequestSend, ResponseGuard, MAX_OUTBOUND_REQUEST_STREAMS,
+                    drive, ObjectSizes, RequestContext, RequestSend, ResponseGuard,
+                    MAX_OUTBOUND_REQUEST_STREAMS,
                 },
                 spawn_connection, ConnectionParams, Event, Events, Overloads, EVENT_QUEUE,
                 MAX_UNKNOWN_HANDSHAKE_RECORDS,
@@ -284,7 +286,11 @@ fn spawn_node_scored(
             serve_block_ranges: true,
             block_range_permits: global_block_range_permits(),
             hashes_permits: global_hashes_permits(),
+            object_source: None,
+            local_services: PeerServices::NODE_NETWORK,
+            object_permits: global_object_permits(),
         },
+        ObjectSizes::spawn(),
         None,
     )
     .0;
@@ -2902,6 +2908,15 @@ async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down
             None,
             events,
             BlockRangeServing::new(true, global_block_range_permits()),
+            ObjectServing {
+                source: None,
+                advertised: false,
+                peer_permits: Arc::new(tokio::sync::Semaphore::new(MAX_OBJECT_STREAMS_PER_PEER)),
+                global_permits: global_object_permits(),
+                stall_backoff: Arc::new(
+                    crate::peer::v2::connection::inbound::hashes::StallBackoff::new(),
+                ),
+            },
         ));
 
         let expected = found(&block);
@@ -3490,6 +3505,7 @@ async fn request_task_aborted_before_it_runs_answers_the_client() {
             genesis_hash: network.genesis_hash(),
             misbehavior: MisbehaviorScores::spawn(misbehavior_tx, 8),
             events,
+            object_sizes: crate::peer::v2::connection::outbound::ObjectSizes::spawn(),
         };
 
         // The test runtime is single-threaded, so the task cannot run before it is aborted.
@@ -3516,6 +3532,93 @@ async fn request_task_aborted_before_it_runs_answers_the_client() {
             1,
             "the aborted task releases its permit"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A `get-object` stream from a peer is refused with `REFUSED` and the
+/// connection stays open, and object requests are routed only to version 2
+/// peers that advertise `NODE_SYNC_ARTIFACTS`.
+#[tokio::test]
+async fn get_object_is_refused_and_routed_by_service_bit() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // A raw peer that advertises artifact serving, connected to a node serving the fixture.
+        let (connection, inbound, _client_ep, _server_ep) = connected_pair(&network).await;
+        let raw_init = InitRecord {
+            version: crate::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
+            services: PeerServices::NODE_NETWORK | PeerServices::NODE_SYNC_ARTIFACTS,
+            nonce: Default::default(),
+            user_agent: "/raw/".to_string(),
+            start_height: block::Height(0),
+            relay: true,
+            announce: false,
+            full_ids: false,
+        };
+        let (mut hs_send, hs_recv) = connection.open_bi().await.expect("opens");
+        hs_send
+            .write_all(&[StreamType::Handshake.code()])
+            .await
+            .expect("writes");
+        hs_send
+            .write_all(&RecordCodec::encode_record(raw_init.encode()).expect("valid"))
+            .await
+            .expect("writes");
+        let (b, nonces) = (identity("/b/"), NonceRegistry::spawn(8));
+        let (completed, _hs_recv) = tokio::join!(
+            run_handshake(&inbound, Role::Responder, &network, &b, &nonces),
+            async {
+                let mut framed = tokio_util::codec::FramedRead::new(hs_recv, RecordCodec);
+                framed.next().await.expect("init").expect("valid");
+                framed.into_inner()
+            }
+        );
+        let node = spawn_node(
+            inbound,
+            completed.expect("the handshake completes"),
+            Fixture::new(),
+        );
+
+        // The peer's `get-object` stream, with a full-length body: REFUSED, connection open.
+        let (mut send, mut recv) = connection.open_bi().await.expect("opens");
+        send.write_all(&[StreamType::GetObject.code()])
+            .await
+            .expect("writes");
+        send.write_all(&[0; 44]).await.expect("writes");
+        send.finish().expect("finishes");
+        let error = recv.read_to_end(16).await.expect_err("refused");
+        assert!(
+            matches!(error, quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))
+                if code.into_inner() == ErrorCode::Refused.code()),
+            "got {error:?}"
+        );
+        assert!(
+            connection.close_reason().is_none(),
+            "the connection stays open"
+        );
+
+        let request = Request::Object {
+            hash: zebra_chain::state_snapshot::ObjectHash([0xAB; 32]),
+            offset: 0,
+            length: 1,
+        };
+
+        // Routing: a version 2 peer with the bit supports object requests but not the mempool
+        // snapshot; one without the bit supports neither.
+        let tracked = crate::peer::LoadTrackedClient::from(node.client);
+        assert!(tracked.supports(&request));
+        assert!(!tracked.supports(&Request::MempoolTransactionIds));
+        // Nor the legacy address request: its records go to the version 2 address segment.
+        assert!(!tracked.supports(&Request::Peers));
+        drop(hs_send);
+
+        let without_bit = raw_peer_node(&network).await;
+        let tracked = crate::peer::LoadTrackedClient::from(without_bit.node.client);
+        assert!(!tracked.supports(&request));
+        assert!(!tracked.supports(&Request::MempoolTransactionIds));
     })
     .await
     .expect("the test completes well within the timeout");
@@ -3599,6 +3702,7 @@ async fn response_violations_are_never_crowded_out() {
                 genesis_hash: network.genesis_hash(),
                 misbehavior,
                 events,
+                object_sizes: ObjectSizes::spawn(),
             };
             let (driven, ()) = tokio::join!(
                 tokio::time::timeout(

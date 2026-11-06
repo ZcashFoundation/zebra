@@ -17,7 +17,8 @@
 //! - [`anchors`]: checkpoint-list anchors;
 //! - [`known_hashes`]: the known-hash list, fetched from peers and verified
 //!   against its pins, as a [`HashSource`](scheduler::HashSource) that
-//!   anchors units at every listed height.
+//!   anchors units at every listed height;
+//! - [`hints`]: spentness-hint acquisition, verification and serving.
 //!
 //! The supervisor's state machine:
 //!
@@ -59,6 +60,7 @@ use scheduler::HashSource;
 pub mod anchors;
 pub mod convert;
 pub mod engine;
+pub mod hints;
 pub mod known_hashes;
 pub mod scheduler;
 

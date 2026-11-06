@@ -639,3 +639,144 @@ async fn engine_claim_after_exhausted_tips_cancels_downloads() -> Result<(), cra
 
     Ok(())
 }
+
+/// Starts `chain_sync` on a state that already holds genesis, and answers its
+/// genesis check.
+async fn sync_from_genesis(
+    chain_sync: ChainSync<MockPeerSet, MockState, MockReadState, MockVerifier, MockChainTip>,
+    state_service: &mut MockState,
+) -> Result<
+    (
+        tokio::task::JoinHandle<Result<(), color_eyre::Report>>,
+        block::Hash,
+    ),
+    crate::BoxError,
+> {
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync.sync());
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    Ok((chain_sync_task_handle, block0_hash))
+}
+
+/// While spentness hints may apply, the syncer starts no sync round after
+/// genesis until the hints decision is made, so it cannot commit block 1
+/// before the checkpoint sync engine claims block download.
+#[tokio::test(start_paused = true)]
+async fn hints_gate_holds_the_syncer_after_genesis() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let (_supervisor, ownership) = ownership_channels(SyncOwner::Legacy);
+    let (chain_sync, _sync_status, mut peer_set, mut state_service, mut verifier) =
+        syncer_with_ownership(ownership);
+    let (decided, gate) = watch::channel(false);
+    let chain_sync = chain_sync.with_hints_gate(gate, None);
+
+    let (chain_sync_task_handle, block0_hash) =
+        sync_from_genesis(chain_sync, &mut state_service).await?;
+
+    // With `require`, the syncer waits as long as acquisition takes.
+    tokio::time::sleep(GATE_OBSERVATION).await;
+    peer_set.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+    verifier.expect_no_requests().await;
+
+    // The decision is made, and the syncer starts its first round.
+    decided.send_replace(true);
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
+/// An engine claim while the hints gate is closed is acknowledged at once, and
+/// a hand-back before the hints decision still starts no sync round. A dropped
+/// gate counts as decided.
+#[tokio::test(start_paused = true)]
+async fn hints_gate_acknowledges_engine_claims() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let (mut supervisor, ownership) = ownership_channels(SyncOwner::Legacy);
+    let (chain_sync, _sync_status, mut peer_set, mut state_service, _verifier) =
+        syncer_with_ownership(ownership);
+    let (decided, gate) = watch::channel(false);
+    let chain_sync = chain_sync.with_hints_gate(gate, None);
+
+    let (chain_sync_task_handle, block0_hash) =
+        sync_from_genesis(chain_sync, &mut state_service).await?;
+
+    supervisor.owner.send_replace(engine(4_000, 1));
+    timeout(GATE_OBSERVATION, supervisor.ack.wait_for(|ack| *ack == 1))
+        .await
+        .expect("the syncer acknowledges the claim while the hints gate is closed")
+        .expect("the syncer holds the ack sender");
+
+    supervisor.owner.send_replace(SyncOwner::Legacy);
+    tokio::time::sleep(GATE_OBSERVATION).await;
+    peer_set.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    drop(decided);
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
+/// With a timeout (`auto`), the syncer syncs without hints once it passes,
+/// even if the hints decision never comes.
+#[tokio::test(start_paused = true)]
+async fn hints_gate_falls_back_to_unhinted_sync() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let fallback = 2 * GATE_OBSERVATION;
+    let (_supervisor, ownership) = ownership_channels(SyncOwner::Legacy);
+    let (chain_sync, _sync_status, mut peer_set, mut state_service, _verifier) =
+        syncer_with_ownership(ownership);
+    let (_decided, gate) = watch::channel(false);
+    let chain_sync = chain_sync.with_hints_gate(gate, Some(fallback));
+
+    let (chain_sync_task_handle, block0_hash) =
+        sync_from_genesis(chain_sync, &mut state_service).await?;
+
+    tokio::time::sleep(GATE_OBSERVATION).await;
+    peer_set.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    tokio::time::sleep(GATE_OBSERVATION).await;
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}

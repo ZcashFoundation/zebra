@@ -151,6 +151,26 @@ pub enum Response {
     //
     // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
     Transactions(Vec<InventoryResponse<(UnminedTx, Option<PeerSocketAddr>), UnminedTxId>>),
+
+    /// A range of a content-addressed synchronization artifact, in response to
+    /// [`Request::Object`](super::Request::Object).
+    ///
+    /// `size` is the object's total size as the peer claims it, which is only trusted once the
+    /// whole object hashes to the requested hash. `data` starts at the requested offset and may
+    /// be shorter than requested, or empty: the responder may finish early, and an answer that
+    /// the request's deadline or a reset cut off after its size arrived keeps the data received.
+    /// The requester re-requests the remainder from any peer.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    Object {
+        /// The object's total size in bytes, as the peer claims it.
+        size: u64,
+        /// The delivered bytes, from the requested offset.
+        data: Vec<u8>,
+    },
+
+    /// The peer does not have the requested object, in response to
+    /// [`Request::Object`](super::Request::Object).
+    ObjectNotFound,
 }
 
 impl fmt::Display for Response {
@@ -208,6 +228,11 @@ impl fmt::Display for Response {
                 transactions.iter().filter(|r| r.is_available()).count(),
                 transactions.iter().filter(|r| r.is_missing()).count()
             ),
+
+            Response::Object { size, data } => {
+                format!("Object {{ size: {size}, data: {} }}", data.len())
+            }
+            Response::ObjectNotFound => "ObjectNotFound".to_string(),
         })
     }
 }
@@ -233,6 +258,8 @@ impl Response {
             Response::Transactions(_) => "Transactions",
             Response::BlockRange(_) => "BlockRange",
             Response::SyncHashes(_) => "SyncHashes",
+            Response::Object { .. } => "Object",
+            Response::ObjectNotFound => "ObjectNotFound",
         }
     }
 

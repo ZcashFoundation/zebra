@@ -22,6 +22,10 @@
 //! part of an answer to was not served at all, so the stream is reset with
 //! `CANCELLED`, the code for a request that is no longer wanted, which is the
 //! closest the draft has.
+//!
+//! A `get-object` stream is the exception to the general request permit: it
+//! is served from the object index and the disk, not the inbound service,
+//! under its own permits, which are taken without waiting.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -32,7 +36,10 @@ use std::{
 };
 
 use quinn::{RecvStream, SendStream};
-use tokio::sync::Semaphore;
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::Instant,
+};
 use tower::Service;
 
 use zebra_chain::{
@@ -63,9 +70,18 @@ use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
 pub(crate) mod block_range;
 pub(super) mod hashes;
+mod object;
 
 pub(crate) use block_range::{global_block_range_permits, BlockRangeServing};
 pub(crate) use hashes::global_hashes_permits;
+#[cfg(test)]
+pub(super) use object::{
+    record_sent_object_bytes, spawn_object_disk, unreadable, OBJECT_EARLY_FIN_MARGIN,
+    OBJECT_READ_CHUNK, OBJECT_WRITE_STALL,
+};
+pub(super) use object::{
+    serve_object, ObjectServing, MAX_OBJECT_STREAMS_GLOBAL, MAX_OBJECT_STREAMS_PER_PEER,
+};
 
 use block_range::{serve_block_range, PendingRange};
 
@@ -169,6 +185,7 @@ pub(super) async fn serve<S>(
     address_book: Option<V2BookHandle>,
     events: Events,
     block_ranges: BlockRangeServing,
+    objects: ObjectServing,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -178,12 +195,9 @@ pub(super) async fn serve<S>(
     // One deadline for the whole exchange: a peer that reads its responses slowly, or asks for
     // many entries, cannot hold a request permit and the request's objects for longer than a
     // requester waits for a response. Dropping the exchange at the deadline releases both.
-    let accepted = tokio::time::Instant::now();
+    let accepted = Instant::now();
     let deadline = accepted + REQUEST_TIMEOUT;
-    let mut response = ResponseSend {
-        send,
-        written: false,
-    };
+    let mut response = ResponseSend::new(send);
     let served = tokio::time::timeout_at(
         deadline,
         serve_inner(
@@ -195,6 +209,8 @@ pub(super) async fn serve<S>(
             &get_addr_allowed,
             address_book.as_ref(),
             &block_ranges,
+            &objects,
+            deadline,
         ),
     )
     .await;
@@ -241,7 +257,7 @@ pub(super) async fn serve<S>(
 }
 
 /// Why a request stream could not be answered normally.
-enum Outcome {
+pub(super) enum Outcome {
     /// Close the connection with `code`: the peer violated the protocol, or
     /// (with `INTERNAL_ERROR`) this node could not encode the response.
     Violation { reason: String, code: ErrorCode },
@@ -271,7 +287,7 @@ impl From<WireError> for Outcome {
 
 /// Reads the request, answers it, and writes the response. The caller
 /// bounds the whole exchange, every wait here included, by the request
-/// deadline.
+/// `deadline`.
 ///
 /// A `get-block-range` request is only read here: it is returned, with the
 /// permits it was admitted with, for the caller to serve outside the request
@@ -286,6 +302,8 @@ async fn serve_inner<S>(
     get_addr_allowed: &AtomicBool,
     address_book: Option<&V2BookHandle>,
     block_ranges: &BlockRangeServing,
+    objects: &ObjectServing,
+    deadline: Instant,
 ) -> Result<Option<PendingRange>, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
@@ -331,20 +349,15 @@ where
     // starve the peer's other requests. A range stream claims its peer permit here, and the node
     // permit only once its request is decoded, and a `get-hashes` stream claims both once its
     // request is decoded, so streams that never send a request cannot hold the node's permits.
+    // Object requests hold none either: they are bounded by their own, which are never waited
+    // for.
     let mut range_permit = match stream_type {
         StreamType::GetBlockRange => Some(block_ranges.claim_peer()?),
         _ => None,
     };
     let _permit = match (&range_permit, stream_type) {
         (Some(_), _) | (None, StreamType::GetHashes) => None,
-        (None, _) => Some(
-            permits
-                .request
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|_closed| Outcome::Transport)?,
-        ),
+        (None, _) => request_permit(stream_type, permits.request.clone()).await?,
     };
 
     // The body, up to the peer finishing its direction, bounded by what the type allows.
@@ -403,6 +416,7 @@ where
             let permits = block_ranges.claim_node(peer)?;
             return Ok(Some(PendingRange { request, permits }));
         }
+        WireRequest::Object(request) => serve_object(response, request, objects, deadline).await,
     }?;
 
     metrics::counter!(
@@ -448,6 +462,27 @@ impl StreamPermits {
     }
 }
 
+/// Waits for one of the peer's request `permits` for a `stream_type` request,
+/// or returns at once with none for a `get-object` request, which is bounded
+/// by the object stream permits instead. Excess object requests are refused,
+/// never queued, so they must not wait behind the peer's other requests.
+///
+/// Fails only if the permits were closed, which the connection task never does
+/// while a stream is served.
+pub(super) async fn request_permit(
+    stream_type: StreamType,
+    permits: Arc<Semaphore>,
+) -> Result<Option<OwnedSemaphorePermit>, Outcome> {
+    if stream_type == StreamType::GetObject {
+        return Ok(None);
+    }
+    permits
+        .acquire_owned()
+        .await
+        .map(Some)
+        .map_err(|_closed| Outcome::Transport)
+}
+
 /// Calls the inbound service, mapping its failures to stream refusals, or,
 /// when the connection's overload policy drops the connection or the
 /// inbound service has shut down, to a close.
@@ -473,8 +508,8 @@ where
 
 /// This node's sending direction of a request stream, which the response is
 /// written to.
-struct ResponseSend {
-    send: SendStream,
+pub(super) struct ResponseSend {
+    pub(super) send: SendStream,
     /// Whether any of the response may have reached the stream, which decides
     /// the code the stream is reset with if the request is abandoned (see
     /// [`ResponseSend::abandon_code`]).
@@ -482,6 +517,14 @@ struct ResponseSend {
 }
 
 impl ResponseSend {
+    /// Returns a response stream with no bytes written yet.
+    pub(super) fn new(send: SendStream) -> Self {
+        Self {
+            send,
+            written: false,
+        }
+    }
+
     /// The code the stream is reset with if the request is abandoned now, at
     /// its deadline or because the connection is closing: `REFUSED` while none
     /// of the response has been written (draft, "Request Streams": a

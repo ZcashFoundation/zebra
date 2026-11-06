@@ -95,8 +95,8 @@ pub enum PeerError {
     LocalEncodingError(String),
 
     /// A request stream failed or was reset, including by the peer's `REFUSED`
-    /// reset (there is no separate refused error, and no retry policy keys on
-    /// one yet); the connection stays open.
+    /// reset of any request but a `get-object` one, which fails with
+    /// [`PeerError::RequestRefused`]; the connection stays open.
     #[error("Request stream failed: {0}")]
     RequestStreamFailed(String),
 
@@ -116,6 +116,19 @@ pub enum PeerError {
     /// legacy connection.
     #[error("request is only served on version 2 connections")]
     V2OnlyRequest,
+
+    /// A request is outside the bounds the version 2 protocol allows, such as
+    /// a `get-object` offset above 2^48 − 1, so it was not sent; the
+    /// connection stays open.
+    #[error("request is outside the protocol's bounds, not sent: {0}")]
+    RequestOutOfBounds(String),
+
+    /// The peer reset a version 2 `get-object` request with `REFUSED` before
+    /// answering it: it is busy, or serves no objects. A refusal is not
+    /// misbehavior, so the caller backs off from the peer without penalty; the
+    /// connection stays open.
+    #[error("Remote peer refused the request")]
+    RequestRefused,
 
     /// A queued advert lost authorization before its local write started.
     #[error("peer authorization was revoked before advert delivery")]
@@ -193,6 +206,8 @@ impl PeerError {
             PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
             PeerError::InboundOnlyRequest => "InboundOnlyRequest".into(),
             PeerError::V2OnlyRequest => "V2OnlyRequest".into(),
+            PeerError::RequestOutOfBounds(_) => "RequestOutOfBounds".into(),
+            PeerError::RequestRefused => "RequestRefused".into(),
             PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),

@@ -135,6 +135,10 @@ preparation on `main` before the final Release PR refresh:
 - Confirm a successful full sync since the last state change and the required
   integration evidence.
 - Review and merge the checkpoint update.
+- If the release pins a new spentness-hint artifact, follow the
+  [artifact release steps](../user/spentness-hints.md#generating-an-artifact-release-maintainers):
+  its terminal height must be in the checkpoint update, and version 2 nodes
+  must be seeded with the artifact.
 - Set `ESTIMATED_RELEASE_HEIGHT` for the intended release. Check the support
   interval against upcoming upgrades: a release lacking an upgrade must expire
   before that upgrade; restore the intended interval in its supporting release.

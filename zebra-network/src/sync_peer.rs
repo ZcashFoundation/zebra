@@ -21,7 +21,10 @@ use tokio::sync::Semaphore;
 use zebra_chain::block;
 
 use crate::{
-    peer::v2::{connection::ConnectionCloser, misbehavior::MisbehaviorScores},
+    peer::v2::{
+        connection::{ConnectionCloser, ObjectSizes},
+        misbehavior::MisbehaviorScores,
+    },
     protocol::v2::request::Request as WireRequest,
     quic::app_error_code,
     types::PeerServices,
@@ -30,16 +33,19 @@ use crate::{
 
 pub mod block_range;
 pub mod hashes;
+pub mod object;
 pub mod registry;
 
 #[cfg(test)]
 mod tests;
 
 pub use crate::protocol::v2::{
+    object::{ObjectEntry, ObjectHash, ObjectIndex, ObjectSource},
     request::{GetBlockRange, GetHashes},
     types::ErrorCode,
 };
 pub use block_range::{BlockRangeStream, RangeItem};
+pub use object::ObjectChunk;
 pub use registry::{SyncPeers, SyncPeersSender};
 
 /// The bulk streams one [`SyncPeer`] may have open at once, across clones.
@@ -86,6 +92,8 @@ pub struct SyncPeer {
     /// Closes the connection through its connection task, so the close is in
     /// the task's error slot and log, as for a violation a stream task finds.
     closer: ConnectionCloser,
+    /// The connection's object size task, shared with its connection task.
+    object_sizes: ObjectSizes,
 }
 
 impl SyncPeer {
@@ -93,7 +101,8 @@ impl SyncPeer {
     ///
     /// Called only from `peer_set::initialize::v2::finish_connection`, next to
     /// `spawn_connection`, which then sends it to the registry. `closer` is
-    /// the connection task's.
+    /// the connection task's, and `object_sizes` the size task it shares with
+    /// the connection task.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         id: ConnectionId,
@@ -103,6 +112,7 @@ impl SyncPeer {
         connection: quinn::Connection,
         misbehavior: MisbehaviorScores,
         closer: ConnectionCloser,
+        object_sizes: ObjectSizes,
     ) -> Self {
         SyncPeer {
             id,
@@ -114,6 +124,7 @@ impl SyncPeer {
             hashes_permits: Arc::new(Semaphore::new(HASHES_STREAMS_PER_PEER)),
             misbehavior,
             closer,
+            object_sizes,
         }
     }
 

@@ -1,5 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
+use std::sync::Arc;
+
 use static_assertions::const_assert;
 use zebra_chain::{
     block::Height,
@@ -13,8 +15,44 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
-    Config,
+    Config, ObjectIndex, ObjectSource,
 };
+
+/// The objects a node serves are runtime-only: a config never writes them, a config file that
+/// names them is rejected, and two configs are equal only if they watch the same object index.
+#[test]
+fn object_source_is_runtime_only() {
+    let _init_guard = zebra_test::init();
+
+    let (_sender, source) = ObjectSource::channel(Arc::new(ObjectIndex::new()));
+    let config = Config {
+        object_source: Some(source),
+        ..Config::default()
+    };
+
+    let written = toml::to_string(&config).expect("configs serialize");
+    assert!(
+        !written.contains("object_source"),
+        "the served objects are not written: {written}"
+    );
+    let read: Config = toml::from_str(&written).expect("written configs parse");
+    assert_eq!(read.object_source, None);
+    assert!(
+        toml::from_str::<Config>("object_source = 1").is_err(),
+        "config files cannot name served objects"
+    );
+
+    assert_eq!(config.clone(), config, "a clone watches the same index");
+    let (_other_sender, other) = ObjectSource::channel(Arc::new(ObjectIndex::new()));
+    assert_ne!(
+        Config {
+            object_source: Some(other),
+            ..Config::default()
+        },
+        config,
+        "a different index"
+    );
+}
 
 #[test]
 fn parse_config_listen_addr() {

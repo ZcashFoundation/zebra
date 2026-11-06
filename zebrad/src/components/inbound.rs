@@ -762,6 +762,10 @@ impl Service<zn::Request> for Inbound {
                 })
                     .boxed()
             }
+            // Objects are served by the version 2 connection from the node's artifact index, not
+            // through the inbound service.
+            zn::Request::Object { .. } => async { Ok(zn::Response::Nil) }.boxed(),
+
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");
             }

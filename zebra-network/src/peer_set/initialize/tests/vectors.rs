@@ -4105,6 +4105,96 @@ async fn v2_mutual_initial_peers_settle_on_one_connection() {
     second_task.abort();
 }
 
+/// A version 2 node with an object source advertises `NODE_SYNC_ARTIFACTS`, and another node
+/// fetches an object from it through the [`SyncPeer`](crate::SyncPeer) its handshake registers:
+/// the path that spentness-hint acquisition takes, with no hand-set service flags.
+#[tokio::test]
+async fn v2_node_with_object_source_serves_objects_to_another_node() {
+    use crate::{sync_peer::ObjectChunk, ObjectEntry, ObjectHash, ObjectIndex, ObjectSource};
+
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let dir = tempfile::tempdir().expect("a temporary directory can be created");
+    // Truncating the position gives a pattern that differs between nearby offsets.
+    let data: Vec<u8> = (0..100_000_u32).map(|position| position as u8).collect();
+    let hash = ObjectHash::of(&data);
+    let path = dir.path().join(hash.to_string());
+    std::fs::write(&path, &data).expect("the object file is writable");
+    let index = ObjectIndex::from([(
+        hash,
+        ObjectEntry {
+            path,
+            // A test object of 100,000 bytes, which fits in a u64.
+            size: data.len() as u64,
+        },
+    )]);
+    let (_objects, object_source) = ObjectSource::channel(Arc::new(index));
+
+    let server_addr = free_udp_addr();
+    let (_server_rx, server_task) = spawn_v2_node(
+        Config {
+            object_source: Some(object_source),
+            ..v2_test_config(server_addr, &[])
+        },
+        no_bans(),
+    );
+
+    let (sync_peers_sender, mut sync_peers) = crate::SyncPeersSender::spawn();
+    let (_client_rx, client_task) = spawn_v2_node(
+        Config {
+            v2_sync_peers: Some(sync_peers_sender),
+            ..v2_test_config(any_udp_addr(), &[server_addr])
+        },
+        no_bans(),
+    );
+
+    let peer = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, async {
+        loop {
+            if let Some(peer) = sync_peers.borrow_and_update().first().cloned() {
+                return peer;
+            }
+            sync_peers
+                .changed()
+                .await
+                .expect("the registry runs while its sender is in the client's config");
+        }
+    })
+    .await
+    .expect("the client connects to the server");
+
+    assert!(
+        peer.services().contains(PeerServices::NODE_SYNC_ARTIFACTS),
+        "a node with an object source advertises NODE_SYNC_ARTIFACTS: {:?}",
+        peer.services(),
+    );
+
+    let chunk = peer
+        .get_object(hash, 0, 1 << 20)
+        .await
+        .expect("the server answers");
+    let ObjectChunk::Found { size, data: served } = chunk else {
+        panic!("the server holds the object, but answered {chunk:?}");
+    };
+    // The object's length fits in a u64.
+    assert_eq!(size, data.len() as u64);
+    assert_eq!(served.as_ref(), data.as_slice());
+
+    let missing = peer
+        .get_object(ObjectHash::of(b"not served"), 0, 1 << 20)
+        .await
+        .expect("the server answers");
+    assert!(
+        matches!(missing, ObjectChunk::NotFound),
+        "an object the index does not hold is not found: {missing:?}"
+    );
+
+    server_task.abort();
+    client_task.abort();
+}
+
 /// Starts two dialers from 127.0.0.1 to a version 2 listener with `listener_config`, and checks
 /// that it accepts exactly one of them.
 async fn assert_v2_listener_accepts_one_of_two_dialers(listener_config: Config) {
