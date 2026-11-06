@@ -2,6 +2,8 @@
 
 use std::{collections::VecDeque, time::SystemTime};
 
+use ratatui::widgets::TableState;
+
 use crate::{
     mempool::MempoolSummary, rpc::RpcPeer, summary::BlockSummary, upgrades::UpgradeSchedule,
 };
@@ -48,6 +50,8 @@ pub struct App {
     /// Lines between the bottom of the log pane and the newest line. Zero follows new lines.
     pub log_scroll_back: usize,
     pub show_peers: bool,
+    /// The highlighted row and scroll position of the peer list.
+    pub peer_table: TableState,
     pub should_quit: bool,
 }
 
@@ -69,6 +73,7 @@ impl App {
             log_lines: VecDeque::new(),
             log_scroll_back: 0,
             show_peers: false,
+            peer_table: TableState::new().with_selected(Some(0)),
             should_quit: false,
         }
     }
@@ -93,6 +98,16 @@ impl App {
             Update::Mempool(summary) => self.mempool = Some(summary),
             Update::Peers(mut peers) => {
                 peers.sort_by_key(|peer| std::cmp::Reverse(peer.startingheight));
+                let selected_addr = self
+                    .peer_table
+                    .selected()
+                    .and_then(|index| self.peers.get(index))
+                    .map(|peer| peer.addr.clone());
+                if let Some(index) =
+                    selected_addr.and_then(|addr| peers.iter().position(|peer| peer.addr == addr))
+                {
+                    self.peer_table.select(Some(index));
+                }
                 self.peers = peers;
                 self.peers_updated = Some(SystemTime::now());
             }
@@ -118,6 +133,21 @@ impl App {
             .saturating_add_signed(lines)
             .min(self.log_lines.len());
     }
+
+    /// Moves the peer list highlight `rows` down. Negative values move it up.
+    ///
+    /// The highlight stops at the first and last peer.
+    pub fn move_peer_selection(&mut self, rows: isize) {
+        let last = self.peers.len().saturating_sub(1);
+        let selected = self
+            .peer_table
+            .selected()
+            .unwrap_or(0)
+            .min(last)
+            .saturating_add_signed(rows)
+            .min(last);
+        self.peer_table.select(Some(selected));
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +169,42 @@ mod tests {
         app.apply(Update::LogLines(vec!["a".into()]));
         app.apply(Update::LogLines(vec!["b".into()]));
         assert_eq!(app.log_scroll_back, 0);
+    }
+
+    fn peer(addr: &str, height: i64) -> RpcPeer {
+        serde_json::from_value(serde_json::json!({"addr": addr, "startingheight": height}))
+            .expect("test peer is valid getpeerinfo JSON")
+    }
+
+    #[test]
+    fn peer_highlight_follows_the_same_peer_after_a_refresh() {
+        let mut app = App::new(String::new(), None);
+        app.apply(Update::Peers(vec![
+            peer("a", 3),
+            peer("b", 2),
+            peer("c", 1),
+        ]));
+        app.move_peer_selection(1);
+        assert_eq!(app.peers[app.peer_table.selected().unwrap_or(0)].addr, "b");
+
+        app.apply(Update::Peers(vec![
+            peer("a", 3),
+            peer("c", 9),
+            peer("b", 2),
+        ]));
+        assert_eq!(app.peers[app.peer_table.selected().unwrap_or(0)].addr, "b");
+    }
+
+    #[test]
+    fn peer_highlight_stops_at_the_ends_of_the_list() {
+        let mut app = App::new(String::new(), None);
+        app.apply(Update::Peers(vec![peer("a", 2), peer("b", 1)]));
+        app.move_peer_selection(10);
+        assert_eq!(app.peer_table.selected(), Some(1));
+        app.move_peer_selection(-1);
+        assert_eq!(app.peer_table.selected(), Some(0));
+        app.move_peer_selection(-10);
+        assert_eq!(app.peer_table.selected(), Some(0));
     }
 
     #[test]

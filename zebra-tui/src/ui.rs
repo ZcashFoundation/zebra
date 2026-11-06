@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Draws the whole dashboard into `frame`.
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let [top, logs, status] = Layout::vertical([
         Constraint::Length(14),
         Constraint::Min(3),
@@ -394,12 +394,15 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn draw_peers(frame: &mut Frame, app: &App) {
+fn draw_peers(frame: &mut Frame, app: &mut App) {
     let area = centered(frame.area(), 90, 70);
     frame.render_widget(Clear, area);
 
     let title = match app.peers_updated {
-        Some(_) => format!(" Peers ({}) — [p] close ", app.peers.len()),
+        Some(_) => format!(
+            " Peers ({}) — [↑↓ PgUp PgDn Home End] move  [p] close ",
+            app.peers.len()
+        ),
         None => " Peers — loading… [p] close ".to_owned(),
     };
     let now = unix_now();
@@ -418,11 +421,12 @@ fn draw_peers(frame: &mut Frame, app: &App) {
             Cell::from(peer.connection_state.clone()),
         ])
     });
-    frame.render_widget(
+    frame.render_stateful_widget(
         Table::new(
             rows,
             [
-                Constraint::Length(40),
+                // "[" + 39-character IPv6 address + "]:" + 5-digit port
+                Constraint::Length(47),
                 Constraint::Length(4),
                 Constraint::Length(10),
                 Constraint::Length(8),
@@ -445,8 +449,10 @@ fn draw_peers(frame: &mut Frame, app: &App) {
             ])
             .style(Style::new().add_modifier(Modifier::UNDERLINED)),
         )
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED))
         .block(titled(title).border_style(Style::new().fg(Color::Cyan))),
         area,
+        &mut app.peer_table,
     );
 }
 

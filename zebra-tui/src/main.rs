@@ -110,7 +110,7 @@ fn run(
         for update in updates.try_iter() {
             app.apply(update);
         }
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        terminal.draw(|frame| ui::draw(frame, &mut *app))?;
         if event::poll(FRAME_INTERVAL)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
@@ -123,7 +123,24 @@ fn run(
     Ok(())
 }
 
+/// Applies a key press. While the peer list is open, the movement keys move its highlight;
+/// otherwise they scroll the log.
 fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    if app.show_peers {
+        let peer_rows = match code {
+            KeyCode::Up | KeyCode::Char('k') => Some(-1),
+            KeyCode::Down | KeyCode::Char('j') => Some(1),
+            KeyCode::PageUp => Some(-PAGE_LINES),
+            KeyCode::PageDown => Some(PAGE_LINES),
+            KeyCode::Home => Some(isize::MIN),
+            KeyCode::End => Some(isize::MAX),
+            _ => None,
+        };
+        if let Some(rows) = peer_rows {
+            app.move_peer_selection(rows);
+            return;
+        }
+    }
     match code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => app.should_quit = true,
@@ -137,5 +154,49 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Home => app.scroll_log(isize::MAX),
         KeyCode::End => app.log_scroll_back = 0,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app_with_peers_and_log() -> App {
+        let mut app = App::new(String::new(), None);
+        let peers = (0..5)
+            .map(|i| {
+                serde_json::from_value(
+                    serde_json::json!({"addr": format!("p{i}"), "startingheight": 10 - i}),
+                )
+                .expect("test peer is valid getpeerinfo JSON")
+            })
+            .collect();
+        app.apply(Update::Peers(peers));
+        app.apply(Update::LogLines((0..50).map(|i| i.to_string()).collect()));
+        app
+    }
+
+    #[test]
+    fn movement_keys_move_the_peer_highlight_while_the_peer_list_is_open() {
+        let mut app = app_with_peers_and_log();
+        handle_key(&mut app, KeyCode::Char('p'), KeyModifiers::NONE);
+        handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+        handle_key(&mut app, KeyCode::Down, KeyModifiers::NONE);
+        handle_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(app.peer_table.selected(), Some(1));
+        handle_key(&mut app, KeyCode::End, KeyModifiers::NONE);
+        assert_eq!(app.peer_table.selected(), Some(4));
+        handle_key(&mut app, KeyCode::Home, KeyModifiers::NONE);
+        assert_eq!(app.peer_table.selected(), Some(0));
+        assert_eq!(app.log_scroll_back, 0);
+    }
+
+    #[test]
+    fn movement_keys_scroll_the_log_while_the_peer_list_is_closed() {
+        let mut app = app_with_peers_and_log();
+        handle_key(&mut app, KeyCode::Up, KeyModifiers::NONE);
+        handle_key(&mut app, KeyCode::PageUp, KeyModifiers::NONE);
+        assert_eq!(app.log_scroll_back, 21);
+        assert_eq!(app.peer_table.selected(), Some(0));
     }
 }
