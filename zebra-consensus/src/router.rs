@@ -365,11 +365,11 @@ where
 /// `checkpoint_tip` carries the state tip the checkpoint sync engine left
 /// when it stopped, as `(height, hash)`: usually a checkpoint, but in the
 /// middle of a checkpoint interval if a commit failed there. When it
-/// changes, the checkpoint verifier resets its progress to it if, and only
-/// if, `height` is above the verifier's current progress and, if `height` is
-/// a checkpoint, `hash` is that checkpoint's hash; any other value is
-/// ignored. The verifier then accepts blocks from `height + 1`, so the
-/// legacy syncer can continue from where the engine stopped.
+/// changes, the checkpoint verifier resets its progress to it, above or below
+/// its current progress, if, when `height` is a checkpoint, `hash` is that
+/// checkpoint's hash; any other value is ignored. The verifier then accepts
+/// blocks from `height + 1`, so the legacy syncer can continue from where the
+/// engine stopped.
 ///
 /// With a receiver whose value never changes, this behaves exactly like
 /// [`init`].
