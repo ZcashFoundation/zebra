@@ -243,6 +243,35 @@ fuzz_target!(|data: &[u8]| {
                         deep_fuzz_transaction(tx);
                     }
                 }
+                Message::SendCompact {
+                    high_bandwidth,
+                    version,
+                } => {
+                    let _high_bandwidth = *high_bandwidth;
+                    let _version = *version;
+                }
+                Message::CompactBlock(block) => {
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.header.hash()));
+                    let _nonce = block.nonce;
+                    let _count = block.short_ids.len();
+                    for _short_id in &block.short_ids {}
+                    for (index, tx) in &block.prefilled {
+                        let _index = *index;
+                        deep_fuzz_transaction(tx);
+                    }
+                }
+                Message::GetBlockTransactions(request) => {
+                    let _hash = &request.block_hash;
+                    let _count = request.indexes.len();
+                    for _index in &request.indexes {}
+                }
+                Message::BlockTransactions(response) => {
+                    let _hash = &response.block_hash;
+                    let _count = response.transactions.len();
+                    for tx in &response.transactions {
+                        deep_fuzz_transaction(tx);
+                    }
+                }
                 Message::Tx(unmined_tx) => {
                     // Deep fuzz the transaction
                     deep_fuzz_transaction(&unmined_tx.transaction);
@@ -395,6 +424,10 @@ fuzz_target!(|data: &[u8]| {
                 | Message::GetData(_)
                 | Message::NotFound(_)
                 | Message::Block(_)
+                | Message::SendCompact { .. }
+                | Message::CompactBlock(_)
+                | Message::GetBlockTransactions(_)
+                | Message::BlockTransactions(_)
                 | Message::Headers(_)
                 | Message::GetHeaders { .. }
                 | Message::Tx(_)

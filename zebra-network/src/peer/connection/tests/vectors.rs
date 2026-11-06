@@ -478,6 +478,15 @@ async fn early_block_download_classifies_full_and_partial_responses() {
                 info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
                 let (mut peer_tx, peer_rx) = mpsc::channel(1);
                 let task = tokio::spawn(connection.run(peer_rx));
+                if negotiated {
+                    assert_eq!(
+                        outbound.next().await,
+                        Some(Message::SendCompact {
+                            high_bandwidth: true,
+                            version: 1
+                        })
+                    );
+                }
                 let request = if partial {
                     Request::BlocksByHash(HashSet::from([block.hash(), missing]))
                 } else {
@@ -769,7 +778,11 @@ fn block_advert_request_metrics_include_cancellation() {
                 let hash = block::Hash([1; 32]);
                 let (result, delivery) = tokio::sync::oneshot::channel();
                 let (_, message) = tokio::join!(
-                    connection.send_block_advert(crate::peer_set::BlockAdvert { hash, result }),
+                    connection.send_block_advert(crate::peer_set::BlockAdvert {
+                        hash,
+                        compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+                        result
+                    }),
                     outbound_messages.next(),
                 );
                 assert_eq!(
@@ -784,7 +797,11 @@ fn block_advert_request_metrics_include_cancellation() {
                 let (result, delivery) = tokio::sync::oneshot::channel();
                 drop(delivery);
                 connection
-                    .send_block_advert(crate::peer_set::BlockAdvert { hash, result })
+                    .send_block_advert(crate::peer_set::BlockAdvert {
+                        hash,
+                        compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+                        result,
+                    })
                     .await;
                 assert!(outbound_messages.try_recv().is_err());
 
@@ -834,6 +851,7 @@ async fn block_advert_while_awaiting_response() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: idle_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();
@@ -860,6 +878,7 @@ async fn block_advert_while_awaiting_response() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: busy_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();
@@ -917,6 +936,7 @@ async fn getblocks_response_precedes_ready_block_advert() {
         block_advert_tx
             .try_send(crate::peer_set::BlockAdvert {
                 hash: advert_hash,
+                compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                 result,
             })
             .unwrap();

@@ -25,6 +25,7 @@ use crate::{
     Request, Response, VersionMessage,
 };
 
+mod compact_relay;
 mod prop;
 mod readiness;
 mod vectors;

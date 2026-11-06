@@ -1051,6 +1051,13 @@ async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
         peer_set.ready().await.unwrap();
         let early_task = tokio::spawn(early_connection);
         let legacy_task = tokio::spawn(legacy_connection);
+        assert_eq!(
+            early_messages.next().await,
+            Some(Message::SendCompact {
+                high_bandwidth: true,
+                version: 1
+            })
+        );
         let mut busy = peer_set.take_ready_service(&early_addr).unwrap();
         let _pending_request = busy.call(Request::Peers);
         peer_set.push_unready(early_addr, busy);
