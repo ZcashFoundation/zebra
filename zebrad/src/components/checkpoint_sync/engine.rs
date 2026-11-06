@@ -686,7 +686,9 @@ pub struct EngineOutcome {
     /// The IP addresses of the peers whose streams of the frontier unit
     /// failed since it last advanced, and of the peers that delivered
     /// mismatched authorizing data at the frontier, when the run ended with
-    /// [`EngineExit::NoProgress`]; otherwise empty.
+    /// [`EngineExit::NoProgress`]; the IP addresses of the peers excluded for
+    /// refusing ranges, when it ended with [`EngineExit::TooFewPeers`];
+    /// otherwise empty.
     pub blamed: BTreeSet<IpAddr>,
 }
 
@@ -1120,17 +1122,24 @@ where
             }
         }
         window.advance_base();
-        let blamed = if exit == EngineExit::NoProgress {
-            scheduler
+        let blamed_ids: Vec<ConnectionId> = match exit {
+            EngineExit::NoProgress => scheduler
                 .frontier_failed_peers()
                 .iter()
                 .chain(auth_mismatch_peers.iter())
-                .filter_map(|id| peer_ips.get(id))
                 .copied()
-                .collect()
-        } else {
-            BTreeSet::new()
+                .collect(),
+            // Peers that refuse ranges must not count toward the next claim,
+            // or they could make the supervisor claim, and preempt the
+            // legacy syncer, again and again.
+            EngineExit::TooFewPeers => scheduler.refused_peers(Instant::now()).collect(),
+            _ => Vec::new(),
         };
+        let blamed = blamed_ids
+            .iter()
+            .filter_map(|id| peer_ips.get(id))
+            .copied()
+            .collect();
 
         // The window's blocks are dropped with the run: nothing stays
         // charged while the legacy syncer runs.

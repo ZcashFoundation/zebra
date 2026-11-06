@@ -320,6 +320,8 @@ pub(crate) enum Behaviour {
     /// Fails its first this many requests with a transport error, then is
     /// honest.
     FailFirst(u32),
+    /// Answers every request with `REFUSED`.
+    Refused,
 }
 
 /// A simulated version 2 peer serving [`TestChain`].
@@ -452,6 +454,9 @@ impl RangePeer for MockPeer {
                 return Err(SyncPeerError::Transport("closed".to_string()));
             }
             let request_number = peer.requests.fetch_add(1, Ordering::SeqCst);
+            if peer.behaviour == Behaviour::Refused {
+                return Err(SyncPeerError::Refused);
+            }
             if matches!(peer.behaviour, Behaviour::FailFirst(count) if request_number < count) {
                 return Err(SyncPeerError::Transport("failing first".to_string()));
             }
@@ -1011,6 +1016,37 @@ async fn engine_hands_back_when_auth_data_mismatches_persist() {
         penalties,
         FRONTIER_FAILURE_LIMIT * AUTH_COMMITMENT_PENALTY,
         "every lying copy is penalized, the last one too"
+    );
+}
+
+/// Peers that keep refusing ranges are blamed when the run hands back for
+/// too few peers, so the supervisor does not claim again with them.
+#[tokio::test]
+async fn engine_blames_peers_that_refuse_ranges() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let chain = TestChain::new();
+    let peers = vec![
+        MockPeer::new(1, chain.clone(), Behaviour::Refused),
+        MockPeer::new(2, chain.clone(), Behaviour::Refused),
+    ];
+    let harness = run_engine(peers.clone(), |_, _| false, None).await;
+
+    assert_eq!(
+        harness.outcome,
+        EngineOutcome {
+            exit: EngineExit::TooFewPeers,
+            base: block::Height(1),
+            blamed: peers.iter().map(|peer| peer.peer_ip()).collect(),
+        },
+        "both refusing peers are blamed"
+    );
+    assert!(
+        peers
+            .iter()
+            .all(|peer| peer.requests.load(Ordering::SeqCst) >= 2),
+        "each peer refused at least twice"
     );
 }
 

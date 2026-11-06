@@ -404,6 +404,16 @@ impl Scheduler {
         &self.frontier_failed_peers
     }
 
+    /// The peers excluded at `now` for refusing ranges: `REFUSED` again
+    /// without a block in between, or `NOT_FOUND` for a checkpointed range
+    /// below their tip.
+    pub fn refused_peers(&self, now: Instant) -> impl Iterator<Item = ConnectionId> + '_ {
+        self.peers
+            .iter()
+            .filter(move |(_, peer)| peer.excluded(now))
+            .map(|(id, _)| *id)
+    }
+
     /// Whether the frontier has failed `limit` times without progress (the
     /// "5 restarts without progress" fallback), counted so that one peer
     /// cannot end the run alone: either `limit` distinct peers failed it, or

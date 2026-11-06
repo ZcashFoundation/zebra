@@ -390,7 +390,8 @@ where
             );
             // Only the last run's blame counts: a peer blamed earlier may
             // have recovered, and the cooldown already limits how often a
-            // run can fail.
+            // run can fail. Blamed peers, including those that refused
+            // ranges, do not count toward the next claim.
             self.blamed = outcome.blamed;
 
             match outcome.exit {
