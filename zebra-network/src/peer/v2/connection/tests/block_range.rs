@@ -13,7 +13,7 @@ use std::{
 };
 
 use quinn::{Connection, RecvStream};
-use tokio::{sync::Semaphore, task::JoinHandle, time::Instant};
+use tokio::{task::JoinHandle, time::Instant};
 use tower::{service_fn, util::BoxCloneService};
 
 use zebra_chain::{
@@ -31,8 +31,8 @@ use crate::{
                     RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STREAMS_GLOBAL,
                     RANGE_STREAMS_PER_PEER,
                 },
-                global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
-                INBOUND_REQUEST_CONCURRENCY,
+                global_block_range_permits, global_hashes_permits, serve as serve_request_stream,
+                BlockRangeServing, StreamPermits,
             },
             Events, Overloads,
         },
@@ -193,7 +193,7 @@ fn spawn_server(
     serving: BlockRangeServing,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let permits = Arc::new(Semaphore::new(INBOUND_REQUEST_CONCURRENCY));
+        let permits = StreamPermits::new(global_hashes_permits());
         let overloads = Arc::new(Overloads::new());
         let get_addr_allowed = Arc::new(AtomicBool::new(false));
         let (events, _fatal_rx, _events_rx) = Events::channel();

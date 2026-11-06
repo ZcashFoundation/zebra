@@ -127,8 +127,11 @@ fn request_framing() {
         Violation::Close(ErrorCode::ProtocolError)
     );
 
-    // Decodable, but not served: the stream's owner has no body bound for it, and refuses it.
-    assert_eq!(max_body_len(StreamType::GetHashes), None);
+    // The stream's owner reads exactly the request's length.
+    assert_eq!(
+        max_body_len(StreamType::GetHashes),
+        Some(GET_HASHES_REQUEST_LEN)
+    );
 }
 
 #[test]

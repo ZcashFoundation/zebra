@@ -120,9 +120,13 @@ pub struct ConnectionParams<S> {
     /// The node-wide `get-block-range` stream permits, shared by every
     /// version 2 connection: [`global_block_range_permits`].
     pub block_range_permits: Arc<Semaphore>,
+
+    /// The node-wide `get-hashes` permits, shared by every version 2
+    /// connection: [`global_hashes_permits`].
+    pub hashes_permits: Arc<Semaphore>,
 }
 
-pub(crate) use inbound::global_block_range_permits;
+pub(crate) use inbound::{global_block_range_permits, global_hashes_permits};
 
 /// Something a stream task needs the connection task to act on.
 enum Event {
@@ -457,6 +461,7 @@ where
         params.serve_block_ranges,
         params.block_range_permits.clone(),
     );
+    let inbound_permits = inbound::StreamPermits::new(params.hashes_permits.clone());
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
@@ -475,7 +480,7 @@ where
         tx_announcer: None,
         addr_announcer: None,
         announcement_permits: AnnouncementPermits::new(),
-        inbound_permits: Arc::new(Semaphore::new(inbound::INBOUND_REQUEST_CONCURRENCY)),
+        inbound_permits,
         block_ranges,
         overloads: Arc::new(Overloads::new()),
         outbound_permits: Arc::new(Semaphore::new(outbound::MAX_OUTBOUND_REQUEST_STREAMS)),
@@ -554,7 +559,7 @@ struct ConnectionTask<S> {
     addr_announcer: Option<AnnouncementWriter>,
     announcement_permits: AnnouncementPermits,
     /// Bounds how many of the peer's requests are in the inbound service at once.
-    inbound_permits: Arc<Semaphore>,
+    inbound_permits: inbound::StreamPermits,
     /// Bounds how many of the peer's `get-block-range` requests are served at once.
     block_ranges: inbound::BlockRangeServing,
     /// The peer's inbound service overloads, which may close the connection.
@@ -919,7 +924,8 @@ where
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
             | Request::CheckCompactBlock(_)
-            | Request::BlockRange { .. } => Err(PeerError::InboundOnlyRequest.into()),
+            | Request::BlockRange { .. }
+            | Request::SyncHashes { .. } => Err(PeerError::InboundOnlyRequest.into()),
 
             // Peer set internal.
             Request::PollPeerSet => Ok(Response::Nil),

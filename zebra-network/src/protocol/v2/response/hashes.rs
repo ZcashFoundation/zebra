@@ -2,7 +2,7 @@
 //! `n` [`SyncHashEntry`]s, encoded by
 //! [`write_sync_hashes_body`](zebra_chain::block::sync_metadata::write_sync_hashes_body).
 
-// Unused until `get-hashes` serving calls it.
+// The decoder is unused until the `get-hashes` client calls it.
 #![allow(dead_code)]
 
 use bytes::Bytes;

@@ -71,6 +71,9 @@ version 2 peers are recorded in a separate version 2 address book.
 - Serving `get-block-range` requests, which a syncing peer uses to download
   up to 64 MiB of consecutive blocks in one stream. See
   [Serving block ranges](#serving-block-ranges).
+- Serving `get-hashes` requests, which a peer uses to fetch the hash, size,
+  and transaction, transparent output, and note counts of up to 50,000
+  consecutive blocks. See [Serving known hashes](#serving-known-hashes).
 - Downloading the checkpointed part of the chain with `get-block-range`, when
   `sync.v2_checkpoint_sync` is set. See
   [Checkpoint sync over version 2](#checkpoint-sync-over-version-2).
@@ -150,6 +153,41 @@ Serving is bounded so that it cannot crowd out the node's other work:
 
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
 request.
+
+## Serving known hashes
+
+A node with `v2_listen_addr` set also answers `get-hashes` requests from its
+version 2 peers. A request names a start height and a count of at most 50,000
+heights. The answer has one entry per block of the best chain, from the start
+height up: the block's hash, its size, and its transaction, transparent
+output, and note commitment counts. A full answer is about 2 MB. A requester
+must check the entries against a pinned known-hash list before it uses them,
+so a node's answer is never trusted on its own.
+
+Zebra answers with a prefix of the requested heights:
+
+- It stops 1,000 blocks below its best tip, so it never serves an entry that a
+  chain reorganization could change. A node whose chain is no longer than
+  that answers with no entries.
+- It stops at the first block whose entry it has not stored. The 29.1.0
+  database upgrade stores the entries of blocks the node already has, from
+  genesis upwards, in the background. While it runs, the node serves entries
+  only up to the height the upgrade has reached, and answers requests above
+  it with no entries. New blocks store their entries when they are committed.
+
+Serving is bounded so that it cannot crowd out the node's other work:
+
+- Each peer can have two `get-hashes` streams open at once, separate from its
+  other requests and from its block-range streams, and the node serves eight
+  in total. A request beyond either limit is refused, and the peer asks
+  another node.
+- A peer must read the answer within 5 seconds. Otherwise the stream is
+  cancelled, and the node refuses that connection's `get-hashes` requests for
+  60 seconds, so peers that never read their answers cannot keep the node's
+  eight streams busy.
+
+Serving `get-hashes` is always on when `v2_listen_addr` is set. Unlike block
+ranges, answers are small and few, so there is no setting to turn it off.
 
 ## Checkpoint sync over version 2
 
