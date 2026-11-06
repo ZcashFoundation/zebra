@@ -4863,13 +4863,40 @@ async fn next_client_from(
 }
 
 /// The legacy crawler does not dial a candidate the peer set is already connected to, for
-/// example over version 2: it marks the candidate failed, as a failed dial does, so the
-/// candidate waits the failed-peer reconnection delay, and dials the next candidate.
+/// example over version 2, and dials the next candidate. The skipped candidate is left attempt
+/// pending, not failed, so it waits the reconnection delay, then is a candidate again.
 #[tokio::test]
 async fn crawler_skips_candidates_the_peer_set_is_connected_to() {
+    let connected_addr: PeerSocketAddr = "127.1.2.1:8233".parse().unwrap();
+    crawler_skips_a_connected_candidate(
+        MetaAddr::new_gossiped_meta_addr(
+            connected_addr,
+            PeerServices::NODE_NETWORK,
+            DateTime32::now(),
+        )
+        .new_gossiped_change()
+        .expect("a gossiped address can be added to the address book"),
+    )
+    .await;
+}
+
+/// A skipped initial peer, which has no last-seen time, is not marked failed, which would make
+/// it ineligible for good: it is a candidate again after the reconnection delay.
+#[tokio::test]
+async fn crawler_skip_does_not_fail_an_initial_peer() {
+    crawler_skips_a_connected_candidate(MetaAddr::new_initial_peer(
+        "127.1.2.1:8233".parse().unwrap(),
+    ))
+    .await;
+}
+
+/// Checks that the crawler skips the candidate `connected_change` adds, which the peer set is
+/// connected to, dials another one, and leaves the skipped one eligible after the reconnection
+/// delay.
+async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr::MetaAddrChange) {
     let _init_guard = zebra_test::init();
 
-    let connected_addr: PeerSocketAddr = "127.1.2.1:8233".parse().unwrap();
+    let connected_addr = connected_change.addr();
     let open_addr: PeerSocketAddr = "127.1.2.2:8233".parse().unwrap();
     let config = Config {
         crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
@@ -4887,13 +4914,12 @@ async fn crawler_skips_candidates_the_peer_set_is_connected_to() {
         _address_metrics,
         _address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, config.listen_addr);
-    for addr in [connected_addr, open_addr] {
-        let change =
-            MetaAddr::new_gossiped_meta_addr(addr, PeerServices::NODE_NETWORK, DateTime32::now())
-                .new_gossiped_change()
-                .expect("a gossiped address can be added to the address book");
-        address_book.lock().unwrap().update(change);
-    }
+    address_book.lock().unwrap().update(connected_change);
+    let change =
+        MetaAddr::new_gossiped_meta_addr(open_addr, PeerServices::NODE_NETWORK, DateTime32::now())
+            .new_gossiped_change()
+            .expect("a gossiped address can be added to the address book");
+    address_book.lock().unwrap().update(change);
 
     // The connector records every address it is asked to dial, and holds the connections open.
     let (dialled_tx, mut dialled_rx) = mpsc::unbounded();
@@ -4948,25 +4974,46 @@ async fn crawler_skips_candidates_the_peer_set_is_connected_to() {
 
     tokio::time::timeout(CRAWLER_TEST_DURATION, async {
         loop {
-            let state = address_book
+            let peer = address_book
                 .lock()
                 .unwrap()
                 .get(connected_addr)
-                .map(|peer| peer.last_connection_state);
-            if state == Some(PeerAddrState::Failed) {
+                .expect("the address book has the connected candidate");
+            if !peer.last_connection_state.is_never_attempted() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("the skipped candidate is marked failed, so it is not left attempt pending");
+    .expect("the crawler selects the connected candidate, and skips it");
 
-    // Several crawl timer ticks, so the crawler had the chance to dial the skipped candidate.
+    // Several crawl timer ticks, so the crawler had the chance to dial the skipped candidate, and
+    // to finish recording the skip.
     tokio::time::sleep(CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL * 10).await;
     assert!(
         dialled_rx.try_recv().is_err(),
         "the connected candidate must never reach the connector"
+    );
+
+    let skipped = address_book
+        .lock()
+        .unwrap()
+        .get(connected_addr)
+        .expect("the address book has the connected candidate");
+    assert_ne!(
+        skipped.last_connection_state,
+        PeerAddrState::Failed,
+        "a skipped candidate is not a failed one"
+    );
+    let after_delay = constants::MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1);
+    assert!(
+        skipped.is_ready_for_connection_attempt(
+            Instant::now() + after_delay,
+            Utc::now() + after_delay,
+            &Network::Mainnet,
+        ),
+        "the skipped candidate is a candidate again after the reconnection delay"
     );
 
     stop_crawler(crawl_task_handle).await;
@@ -5106,14 +5153,14 @@ async fn mixed_node_with_one_connection_per_ip_skips_legacy_dial_to_v2_host() {
                 .unwrap()
                 .get(legacy_addr)
                 .map(|peer| peer.last_connection_state);
-            if state == Some(PeerAddrState::Failed) {
+            if state.is_some_and(|state| !state.is_never_attempted()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("the crawler takes the legacy candidate and marks it failed");
+    .expect("the crawler takes the legacy candidate");
 
     // Give a dial that was started anyway the time to reach the listener.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -5121,6 +5168,15 @@ async fn mixed_node_with_one_connection_per_ip_skips_legacy_dial_to_v2_host() {
         accepted.load(Ordering::SeqCst),
         0,
         "the crawler must not dial a second connection to the version 2 peer's IP"
+    );
+    assert_eq!(
+        address_book
+            .lock()
+            .unwrap()
+            .get(legacy_addr)
+            .map(|peer| peer.last_connection_state),
+        Some(PeerAddrState::AttemptPending),
+        "the skipped candidate is not marked failed"
     );
     assert_eq!(
         first_response(&mut peer_set, v2_headers_request()).await,
