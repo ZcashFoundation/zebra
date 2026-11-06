@@ -2381,8 +2381,11 @@ impl Service<ReadRequest> for ReadStateService {
 /// spentness hints below their terminal height.
 ///
 /// `spentness` delivers the verified artifact once `zebrad` has one; see
-/// [`SpentnessHintsReceiver`] for when the writer adopts it. A sender that
-/// never sends, or sends `None`, gives exactly [`init`]'s behaviour.
+/// [`SpentnessHintsReceiver`] for when the writer adopts it. Until the sender
+/// sends an artifact or is dropped, block 1 of an empty state, and the first
+/// block of an incomplete hinted sync, wait in the writer, whichever path
+/// submitted them. A sender dropped without sending gives [`init`]'s
+/// behaviour.
 ///
 /// The artifact cannot be a plain argument (the design's
 /// `Option<VerifiedArtifact>`): `zebrad` initializes the state before the

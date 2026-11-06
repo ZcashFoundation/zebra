@@ -508,32 +508,69 @@ fn no_artifact_gives_an_ordinary_sync() {
     assert!(writer.is_none());
 }
 
-/// An artifact that arrives after genesis is adopted for block 1, but not later.
+/// An artifact that arrives after genesis is adopted for block 1. (A state that
+/// committed block 1 without hints never adopts them: see
+/// [`no_artifact_gives_an_ordinary_sync`].)
 #[test]
 fn artifact_is_adopted_only_while_the_tip_is_at_most_genesis() {
     let _init_guard = zebra_test::init();
 
-    for unhinted_blocks in [1, 2] {
-        let fixture = Fixture::generated(None);
-        let (sender, receiver) = watch::channel(None);
-        let (mut state, mut writer) = fixture.open_with(receiver);
-        fixture.commit(&mut state, &mut writer, 0..=unhinted_blocks - 1);
+    let fixture = Fixture::generated(None);
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
 
-        sender.send_replace(Some(fixture.artifact.clone()));
-        fixture.commit(
-            &mut state,
-            &mut writer,
-            unhinted_blocks..=GENERATED_TIP as usize,
-        );
+    sender.send_replace(Some(fixture.artifact.clone()));
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
 
-        let progress = progress(&state);
-        if unhinted_blocks == 1 {
-            assert_eq!(progress.unwrap().phase, Phase::Complete);
-        } else {
-            assert_eq!(progress, None);
-        }
-        assert_matches_ordinary(&state, &fixture.ordinary);
-    }
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_matches_ordinary(&state, &fixture.ordinary);
+}
+
+/// Block 1 waits for the node's hints decision, whichever path submits it (F-345).
+#[test]
+fn block_one_waits_for_the_hints_decision() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
+
+    let artifact = fixture.artifact.clone();
+    let delivery = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        sender.send_replace(Some(artifact));
+        sender
+    });
+    // Block 1 arrives before the artifact, as from `submit_block` or gossip.
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
+    let _sender = delivery.join().unwrap();
+
+    assert_eq!(progress(&state).unwrap().phase, Phase::Complete);
+    assert_matches_ordinary(&state, &fixture.ordinary);
+}
+
+/// Once the node decides on no hints by dropping its sender, block 1 commits without hints.
+#[test]
+fn block_one_commits_without_hints_after_the_sender_drops() {
+    let _init_guard = zebra_test::init();
+    let fixture = Fixture::generated(None);
+
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
+    fixture.commit(&mut state, &mut writer, 0..=0);
+
+    let dropper = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        drop(sender);
+    });
+    fixture.commit(&mut state, &mut writer, 1..=GENERATED_TIP as usize);
+    dropper.join().unwrap();
+
+    assert_eq!(progress(&state), None);
+    assert!(entries(&state, SPENTNESS_JOURNAL).is_empty());
+    assert_matches_ordinary(&state, &fixture.ordinary);
 }
 
 /// An incomplete hinted state refuses to continue without its artifact.
@@ -583,9 +620,9 @@ fn resume_waits_for_a_late_artifact() {
     assert_matches_ordinary(&state, &fixture.ordinary);
 }
 
-/// A resumed writer fails once the artifact does not arrive in time.
+/// A resumed writer waits until the node gives up on the artifact, then fails.
 #[test]
-fn resume_times_out_without_the_artifact() {
+fn resume_fails_once_the_sender_drops_without_the_artifact() {
     let _init_guard = zebra_test::init();
     let fixture = Fixture::generated(None);
 
@@ -593,12 +630,15 @@ fn resume_times_out_without_the_artifact() {
     fixture.commit(&mut state, &mut writer, 0..=10);
     drop((state, writer));
 
-    let (_sender, receiver) = watch::channel(None);
-    let (mut state, writer) = fixture.open_with(receiver);
+    let (sender, receiver) = watch::channel(None);
+    let (mut state, mut writer) = fixture.open_with(receiver);
     assert!(has_incomplete_hints(&state));
-    let mut writer =
-        writer.map(|writer| writer.with_resume_timeout(std::time::Duration::from_millis(100)));
+    let dropper = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        drop(sender);
+    });
     let error = commit(&mut state, &mut writer, &fixture.blocks[11]).unwrap_err();
+    dropper.join().unwrap();
     assert_eq!(
         error.spentness_failure(),
         Some(&SpentnessError::MissingArtifact)

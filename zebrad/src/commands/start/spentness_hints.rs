@@ -1,8 +1,11 @@
 //! Startup wiring for spentness hints (`[sync] v2_spentness_hints`).
 //!
-//! Hints need the checkpoint sync engine: only its gate holds back block 1
-//! until acquisition finishes, so [`effective_mode`] turns them off, or stops
-//! Zebra with `require`, when `sync.v2_checkpoint_sync` is off.
+//! Hints need the checkpoint sync engine: its gate holds back the syncers'
+//! block downloads until acquisition finishes, so [`effective_mode`] turns them
+//! off, or stops Zebra with `require`, when `sync.v2_checkpoint_sync` is off.
+//! The state's writer also holds back block 1 itself until the hints task sends
+//! the artifact or drops the state's sender, so blocks submitted by RPC or
+//! gossip cannot commit it without hints first.
 //!
 //! When hints are on, `start`:
 //!
@@ -74,8 +77,9 @@ pub(super) const KNOWN_HASH_SUM_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 ///
 /// The hints task bounds `auto` itself, with [`KNOWN_HASH_SUM_TIMEOUT`] and the
 /// download timeout, which is at most [`hints::MAX_AUTO_TIMEOUT`], so this fires only
-/// if that task is stuck: about 45 minutes. With `require`, the legacy syncer waits
-/// as long as acquisition takes.
+/// if that task is stuck: about 45 minutes. Even then, block 1 still waits in the
+/// state's writer for the hints task's decision. With `require`, the legacy syncer
+/// waits as long as acquisition takes.
 pub(super) const LEGACY_SYNC_HINTS_TIMEOUT: Duration = Duration::from_secs(
     KNOWN_HASH_SUM_TIMEOUT.as_secs() + hints::MAX_AUTO_TIMEOUT.as_secs() + 5 * 60,
 );
