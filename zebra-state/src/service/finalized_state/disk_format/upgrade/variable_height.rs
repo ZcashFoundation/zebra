@@ -195,6 +195,18 @@ const AFFECTED_FAMILIES: &[Family] = &[
         key: Part::Unchanged,
         value: Part::SnapshotBase,
     },
+    // The checkpoint sync column families. The `spentness_artifact` record stores its height as a
+    // fixed four-byte integer, not as a disk `Height`, so it needs no rewrite.
+    Family {
+        name: "sync_meta_by_height",
+        key: Part::Height,
+        value: Part::Unchanged,
+    },
+    Family {
+        name: "spentness_journal",
+        key: Part::OutputLocation,
+        value: Part::Unchanged,
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -218,6 +230,19 @@ impl DiskFormatUpgrade for Upgrade {
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        if !checkpoint_paths(db).0.exists() {
+            // The synchronous open path rewrites the records and removes the checkpoint before it
+            // runs the pending upgrade list, so that older migrations read the records with the
+            // current codec. By the time the list reaches v33, nothing is left to rewrite.
+            assert!(
+                current_height_markers_exist(db.disk_db().inner(), db.path())
+                    .expect("the live database must be readable during its migration")
+                    || db.finalized_tip_height().is_none(),
+                "the v33 rewrite needs its checkpoint until every record is converted"
+            );
+            return Ok(());
+        }
+
         let source = open_source(db)
             .expect("the fixed-width checkpoint must be readable during its migration");
         let live = db.disk_db().inner();
@@ -280,7 +305,39 @@ pub(crate) fn is_required(change: &DbFormatChange) -> bool {
 }
 
 fn migration_metadata_path(db: &ZebraDb) -> PathBuf {
-    checkpoint_paths(db).0.with_extension("migration")
+    migration_metadata_path_for(db.path())
+}
+
+fn migration_metadata_path_for(path: &Path) -> PathBuf {
+    checkpoint_paths_for(path).0.with_extension("migration")
+}
+
+/// Returns whether the database at `path` has an unfinished v33 rewrite: its checkpoint and the
+/// live migration metadata that names it both exist.
+///
+/// A database with an unfinished rewrite can already hold current-format records in the column
+/// families converted before it stopped, so those records don't show that the rewrite is done.
+pub(crate) fn rewrite_in_progress(path: &Path) -> bool {
+    checkpoint_paths_for(path).0.exists() && migration_metadata_path_for(path).exists()
+}
+
+/// Rewrites every affected record from the fixed-width checkpoint that [`prepare`] made, checks the
+/// result, and removes the checkpoint.
+///
+/// The open path calls this before any other pending upgrade, so that older migrations, such as
+/// the 29.1 synchronization metadata backfill, read and write the records with the current codec.
+/// After this returns, the live database holds only current-format records, and the v33 entry in
+/// the upgrade list has nothing left to rewrite.
+pub(crate) fn rewrite(db: &ZebraDb) {
+    let (_never_cancel_sender, cancel_receiver) = crossbeam_channel::bounded(1);
+    Upgrade
+        .run(Height::MIN, db, &cancel_receiver)
+        .expect("the synchronous variable-height rewrite cannot be cancelled");
+    Upgrade
+        .validate(db, &cancel_receiver)
+        .expect("the synchronous variable-height rewrite cannot be cancelled")
+        .expect("the variable-height rewrite must convert every record");
+    finish(db);
 }
 
 fn new_migration_operation() -> String {
@@ -374,16 +431,22 @@ pub(crate) fn prepare(db: &ZebraDb) -> Result<Option<Height>, StateInitError> {
     legacy_tip(db, &source)
 }
 
-/// Removes migration checkpoints after the version file records a complete v33 upgrade.
+/// Removes the migration checkpoint once every record is converted.
+///
+/// The live metadata goes first: a checkpoint without it is the leftover of an interrupted
+/// removal, not an unfinished rewrite (see [`rewrite_in_progress`]).
 pub(crate) fn finish(db: &ZebraDb) {
     let (checkpoint, temporary) = checkpoint_paths(db);
+    remove_file(&migration_metadata_path(db));
     remove_directory(&checkpoint);
     remove_directory(&temporary);
-    remove_file(&migration_metadata_path(db));
 }
 
 fn checkpoint_paths(db: &ZebraDb) -> (PathBuf, PathBuf) {
-    let path = db.path();
+    checkpoint_paths_for(db.path())
+}
+
+fn checkpoint_paths_for(path: &Path) -> (PathBuf, PathBuf) {
     let network_directory = path
         .file_name()
         .expect("a state database path always ends in its network directory")

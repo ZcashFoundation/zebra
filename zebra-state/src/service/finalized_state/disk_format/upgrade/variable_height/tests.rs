@@ -58,6 +58,8 @@ const EXPECTED_FAMILIES: &[&str] = &[
     "history_tree",
     "block_info",
     "snapshot_base",
+    "sync_meta_by_height",
+    "spentness_journal",
 ];
 
 type Records = BTreeMap<String, Vec<(Vec<u8>, Vec<u8>)>>;
@@ -1114,4 +1116,355 @@ async fn old_chain_upgrades_legacy_pools_reads_new_writes_and_restarts() {
             *expected
         );
     }
+}
+
+/// Builds a three-block Mainnet chain with the current code, and returns its records.
+fn current_chain_records() -> (Records, Vec<Arc<Block>>, String) {
+    let mut source = FinalizedState::new(
+        &Config::ephemeral(),
+        &Network::Mainnet,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .unwrap();
+    let mut blocks = Vec::new();
+    for (_, bytes) in zebra_test::vectors::MAINNET_BLOCKS.range(0..=2) {
+        let block = bytes.zcash_deserialize_into::<Arc<Block>>().unwrap();
+        source
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block.clone()).into(),
+                None,
+                "checkpoint sync fixture",
+            )
+            .unwrap();
+        blocks.push(block);
+    }
+    let records = snapshot(&source.db);
+    let build = source.db.format_version_in_code().build.to_string();
+
+    (records, blocks, build)
+}
+
+/// Returns whether a database created at `version` has the column family `name`.
+fn family_exists_at(name: &str, version: &Version) -> bool {
+    let added = match name {
+        "sync_meta_by_height" => Version::new(29, 1, 0),
+        "spentness_journal" | "spentness_artifact" => Version::new(29, 2, 0),
+        "snapshot_base" => Version::new(30, 1, 0),
+        _ => Version::new(0, 0, 0),
+    };
+    Version::new(version.major, version.minor, version.patch) >= added
+}
+
+/// Writes `records` in the fixed-width format to a new database in the `version.major`
+/// directory, with only the column families that `version` has, and records `version` as its
+/// format.
+fn write_legacy_database(config: &Config, version: &Version, records: &Records) {
+    let network = Network::Mainnet;
+    let legacy = DiskDb::new(
+        config,
+        STATE_DATABASE_KIND,
+        version,
+        &network,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .filter(|name| family_exists_at(name, version))
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    for (name, records) in records {
+        if !family_exists_at(name, version) {
+            assert!(records.is_empty(), "{version} has no {name} column family");
+            continue;
+        }
+        let family = AFFECTED_FAMILIES.iter().find(|family| family.name == name);
+        let cf = legacy.inner().cf_handle(name).unwrap();
+        for (key, value) in records {
+            let (key, value) = match family {
+                Some(family) => (
+                    legacy_part(family.key, key),
+                    legacy_part(family.value, value),
+                ),
+                None => (key.clone(), value.clone()),
+            };
+            legacy.inner().put_cf(&cf, key, value).unwrap();
+        }
+    }
+    drop(legacy);
+    write_database_format_version_to_disk(
+        config,
+        STATE_DATABASE_KIND,
+        version.major,
+        version,
+        &network,
+    )
+    .unwrap();
+}
+
+/// Opens the state with the current code and waits for its startup upgrades and checks.
+async fn open_and_wait(config: &Config) -> FinalizedState {
+    let mut state = FinalizedState::new(
+        config,
+        &Network::Mainnet,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !state.db.ready_for_pruning() {
+            state.db.check_for_panics();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    state
+}
+
+/// Every registered format from 29.0 to 32.0 stores fixed-width heights, and each upgrades to the
+/// running format: 29.0 -> 29.1 -> 29.2 -> 30.0 -> 30.1 -> 32.0 -> 33.0.
+///
+/// A database created at each version moves from its own directory to the running directory, and
+/// the height rewrite runs first, so the 29.1 backfill reads the blocks with the current codec. A
+/// 29.0 database has no synchronization metadata, and from 29.2 on a database can hold the
+/// checkpoint sync column families, whose heights and output locations the rewrite converts.
+#[tokio::test]
+async fn every_registered_format_upgrades_through_the_height_rewrite() {
+    let _guard = zebra_test::init();
+    let (current_records, blocks, build) = current_chain_records();
+    let journal_key = OutputLocation::from_usize(Height(2), 1, 3).as_bytes();
+    let journal_value = vec![0x5a; 40];
+    let record_key = vec![0x7c; 32];
+    let record_value = [
+        &[1, 1][..],
+        &2_u32.to_be_bytes(),
+        &9_u64.to_be_bytes(),
+        &4_u64.to_be_bytes(),
+        &4_u64.to_be_bytes(),
+    ]
+    .concat();
+
+    let chain: Vec<_> = super::super::format_upgrades(Some(Version::new(29, 0, 0)))
+        .map(|upgrade| upgrade.version())
+        .collect();
+    assert_eq!(
+        chain,
+        [(29, 1), (29, 2), (30, 0), (30, 1), (32, 0), (33, 0)]
+            .map(|(major, minor)| Version::new(major, minor, 0)),
+        "the upgrade ladder skips the unused format 31"
+    );
+
+    for (major, minor) in [(29, 0), (29, 1), (29, 2), (30, 0), (30, 1), (32, 0)] {
+        let cache = tempfile::tempdir().unwrap();
+        let config = test_config(&cache);
+        let mut source_records = current_records.clone();
+        let mut expected = current_records.clone();
+        let has_spentness_hints = (major, minor) >= (29, 2);
+        if (major, minor) == (29, 0) {
+            // Format 29.0 has no synchronization metadata, and the upgrade backfills it.
+            source_records.insert("sync_meta_by_height".to_string(), Vec::new());
+        } else if has_spentness_hints {
+            source_records.insert(
+                "spentness_journal".to_string(),
+                vec![(journal_key.clone(), journal_value.clone())],
+            );
+            source_records.insert(
+                "spentness_artifact".to_string(),
+                vec![(record_key.clone(), record_value.clone())],
+            );
+            expected = source_records.clone();
+        }
+        assert_eq!(
+            expected["sync_meta_by_height"].len(),
+            blocks.len(),
+            "the fixture has synchronization metadata for every block"
+        );
+
+        let mut version = Version::new(major, minor, 0);
+        version.build = semver::BuildMetadata::new(&build).unwrap();
+        write_legacy_database(&config, &version, &source_records);
+        let legacy_path = config.db_path(STATE_DATABASE_KIND, major, &Network::Mainnet);
+        let legacy_cf = |name: &str| {
+            let db = DiskDb::open_read_only(&legacy_path).unwrap();
+            let cf = db.cf_handle(name).unwrap();
+            db.iterator_cf(&cf, IteratorMode::Start)
+                .map(|item| item.unwrap().0.to_vec())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            legacy_cf("hash_by_height"),
+            [vec![0, 0, 0], vec![0, 0, 1], vec![0, 0, 2]],
+            "the {version} fixture has fixed-width height keys"
+        );
+        let families_on_disk =
+            rocksdb::DB::list_cf(&rocksdb::Options::default(), &legacy_path).unwrap();
+        for name in ["sync_meta_by_height", "spentness_journal", "snapshot_base"] {
+            assert_eq!(
+                families_on_disk.iter().any(|family| family == name),
+                family_exists_at(name, &version),
+                "the {version} fixture has exactly its own column families"
+            );
+        }
+        if has_spentness_hints {
+            assert_eq!(
+                legacy_cf("sync_meta_by_height"),
+                [vec![0, 0, 0], vec![0, 0, 1], vec![0, 0, 2]],
+                "the {version} fixture has fixed-width metadata keys"
+            );
+            assert_eq!(
+                legacy_cf("spentness_journal"),
+                [vec![0, 0, 2, 0, 1, 0, 0, 3]],
+                "the {version} fixture has a fixed-width journal key"
+            );
+        }
+
+        let upgraded = open_and_wait(&config).await;
+        assert!(
+            !legacy_path.exists(),
+            "the v{major} source moved to the running directory"
+        );
+        assert_eq!(
+            upgraded.db.path(),
+            config.db_path(
+                STATE_DATABASE_KIND,
+                running_version().major,
+                &Network::Mainnet
+            )
+        );
+        assert!(!checkpoint_paths(&upgraded.db).0.exists());
+        assert_eq!(
+            upgraded.db.format_version_on_disk().unwrap(),
+            Some(running_version()),
+            "{version} reaches the running format"
+        );
+        assert_records(&upgraded.db, &expected);
+        for (height, block) in blocks.iter().enumerate() {
+            let height = Height(height.try_into().unwrap());
+            assert_eq!(upgraded.db.block(height.into()).unwrap().unwrap(), *block);
+            assert!(upgraded.db.sync_metadata(height).is_some());
+        }
+    }
+}
+
+/// When v30 and v32 sources both exist, startup upgrades the newer v32 source and leaves the v30
+/// one for old-database cleanup.
+#[tokio::test]
+async fn newest_fixed_width_source_is_upgraded() {
+    let _guard = zebra_test::init();
+    let (current_records, _blocks, build) = current_chain_records();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let build = semver::BuildMetadata::new(&build).unwrap();
+
+    let mut older = v30();
+    older.build = build.clone();
+    let mut older_records = current_records.clone();
+    older_records.insert("hash_by_height".to_string(), Vec::new());
+    write_legacy_database(&config, &older, &older_records);
+    let mut newer = v32();
+    newer.build = build;
+    write_legacy_database(&config, &newer, &current_records);
+
+    let upgraded = open_and_wait(&config).await;
+    assert!(config
+        .db_path(STATE_DATABASE_KIND, 30, &Network::Mainnet)
+        .exists());
+    assert!(!config
+        .db_path(STATE_DATABASE_KIND, 32, &Network::Mainnet)
+        .exists());
+    assert_eq!(
+        upgraded.db.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+    assert_records(&upgraded.db, &current_records);
+}
+
+/// A rewrite that finished before the process stopped leaves current-format records and no
+/// checkpoint. The next start runs the remaining upgrades, including the 29.1 backfill, instead
+/// of inferring that the records are already in the running format.
+#[tokio::test]
+async fn finished_rewrite_resumes_the_remaining_older_upgrades() {
+    let _guard = zebra_test::init();
+    let (current_records, blocks, _build) = current_chain_records();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+
+    let db = open_test_db(&config);
+    let live = db.disk_db().inner();
+    for (name, records) in &current_records {
+        if name == "sync_meta_by_height" {
+            continue;
+        }
+        let cf = live.cf_handle(name).unwrap();
+        for (key, value) in records {
+            live.put_cf(&cf, key, value).unwrap();
+        }
+    }
+    let mut version = Version::new(29, 0, 0);
+    version.build = running_version().build;
+    db.update_format_version_on_disk(&version).unwrap();
+    drop(db);
+
+    let resumed = open_and_wait(&config).await;
+    assert_eq!(
+        resumed.db.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+    assert_records(&resumed.db, &current_records);
+    assert_eq!(
+        resumed.db.sync_metadata_range(Height(0)..=Height(2)).len(),
+        blocks.len()
+    );
+}
+
+/// The families that an interrupted rewrite already converted hold current-format records. The
+/// next start must resume the rewrite from its checkpoint instead of treating those records as
+/// a finished migration.
+#[tokio::test]
+async fn interrupted_rewrite_resumes_on_open_despite_converted_families() {
+    let _guard = zebra_test::init();
+    let (current_records, _blocks, build) = current_chain_records();
+    let cache = tempfile::tempdir().unwrap();
+    let config = test_config(&cache);
+    let mut version = v30();
+    version.build = semver::BuildMetadata::new(&build).unwrap();
+    write_legacy_database(&config, &version, &current_records);
+
+    let legacy_path = config.db_path(STATE_DATABASE_KIND, 30, &Network::Mainnet);
+    let current_path = config.db_path(STATE_DATABASE_KIND, 33, &Network::Mainnet);
+    std::fs::create_dir_all(current_path.parent().unwrap()).unwrap();
+    std::fs::rename(&legacy_path, &current_path).unwrap();
+    let db = open_test_db(&config);
+    db.update_format_version_on_disk(&version).unwrap();
+    prepare(&db).unwrap();
+    let source = open_source(&db).unwrap();
+    let (_sender, receiver) = bounded(1);
+    for pass in [
+        Pass::WriteConverted,
+        Pass::DeleteLegacy,
+        Pass::WriteConverted,
+    ] {
+        rewrite_pass(
+            db.disk_db().inner(),
+            &source,
+            &AFFECTED_FAMILIES[0],
+            pass,
+            &receiver,
+        )
+        .unwrap();
+    }
+    drop(source);
+    assert!(current_height_markers_exist(db.disk_db().inner(), db.path()).unwrap());
+    assert!(rewrite_in_progress(db.path()));
+    drop(db);
+
+    let resumed = open_and_wait(&config).await;
+    assert_eq!(
+        resumed.db.format_version_on_disk().unwrap(),
+        Some(running_version())
+    );
+    assert_records(&resumed.db, &current_records);
+    assert!(!checkpoint_paths(&resumed.db).0.exists());
 }
