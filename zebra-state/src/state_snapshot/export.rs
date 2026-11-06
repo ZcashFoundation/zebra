@@ -1,5 +1,5 @@
-//! Exporting a state snapshot from a finalized database (design, §7
-//! "Exporter").
+//! Exporting a state snapshot from a finalized database (design,
+//! "State changes").
 //!
 //! The exporter opens the state read-only, refuses unless its finalized tip
 //! is the snapshot height, is not pruned below the window start, and has no
@@ -9,7 +9,7 @@
 //! # Rows
 //!
 //! With the snapshot at `H` and the window at `L..=H`, `L = max(1, H - 2303)`
-//! (design, §3):
+//! (design, "Snapshot contents"):
 //!
 //! - the window is archive-complete, and genesis is shipped too: the hashes,
 //!   headers and bodies of `{0} ∪ L..=H`, their transaction index rows, and

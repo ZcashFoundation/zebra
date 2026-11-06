@@ -137,7 +137,8 @@ fn component_ids_are_dense_and_name_state_column_families() {
         );
         assert!(!names.contains(name), "{name} is not a snapshot component");
     }
-    // Design §3: the canonicalized values are the chain singletons, the balances, and every tree.
+    // Design, "Snapshot contents": the canonicalized values are the chain singletons, the
+    // balances, and every tree.
     let canonical: Vec<ComponentId> = ComponentId::ALL
         .into_iter()
         .filter(|id| id.is_canonicalized())

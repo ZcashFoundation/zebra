@@ -200,7 +200,7 @@ fn import_tampered(
 }
 
 /// The importer's value pool check requires the UTXO set to hold exactly the
-/// transparent pool (design, §2, "Self-consistency checks"). That relation
+/// transparent pool (design, "Trust model and verification"). That relation
 /// holds on databases populated with the Mainnet and Testnet block vectors,
 /// whose coinbases pay miners and founders, and not only on the fixture chain.
 #[test]
@@ -1015,7 +1015,8 @@ fn active_ironwood_tip_root_and_anchors_are_checked() {
 
 /// A snapshot is refused before any chain check when its height is not below
 /// the network's last checkpoint, so the block after it would not be
-/// checkpoint-verified, or when NU5 is not active at its height (design, §2).
+/// checkpoint-verified, or when NU5 is not active at its height (design, "Trust
+/// model and verification").
 #[test]
 fn snapshot_failing_a_precondition_is_refused() {
     let _init_guard = zebra_test::init();

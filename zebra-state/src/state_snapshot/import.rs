@@ -1,5 +1,5 @@
 //! Importing a verified state snapshot into a new finalized database
-//! (design, §7 "Importer").
+//! (design, "State changes").
 //!
 //! Each verified piece becomes one SST file for its component, built as the
 //! pieces arrive. The importer then ingests the SST files into a database
@@ -8,7 +8,7 @@
 //! chain checks, and renames it into place only if every check passes.
 //!
 //! A database renamed into place has passed every check of the design's trust
-//! model (§2), and the database format checks that run at every start, so a
+//! model, and the database format checks that run at every start, so a
 //! snapshot that is wrong for this node is refused with
 //! [`SnapshotError::Refused`] instead of failing later.
 //!
@@ -63,7 +63,7 @@ pub const IMPORT_DIR: &str = "state-snapshot-import";
 
 /// The number of blocks below the snapshot height that a snapshot carries in
 /// full, with the block at the snapshot height: its window is `L..=H` with
-/// `L = max(1, H - 2303)` (design, §3).
+/// `L = max(1, H - 2303)` (design, "Snapshot contents").
 pub const WINDOW_BLOCKS: u32 = 2_304;
 
 /// The largest SST metadata file: two keys of at most a piece each, the piece
@@ -118,7 +118,8 @@ pub enum ImportCheck {
     /// database format, with the window the design gives it.
     Manifest,
 
-    /// The snapshot meets the import preconditions (design, §2): NU5 is active
+    /// The snapshot meets the import preconditions (design, "Trust model and
+    /// verification"): NU5 is active
     /// at its height `H`, and `H + 1` is at or below the network's last
     /// checkpoint, so the block after the snapshot is checkpoint-verified.
     ///
@@ -643,7 +644,8 @@ fn check_manifest(
             format!("NU5 is not active at the snapshot height {height:?}"),
         ));
     }
-    // `H + 1 <= C` for the last checkpoint `C` (design, §2): the block after the snapshot is
+    // `H + 1 <= C` for the last checkpoint `C` (design, "Trust model and verification"): the
+    // block after the snapshot is
     // checkpoint-verified, and the checkpoint verifier anchors `C` back to the snapshot block.
     let last_checkpoint = network.checkpoint_list().max_height();
     if height >= last_checkpoint {
