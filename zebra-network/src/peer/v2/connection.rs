@@ -769,7 +769,7 @@ where
         let tx = MustUseClientResponseSender::new(tx, &request, None, Some(source));
         let context = self.request_context();
         self.tasks.spawn(async move {
-            outbound::drive(request, tx, permit, context).await;
+            outbound::drive(request, outbound::ResponseGuard::new(tx), permit, context).await;
             if let Ok(Ok(Response::Peers(addrs))) = rx.await {
                 book.intake(source, addrs, Via::GetAddr);
             }
@@ -853,8 +853,14 @@ where
                     .try_acquire_owned()
                     .expect("requests are only taken while a permit is available, and only this task takes permits");
                 let context = self.request_context();
-                self.tasks
-                    .spawn(outbound::drive(request, tx, permit, context));
+                // The guard is created before the task is spawned, so if the task is aborted
+                // before it first runs, dropping it still answers the client.
+                self.tasks.spawn(outbound::drive(
+                    request,
+                    outbound::ResponseGuard::new(tx),
+                    permit,
+                    context,
+                ));
                 return;
             }
         };
