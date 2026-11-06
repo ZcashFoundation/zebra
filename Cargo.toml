@@ -10,6 +10,7 @@ members = [
         "zebra-node-services",
         "zebra-test",
         "zebra-utils",
+        "zebra-tui",
         "tower-batch-control",
         "tower-fallback",
         "zebra-fuzz/fuzz",

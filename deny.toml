@@ -156,6 +156,13 @@ skip-tree = [
 
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
+
+    # ratatui 0.30 pulls strum 0.28 (via ratatui-core), darling 0.24 (via instability),
+    # and convert_case 0.10 (via crossterm's derive_more) into zebra-tui.
+    # remove once the rest of the workspace updates to these versions.
+    { name = "strum", version = "=0.28.0" },
+    { name = "darling", version = "=0.24.1" },
+    { name = "convert_case", version = "=0.10.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
