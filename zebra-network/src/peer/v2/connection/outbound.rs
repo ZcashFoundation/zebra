@@ -19,10 +19,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{PEER_ADDR_RESPONSE_LIMIT, REQUEST_TIMEOUT},
+    constants::REQUEST_TIMEOUT,
     peer::{
-        connection::Handler, v2::misbehavior::MisbehaviorScores, MustUseClientResponseSender,
-        PeerError, SharedPeerError,
+        v2::misbehavior::MisbehaviorScores, MustUseClientResponseSender, PeerError, SharedPeerError,
     },
     protocol::{
         external::InventoryHash,
@@ -116,7 +115,7 @@ pub(super) struct RequestContext {
     pub misbehavior: MisbehaviorScores,
 
     /// Where to send what the connection task must act on: a close through
-    /// its connection-closing queue, addresses best effort.
+    /// its connection-closing queue.
     pub events: Events,
 }
 
@@ -183,22 +182,10 @@ pub(super) async fn drive(
                 "command" => response.command(),
             )
             .increment(1);
-            match response {
-                // # Security
-                //
-                // As in the legacy connection, the client gets a bounded random sample of a
-                // get-addr answer and the rest goes to the connection task's cache, so one peer
-                // cannot fill the address book with a thousand addresses per request.
-                Response::Peers(mut addrs) => {
-                    let sample =
-                        Handler::update_addr_cache(&mut addrs, None, PEER_ADDR_RESPONSE_LIMIT);
-                    guard.send(Ok(Response::Peers(sample)));
-                    if !addrs.is_empty() {
-                        events.addresses(addrs);
-                    }
-                }
-                response => guard.send(Ok(response)),
-            }
+            // A `get-addr` answer only comes from the connection's own request, which hands it
+            // to the version 2 address segment whole: the segment's intake rules and buckets
+            // bound what one peer's answer can add.
+            guard.send(Ok(response));
         }
         Err(failure) => {
             tracing::debug!(%failure, command, "request to peer failed");

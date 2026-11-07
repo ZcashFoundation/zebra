@@ -6,6 +6,7 @@
 //! shared state held by actor tasks reached over channels (see
 //! [`nonces::NonceRegistry`]), never by locks.
 
+pub mod addr_relay;
 pub mod connection;
 pub mod handshake;
 pub mod misbehavior;

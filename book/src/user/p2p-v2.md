@@ -15,8 +15,8 @@ Zcash node.
 
 ## Enabling it
 
-Set a UDP listen address in the `[network]` section of `zebrad.toml`, and list
-the peers to connect to over the version 2 protocol:
+Set a UDP listen address in the `[network]` section of `zebrad.toml`, and,
+optionally, list peers to connect to over the version 2 protocol:
 
 ```toml
 [network]
@@ -30,6 +30,9 @@ v2_listen_addr = "[::]:8233"
 # Peers to connect to over the version 2 protocol at startup, as host:port.
 # The port is the peer's QUIC (UDP) port.
 initial_v2_peers = ["203.0.113.10:8233", "v2-peer.example.com:8233"]
+
+# Discover more version 2 peers (the default).
+v2_peer_discovery = true
 ```
 
 `v2_listen_addr` can use the same port number as `listen_addr`, because one is
@@ -45,8 +48,8 @@ Version 2 connections join the same peer set as legacy connections, so the
 syncer, the mempool, and the inbound service use them like any other peer. The
 connection metrics count them too, with their own handshake stages, so a failed
 QUIC handshake is counted separately from a failed TCP one. They are not listed
-by the `getpeerinfo` RPC yet, because that lists the address book and version 2
-peers are not recorded there (see below).
+by the `getpeerinfo` RPC yet, because that lists the legacy address book, and
+version 2 peers are recorded in a separate version 2 address book.
 
 ## What works
 
@@ -67,6 +70,38 @@ peers are not recorded there (see below).
   response.
 - Exchanging peer addresses as the draft recommends: Zebra asks for addresses
   once, on connections it made, and answers once, on connections it accepted.
+- Discovering version 2 peers, unless `v2_peer_discovery` is `false`. Version 2
+  addresses are QUIC endpoints, so Zebra keeps them in a version 2 address
+  book, apart from the legacy one: the configured peers, the addresses version
+  2 peers send in answers and announcements, and the version 2 peers Zebra
+  connected to. Relayed addresses are bucketed by their address group and the
+  group of the peer that sent them, so one network range cannot fill the book,
+  and they never displace the configured, cached, or seeded addresses, or the
+  peers Zebra connected to. Zebra answers version 2 address requests from this
+  book only, with addresses it connected to or recently heard of over version
+  2, and its own version 2 address when it has a specific one
+  (`v2_listen_addr`, or the IP address of `external_addr` with the
+  `v2_listen_addr` port). It keeps the version 2 peers it connected to most
+  recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
+  cache, and tries them at startup. It never caches an address it only heard
+  of. Zebra dials the peers it connected to before first, then picks at random
+  among the others, giving seeded and cached addresses even odds against
+  relayed ones, whatever time the relaying peer claimed. When it has no address left to dial and fewer discovered peers than it
+  wants, it looks up the DNS seeders in
+  `initial_mainnet_peers` or `initial_testnet_peers` and dials the results on
+  the network's default port, UDP 8233 on Mainnet and 18233 on Testnet, at most
+  every 30 minutes. Configured peers keep the first claim on the outbound
+  version 2 slots; discovered peers get up to half of the initial target size,
+  at most one per address group. Few nodes accept QUIC yet, so most DNS seed
+  results fail to connect, which Zebra logs at the `debug` level.
+- Relaying version 2 addresses. Zebra relays each fresh full-node address a
+  version 2 peer announces to two of its other version 2 peers, and limits each peer to
+  about one announced address every 10 seconds, dropping the rest. It also
+  advertises its own version 2 address to each version 2 peer soon after
+  connecting and then about once a day: the IP address of `external_addr` with
+  the port of `v2_listen_addr` if `external_addr` is set, otherwise
+  `v2_listen_addr` if it is a specific address. An unspecified listener, like
+  `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
   announcements from peers are received and acted on.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
@@ -89,28 +124,22 @@ peers are not recorded there (see below).
 
 ## Known limitations
 
-- **Peers are not discovered.** Zebra has one address book for both
-  protocols, and it does not record which protocol an address was learned
-  over. So Zebra does not record the version 2 peers it connects to, and
-  connects over version 2 only to the hosts in `initial_v2_peers`. Addresses
-  that version 2 peers send still join that address book, where they are
-  treated as legacy TCP addresses. Zebra answers version 2 address requests
-  from the same address book, so some of the addresses it sends may not accept
-  QUIC.
-- **One connection per host across both protocols.** Peers are keyed by IP
-  address and port whatever their protocol, and `max_connections_per_ip`
-  applies across both. While Zebra has a legacy connection to a host in
-  `initial_v2_peers`, the version 2 connection to it is dropped and redialled
-  after the reconnection delay. While it has a version 2 connection to such a
-  host, its legacy crawler may still dial the same address over TCP, and that
-  connection is dropped. Version 2 connections add up to half of each legacy
-  connection limit on top of it.
-- **Blocks and addresses are not announced to version 2 peers.** A version 2
-  block announcement carries the block header, which Zebra's block gossip does
-  not have yet, and address relay is not implemented. Version 2 peers learn of
-  new blocks from their other peers, or by requesting headers. Early block
-  relay and compact blocks (`experimental_early_block_relay`) also use legacy
-  connections only.
+- **One connection per host across both protocols.** By design, Zebra keeps
+  at most one connection to each IP address and port, whatever its protocol.
+  Each protocol's dialer skips a host that the other protocol is already
+  connected to, so connections are rarely dropped and redialled. A dial still
+  in progress doesn't count, so both protocols can occasionally dial one host
+  at once; Zebra then keeps the first connection and drops the other. An existing
+  legacy connection is not replaced with a version 2 one: while Zebra has a
+  legacy connection to a version 2 peer, configured or discovered, it dials
+  that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
+  still applies across both protocols. Version 2 connections add up to half of
+  each legacy connection limit on top of it.
+- **Blocks are not announced to version 2 peers.** A version 2 block
+  announcement carries the block header, which Zebra's block gossip does not
+  have yet. Version 2 peers learn of new blocks from their other peers, or by
+  requesting headers. Early block relay and compact blocks
+  (`experimental_early_block_relay`) also use legacy connections only.
 - **Host names are resolved once.** A host name in `initial_v2_peers` that does
   not resolve at startup is retried, but once it resolves Zebra keeps using
   that address. Restart Zebra to pick up a changed address.
@@ -148,6 +177,9 @@ listen_addr = "127.0.0.1:18345"
 v2_listen_addr = "127.0.0.1:18345"
 initial_v2_peers = ["127.0.0.1:18344"]
 ```
+
+To keep such a pair closed, so it does not dial any version 2 peer it hears
+of, set `v2_peer_discovery = false` on both nodes.
 
 Node B logs `connected to initial v2 peer` at the default `info` level. Node A
 logs the version 2 handshake at the `debug` level, for example with
