@@ -28,7 +28,6 @@ use zebra_chain::{
     },
     primitives::ed25519,
     sapling::ValueCommitment,
-    serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::{OutPoint, Script, Utxo},
 };
@@ -603,13 +602,16 @@ impl ScriptPubKey {
         let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
         let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
 
+        // Copy the script bytes once for both `asm` and `type`.
+        let code = zcash_script::script::Code(lock_script.as_raw_bytes().to_vec());
+
         Self {
             // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
             // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
-            asm: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            asm: code.to_asm(false),
             hex: lock_script.clone(),
             req_sigs,
-            r#type: zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+            r#type: code
                 .to_component()
                 .ok()
                 .and_then(|c| c.refine().ok())
@@ -928,8 +930,13 @@ impl TransactionObject {
         txid: transaction::Hash,
     ) -> Self {
         let block_time = block_time.map(|bt| bt.timestamp());
+        // Serialize once: `size` is the length of the same bytes.
+        let hex = SerializedTransaction::from(&*tx);
+        let size = hex.as_ref().len().try_into().ok();
+        let sapling_value_balance = tx.sapling_value_balance().sapling_amount();
+        let overwintered = tx.is_overwintered();
         Self {
-            hex: tx.clone().into(),
+            hex,
             height: if in_active_chain.unwrap_or_default() {
                 height.map(|height| height.0 as i32)
             } else if block_hash.is_some() {
@@ -1073,8 +1080,8 @@ impl TransactionObject {
                     }
                 })
                 .collect(),
-            value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
-            value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
+            value_balance: Some(Zec::from(sapling_value_balance).lossy_zec()),
+            value_balance_zat: Some(sapling_value_balance.zatoshis()),
             orchard: Some(orchard_shaped_object(
                 tx.orchard_bundle(),
                 tx.orchard_value_balance().orchard_amount(),
@@ -1093,18 +1100,18 @@ impl TransactionObject {
                 key
             }),
             joinsplit_sig: tx.sprout_bundle().map(|b| b.joinsplit_sig),
-            size: tx.zcash_serialized_size().try_into().ok(),
+            size,
             time: block_time,
             txid,
             in_active_chain,
             auth_digest: tx.auth_digest(),
-            overwintered: tx.is_overwintered(),
+            overwintered,
             version: tx.version(),
             version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
             lock_time: tx.raw_lock_time(),
             // zcashd includes expiryheight only for Overwinter+ transactions.
             // For those, expiry_height of 0 means "no expiry" per ZIP-203.
-            expiry_height: if tx.is_overwintered() {
+            expiry_height: if overwintered {
                 Some(tx.expiry_height().unwrap_or(Height(0)))
             } else {
                 None
@@ -1168,7 +1175,11 @@ impl TransactionObject {
 mod tests {
     use super::*;
 
-    use zebra_chain::{block::Block, serialization::ZcashDeserializeInto, transparent::Output};
+    use zebra_chain::{
+        block::Block,
+        serialization::{ZcashDeserializeInto, ZcashSerialize},
+        transparent::Output,
+    };
 
     /// Returns the first non-coinbase, transparent-only transaction in the mainnet block vectors.
     ///
