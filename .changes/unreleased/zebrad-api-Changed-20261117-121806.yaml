@@ -1,0 +1,4 @@
+project: zebrad-api
+kind: Changed
+body: '`components::mempool::Storage::remove_exact`, `reject_and_remove_same_effects` and `remove_expired_transactions` look up the listed transactions and their dependents directly instead of scanning every verified transaction ([#12341](https://github.com/ZcashFoundation/zebra/pull/12341)).'
+time: 2026-11-17T12:18:06.568220656+01:00
