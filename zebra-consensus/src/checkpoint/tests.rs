@@ -7,7 +7,7 @@ use std::{cmp::min, time::Duration};
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::timeout;
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
 use zebra_test::mock_service::MockService;

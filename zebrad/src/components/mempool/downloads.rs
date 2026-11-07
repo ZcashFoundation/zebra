@@ -43,7 +43,7 @@ use pin_project::{pin_project, pinned_drop};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::Height,

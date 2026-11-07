@@ -32,8 +32,6 @@ futures = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server"] }
 serde_json = { workspace = true }
 
-# structure-aware oracle support
-proptest = { workspace = true }
 # address_fuzz third oracle uses zebra-chain's address conversion traits.
 zcash_address = { workspace = true }
 # note_commitment_tree_fuzz tree types
