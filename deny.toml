@@ -184,6 +184,7 @@ allow-git = [
     "https://github.com/zcash/pasta_curves",
     "https://github.com/zcash/sinsemilla",
     "https://github.com/zcash/sapling-crypto",
+    "https://github.com/zkcrypto/bellman",
 ]
 
 [sources.allow-org]
