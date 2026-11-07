@@ -20,14 +20,14 @@ use itertools::Itertools;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Block, Height, SerializedBlock},
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     primitives::byte_array::increment_big_endian,
     sapling,
     serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
-    transaction::{self, Transaction},
+    transaction::{self, SerializedTransaction, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
@@ -194,6 +194,40 @@ impl ZebraDb {
             transactions: txs,
         };
         Ok(Some((Arc::new(block), size)))
+    }
+
+    /// Returns the serialized [`Block`] with [`block::Hash`] or [`Height`], if it exists in the
+    /// finalized chain, reassembled from the stored header and transaction bytes.
+    ///
+    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn serialized_block(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Result<Option<SerializedBlock>, BlockReadError> {
+        let Some((raw_header, raw_txs)) = self.raw_block(hash_or_height)? else {
+            return Ok(None);
+        };
+
+        let tx_count = CompactSizeMessage::try_from(raw_txs.len())
+            .expect("must work for a previously serialized block")
+            .zcash_serialize_to_vec()
+            .expect("must work for a previously serialized block");
+        let size = raw_header.raw_bytes().len()
+            + tx_count.len()
+            + raw_txs
+                .iter()
+                .map(|raw_tx| raw_tx.raw_bytes().len())
+                .sum::<usize>();
+
+        let mut bytes = Vec::with_capacity(size);
+        bytes.extend_from_slice(raw_header.raw_bytes());
+        bytes.extend_from_slice(&tx_count);
+        for raw_tx in &raw_txs {
+            bytes.extend_from_slice(raw_tx.raw_bytes());
+        }
+
+        Ok(Some(bytes.into()))
     }
 
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
@@ -416,6 +450,18 @@ impl ZebraDb {
         self.db
             .zs_get(&tx_by_loc, &transaction_location)
             .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
+    }
+
+    /// Returns the stored bytes of the [`Transaction`] with [`transaction::Hash`],
+    /// if a transaction with that hash exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn serialized_transaction(&self, hash: transaction::Hash) -> Option<SerializedTransaction> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction_location = self.transaction_location(hash)?;
+        let raw_tx: RawBytes = self.db.zs_get(&tx_by_loc, &transaction_location)?;
+
+        Some(raw_tx.into_raw_bytes().into())
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.

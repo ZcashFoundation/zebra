@@ -180,6 +180,30 @@ fn test_block_db_round_trip_with(
         }
 
         assert_eq!(stored_block, original_block);
+
+        // The stored bytes must be identical to serializing the block and its transactions.
+        let serialized_block = state
+            .serialized_block(finalized.height.into())
+            .expect("stored block is complete")
+            .expect("block was stored at height");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+        let serialized_block = state
+            .serialized_block(original_block.hash().into())
+            .expect("stored block is complete")
+            .expect("block was stored with its hash");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+
+        for tx in &original_block.transactions {
+            let serialized_tx = state
+                .serialized_transaction(tx.hash())
+                .expect("transaction was stored");
+            assert_eq!(
+                serialized_tx.as_ref(),
+                tx.zcash_serialize_to_vec()
+                    .expect("serialization to vec never fails")
+                    .as_slice(),
+            );
+        }
     }
 }
 
