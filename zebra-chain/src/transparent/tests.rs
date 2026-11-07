@@ -6,14 +6,22 @@ mod vectors;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
+    collections::HashMap,
     hint::black_box,
 };
 
 use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
 
-use crate::parameters::Network;
+use crate::{
+    block::{Block, Height},
+    parameters::Network,
+    transaction::{self, Transaction},
+};
 
-use super::{Address, Output};
+use super::{
+    new_ordered_outputs_with_height, new_transaction_ordered_outputs, Address, OrderedUtxo,
+    OutPoint, Output,
+};
 
 struct CountingAllocator;
 
@@ -76,4 +84,69 @@ fn assert_output_address(output: &Output, network: &Network) -> Option<Address> 
     assert_eq!(actual, expected, "{output:?} on {network:?}");
     assert_eq!(allocations, 0, "address extraction must not allocate");
     actual
+}
+
+/// Compare the old per-transaction construction and count only destination-map/script allocations.
+fn assert_ordered_outputs(block: &Block, height: Height, hashes: &[transaction::Hash]) {
+    let mut expected = HashMap::new();
+    let mut script_allocations = 0;
+    for (tx_index, (tx, &hash)) in block.transactions.iter().zip(hashes).enumerate() {
+        let mut transaction_outputs = HashMap::new();
+        let mut transaction_scripts = 0;
+        for (index, output) in tx.outputs().iter().cloned().enumerate() {
+            transaction_scripts += usize::from(!output.lock_script.as_raw_bytes().is_empty());
+            transaction_outputs.insert(
+                OutPoint {
+                    hash,
+                    index: index.try_into().unwrap(),
+                },
+                OrderedUtxo::new(output, height, tx_index),
+            );
+        }
+
+        script_allocations += transaction_scripts;
+        ALLOCATIONS.with(|count| count.set(Some(0)));
+        let actual = new_transaction_ordered_outputs(black_box(tx), hash, tx_index, height);
+        let allocations = ALLOCATIONS.with(|count| count.replace(None).unwrap());
+        assert_eq!(actual, transaction_outputs);
+        assert_eq!(
+            allocations,
+            transaction_scripts + usize::from(!actual.is_empty()),
+            "only the destination map and one copy of each nonempty script may allocate",
+        );
+        expected.extend(transaction_outputs);
+    }
+
+    ALLOCATIONS.with(|count| count.set(Some(0)));
+    let actual = new_ordered_outputs_with_height(black_box(block), height, black_box(hashes));
+    let allocations = ALLOCATIONS.with(|count| count.replace(None).unwrap());
+    assert_eq!(actual, expected);
+    assert_eq!(
+        allocations,
+        script_allocations + usize::from(!actual.is_empty()),
+        "only the destination map and one copy of each nonempty script may allocate",
+    );
+}
+
+/// Build V4, V5, and V6 transactions without transparent bundles.
+fn ordered_output_transactions() -> [Transaction; 3] {
+    use crate::{parameters::NetworkUpgrade, transaction::LockTime};
+
+    [
+        Transaction::test_v4(Vec::new(), Vec::new(), LockTime::unlocked(), Height(0)),
+        Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            Vec::new(),
+            Vec::new(),
+            LockTime::unlocked(),
+            Height(0),
+        ),
+        Transaction::test_v6(
+            NetworkUpgrade::Nu6_3,
+            Vec::new(),
+            Vec::new(),
+            LockTime::unlocked(),
+            Height(0),
+        ),
+    ]
 }

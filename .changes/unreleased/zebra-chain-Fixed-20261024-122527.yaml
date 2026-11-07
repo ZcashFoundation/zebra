@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: Build block ordered outputs directly from native outputs, avoiding temporary transaction maps and repeated script copies ([#12012](https://github.com/ZcashFoundation/zebra/issues/12012)).
+time: 2026-10-24T12:25:27.249641698+02:00
