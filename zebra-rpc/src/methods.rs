@@ -2289,40 +2289,38 @@ where
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        // Fetch the block referenced by [`hash_or_height`] from the state.
+        // Fetch the header of the block referenced by [`hash_or_height`] from the best chain.
         //
         // # Concurrency
         //
         // For consistency, this lookup must be performed first, then all the other lookups must
         // be based on the hash. The tree lookups check every chain, so a reorg that moves the
         // block onto a side chain after this lookup can't make its treestate disappear.
-        //
-        // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
-        let block = match read_state
+        let (hash, height, header) = match read_state
             .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
             .await
             .map_misc_error()?
+            .call(zebra_state::ReadRequest::BlockHeader(hash_or_height))
+            .await
         {
-            zebra_state::ReadResponse::Block(Some(block)) => block,
-            zebra_state::ReadResponse::Block(None) => {
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            Ok(zebra_state::ReadResponse::BlockHeader {
+                header,
+                hash,
+                height,
+                ..
+            }) => (hash, height, header),
+            // `BlockHeader` only errors when the block isn't in the best chain.
+            //
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            Err(_) => {
                 return Err("the requested block is not in the main chain")
                     .map_error(server::error::LegacyCode::InvalidParameter);
             }
-            _ => unreachable!("unmatched response to a block request"),
+            _ => unreachable!("unmatched response to a block header request"),
         };
 
-        let hash = hash_or_height
-            .hash_or_else(|_| Some(block.hash()))
-            .expect("block hash");
-
-        let height = hash_or_height
-            .height_or_else(|_| block.coinbase_height())
-            .expect("verified blocks have a coinbase height");
-
-        let time = u32::try_from(block.header.time.timestamp())
+        let time = u32::try_from(header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
         let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
