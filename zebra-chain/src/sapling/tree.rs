@@ -32,6 +32,9 @@ use crate::{
 pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
+#[cfg(test)]
+mod tests;
+
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `sapling::NoteCommitment`.
@@ -178,8 +181,8 @@ pub struct NoteCommitmentTree {
     ///
     /// Every time the root is computed by [`Self::root`] it is cached here, and
     /// the cached value will be returned by [`Self::root`] until the tree is
-    /// changed by [`Self::append`]. This greatly increases performance because
-    /// it avoids recomputing the root when the tree does not change between
+    /// changed by [`Self::append`] or [`Self::append_batch`]. This greatly increases performance
+    /// because it avoids recomputing the root when the tree does not change between
     /// blocks. In the finalized state, the tree is read from disk for every
     /// block processed, which would also require recomputing the root even if
     /// it has not changed (note that the cached root is serialized with the
@@ -215,6 +218,37 @@ impl NoteCommitmentTree {
         } else {
             Err(NoteCommitmentTreeError::FullTree)
         }
+    }
+
+    /// Appends commitments in order, hashing independent subtrees in parallel.
+    ///
+    /// Returns the last [`TRACKED_SUBTREE_HEIGHT`] subtree completed by these commitments,
+    /// or `None` if none was completed. A block can complete at most one such subtree.
+    /// An empty batch leaves the tree and cached root unchanged.
+    ///
+    /// Returns an error when the tree is full, retaining any commitments that fit,
+    /// just like successive calls to [`Self::append`].
+    #[allow(clippy::unwrap_in_result)]
+    pub fn append_batch(
+        &mut self,
+        note_commitments: &[NoteCommitmentUpdate],
+    ) -> Result<Option<(NoteCommitmentSubtreeIndex, sapling_crypto::Node)>, NoteCommitmentTreeError>
+    {
+        let old_size = self.inner.tree_size();
+        let result = crate::parallel::batch_frontier::append_batch(
+            &mut self.inner,
+            note_commitments,
+            sapling_crypto::Node::from_cmu,
+        );
+
+        if self.inner.tree_size() != old_size {
+            *self
+                .cached_root
+                .get_mut()
+                .expect("a thread that previously held exclusive lock access panicked") = None;
+        }
+
+        result.map_err(|_| NoteCommitmentTreeError::FullTree)
     }
 
     /// Returns frontier of non-empty tree, or None.
