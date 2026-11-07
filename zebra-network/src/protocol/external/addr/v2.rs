@@ -3,7 +3,8 @@
 //! Zebra parses received IPv4 and IPv6 addresses in the [`AddrV2`] format.
 //! But it ignores all other address types.
 //!
-//! Zebra never sends `addrv2` messages, because peers still accept `addr` (v1) messages.
+//! The legacy protocol never sends `addrv2` messages, because peers still accept `addr` (v1)
+//! messages; the version 2 protocol sends `addrv2` address records.
 
 use std::{
     io::Read,
@@ -25,11 +26,8 @@ use super::canonical_peer_addr;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-#[cfg(test)]
 use byteorder::WriteBytesExt;
-#[cfg(test)]
 use std::io::Write;
-#[cfg(test)]
 use zebra_chain::serialization::{zcash_serialize_bytes, ZcashSerialize};
 
 /// The maximum permitted size of the `addr` field in `addrv2` messages.
@@ -79,7 +77,7 @@ pub const ADDR_V2_IPV6_ADDR_SIZE: usize = 16;
 /// [ZIP 155](https://zips.z.cash/zip-0155#specification)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub(in super::super) enum AddrV2 {
+pub(crate) enum AddrV2 {
     /// An IPv4 or IPv6 node address, in `addrv2` format.
     IpAddr {
         /// The unverified "last seen time" gossiped by the remote peer that sent us
@@ -114,14 +112,8 @@ pub(in super::super) enum AddrV2 {
     Unsupported,
 }
 
-// Just serialize in the tests for now.
-//
-// We can't guarantee that peers support addrv2 until it activates,
-// and outdated peers are excluded from the network by a network upgrade.
-// (Likely NU5 on mainnet, and NU6 on testnet.)
-// https://zips.z.cash/zip-0155#deployment
-//
-// And Zebra doesn't use different codecs for different peer versions.
+// Tests build records from owned addresses; the version 2 protocol builds them in
+// `protocol::v2::response`.
 #[cfg(test)]
 impl From<MetaAddr> for AddrV2 {
     fn from(meta_addr: MetaAddr) -> Self {
@@ -205,10 +197,12 @@ impl AddrV2 {
     }
 }
 
-// Just serialize in the tests for now.
-//
-// See the detailed note about ZIP-155 activation above.
-#[cfg(test)]
+/// Serialize an `addrv2` entry (<https://zips.z.cash/zip-0155#specification>).
+///
+/// Only the version 2 protocol sends `addrv2`: the legacy codec always sends
+/// `addr`, because it can not assume a legacy peer supports ZIP 155. Only
+/// [`AddrV2::IpAddr`] can be serialized: [`AddrV2::Unsupported`] does not keep
+/// the bytes it was parsed from.
 impl ZcashSerialize for AddrV2 {
     fn zcash_serialize<W: Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
         if let AddrV2::IpAddr {
@@ -249,7 +243,10 @@ impl ZcashSerialize for AddrV2 {
                 }
             }
         } else {
-            unreachable!("unexpected AddrV2 variant: {:?}", self);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "unsupported addrv2 network ID can not be serialized",
+            ));
         }
 
         Ok(())
@@ -268,6 +265,12 @@ impl ZcashDeserialize for AddrV2 {
 
         // > Service bits. A CompactSize-encoded bit field that is 64 bits wide.
         let untrusted_services: CompactSize64 = (&mut reader).zcash_deserialize_into()?;
+        //
+        // Unknown bits are discarded, as every legacy address reader does. The version 2
+        // protocol reads its address records here too, so it also discards them, although its
+        // draft says a node "SHOULD preserve them when relaying address records" (draft P2P v2
+        // ZIP, "Service Flags"): the address book is shared with the legacy protocol, so
+        // keeping them would change what legacy peers are sent.
         let untrusted_services = PeerServices::from_bits_truncate(untrusted_services.into());
 
         // > Network identifier. An 8-bit value that specifies which network is addressed.

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added experimental, opt-in support for the draft version 2 peer-to-peer protocol over QUIC. Setting `network.v2_listen_addr` opens a UDP endpoint that accepts version 2 connections, and `network.initial_v2_peers` lists peers to connect to over it at startup. Both default to off, and the legacy protocol is unchanged.'
+time: 2026-10-17T11:00:00.000000000+02:00

@@ -60,6 +60,11 @@ rand = { workspace = true }
 rayon = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
+
+# version 2 protocol QUIC transport
+quinn = { workspace = true }
+rcgen = { workspace = true }
+rustls = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 sha2 = { workspace = true }
 siphasher = { workspace = true }
@@ -98,6 +103,7 @@ proptest-derive = { workspace = true }
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 toml = { workspace = true }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }

@@ -14,8 +14,8 @@
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
-    collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    collections::{HashMap, HashSet},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -29,6 +29,7 @@ use indexmap::IndexSet;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
+    sync::{broadcast, watch},
     task::JoinHandle,
 };
 use tower::{service_fn, Layer, Service, ServiceExt};
@@ -40,12 +41,15 @@ use crate::{
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
-    peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
+    peer::{
+        self, v2::handshake::LocalIdentity, ClientTestHarness, ConnectedAddr, HandshakeRequest,
+        OutboundConnectorRequest,
+    },
     peer_set::{
         crawler_services,
         initialize::{
             accept_inbound_connections, add_initial_peers, batch_misbehavior_updates,
-            crawl_and_dial, limit_initial_peers, open_listener, DiscoveredPeer,
+            crawl_and_dial, limit_initial_peers, open_listener, v2, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
@@ -3191,4 +3195,1032 @@ async fn misbehavior_reports_are_received_during_flush() {
 
     drop(misbehavior_tx);
     batch_task.await.expect("batch task should not panic");
+}
+
+/// A peer set with a version 2 initial peer and a legacy inbound peer serves
+/// requests over both protocols, and routes the mempool snapshot request,
+/// which version 2 connections cannot answer yet, to the legacy peer only.
+#[tokio::test]
+async fn mixed_legacy_and_v2_peers_route_by_capability() {
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+
+    // The responder's QUIC port must be known before the dialer starts; probe a free UDP port.
+    let responder_v2_addr = {
+        let probe = std::net::UdpSocket::bind("127.0.0.1:0").expect("a UDP port is free");
+        probe.local_addr().expect("bound")
+    };
+
+    // The version 2 responder answers peers, but has no mempool answer (like a v2 connection).
+    let v2_gossiped: PeerSocketAddr = "203.0.113.5:8233".parse::<SocketAddr>().unwrap().into();
+    let responder_config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: network.clone(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        v2_listen_addr: Some(responder_v2_addr),
+        ..Config::default()
+    };
+    let responder_inbound = service_fn(move |request: Request| async move {
+        match request {
+            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
+                v2_gossiped,
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )])),
+            _ => Ok::<Response, BoxError>(Response::Nil),
+        }
+    });
+    let (_responder_service, _responder_book, _, _advertiser) = init(
+        responder_config,
+        responder_inbound,
+        NoChainTip,
+        "v2 responder".to_string(),
+    )
+    .await;
+
+    // The node under test dials the v2 responder and listens for legacy peers.
+    let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: network.clone(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        initial_v2_peers: [responder_v2_addr.to_string()].into_iter().collect(),
+        // Both test peers are on 127.0.0.1; the peer set caps peers per IP across both protocols.
+        max_connections_per_ip: 2,
+        ..Config::default()
+    };
+    let inbound = service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) });
+    let (mut peer_set, address_book, _, _advertiser) =
+        init(config, inbound, NoChainTip, "mixed node".to_string()).await;
+
+    // The version 2 peer is dialled in the background and is the only peer that can answer yet,
+    // so the first answer proves the version 2 connection was established.
+    match first_response(&mut peer_set, Request::Peers).await {
+        Response::Peers(addrs) => {
+            assert_eq!(addrs.len(), 1);
+            assert_eq!(addrs[0].addr(), v2_gossiped);
+        }
+        other => panic!("unexpected response {other}"),
+    }
+
+    // A legacy peer connects inbound over TCP; its mempool answer is recognisable.
+    let legacy_tx_id =
+        zebra_chain::transaction::UnminedTxId::Legacy(zebra_chain::transaction::Hash([0x42; 32]));
+    let legacy_gossiped: PeerSocketAddr = "203.0.113.6:8233".parse::<SocketAddr>().unwrap().into();
+    let legacy_inbound = service_fn(move |request: Request| async move {
+        match request {
+            Request::MempoolTransactionIds => Ok(Response::TransactionIds(vec![legacy_tx_id])),
+            // A legacy peer that does not answer `getaddr` makes the requester time out.
+            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
+                legacy_gossiped,
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )])),
+            _ => Ok::<Response, BoxError>(Response::Nil),
+        }
+    });
+    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+    let _legacy_peer = connect_isolated_tcp_direct_with_inbound(
+        &network,
+        SocketAddr::new(Ipv4Addr::LOCALHOST.into(), listen_addr.port()),
+        "legacy peer".to_string(),
+        legacy_inbound,
+    )
+    .await
+    .expect("the legacy peer connects");
+
+    // The mempool snapshot request must always reach the legacy peer: a v2 peer would answer
+    // with an empty list. Repeat enough times that random routing would have hit v2 by now.
+    let expected = Response::TransactionIds(vec![legacy_tx_id]);
+    assert_eq!(
+        first_response(&mut peer_set, Request::MempoolTransactionIds).await,
+        expected
+    );
+    for _ in 0..19 {
+        let response = tokio::time::timeout(Duration::from_secs(30), async {
+            peer_set.ready().await.expect("buffer is ready");
+            peer_set.call(Request::MempoolTransactionIds).await
+        })
+        .await
+        .expect("answered in time")
+        .expect("a legacy peer is ready");
+        assert_eq!(response, expected);
+    }
+}
+
+/// An IPv4 version 2 endpoint skips IPv6 initial v2 peers, which it could
+/// never reach, instead of giving them one of its outbound slots: with a
+/// single slot, the IPv4 peer listed after an IPv6 one is still dialled.
+#[tokio::test]
+async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+
+    // The responder's QUIC port must be known before the dialer starts; probe a free UDP port.
+    let responder_v2_addr = {
+        let probe = std::net::UdpSocket::bind("127.0.0.1:0").expect("a UDP port is free");
+        probe.local_addr().expect("bound")
+    };
+
+    let v2_gossiped: PeerSocketAddr = "203.0.113.5:8233".parse::<SocketAddr>().unwrap().into();
+    let responder_config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: network.clone(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        v2_listen_addr: Some(responder_v2_addr),
+        ..Config::default()
+    };
+    let responder_inbound = service_fn(move |request: Request| async move {
+        match request {
+            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
+                v2_gossiped,
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )])),
+            _ => Ok::<Response, BoxError>(Response::Nil),
+        }
+    });
+    let (_responder_service, _responder_book, _, _advertiser) = init(
+        responder_config,
+        responder_inbound,
+        NoChainTip,
+        "v2 responder".to_string(),
+    )
+    .await;
+
+    // The IPv6 peer comes first, so without the skip it would take the only outbound v2 slot.
+    let ipv6_peer = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), responder_v2_addr.port());
+    let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: network.clone(),
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
+        initial_v2_peers: [ipv6_peer.to_string(), responder_v2_addr.to_string()]
+            .into_iter()
+            .collect(),
+        // One legacy target peer gives the version 2 dialer a single outbound slot.
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+    let inbound = service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) });
+    let (mut peer_set, _address_book, _, _advertiser) =
+        init(config, inbound, NoChainTip, "ipv4 node".to_string()).await;
+
+    match first_response(&mut peer_set, Request::Peers).await {
+        Response::Peers(addrs) => {
+            assert_eq!(addrs.len(), 1);
+            assert_eq!(addrs[0].addr(), v2_gossiped);
+        }
+        other => panic!("unexpected response {other}"),
+    }
+}
+
+/// Polls `peer_set` with `request` until a peer answers it: peers connect in
+/// the background, so the first calls fail with no ready peer.
+async fn first_response<S>(peer_set: &mut S, request: Request) -> Response
+where
+    S: Service<Request, Response = Response, Error = BoxError>,
+{
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let attempt = async {
+                peer_set.ready().await?;
+                peer_set.call(request.clone()).await
+            }
+            .await;
+            match attempt {
+                Ok(response) => break response,
+                Err(error) => {
+                    tracing::debug!(%error, ?request, "waiting for a peer that can answer");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    })
+    .await
+    .expect("a peer answers within the timeout")
+}
+
+/// The reconnection delay of the version 2 dialer tests: short, so they can watch several
+/// redials.
+const V2_TEST_RECONNECTION_DELAY: Duration = Duration::from_millis(300);
+
+/// How long version 2 tests wait for a connection that should be made.
+const V2_TEST_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long version 2 tests watch for connections that should not be made: several redials.
+const V2_TEST_QUIET_PERIOD: Duration = Duration::from_secs(3);
+
+/// The jittered reconnection delay stays within a quarter of the base delay above it.
+#[test]
+fn v2_reconnection_jitter_is_bounded() {
+    let _init_guard = zebra_test::init();
+
+    let delay = constants::MIN_PEER_RECONNECTION_DELAY;
+    for _ in 0..1000 {
+        let jittered = v2::with_jitter(delay);
+        assert!(jittered >= delay && jittered <= delay + delay / 4);
+    }
+}
+
+/// The version 2 listener refuses connections from banned IPs, and accepts them otherwise.
+#[tokio::test]
+async fn v2_listener_refuses_banned_ip() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    for banned in [true, false] {
+        let mut bans = crate::BanList::default();
+        if banned {
+            bans.ban(Ipv4Addr::LOCALHOST.into());
+        }
+        let (_bans_tx, bans_rx) = watch::channel(bans);
+
+        let listener_addr = free_udp_addr();
+        let (mut listener_rx, listener_task) =
+            spawn_v2_node(v2_test_config(listener_addr, &[]), bans_rx);
+        let (_dialer_rx, dialer_task) =
+            spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), no_bans());
+
+        if banned {
+            tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+            assert_eq!(
+                drain_discovered_peers(&mut listener_rx),
+                0,
+                "a banned IP must not be accepted"
+            );
+        } else {
+            tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+                .await
+                .expect("an unbanned IP is accepted")
+                .expect("the listener is running");
+        }
+
+        listener_task.abort();
+        dialer_task.abort();
+    }
+}
+
+/// The version 2 dialer does not dial a configured peer whose IP is banned, so a misbehaving
+/// configured peer is not reconnected, and dials it once the ban is lifted.
+#[tokio::test]
+async fn v2_dialer_skips_banned_initial_peers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let mut bans = crate::BanList::default();
+    bans.ban(Ipv4Addr::LOCALHOST.into());
+    let (bans_tx, bans_rx) = watch::channel(bans);
+
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) =
+        spawn_v2_node(v2_test_config(listener_addr, &[]), no_bans());
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), bans_rx);
+
+    // Several reconnection delays, so the dialer has retried while the peer is banned.
+    tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+    assert_eq!(
+        drain_discovered_peers(&mut listener_rx),
+        0,
+        "a banned configured peer must not be dialled"
+    );
+
+    bans_tx.send_replace(Default::default());
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the configured peer is dialled once it is no longer banned")
+        .expect("the listener is running");
+
+    listener_task.abort();
+    dialer_task.abort();
+}
+
+/// A banned configured peer takes no outbound slot while it waits for the reconnection delay:
+/// with one slot, the live peer listed after it is dialled at once, and only the peer listed
+/// after that one is logged as waiting for a slot: not the banned peer, which is deferred, and
+/// not the live peer, which holds the slot.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn v2_dialer_gives_banned_initial_peer_no_slot() {
+    // No `zebra_test::init()`: `traced_test` installs the subscriber that records the logs.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // The banned peer is on another loopback address, so the ban does not cover the live peer.
+    // It is never dialled, so nothing needs to listen there, nor at the waiting peer's address,
+    // which never gets the slot.
+    let banned_ip = Ipv4Addr::new(127, 0, 0, 2);
+    let [live_addr, waiting_addr] = free_udp_addrs();
+    let banned_addr = SocketAddr::new(banned_ip.into(), live_addr.port());
+    let mut bans = crate::BanList::default();
+    bans.ban(banned_ip.into());
+    let (_bans_tx, bans_rx) = watch::channel(bans);
+
+    let (mut live_rx, live_task) = spawn_v2_node(v2_test_config(live_addr, &[]), no_bans());
+
+    // The banned peer is listed first, so it is offered the only slot first. With the production
+    // reconnection delay, a slot held while the banned peer waits would not free in this test.
+    let dialer_config = Config {
+        peerset_initial_target_size: 1,
+        ..v2_test_config(any_udp_addr(), &[banned_addr, live_addr, waiting_addr])
+    };
+    assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
+    let (_dialer_rx, dialer_task) = spawn_v2_node_with_delay(
+        dialer_config,
+        bans_rx,
+        constants::MIN_PEER_RECONNECTION_DELAY,
+    );
+
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, live_rx.next())
+        .await
+        .expect("the live configured peer is dialled while the banned one waits")
+        .expect("the listener is running");
+
+    // Once a round of dials ends, the dialer logs each host with addresses that wait for a slot,
+    // in the configured order, so the waiting peer's log comes after any for the two before it.
+    let waiting_log = |host: &SocketAddr| {
+        format!("wait for a connection to fail or end before they are dialled host={host} ")
+    };
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, async {
+        while !logs_contain(&waiting_log(&waiting_addr)) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the peer that has no slot is logged as waiting for one");
+    assert!(
+        !logs_contain(&waiting_log(&banned_addr)),
+        "the banned peer is deferred, so it does not wait for a slot"
+    );
+    assert!(
+        !logs_contain(&waiting_log(&live_addr)),
+        "the live peer holds the slot"
+    );
+
+    live_task.abort();
+    dialer_task.abort();
+}
+
+/// A dialer with no outbound slot warns that its configured peers are never dialled, and stops,
+/// instead of logging that they are dialled when a connection fails or ends, which never happens.
+///
+/// `Config::v2_outbound_connection_limit` is at least one when the endpoint is configured, so this
+/// checks the dialer's guard against a change there.
+#[tokio::test]
+#[tracing_test::traced_test]
+async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
+    // No `zebra_test::init()`: `traced_test` installs the subscriber that records the logs.
+    let config = v2_test_config(any_udp_addr(), &[*test_v2_addr(1)]);
+    let endpoint = crate::quic::bind(&config.network, any_udp_addr()).expect("a UDP port is free");
+    let identity = LocalIdentity {
+        user_agent: "v2 test node".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    let (shared, _open_inbound_tx) = v2::Shared::new(
+        &config,
+        endpoint,
+        identity,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        misbehavior_tx,
+        V2_TEST_RECONNECTION_DELAY,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+    );
+    let (peerset_tx, _peerset_rx) = mpsc::channel(1);
+
+    tokio::time::timeout(
+        V2_TEST_CONNECT_TIMEOUT,
+        v2::keep_initial_peers_connected(shared, config.initial_v2_peers, 0, no_bans(), peerset_tx),
+    )
+    .await
+    .expect("the dialer stops when it has no slot");
+
+    assert!(logs_contain("the outbound v2 connection limit is zero"));
+    assert!(!logs_contain("wait for a connection to fail or end"));
+}
+
+/// The version 2 listener refuses connections over its share of the inbound limit.
+#[tokio::test]
+async fn v2_listener_refuses_connections_over_inbound_limit() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // A zero legacy target makes every legacy limit zero, so the version 2 inbound limit is its
+    // minimum of one connection.
+    let listener_config = Config {
+        peerset_initial_target_size: 0,
+        ..v2_test_config(free_udp_addr(), &[])
+    };
+    assert_eq!(listener_config.v2_inbound_connection_limit(), 1);
+
+    assert_v2_listener_accepts_one_of_two_dialers(listener_config).await;
+}
+
+/// The version 2 listener refuses a second connection from the same IP, like the legacy one.
+#[tokio::test]
+async fn v2_listener_refuses_connections_past_per_ip_limit() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_config = Config {
+        max_connections_per_ip: 1,
+        ..v2_test_config(free_udp_addr(), &[])
+    };
+    assert!(listener_config.v2_inbound_connection_limit() > 1);
+
+    assert_v2_listener_accepts_one_of_two_dialers(listener_config).await;
+}
+
+/// With one outbound version 2 slot, a configured peer whose connection stays up keeps the slot,
+/// so the next configured peer waits for it to free, instead of a live connection being ended.
+#[tokio::test]
+async fn v2_dialer_keeps_live_initial_peer_slot() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let [first_addr, second_addr] = free_udp_addrs();
+    let (mut first_rx, first_task) = spawn_v2_node(v2_test_config(first_addr, &[]), no_bans());
+    let (mut second_rx, second_task) = spawn_v2_node(v2_test_config(second_addr, &[]), no_bans());
+
+    let dialer_config = Config {
+        peerset_initial_target_size: 1,
+        ..v2_test_config(any_udp_addr(), &[first_addr, second_addr])
+    };
+    assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
+    let (_dialer_rx, dialer_task) = spawn_v2_node(dialer_config, no_bans());
+
+    // Configured peers are dialled in order, so the first one takes the only slot.
+    let _first_client = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, first_rx.next())
+        .await
+        .expect("the first configured peer is dialled")
+        .expect("the listener is running");
+    tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+    assert_eq!(
+        drain_discovered_peers(&mut second_rx),
+        0,
+        "a configured peer must wait while the only slot holds a live connection"
+    );
+
+    first_task.abort();
+    second_task.abort();
+    dialer_task.abort();
+}
+
+/// With a single outbound version 2 slot, a configured peer that cannot be reached frees its
+/// slot after its failed attempt, so the next configured peer is dialled instead of the dead one
+/// keeping the slot forever.
+#[tokio::test]
+async fn v2_dialer_moves_on_from_unreachable_initial_peer() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // Nothing listens on the first address once its probe is dropped.
+    let [unreachable_addr, live_addr] = free_udp_addrs();
+    let (mut live_rx, live_task) = spawn_v2_node(v2_test_config(live_addr, &[]), no_bans());
+
+    let dialer_config = Config {
+        peerset_initial_target_size: 1,
+        ..v2_test_config(any_udp_addr(), &[unreachable_addr, live_addr])
+    };
+    assert_eq!(dialer_config.v2_outbound_connection_limit(), 1);
+    let (_dialer_rx, dialer_task) = spawn_v2_node(dialer_config, no_bans());
+
+    // The unreachable peer is dialled first, and its attempt times out before the slot is freed.
+    tokio::time::timeout(
+        constants::HANDSHAKE_TIMEOUT + V2_TEST_CONNECT_TIMEOUT,
+        live_rx.next(),
+    )
+    .await
+    .expect("the live configured peer gets the slot after the unreachable one fails")
+    .expect("the listener is running");
+
+    live_task.abort();
+    dialer_task.abort();
+}
+
+/// An early configured host that resolves to more addresses than there are outbound version 2
+/// slots does not take every slot: each host gets a slot before any host gets a second one.
+#[test]
+fn v2_initial_peer_slots_go_to_each_host_before_any_second_address() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
+    let late_host = test_v2_addr(4);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host(early_host);
+    slots.add_host([late_host]);
+
+    let dialled = [slots.take_next(now), slots.take_next(now)];
+    assert_eq!(dialled, [Some(early_host[0]), Some(late_host)]);
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
+
+    // With more slots than hosts, the early host's other addresses fill them.
+    let mut slots = v2::InitialPeerSlots::new(4);
+    slots.add_host(early_host);
+    slots.add_host([late_host]);
+    let dialled: HashSet<_> = std::iter::from_fn(|| slots.take_next(now)).collect();
+    assert_eq!(dialled.len(), 4);
+    assert!(dialled.contains(&late_host));
+}
+
+/// A freed slot goes to the next host in turn, then to the next address of a host, and an
+/// address that freed its slot can take one again, so a single configured peer is redialled.
+#[test]
+fn v2_initial_peer_slots_rotate_freed_slots() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+
+    let (first, second) = (test_v2_addr(1), test_v2_addr(2));
+
+    // Two hosts with one slot: the slot alternates between them.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host([first]);
+    slots.add_host([second]);
+    assert_eq!(slots.take_next(now), Some(first));
+    assert_eq!(slots.take_next(now), None);
+    slots.free(&first);
+    assert_eq!(slots.take_next(now), Some(second));
+    slots.free(&second);
+    assert_eq!(slots.take_next(now), Some(first));
+
+    // One host with two addresses and one slot: the slot alternates between its addresses.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host([first, second]);
+    assert_eq!(slots.take_next(now), Some(first));
+    slots.free(&first);
+    assert_eq!(slots.take_next(now), Some(second));
+    slots.free(&second);
+    assert_eq!(slots.take_next(now), Some(first));
+
+    // One address: it takes the slot again once it freed it.
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([first]);
+    assert_eq!(slots.take_next(now), Some(first));
+    assert_eq!(
+        slots.take_next(now),
+        None,
+        "an address holds at most one slot"
+    );
+    slots.free(&first);
+    assert_eq!(slots.take_next(now), Some(first));
+}
+
+/// An address that two configured hosts resolve to holds at most one slot.
+#[test]
+fn v2_initial_peer_slots_dial_a_shared_address_once() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+
+    let shared = test_v2_addr(1);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([shared]);
+    slots.add_host([shared]);
+    assert_eq!(slots.take_next(now), Some(shared));
+    assert_eq!(slots.take_next(now), None);
+}
+
+/// A host that resolves after the slots are full waits for a slot to free, and then gets it
+/// before the hosts that already hold one.
+#[test]
+fn v2_initial_peer_slots_late_host_waits_for_a_free_slot() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2)];
+    let late_host = test_v2_addr(3);
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
+
+    slots.add_host([late_host]);
+    assert_eq!(slots.take_next(now), None, "the only slot is taken");
+    assert!(slots.waits_for_slot(&late_host));
+
+    slots.free(&early_host[0]);
+    assert_eq!(slots.take_next(now), Some(late_host));
+    assert!(!slots.waits_for_slot(&late_host));
+}
+
+/// A slot is kept free for each configured host that has not resolved yet, so an early host
+/// with many addresses cannot fill every slot before a later host resolves.
+#[test]
+fn v2_initial_peer_slots_keep_a_slot_for_each_unresolved_host() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+
+    let early_host = [test_v2_addr(1), test_v2_addr(2), test_v2_addr(3)];
+    let late_host = test_v2_addr(4);
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.set_unresolved_hosts(1);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
+    assert_eq!(
+        slots.take_next(now),
+        None,
+        "the last free slot is kept for the unresolved host"
+    );
+
+    slots.set_unresolved_hosts(0);
+    slots.add_host([late_host]);
+    assert_eq!(slots.take_next(now), Some(late_host));
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
+
+    // With more unresolved hosts than free slots, each resolved host still gets one slot.
+    let mut slots = v2::InitialPeerSlots::new(1);
+    slots.set_unresolved_hosts(2);
+    slots.add_host(early_host);
+    assert_eq!(slots.take_next(now), Some(early_host[0]));
+}
+
+/// An address that was not dialled frees its slot at once, so the next host in turn gets it, and
+/// is not offered a slot again until its deferral passed, even while a slot is free.
+#[test]
+fn v2_initial_peer_slots_defer_addresses_that_were_not_dialled() {
+    let _init_guard = zebra_test::init();
+    let now = tokio::time::Instant::now();
+    let deferred_until = now + Duration::from_secs(60);
+
+    let (banned, live, waiting) = (test_v2_addr(1), test_v2_addr(2), test_v2_addr(3));
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([banned]);
+    slots.add_host([live]);
+    slots.add_host([waiting]);
+    assert_eq!(slots.take_next(now), Some(banned));
+    assert_eq!(slots.take_next(now), Some(live));
+    assert_eq!(slots.take_next(now), None, "both slots are taken");
+    assert_eq!(slots.next_deferral_end(), None);
+
+    // The banned address is not dialled: its slot goes to the waiting host at once, and it does
+    // not wait for a slot itself.
+    slots.defer(banned, deferred_until);
+    assert_eq!(slots.next_deferral_end(), Some(deferred_until));
+    assert!(!slots.waits_for_slot(&banned));
+    assert_eq!(slots.take_next(now), Some(waiting));
+
+    // The waiting host's connection ends: the banned address would be next in turn, but it is
+    // not offered the free slot before its deferral passed, so the slot goes to the waiting host.
+    slots.free(&waiting);
+    assert_eq!(slots.take_next(now), Some(waiting));
+
+    // Once its deferral passed, the banned address is dialled again in turn.
+    slots.free(&waiting);
+    assert_eq!(slots.take_next(deferred_until), Some(banned));
+    assert_eq!(slots.next_deferral_end(), None);
+
+    // A deferred address is not offered a free slot even when it is the only address without one.
+    let mut slots = v2::InitialPeerSlots::new(2);
+    slots.add_host([banned]);
+    slots.add_host([live]);
+    assert_eq!(slots.take_next(now), Some(banned));
+    assert_eq!(slots.take_next(now), Some(live));
+    slots.defer(banned, deferred_until);
+    assert_eq!(
+        slots.take_next(now),
+        None,
+        "the only free address is deferred"
+    );
+    assert_eq!(slots.take_next(deferred_until), Some(banned));
+}
+
+/// The initial version 2 peers resolve by host, so each host's addresses stay together and share
+/// its turns for the outbound slots, and an address is never counted for the wrong host.
+#[tokio::test]
+async fn v2_initial_peers_resolve_by_host() {
+    let _init_guard = zebra_test::init();
+
+    let hosts: IndexSet<String> = ["127.0.0.1:8233", "127.0.0.2:8234"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let (resolved, unresolved) = Config::resolve_initial_v2_peers(&hosts).await;
+
+    assert!(unresolved.is_empty());
+    let resolved: Vec<_> = resolved
+        .into_iter()
+        .map(|(host, addrs)| (host, addrs.into_iter().collect::<Vec<_>>()))
+        .collect();
+    let expected: Vec<_> = hosts
+        .iter()
+        .map(|host| {
+            let addr: SocketAddr = host.parse().expect("the test hosts are socket addresses");
+            (host.clone(), vec![PeerSocketAddr::from(addr)])
+        })
+        .collect();
+    assert_eq!(resolved, expected);
+}
+
+/// A distinct version 2 peer address for the slot tests, which never connect to it.
+fn test_v2_addr(port: u16) -> PeerSocketAddr {
+    SocketAddr::new(Ipv4Addr::new(203, 0, 113, 1).into(), port).into()
+}
+
+/// The version 2 dialer keeps one connection to each configured peer: it does not redial while
+/// the connection is open, and redials once it closes.
+#[tokio::test]
+async fn v2_dialer_redials_after_disconnect() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) =
+        spawn_v2_node(v2_test_config(listener_addr, &[]), no_bans());
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), no_bans());
+
+    let first_client = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the configured peer is dialled")
+        .expect("the listener is running");
+    tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+    assert_eq!(
+        drain_discovered_peers(&mut listener_rx),
+        0,
+        "an open connection must not be redialled"
+    );
+
+    // Dropping the client ends the connection.
+    std::mem::drop(first_client);
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the configured peer is redialled after the connection closes")
+        .expect("the listener is running");
+
+    listener_task.abort();
+    dialer_task.abort();
+}
+
+/// Two nodes that list each other as initial version 2 peers settle on one connection between
+/// them, rather than repeatedly dialling connections that the other node's peer set drops as
+/// duplicates.
+#[tokio::test]
+async fn v2_mutual_initial_peers_settle_on_one_connection() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    // The listener's per-IP rate limit would hide repeated redials by refusing them, so lift it
+    // well above the number of redials this test can see.
+    let mutual_config = |listen_addr, peer_addr| Config {
+        max_connections_per_ip: 1000,
+        ..v2_test_config(listen_addr, &[peer_addr])
+    };
+    let [first_addr, second_addr] = free_udp_addrs();
+    let (mut first_rx, first_task) =
+        spawn_v2_node(mutual_config(first_addr, second_addr), no_bans());
+    let (mut second_rx, second_task) =
+        spawn_v2_node(mutual_config(second_addr, first_addr), no_bans());
+
+    // Both nodes usually dial at once at startup, so the first connections can collide; the
+    // redial jitter then lets one node's connection arrive before the other node redials. The
+    // short inbound interval matters: the listener holds a new connection until its next accept,
+    // so a long interval would line both nodes' connections up whatever the jitter.
+    let mut first_peers = HashMap::new();
+    let mut second_peers = HashMap::new();
+    let start = Instant::now();
+    let mut quiet_since = Instant::now();
+    loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "the nodes never settled on one connection: {} and {} live peers",
+            first_peers.len(),
+            second_peers.len(),
+        );
+
+        let received = keep_peers_like_peer_set(&mut first_rx, &mut first_peers)
+            + keep_peers_like_peer_set(&mut second_rx, &mut second_peers);
+        if received > 0 || first_peers.len() != 1 || second_peers.len() != 1 {
+            quiet_since = Instant::now();
+        } else if quiet_since.elapsed() >= V2_TEST_QUIET_PERIOD {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    first_task.abort();
+    second_task.abort();
+}
+
+/// Starts two dialers from 127.0.0.1 to a version 2 listener with `listener_config`, and checks
+/// that it accepts exactly one of them.
+async fn assert_v2_listener_accepts_one_of_two_dialers(listener_config: Config) {
+    let listener_addr = listener_config
+        .v2_listen_addr
+        .expect("version 2 test configs listen");
+    let (mut listener_rx, listener_task) = spawn_v2_node(listener_config, no_bans());
+    let (_first_rx, first_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), no_bans());
+    let (_second_rx, second_task) =
+        spawn_v2_node(v2_test_config(any_udp_addr(), &[listener_addr]), no_bans());
+
+    // Keep the accepted connection open, so it holds its slot.
+    let _accepted = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("one dialer is accepted")
+        .expect("the listener is running");
+    tokio::time::sleep(V2_TEST_QUIET_PERIOD).await;
+    assert_eq!(
+        drain_discovered_peers(&mut listener_rx),
+        0,
+        "the second dialer must be refused"
+    );
+
+    listener_task.abort();
+    first_task.abort();
+    second_task.abort();
+}
+
+/// Moves the clients waiting in `peerset_rx` to `peers`, like the peer set: a client for an
+/// address that already has a live client is dropped. Closed clients are removed first.
+///
+/// Returns the number of clients received.
+fn keep_peers_like_peer_set(
+    peerset_rx: &mut mpsc::Receiver<DiscoveredPeer>,
+    peers: &mut HashMap<PeerSocketAddr, peer::Client>,
+) -> usize {
+    peers.retain(|_, client| {
+        !matches!(
+            ServiceExt::<Request>::ready(client).now_or_never(),
+            Some(Err(_))
+        )
+    });
+
+    let mut received = 0;
+    while let Ok((addr, client)) = peerset_rx.try_recv() {
+        received += 1;
+        peers.entry(addr).or_insert(client);
+    }
+    received
+}
+
+/// A version 2 test node's config: listening on `v2_listen_addr`, dialling `initial_v2_peers`,
+/// and with a per-IP limit that lets several test nodes on 127.0.0.1 connect.
+fn v2_test_config(v2_listen_addr: SocketAddr, initial_v2_peers: &[SocketAddr]) -> Config {
+    Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        network: Mainnet,
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        v2_listen_addr: Some(v2_listen_addr),
+        initial_v2_peers: initial_v2_peers.iter().map(ToString::to_string).collect(),
+        max_connections_per_ip: 10,
+        ..Config::default()
+    }
+}
+
+/// Starts a version 2 listener and dialer for `config`, with the test reconnection delay and
+/// inbound connection interval.
+///
+/// Returns the channel of the clients it would send to its peer set, and its task.
+fn spawn_v2_node(
+    config: Config,
+    bans_receiver: watch::Receiver<crate::BanList>,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
+    spawn_v2_node_with_delay(config, bans_receiver, V2_TEST_RECONNECTION_DELAY)
+}
+
+/// [`spawn_v2_node`], redialling configured peers after `reconnection_delay` plus jitter.
+fn spawn_v2_node_with_delay(
+    config: Config,
+    bans_receiver: watch::Receiver<crate::BanList>,
+    reconnection_delay: Duration,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
+    let (peerset_tx, peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
+    let (inv_collector, _) = broadcast::channel(16);
+    // These tests do not check misbehavior reports; a closed channel drops them.
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    let task = v2::start_with_intervals(
+        config,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        "v2 test node".to_string(),
+        bans_receiver,
+        misbehavior_tx,
+        peerset_tx,
+        reconnection_delay,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+    )
+    .expect("version 2 test configs listen");
+
+    (peerset_rx, task)
+}
+
+/// An empty ban list.
+fn no_bans() -> watch::Receiver<crate::BanList> {
+    let (_bans_tx, bans_rx) = watch::channel(Default::default());
+    bans_rx
+}
+
+/// A UDP address on 127.0.0.1 that was free when probed, for a node that must be dialled at a
+/// known address.
+fn free_udp_addr() -> SocketAddr {
+    let [addr] = free_udp_addrs();
+    addr
+}
+
+/// `N` distinct UDP addresses on 127.0.0.1 that were free when probed: the probes are held
+/// together, so the operating system cannot hand the same port out twice.
+fn free_udp_addrs<const N: usize>() -> [SocketAddr; N] {
+    let probes: [std::net::UdpSocket; N] = std::array::from_fn(|_| {
+        std::net::UdpSocket::bind("127.0.0.1:0").expect("a UDP port is free")
+    });
+    probes
+        .each_ref()
+        .map(|probe| probe.local_addr().expect("a bound socket has an address"))
+}
+
+/// A UDP address for a node that only dials, so nothing needs to know its port in advance.
+fn any_udp_addr() -> SocketAddr {
+    "127.0.0.1:0".parse().unwrap()
+}
+
+/// Closing the version 2 endpoint at shutdown tells connected peers at once, with `NO_ERROR`,
+/// rather than leaving them a dead connection until their idle timeout.
+#[tokio::test]
+async fn closing_the_v2_endpoint_tells_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Mainnet;
+
+    let server = crate::quic::bind(&network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let client = crate::quic::bind(&network, "127.0.0.1:0".parse().unwrap()).expect("binds");
+    let server_addr = server.local_addr().expect("bound");
+    v2::OPEN_ENDPOINT
+        .set(server.clone())
+        .expect("nextest runs each test in its own process, so no other endpoint is registered");
+
+    let (outbound, inbound) = tokio::join!(crate::quic::connect(&client, server_addr), async {
+        server
+            .accept()
+            .await
+            .expect("open")
+            .accept()
+            .expect("acceptable")
+            .await
+    });
+    let outbound = outbound.expect("connects");
+    let _inbound = inbound.expect("accepts");
+
+    crate::close_v2_endpoint(Duration::from_secs(1)).await;
+
+    let closed = tokio::time::timeout(Duration::from_secs(5), outbound.closed())
+        .await
+        .expect("the peer learns of the close long before its 120 second idle timeout");
+    match closed {
+        quinn::ConnectionError::ApplicationClosed(close) => assert_eq!(
+            close.error_code,
+            crate::quic::app_error_code(crate::protocol::v2::types::ErrorCode::NoError),
+        ),
+        other => panic!("expected an application close with NO_ERROR, got {other:?}"),
+    }
+}
+
+/// Closing does nothing, and returns at once, when no version 2 endpoint was opened.
+#[tokio::test]
+async fn closing_without_a_v2_endpoint_does_nothing() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        crate::close_v2_endpoint(Duration::from_secs(60)),
+    )
+    .await
+    .expect("returns at once without an endpoint");
 }

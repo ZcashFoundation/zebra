@@ -46,6 +46,7 @@ use crate::{
     protocol::{
         external::{types::*, AddrInVersion, Codec, InventoryHash, Message},
         internal::{Request, Response},
+        v2::handshake::InitRecord,
     },
     types::MetaAddr,
     BoxError, Config, PeerSocketAddr, VersionMessage,
@@ -125,6 +126,80 @@ where
     }
 }
 
+/// The handshake a remote peer sent: its legacy `version` message, or its version 2 `init`
+/// record. The accessors expose the fields both have in common.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoteHandshake {
+    /// The `version` message of a legacy protocol connection.
+    Version(VersionMessage),
+
+    /// The `init` record of a version 2 protocol connection.
+    Init(InitRecord),
+}
+
+impl RemoteHandshake {
+    /// The protocol version the peer advertised.
+    pub fn version(&self) -> Version {
+        match self {
+            RemoteHandshake::Version(version) => version.version,
+            RemoteHandshake::Init(init) => init.version,
+        }
+    }
+
+    /// The services the peer advertised.
+    ///
+    /// The two protocols' decoders differ on bits Zebra does not know: the
+    /// legacy codec discards them, while the version 2 `init` decoder keeps
+    /// them. Compare known flags with `contains`, not by equality.
+    pub fn services(&self) -> PeerServices {
+        match self {
+            RemoteHandshake::Version(version) => version.services,
+            RemoteHandshake::Init(init) => init.services,
+        }
+    }
+
+    /// The services the peer advertised, for tests that change them on an existing connection.
+    #[cfg(test)]
+    pub(crate) fn services_mut(&mut self) -> &mut PeerServices {
+        match self {
+            RemoteHandshake::Version(version) => &mut version.services,
+            RemoteHandshake::Init(init) => &mut init.services,
+        }
+    }
+
+    /// The peer's user agent.
+    pub fn user_agent(&self) -> &str {
+        match self {
+            RemoteHandshake::Version(version) => &version.user_agent,
+            RemoteHandshake::Init(init) => &init.user_agent,
+        }
+    }
+
+    /// The best block height the peer reported when it connected.
+    pub fn start_height(&self) -> block::Height {
+        match self {
+            RemoteHandshake::Version(version) => version.start_height,
+            RemoteHandshake::Init(init) => init.start_height,
+        }
+    }
+
+    /// Whether the peer wants transaction relay.
+    pub fn relay(&self) -> bool {
+        match self {
+            RemoteHandshake::Version(version) => version.relay,
+            RemoteHandshake::Init(init) => init.relay,
+        }
+    }
+
+    /// The version 2 `init` record, if this is a version 2 connection.
+    pub fn as_init_record(&self) -> Option<&InitRecord> {
+        match self {
+            RemoteHandshake::Version(_) => None,
+            RemoteHandshake::Init(init) => Some(init),
+        }
+    }
+}
+
 /// The metadata for a peer connection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionInfo {
@@ -135,12 +210,13 @@ pub struct ConnectionInfo {
     /// which will appear as the connected address to the OS and Zebra.
     pub connected_addr: ConnectedAddr,
 
-    /// The network protocol [`VersionMessage`] sent by the remote peer.
-    pub remote: VersionMessage,
+    /// The handshake the remote peer sent: its [`VersionMessage`] on a legacy
+    /// connection, or its [`InitRecord`] on a version 2 connection.
+    pub remote: RemoteHandshake,
 
     /// The network protocol version negotiated with the remote peer.
     ///
-    /// Derived from `remote.version` and the
+    /// Derived from the remote version and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
 
@@ -591,7 +667,7 @@ where
 /// `Sync` bounds on the returned future.
 ///
 /// Returns the [`VersionMessage`] sent by the remote peer, and the [`Version`] negotiated with the
-/// remote peer, inside a [`ConnectionInfo`] struct.
+/// remote peer, inside a [`ConnectionInfo`] struct, and the peer's canonical address.
 #[allow(clippy::too_many_arguments)]
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
@@ -602,7 +678,7 @@ pub async fn negotiate_version<PeerTransport>(
     our_services: PeerServices,
     relay: bool,
     mut minimum_peer_version: MinimumPeerVersion<impl ChainTip>,
-) -> Result<Arc<ConnectionInfo>, HandshakeError>
+) -> Result<(Arc<ConnectionInfo>, PeerSocketAddr), HandshakeError>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -855,27 +931,29 @@ where
         .intersection(remote.services)
         .contains(PeerServices::NODE_EARLY_BLOCK_RELAY);
 
+    let remote_canonical_addr = remote.address_from.addr();
+
     // Limit containing struct size, and avoid multiple duplicates of 300+ bytes of data.
     let connection_info = Arc::new(ConnectionInfo {
         connected_addr: *connected_addr,
-        remote,
+        remote: RemoteHandshake::Version(remote),
         negotiated_version,
         early_block_relay,
     });
 
     debug!(
         remote_ip = ?their_addr,
-        ?connection_info.remote.version,
+        connection_info.remote.version = ?connection_info.remote.version(),
         ?negotiated_version,
         ?min_version,
-        ?connection_info.remote.user_agent,
+        connection_info.remote.user_agent = ?connection_info.remote.user_agent(),
         "negotiated network protocol version with peer",
     );
 
     // Count connected handshakes by protocol version, without per-peer labels.
     metrics::counter!(
         "zcash.net.peers.connected",
-        "remote_version" => connection_info.remote.version.metric_label(),
+        "remote_version" => connection_info.remote.version().metric_label(),
         "negotiated_version" => negotiated_version.metric_label(),
         "min_version" => min_version.to_string(),
     )
@@ -883,7 +961,7 @@ where
 
     // Record the remote version of the most recently connected handshake.
     metrics::gauge!("zcash.net.peers.version.connected")
-        .set(f64::from(connection_info.remote.version.0));
+        .set(f64::from(connection_info.remote.version().0));
 
     if let Err(error) = peer_conn.send(Message::Verack).await {
         return Err(remote_version_outcome.record_error(HandshakeError::from(error)));
@@ -926,7 +1004,7 @@ where
     }
 
     remote_version_outcome.record_success();
-    Ok(connection_info)
+    Ok((connection_info, remote_canonical_addr))
 }
 
 /// A handshake request.
@@ -1009,7 +1087,7 @@ where
                 Codec::builder().for_network(&config.network).finish(),
             );
 
-            let connection_info = match negotiate_version(
+            let (connection_info, remote_canonical_addr) = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -1065,7 +1143,7 @@ where
                 }
             };
 
-            let remote_services = connection_info.remote.services;
+            let remote_services = connection_info.remote.services();
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
             // send initial connection info, and update the active connection counter.
@@ -1078,9 +1156,9 @@ where
                         book_addr,
                         &remote_services,
                         connected_addr.is_inbound(),
-                        connection_info.remote.user_agent.clone(),
+                        connection_info.remote.user_agent().to_string(),
                         connection_info.negotiated_version,
-                        connection_info.remote.start_height,
+                        connection_info.remote.start_height(),
                     ))
                     .await;
             }
@@ -1220,7 +1298,6 @@ where
             // - opening connections is rate-limited
             // - these addresses are put in the peer address cache
             // - the peer address cache is only used when Zebra requests addresses from that peer
-            let remote_canonical_addr = connection_info.remote.address_from.addr();
             let alternate_addrs = connected_addr
                 .get_alternate_addrs(remote_canonical_addr)
                 .map(|addr| {
