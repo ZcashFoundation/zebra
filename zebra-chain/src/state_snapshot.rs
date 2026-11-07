@@ -100,14 +100,41 @@ pub struct StateSnapshotCommitment {
     pub manifest: ObjectHash,
 }
 
+/// The height of the Mainnet state snapshot this build pins: a checkpoint below
+/// the last checkpoint, so the checkpoint list authenticates the snapshot block,
+/// and the block after it is checkpoint-verified.
+pub const MAINNET_STATE_SNAPSHOT_HEIGHT: block::Height = block::Height(3_522_060);
+
+/// The hash of the block at [`MAINNET_STATE_SNAPSHOT_HEIGHT`]: the Mainnet
+/// checkpoint there, in the usual display byte order.
+pub const MAINNET_STATE_SNAPSHOT_BLOCK_HASH: &str =
+    "00000000000705964fc4c75da9cce97978197b666c9dcdfc1bcf8d44cd776e4d";
+
+/// PLACEHOLDER: the manifest hash of the Mainnet state snapshot at
+/// [`MAINNET_STATE_SNAPSHOT_HEIGHT`], which the snapshot's deterministic export
+/// gives. `None` until that export is done and checked, so this build pins no
+/// Mainnet commitment yet, and Mainnet nodes sync normally.
+pub const MAINNET_STATE_SNAPSHOT_MANIFEST: Option<ObjectHash> = None;
+
 impl Network {
     /// Returns the state snapshot commitment this build pins for the network,
     /// if any.
     ///
     /// A commitment is pinned per release, together with the checkpoint list
-    /// it was cut with; no release has pinned one yet.
+    /// it was cut with. Only Mainnet has one, at a checkpoint, once its
+    /// [`MAINNET_STATE_SNAPSHOT_MANIFEST`] is filled in.
     pub fn state_snapshot_commitment(&self) -> Option<StateSnapshotCommitment> {
-        None
+        if !matches!(self, Network::Mainnet) {
+            return None;
+        }
+
+        Some(StateSnapshotCommitment {
+            height: MAINNET_STATE_SNAPSHOT_HEIGHT,
+            block_hash: MAINNET_STATE_SNAPSHOT_BLOCK_HASH
+                .parse()
+                .expect("the pinned block hash is valid hex"),
+            manifest: MAINNET_STATE_SNAPSHOT_MANIFEST?,
+        })
     }
 
     /// Returns the hash of this network's consensus parameters that a state
