@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Fixed the expected difficulty threshold of blocks at or below the first difficulty averaging window, which is now the minimum difficulty, as in zcashd and in the first Mainnet and Testnet blocks. This affects custom test networks and block templates at those heights.'
+time: 2026-11-06T20:22:49Z

@@ -220,6 +220,15 @@ impl AdjustedDifficulty {
             return self.network.target_difficulty_limit().to_compact();
         }
 
+        // Until the chain has a full averaging window below the candidate, zcashd uses the
+        // minimum difficulty (`GetNextWorkRequired` finds no first block in the window), and
+        // so does every Mainnet and Testnet block at those heights.
+        let averaging_window_height = u32::try_from(self.averaging_window())
+            .expect("the averaging window is at most MAX_POW_AVERAGING_WINDOW");
+        if self.candidate_height.0 <= averaging_window_height {
+            return self.network.target_difficulty_limit().to_compact();
+        }
+
         if NetworkUpgrade::is_testnet_min_difficulty_block(
             &self.network,
             self.candidate_height,
