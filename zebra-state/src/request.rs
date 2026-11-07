@@ -1107,6 +1107,11 @@ pub enum Request {
     /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
+    /// Looks up each hash with [`Request::KnownBlock`] semantics.
+    ///
+    /// Returns [`Response::KnownBlocks`] in input order, including duplicate hashes.
+    KnownBlocks(Vec<block::Hash>),
+
     /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
     /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
     ///
@@ -1158,6 +1163,7 @@ impl Request {
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
+            Request::KnownBlocks(_) => "known_blocks",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
@@ -1752,7 +1758,9 @@ impl TryFrom<Request> for ReadRequest {
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
                      and handle pending UTXOs"),
 
-            Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
+            Request::KnownBlock(_) | Request::KnownBlocks(_) => {
+                Err("ReadService does not track queued blocks")
+            }
 
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),

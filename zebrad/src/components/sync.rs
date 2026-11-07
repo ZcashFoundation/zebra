@@ -938,18 +938,15 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
 
-                    let mut first_unknown = None;
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        if !self.state_contains(hash).await? {
-                            first_unknown = Some(i);
-                            break;
-                        }
-                    }
+                    let known_blocks = self.known_blocks(hashes.clone()).await?;
+                    let first_unknown = known_blocks
+                        .iter()
+                        .position(|loc| matches!(loc, None | Some(zs::KnownBlock::Queue)));
+                    let hashes = hashes.as_slice();
 
                     debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
@@ -1009,11 +1006,12 @@ where
 
         // State can advance during fanout. Compact unknown hashes in place, preserving download
         // order.
+        let known_blocks = self
+            .known_blocks(download_set.iter().copied().collect())
+            .await?;
         let mut retained = 0;
-        for index in 0..download_set.len() {
-            let hash = download_set[index];
-            debug!(?hash, "checking if state contains hash");
-            if !self.state_contains(hash).await? {
+        for (index, loc) in known_blocks.into_iter().enumerate() {
+            if matches!(loc, None | Some(zs::KnownBlock::Queue)) {
                 if retained != index {
                     download_set.swap_indices(retained, index);
                 }
@@ -1670,6 +1668,29 @@ where
                     Ok(())
                 }
             }
+        }
+    }
+
+    /// Returns each block's state location in request order, including queued blocks.
+    async fn known_blocks(
+        &mut self,
+        hashes: Vec<block::Hash>,
+    ) -> Result<Vec<Option<zs::KnownBlock>>, Report> {
+        if hashes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zs::Request::KnownBlocks(hashes))
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::KnownBlocks(locations) => Ok(locations),
+            _ => unreachable!("wrong response to known blocks request"),
         }
     }
 
