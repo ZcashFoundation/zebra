@@ -311,7 +311,7 @@ import.
 
 - The `get-object` request is a draft, and the snapshot format can change between releases: a
   snapshot exported by one Zebra version may be refused by another. This version reads and writes
-  snapshot format 2.
+  snapshot format 3.
 - Mainnet and the default Testnet need a pinned commitment, or `unsafe_trust_state_snapshot`.
   Custom testnets cannot use it, because the version 2 protocol has
   [no ALPN identifier for them](p2p-v2.md#known-limitations).

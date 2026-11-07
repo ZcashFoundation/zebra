@@ -236,7 +236,7 @@ release after it. See [format 33 and recovery](pruning.md#format-33-recovery-and
   would treat its missing pre-window bodies as a complete archive. A
   snapshot-born node must keep running a snapshot-aware release or recover from
   a separate compatible archive backup or a full sync. State snapshots now use
-  snapshot format 2, which older releases reject.
+  snapshot format 3, which older releases reject.
 - **Direct database readers.** Upgrade them to a build that understands format
   33, snapshot history boundaries, and unavailable historical bodies before
   they open the upgraded state.

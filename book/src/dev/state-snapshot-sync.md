@@ -133,7 +133,7 @@ bounds before allocation, the running total, and key order on import.
 The **manifest** (at most 1 MiB) is:
 
 ```text
-magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
+magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (3)
 genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 [Regtest and custom testnets only: parameters_hash 32, the consensus parameters without checkpoints]
 component_count u16 (24), then per component in ComponentId order:
@@ -144,9 +144,9 @@ Decoding is strict: bounds before allocation, no trailing bytes, no unknown ids,
 exactly once in order, `entry_count == 0 ⇔ piece_count == 0`. The decoder takes the `Network`,
 because the parameters hash is present only on Regtest and custom testnets. `snapshot_format`
 changes only when the shipped components or encodings change; the importer maps it onto the running
-database format. Format 1 shipped fixed three-byte heights. Format 2 ships the variable-width
-heights and locations of database format 33, drops the window bodies below `H` and the rebuildable
-indexes, and the decoder rejects format 1.
+database format. Format 2 dropped format 1's window bodies below `H` and its rebuildable indexes,
+both with fixed three-byte heights. Format 3 ships format 2's components with the variable-width
+heights and locations of database format 33, and the decoder rejects formats 1 and 2.
 
 The manifest and the optional version 2 handshake parameters record use the same hash. It binds
 every consensus parameter, including activation heights, funding streams, lockbox disbursements,
