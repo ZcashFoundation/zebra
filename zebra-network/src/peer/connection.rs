@@ -59,7 +59,10 @@ pub(super) enum Handler {
         ping_sent_at: Instant,
     },
     Peers,
-    FindBlocks,
+    FindBlocks {
+        first_locator: Option<block::Hash>,
+        has_stop: bool,
+    },
     FindHeaders,
     BlocksByHash {
         pending_hashes: HashSet<block::Hash>,
@@ -85,7 +88,7 @@ impl fmt::Display for Handler {
             Handler::Ping { .. } => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
 
-            Handler::FindBlocks => "FindBlocks".to_string(),
+            Handler::FindBlocks { .. } => "FindBlocks".to_string(),
             Handler::FindHeaders => "FindHeaders".to_string(),
             Handler::CompactBlock { .. } => "CompactBlock".to_string(),
             Handler::BlocksByHash {
@@ -121,7 +124,7 @@ impl Handler {
             Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks => "FindBlocks".into(),
+            Handler::FindBlocks { .. } => "FindBlocks".into(),
             Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
@@ -413,7 +416,7 @@ impl Handler {
 
             // An empty inventory can be a late mempool reply after cancellation.
             // Zebra and zcashd send no message for an empty getblocks result.
-            (Handler::FindBlocks, Message::Inv(items))
+            (Handler::FindBlocks { .. }, Message::Inv(items))
                 if !items.is_empty()
                     && items
                         .iter()
@@ -877,6 +880,7 @@ where
                         }
                         Either::Left(Some(Err(e))) => self.fail_with(e).await,
                         Either::Left(Some(Ok(msg))) => {
+                            self.compact.take_retired_discovery(&msg);
                             let unhandled_msg = self.handle_message_as_request(msg).await;
 
                             if let Some(unhandled_msg) = unhandled_msg {
@@ -1054,15 +1058,19 @@ where
                             // &mut self. This is a sign that we don't properly
                             // factor the state required for inbound and
                             // outbound requests.
-                            let request_msg = match self.state {
-                                State::AwaitingResponse {
-                                    ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
-                                _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
-                                                  self.state,
-                                                  peer_msg,
-                                                  self.client_rx,
-                                ),
+                            let request_msg = if self.compact.take_retired_discovery(&peer_msg) {
+                                Some(peer_msg)
+                            } else {
+                                match self.state {
+                                    State::AwaitingResponse {
+                                        ref mut handler, ..
+                                    } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
+                                    _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
+                                                      self.state,
+                                                      peer_msg,
+                                                      self.client_rx,
+                                    ),
+                                }
                             };
 
                             self.update_state_metrics(None);
@@ -1266,7 +1274,7 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let authorized = || {
+        let mut authorized = || {
             if version < minimum.current()
                 || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
             {
@@ -1355,13 +1363,23 @@ where
             }
 
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
-                self
-                    .peer_tx
-                    .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
-                    .await
-                    .map(|()|
-                         Handler::FindBlocks
-                    )
+                if let Some(hash) = known_blocks
+                    .first()
+                    .filter(|_| stop.is_none())
+                    .and_then(|tip| self.compact.next_block_hash(tip))
+                {
+                    authorized().map(|()| Handler::Finished(Ok(Response::BlockHashes(vec![hash]))))
+                } else {
+                    let first_locator = known_blocks.first().copied();
+                    let has_stop = stop.is_some();
+                    self
+                        .peer_tx
+                        .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
+                        .await
+                        .map(|()|
+                             Handler::FindBlocks { first_locator, has_stop }
+                        )
+                }
             }
             (AwaitingRequest, FindHeaders { known_blocks, stop }) => {
                 self
