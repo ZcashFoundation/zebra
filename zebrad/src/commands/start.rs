@@ -958,6 +958,7 @@ impl StartCmd {
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            read_state: None,
         };
         setup_tx
             .send(setup_data)
