@@ -117,7 +117,7 @@ use crate::{
             serving,
         },
         sync::{
-            self, record_tip_block_delay, show_block_chain_progress, StateSnapshotFallback,
+            self, record_tip_block_delay, show_block_chain_progress,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
         },
         tokio::{RuntimeRun, TokioComponent},
@@ -201,23 +201,24 @@ impl StartCmd {
             return Ok(());
         }
 
-        match config.sync.state_snapshot_fallback {
-            StateSnapshotFallback::Error => Err(eyre!(
+        let fallback = config.sync.state_snapshot_fallback;
+        if fallback.exits(config.sync.state_snapshot.is_some(), true) {
+            Err(eyre!(
                 "the state snapshot was rejected by an earlier bootstrap, and \
-                 sync.state_snapshot_fallback is \"error\", so Zebra exits without opening the \
+                 sync.state_snapshot_fallback is \"{}\", so Zebra exits without opening the \
                  state or syncing from genesis. Use a different trusted commitment, or investigate \
                  the rejection and remove its marker before retrying it. Set \
                  sync.state_snapshot_fallback = \"genesis\" to sync from genesis without retrying \
-                 the rejected snapshot"
-            )),
-            StateSnapshotFallback::Genesis => {
-                warn!(
-                    "the state snapshot was rejected by an earlier bootstrap, and \
-                     sync.state_snapshot_fallback is \"genesis\": syncing from genesis without \
-                     retrying the rejected snapshot"
-                );
-                Ok(())
-            }
+                 the rejected snapshot",
+                fallback.name()
+            ))
+        } else {
+            warn!(
+                fallback = fallback.name(),
+                "the state snapshot was rejected by an earlier bootstrap: syncing from genesis \
+                 without retrying the rejected snapshot"
+            );
+            Ok(())
         }
     }
 
@@ -581,27 +582,28 @@ impl StartCmd {
                     bootstrapped_height = Some(commitment.height);
                     bootstrapped_successor = bootstrapped.successor;
                 }
-                Err(error) => match config.sync.state_snapshot_fallback {
-                    StateSnapshotFallback::Error => {
-                        return Err(Report::new(error).wrap_err(
+                Err(error) => {
+                    let fallback = config.sync.state_snapshot_fallback;
+                    let rejected = matches!(error, bootstrap::BootstrapError::Rejected(_));
+                    if fallback.exits(config.sync.state_snapshot.is_some(), rejected) {
+                        return Err(Report::new(error).wrap_err(format!(
                             "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
-                             is \"error\", so Zebra exits instead of continuing with normal sync. \
-                             Check sync.state_snapshot_peers and the commitment. An aborted \
+                             is \"{}\", so Zebra exits instead of continuing with normal \
+                             sync. Check sync.state_snapshot_peers and the commitment. An aborted \
                              download is retried on the next start; a rejected snapshot needs a \
                              different trusted commitment, or investigation and removal of its \
                              rejection marker before it is retried. Set \
                              sync.state_snapshot_fallback = \"genesis\" to sync from genesis, or \
                              sync.state_snapshot_sync = false to turn snapshot sync off",
-                        ));
+                            fallback.name()
+                        )));
                     }
-                    StateSnapshotFallback::Genesis => {
-                        warn!(
-                            %error,
-                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
-                             is \"genesis\": syncing from genesis instead"
-                        );
-                    }
-                },
+                    warn!(
+                        %error,
+                        fallback = fallback.name(),
+                        "the state snapshot bootstrap failed: syncing from genesis instead"
+                    );
+                }
             }
         }
 

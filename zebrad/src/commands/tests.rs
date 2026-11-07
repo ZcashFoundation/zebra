@@ -181,6 +181,38 @@ fn pruned_network_services_clear_archive_capability() {
     }
 }
 
+/// Pruned nodes bootstrap from the pinned snapshot by default, and the default fallback lets
+/// them start whatever happens to it, unless the operator configured the snapshot and it was
+/// rejected.
+#[test]
+fn the_default_snapshot_fallback_always_starts_a_pinned_snapshot_node() {
+    use crate::components::sync::StateSnapshotFallback;
+
+    let config = crate::config::ZebradConfig::default();
+    assert!(config.sync.state_snapshot_sync);
+    assert_eq!(
+        config.sync.state_snapshot_fallback,
+        StateSnapshotFallback::Auto
+    );
+
+    for (fallback, configured, rejected, exits) in [
+        (StateSnapshotFallback::Auto, false, false, false),
+        (StateSnapshotFallback::Auto, false, true, false),
+        (StateSnapshotFallback::Auto, true, false, false),
+        (StateSnapshotFallback::Auto, true, true, true),
+        (StateSnapshotFallback::Error, false, false, true),
+        (StateSnapshotFallback::Error, true, true, true),
+        (StateSnapshotFallback::Genesis, true, true, false),
+        (StateSnapshotFallback::Genesis, false, false, false),
+    ] {
+        assert_eq!(
+            fallback.exits(configured, rejected),
+            exits,
+            "{fallback:?}, configured {configured}, rejected {rejected}",
+        );
+    }
+}
+
 /// A node bootstrapped from a state snapshot starts without limited service, and gains it once
 /// its finalized blocks above the snapshot height cover the limited-service window.
 #[test]

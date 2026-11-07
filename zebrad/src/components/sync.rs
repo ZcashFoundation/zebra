@@ -399,7 +399,7 @@ pub struct Config {
     /// Whether an empty pruned node downloads a state snapshot over the version 2 protocol and
     /// syncs only the blocks above it, instead of syncing from genesis.
     ///
-    /// Off by default. The snapshot is downloaded only when `state.prune_blocks_older_than` is
+    /// On by default, so it only takes effect on pruned nodes. The snapshot is downloaded only when `state.prune_blocks_older_than` is
     /// set, the state is not ephemeral, no state database exists yet, a snapshot commitment is
     /// pinned for the network or configured in `state_snapshot`, `consensus.checkpoint_sync` is
     /// on, zcashd-compat mode is off, and `state_snapshot_peers` or `network.initial_v2_peers`
@@ -433,10 +433,15 @@ pub struct Config {
 
     /// What to do when the snapshot cannot be downloaded or is rejected.
     ///
-    /// `"error"` by default: exit with an actionable message. An aborted download leaves no state
-    /// directory and is retried on the next start; a rejected snapshot stays refused until its
-    /// commitment changes or its rejection marker is removed after investigation. `"genesis"`
-    /// continues with a normal sync from genesis.
+    /// `"auto"` by default: continue with a normal sync from genesis, except when a snapshot
+    /// configured in `state_snapshot` is rejected, which exits. A node that uses the pinned
+    /// snapshot always starts, even when no peer serves it. `"error"` always exits with an
+    /// actionable message, and `"genesis"` always continues with a normal sync. After `"error"`
+    /// exits, an aborted download leaves no state directory and is retried on the next start. A
+    /// normal sync after `"auto"` or `"genesis"` creates the state, so later starts continue it
+    /// and do not bootstrap again: delete the state directory to retry. A rejected snapshot stays
+    /// refused until its commitment changes or its rejection marker is removed after
+    /// investigation.
     pub state_snapshot_fallback: StateSnapshotFallback,
 
     /// Whether to serve the state snapshots this node holds to version 2 peers.
@@ -453,13 +458,40 @@ pub struct Config {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateSnapshotFallback {
+    /// Continue with a normal sync from genesis, except when a configured snapshot is rejected,
+    /// which exits like [`Self::Error`]: a configured snapshot is the operator's choice, and the
+    /// pinned one must never stop a node from starting.
+    #[default]
+    Auto,
+
     /// Exit with an actionable error. An aborted download is retried on the next start; a rejected
     /// snapshot stays refused until its commitment changes or its marker is removed.
-    #[default]
     Error,
 
     /// Continue with a normal sync from genesis.
     Genesis,
+}
+
+impl StateSnapshotFallback {
+    /// Returns the value's name in a config file.
+    pub fn name(self) -> &'static str {
+        match self {
+            StateSnapshotFallback::Auto => "auto",
+            StateSnapshotFallback::Error => "error",
+            StateSnapshotFallback::Genesis => "genesis",
+        }
+    }
+
+    /// Returns whether a snapshot failure exits instead of continuing with a normal sync:
+    /// always for [`Self::Error`], never for [`Self::Genesis`], and for [`Self::Auto`] only when
+    /// a snapshot the operator configured was `rejected`.
+    pub fn exits(self, configured: bool, rejected: bool) -> bool {
+        match self {
+            StateSnapshotFallback::Auto => configured && rejected,
+            StateSnapshotFallback::Error => true,
+            StateSnapshotFallback::Genesis => false,
+        }
+    }
 }
 
 impl Default for Config {
@@ -504,11 +536,11 @@ impl Default for Config {
 
             // Mainnet and the default Testnet use their compiled-in lists.
             v2_known_hash_pins: None,
-            state_snapshot_sync: false,
+            state_snapshot_sync: true,
             state_snapshot: None,
             unsafe_trust_state_snapshot: false,
             state_snapshot_peers: Vec::new(),
-            state_snapshot_fallback: StateSnapshotFallback::Error,
+            state_snapshot_fallback: StateSnapshotFallback::Auto,
             serve_state_snapshots: false,
         }
     }

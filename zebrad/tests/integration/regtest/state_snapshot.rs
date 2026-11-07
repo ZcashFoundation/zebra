@@ -469,6 +469,47 @@ fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
     Ok(())
 }
 
+/// With the default `"auto"` fallback, an empty pruned node whose snapshot no peer serves still
+/// starts, and syncs normally from genesis.
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_node_starts_normally_when_no_peer_serves_the_snapshot() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(120), async {
+        // A checkpoint above the snapshot height, so the decision rule's preconditions hold.
+        let network = regtest(Some(vec![
+            (Height(0), regtest(None).genesis_hash()),
+            (Height(10), block::Hash([0x33; 32])),
+        ]));
+        let rpc = reserve_tcp_port()?;
+        let p2p = loopback(reserve_tcp_port()?);
+        let key = TransparentSigningKey::random();
+        let mut config = node_config(&network, rpc, p2p, RETENTION_B, &key)?;
+        assert!(
+            config.sync.state_snapshot_sync,
+            "snapshot sync is on by default"
+        );
+        config.sync.state_snapshot = Some(StateSnapshotCommitment {
+            height: Height(5),
+            block_hash: block::Hash([0x44; 32]),
+            manifest: zebra_chain::state_snapshot::ObjectHash([0x55; 32]),
+        });
+        // Nothing listens on this port.
+        config.sync.state_snapshot_peers = vec![loopback(reserve_udp_port()?).to_string()];
+        let mut node = start_node(testdir()?.with_config(&mut config)?)?;
+
+        node.expect_stdout_line_matches(regex::escape(&Stage::BootstrapStarted.to_string()))?;
+        node.expect_stdout_line_matches(
+            "the state snapshot bootstrap failed: syncing from genesis instead",
+        )?;
+        let client = RpcRequestClient::new_with_timeout(loopback(rpc), TEST_TIMEOUT);
+        wait_for_mempool_activation(&client).await?;
+        let info = blockchain_info(&client).await?;
+        assert_eq!(info["blocks"], 0, "the node started from genesis");
+        stop_node(node)
+    })
+    .await?
+}
+
 /// A snapshot-serving node with block downloads in flight exits successfully on SIGTERM.
 #[cfg(unix)]
 #[ignore = "runs two nodes through 2,000 blocks; run it with --run-ignored=all \
