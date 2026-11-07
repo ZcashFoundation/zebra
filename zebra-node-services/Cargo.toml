@@ -23,7 +23,6 @@ default = []
 # Tool and test features
 
 rpc-client = [
-    "color-eyre",
     "jsonrpsee-types",
     "reqwest",
     "serde",
@@ -37,22 +36,20 @@ tower = { workspace = true }
 # Optional dependencies
 
 # Tool and test feature rpc-client
-color-eyre = { workspace = true, optional = true }
 jsonrpsee-types = { workspace = true, optional = true }
 # Security: avoid default dependency on openssl
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["time", "sync"] }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 
-color-eyre = { workspace = true }
 reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 jsonrpsee-types = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

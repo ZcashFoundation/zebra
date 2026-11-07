@@ -75,10 +75,7 @@ regex = { workspace = true, optional = true }
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
-tokio = { workspace = true, features = ["full"], optional = true }
-
-zcash_primitives = { workspace = true, optional = true }
-zcash_protocol.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"], optional = true }
 
 [lints]
 workspace = true

@@ -45,7 +45,6 @@ tracing = { workspace = true }
 nix = { workspace = true, features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-rand = { workspace = true }
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",

@@ -20,7 +20,7 @@ use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, HeightDiff},
