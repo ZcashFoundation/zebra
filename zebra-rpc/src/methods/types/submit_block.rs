@@ -32,8 +32,11 @@ pub struct SubmitBlockParameters {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, strum_macros::IntoStaticStr,
+)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum SubmitBlockErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
     Duplicate,
@@ -55,6 +58,18 @@ pub enum SubmitBlockResponse {
     ErrorResponse(SubmitBlockErrorResponse),
     /// Block successfully submitted, returns null
     Accepted,
+}
+
+impl SubmitBlockResponse {
+    /// Records the bounded submission result without counting operational RPC errors as rejections.
+    pub(in crate::methods) fn with_metrics(self) -> Self {
+        let outcome: &'static str = match &self {
+            Self::Accepted => "accepted",
+            Self::ErrorResponse(error) => error.into(),
+        };
+        metrics::counter!("rpc.submitblock.outcomes.total", "outcome" => outcome).increment(1);
+        self
+    }
 }
 
 impl Default for SubmitBlockResponse {
