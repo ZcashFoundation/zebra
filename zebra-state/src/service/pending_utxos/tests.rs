@@ -57,6 +57,13 @@ async fn await_utxos_preserves_order_for_queued_and_in_flight_outputs() {
         ])
     );
     assert_eq!(
+        state
+            .call(Request::AwaitUtxos(vec![*queued.0]))
+            .await
+            .unwrap(),
+        Response::Utxos(vec![queued.1.utxo.clone()])
+    );
+    assert_eq!(
         state.call(Request::AwaitUtxos(Vec::new())).await.unwrap(),
         Response::Utxos(Vec::new())
     );
