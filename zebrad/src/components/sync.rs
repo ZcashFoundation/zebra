@@ -291,6 +291,19 @@ pub struct Config {
     /// Off by default. It needs `network.v2_listen_addr` and version 2 peers.
     pub v2_checkpoint_sync: bool,
 
+    /// Whether to sync the header chain first, and download block bodies only
+    /// for headers whose proof of work, difficulty and checkpoints are valid.
+    ///
+    /// Headers come from legacy peers with `getheaders` and from version 2
+    /// peers with `get-headers`, so it works with either kind of peer. On by
+    /// default.
+    pub headers_first: bool,
+
+    /// The number of checkpoint spans of headers that headers-first sync
+    /// downloads at the same time, below the final checkpoint. A value of 0
+    /// is raised to 1.
+    pub header_sync_concurrency: usize,
+
     /// The most block data the checkpoint sync engine requests ahead of the
     /// committed state tip, in bytes.
     ///
@@ -385,6 +398,9 @@ impl Default for Config {
 
             // The checkpoint sync engine is opt-in.
             v2_checkpoint_sync: false,
+            headers_first: true,
+            header_sync_concurrency:
+                crate::components::header_sync::DEFAULT_HEADER_SYNC_CONCURRENCY,
             v2_lookahead_bytes: engine.lookahead_bytes,
             v2_min_peer_rate: engine.min_peer_rate,
             // Spentness hints are opt-in.
