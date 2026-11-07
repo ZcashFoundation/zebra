@@ -82,6 +82,7 @@ pub mod check;
 pub(crate) mod early_relay;
 
 pub(crate) mod finalized_state;
+pub(crate) mod header_write;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
@@ -150,6 +151,9 @@ pub(crate) struct StateService {
 
     /// Channels to send blocks to the block write task.
     block_write_sender: write::BlockWriteSender,
+
+    /// The channel to the header writer, the only writer of the header chain.
+    header_write_sender: tokio::sync::mpsc::UnboundedSender<header_write::CommitHeadersMessage>,
 
     /// The [`block::Hash`] of the most recent block sent on
     /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
@@ -480,6 +484,8 @@ impl StateService {
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
+        let header_write_sender = header_write::spawn(finalized_state.db.clone(), network.clone());
+
         let finalized_block_write_last_sent_hash =
             tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
                 .await
@@ -491,6 +497,7 @@ impl StateService {
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
+            header_write_sender,
             finalized_block_write_last_sent_hash,
             finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
@@ -1603,6 +1610,27 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Used by headers-first sync to store verified headers ahead of their bodies.
+            Request::CommitHeaders(headers) => {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let sent = self
+                    .header_write_sender
+                    .send(header_write::CommitHeadersMessage { headers, rsp_tx });
+
+                async move {
+                    if sent.is_err() {
+                        return Err(header_write::CommitHeadersError::WriterStopped.into());
+                    }
+
+                    let committed = rsp_rx
+                        .await
+                        .map_err(|_| header_write::CommitHeadersError::WriterStopped)??;
+
+                    Ok(Response::HeadersCommitted(committed))
+                }
+                .boxed()
+            }
+
             // Used by sync, inbound, and block verifier to check if a block is already in the state
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
@@ -1707,6 +1735,9 @@ impl Service<Request> for StateService {
             | Request::BestChainNextMedianTimePast
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
+            | Request::HeaderTip
+            | Request::HeaderLocator
+            | Request::HeaderChainHashes { .. }
             | Request::Transaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
@@ -2020,6 +2051,24 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(
                 read::block_locator(state.latest_best_chain(), &state.db).unwrap_or_default(),
             )),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderTip => Ok(ReadResponse::HeaderTip(state.db.header_chain_tip())),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderLocator => {
+                Ok(ReadResponse::HeaderLocator(read::header_locator(&state.db)))
+            }
+
+            // Used by the syncer to download bodies for stored headers.
+            ReadRequest::HeaderChainHashes {
+                known_blocks,
+                limit,
+            } => Ok(ReadResponse::BlockHashes(read::header_chain_hashes(
+                &state.db,
+                &known_blocks,
+                limit,
+            ))),
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {

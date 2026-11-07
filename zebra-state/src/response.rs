@@ -27,8 +27,9 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 use crate::{ReadRequest, Request};
 
 use crate::{
-    service::read::AddressUtxos, ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation,
-    WatchReceiver, MAX_BLOCK_REORG_HEIGHT,
+    service::{header_write::HeadersCommitted, read::AddressUtxos},
+    ContextuallyVerifiedBlock, NonFinalizedState, TransactionLocation, WatchReceiver,
+    MAX_BLOCK_REORG_HEIGHT,
 };
 
 #[cfg(test)]
@@ -162,6 +163,17 @@ pub enum Response {
 
     /// Response to [`Request::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
+
+    /// Response to [`Request::CommitHeaders`] with the header chain after the commit.
+    HeadersCommitted(HeadersCommitted),
+
+    /// Response to [`Request::HeaderTip`] with the header chain tip, or `None`
+    /// before genesis is committed.
+    HeaderTip(Option<(block::Height, block::Hash)>),
+
+    /// Response to [`Request::HeaderLocator`] with a block locator over the
+    /// header chain, with the height of each hash.
+    HeaderLocator(Vec<(block::Height, block::Hash)>),
 
     /// Response to [`Request::Transaction`] with the specified transaction.
     Transaction(Option<Arc<Transaction>>),
@@ -573,6 +585,13 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
 
+    /// Response to [`ReadRequest::HeaderTip`] with the header chain tip.
+    HeaderTip(Option<(block::Height, block::Hash)>),
+
+    /// Response to [`ReadRequest::HeaderLocator`] with a block locator over the
+    /// header chain, with the height of each hash.
+    HeaderLocator(Vec<(block::Height, block::Hash)>),
+
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
 
@@ -759,6 +778,8 @@ impl TryFrom<ReadResponse> for Response {
                                                   Manually unwrap the response, and handle pending UTXOs."),
 
             ReadResponse::BlockLocator(hashes) => Ok(Response::BlockLocator(hashes)),
+            ReadResponse::HeaderTip(tip) => Ok(Response::HeaderTip(tip)),
+            ReadResponse::HeaderLocator(locator) => Ok(Response::HeaderLocator(locator)),
             ReadResponse::BlockHashes(hashes) => Ok(Response::BlockHashes(hashes)),
             ReadResponse::BlockHeaders(headers) => Ok(Response::BlockHeaders(headers)),
 

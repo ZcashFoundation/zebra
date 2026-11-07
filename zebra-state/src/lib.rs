@@ -60,6 +60,7 @@ pub use response::{
     AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, MiningCandidateChanges,
     MiningCandidateGuard, NonFinalizedBlocksListener, ReadResponse, Response,
 };
+pub use service::header_write::{CommitHeadersError, HeadersCommitted, MAX_COMMIT_HEADERS};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
