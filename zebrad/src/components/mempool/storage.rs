@@ -405,8 +405,8 @@ impl Storage {
     /// prevent this transaction from being inserted.
     /// These errors should not be propagated to peers, because the transactions are valid.
     ///
-    /// If inserting this transaction evicts other transactions, they will be tracked
-    /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
+    /// The selected eviction victim is tracked as
+    /// [`SameEffectsChainRejectionError::RandomlyEvicted`], but its dependents can be resubmitted.
     ///
     /// Adds every evicted transaction ID, including collateral dependents, to `evicted_ids` so the
     /// caller can publish complete verified-membership invalidations.
@@ -490,21 +490,27 @@ impl Storage {
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
             let evicted = self.verified.evict_one();
-            evicted_ids.extend(evicted.iter().map(|tx| tx.transaction.id));
-            let victim_tx = evicted
+            // VerifiedSet::remove returns the selected victim after its dependents.
+            let victim_id = evicted
                 .last()
-                .expect("mempool is empty, but was expected to be full");
-
+                .expect("the pool exceeds its cost limit, so eviction removes a transaction")
+                .transaction
+                .id;
             // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
             // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
-                victim_tx.transaction.id,
+                victim_id,
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
-            // If this transaction gets evicted, set its result to the same error
-            if victim_tx.transaction.id == unmined_tx_id {
-                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+            evicted_ids.reserve(evicted.len());
+            for evicted_tx in evicted {
+                let evicted_id = evicted_tx.transaction.id;
+                evicted_ids.insert(evicted_id);
+                // An incoming transaction can be evicted directly or through an ancestor.
+                if evicted_id == unmined_tx_id {
+                    result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
+                }
             }
         }
 
