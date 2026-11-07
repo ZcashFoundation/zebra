@@ -120,5 +120,9 @@ harness = false
 name = "sapling"
 harness = false
 
+[[bench]]
+name = "header"
+harness = false
+
 [lints]
 workspace = true
