@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Handle the new `KnownBlocks` variants in exhaustive matches on `Request` and `Response` ([#11710](https://github.com/ZcashFoundation/zebra/pull/11710)).
+time: 2026-11-07T06:12:21.51835307+01:00

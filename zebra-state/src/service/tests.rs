@@ -940,3 +940,53 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn known_blocks_preserves_order_and_queue_locations() {
+    let _init_guard = zebra_test::init();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+    let blocks: Vec<SemanticallyVerifiedBlock> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(1..=3)
+        .map(|(_, bytes)| {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            block.prepare()
+        })
+        .collect();
+    let (sender, _receiver) = tokio::sync::oneshot::channel();
+    state
+        .non_finalized_state_queued_blocks
+        .queue((blocks[0].clone(), sender));
+    state.non_finalized_block_write_sent_hashes.add(&blocks[1]);
+    let hashes = vec![
+        blocks[1].hash,
+        blocks[2].hash,
+        blocks[0].hash,
+        blocks[1].hash,
+    ];
+    let mut expected = Vec::new();
+    for hash in &hashes {
+        let Response::KnownBlock(location) = state.call(Request::KnownBlock(*hash)).await.unwrap()
+        else {
+            unreachable!("KnownBlock returns its matching response");
+        };
+        expected.push(location);
+    }
+    assert_eq!(
+        expected,
+        vec![
+            Some(crate::KnownBlock::WriteChannel),
+            None,
+            Some(crate::KnownBlock::Queue),
+            Some(crate::KnownBlock::WriteChannel),
+        ]
+    );
+    assert_eq!(
+        state.call(Request::KnownBlocks(hashes)).await.unwrap(),
+        Response::KnownBlocks(expected)
+    );
+    assert_eq!(
+        state.call(Request::KnownBlocks(Vec::new())).await.unwrap(),
+        Response::KnownBlocks(Vec::new())
+    );
+}
