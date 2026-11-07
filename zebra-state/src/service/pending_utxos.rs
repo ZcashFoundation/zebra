@@ -8,6 +8,9 @@ use zebra_chain::transparent;
 
 use crate::{AwaitUtxoError, Response};
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug, Default)]
 pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Utxo>>);
 

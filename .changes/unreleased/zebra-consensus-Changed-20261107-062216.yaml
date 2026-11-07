@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Batch external transparent input UTXO waits into one state request during block verification ([#11186](https://github.com/ZcashFoundation/zebra/pull/11186)).
+time: 2026-11-07T06:22:16.285338193+01:00

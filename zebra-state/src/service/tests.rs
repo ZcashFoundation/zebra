@@ -182,6 +182,10 @@ async fn test_populated_state_responds_correctly(
                         from_coinbase,
                     };
 
+                    transcript.push((
+                        Request::AwaitUtxos(vec![outpoint, outpoint]),
+                        Ok(Response::Utxos(vec![utxo.clone(), utxo.clone()])),
+                    ));
                     transcript.push((Request::AwaitUtxo(outpoint), Ok(Response::Utxo(utxo))));
                 }
             }
