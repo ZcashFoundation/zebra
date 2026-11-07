@@ -328,3 +328,48 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
         Some(OutputLocation::from_usize(height, 0, 1)),
     );
 }
+
+/// The finalized UTXO set iterates in output-location order, and holds every
+/// spendable output of a chain with no spends: all non-genesis outputs.
+#[test]
+fn utxos_by_location_iterates_in_output_location_order() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let mut state = crate::service::finalized_state::FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    )
+    .expect("opening an ephemeral state should succeed");
+
+    let mut expected = Vec::new();
+    let mut trees = None;
+    for height in 0..=10 {
+        let block: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&height]
+            .zcash_deserialize_into()
+            .expect("test vectors deserialize");
+
+        // Genesis outputs are unspendable, so they never enter the UTXO set.
+        if height > 0 {
+            for (tx_index, tx) in block.transactions.iter().enumerate() {
+                for (output_index, output) in tx.outputs().iter().enumerate() {
+                    expected.push((
+                        OutputLocation::from_usize(Height(height), tx_index, output_index),
+                        transparent::OrderedUtxo::new(output.clone(), Height(height), tx_index),
+                    ));
+                }
+            }
+        }
+
+        let (_, next_trees) = state
+            .commit_finalized_direct(block.into(), trees, "utxos_by_location test")
+            .expect("test vectors commit");
+        trees = Some(next_trees);
+    }
+
+    let utxos: Vec<_> = state.db.utxos_by_location().collect();
+    assert!(!utxos.is_empty());
+    assert_eq!(utxos, expected);
+}

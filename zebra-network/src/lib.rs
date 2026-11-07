@@ -212,6 +212,7 @@ pub use crate::{
     protocol::{
         external::{compact, Version, VersionMessage, MAX_TX_INV_IN_SENT_MESSAGE},
         internal::{BlockAuthorization, InventoryResponse, Request, Response},
+        v2::object::{ObjectEntry, ObjectHash, ObjectIndex, ObjectSource},
     },
 };
 

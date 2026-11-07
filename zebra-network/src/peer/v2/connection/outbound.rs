@@ -44,6 +44,10 @@ use crate::{
 
 use super::{close_error, Event, Events};
 
+mod object;
+
+pub(crate) use object::{fetch_object, ObjectSizes};
+
 /// The longest `addrv2` record: time, a 9-byte services CompactSize, the
 /// network ID, a 3-byte length, the 512-byte address maximum, and the port.
 const MAX_ADDR_RECORD_LEN: usize = 4 + 9 + 1 + 3 + 512 + 2;
@@ -117,6 +121,10 @@ pub(super) struct RequestContext {
     /// Where to send what the connection task must act on: a close through
     /// its connection-closing queue.
     pub events: Events,
+
+    /// The object sizes the peer gave in its `get-object` answers on this
+    /// connection.
+    pub object_sizes: ObjectSizes,
 }
 
 /// Drives one client request to completion and answers the client, holding
@@ -143,11 +151,20 @@ pub(super) async fn drive(
         genesis_hash,
         misbehavior,
         events,
+        object_sizes,
     } = context;
     let command = request.command();
-    let work = tokio::time::timeout(
-        REQUEST_TIMEOUT,
-        drive_inner(request, &connection, transient_addr, genesis_hash),
+    let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let work = tokio::time::timeout_at(
+        deadline,
+        drive_inner(
+            request,
+            &connection,
+            transient_addr,
+            genesis_hash,
+            &object_sizes,
+            deadline,
+        ),
     );
     let result = {
         let cancelled = guard
@@ -223,7 +240,7 @@ pub(super) async fn drive(
 
 /// Why a request failed.
 #[derive(Debug, thiserror::Error)]
-enum Failure {
+pub(crate) enum Failure {
     /// The response did not complete in time.
     #[error("response timed out")]
     Timeout,
@@ -254,8 +271,14 @@ enum Failure {
     #[error("transport error: {0}")]
     Transport(String),
 
-    /// This node refuses the request without sending it. The connection task refuses these
-    /// requests itself, before a stream is opened, so this is only a fallback.
+    /// The peer reset a `get-object` request with `REFUSED` before answering
+    /// it.
+    #[error("the peer refused the request with REFUSED")]
+    PeerRefused,
+
+    /// This node refuses the request without sending it: a `get-object` request outside the
+    /// draft's bounds, or, only as a fallback, a request the connection task refuses itself
+    /// before a stream is opened.
     #[error("refused without sending: {0}")]
     Refused(PeerError),
 }
@@ -284,6 +307,7 @@ impl From<Failure> for SharedPeerError {
                 PeerError::RequestStreamFailed(failure.to_string()).into()
             }
             Failure::Transport(reason) => PeerError::RequestStreamFailed(reason).into(),
+            Failure::PeerRefused => PeerError::RequestRefused.into(),
             Failure::Refused(error) => error.into(),
         }
     }
@@ -360,12 +384,15 @@ async fn open_request(
     Ok(response)
 }
 
-/// Drives `request` without the timeout or the client reply.
+/// Drives `request` without the timeout or the client reply; the timeout ends
+/// it at `deadline`.
 async fn drive_inner(
     request: Request,
     connection: &Connection,
     transient_addr: Option<PeerSocketAddr>,
     genesis_hash: block::Hash,
+    object_sizes: &ObjectSizes,
+    deadline: tokio::time::Instant,
 ) -> Result<Response, Failure> {
     let response = match request {
         Request::Peers => {
@@ -428,6 +455,12 @@ async fn drive_inner(
             tracing::debug!("get-mempool is not used on v2 connections yet");
             Response::TransactionIds(Vec::new())
         }
+
+        Request::Object {
+            hash,
+            offset,
+            length,
+        } => object::fetch_object(connection, object_sizes, deadline, hash, offset, length).await?,
 
         // Handled by the connection task without a stream.
         Request::Ping(_)

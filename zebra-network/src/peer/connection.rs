@@ -1393,6 +1393,8 @@ where
             (AwaitingRequest, BlockRange { .. } | SyncHashes { .. }) => {
                 Ok(Handler::Finished(Err(PeerError::V2OnlyRequest)))
             }
+            // The legacy protocol has no `get-object` message.
+            (AwaitingRequest, Object { .. }) => Ok(Handler::Finished(Err(PeerError::V2OnlyRequest))),
             // The peer set handles this request itself, so there is nothing to send to the peer.
             (AwaitingRequest, PollPeerSet) => Ok(Handler::Finished(Ok(Response::Nil))),
         };
@@ -1752,6 +1754,10 @@ where
             }
             Response::BlockRange(_) | Response::SyncHashes(_) => {
                 error!("inbound service returned a version 2 only response to a legacy request");
+                return;
+            }
+            Response::Object { .. } | Response::ObjectNotFound => {
+                error!("inbound service returned a get-object response, which only version 2 connections carry");
                 return;
             }
             Response::Peers(addrs) => {

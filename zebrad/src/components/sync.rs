@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinError,
-    time::{sleep, timeout},
+    time::{sleep, sleep_until, timeout, Instant},
 };
 use tower::{
     builder::ServiceBuilder, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout, Service,
@@ -304,6 +304,27 @@ pub struct Config {
     /// bytes per second) are raised to it.
     pub v2_min_peer_rate: u64,
 
+    /// Whether to build the UTXO set below the final checkpoint from a
+    /// spentness-hint artifact: `"off"` (the default), `"auto"` or `"require"`.
+    ///
+    /// The artifact marks which transparent outputs are still unspent at the
+    /// final checkpoint, so the state does not write and then delete outputs
+    /// that are spent before it. Every other part of the state stays exact.
+    /// The artifact is fetched from version 2 peers, and is trusted only
+    /// through the hash that this Zebra release pins for the network.
+    ///
+    /// Hints apply only to a state that starts empty. With `"auto"`, Zebra
+    /// syncs without hints if it cannot acquire a verified artifact. With
+    /// `"require"`, Zebra exits instead of syncing an empty state without
+    /// hints. After a restart part way through a hinted sync, Zebra resumes it
+    /// with the artifact saved in the state's cache directory, or fetches the
+    /// artifact again.
+    ///
+    /// Hints need the checkpoint sync engine (`v2_checkpoint_sync`): without
+    /// it, `"auto"` syncs without hints, and `"require"` stops Zebra at
+    /// startup.
+    pub v2_spentness_hints: zebra_chain::parameters::spentness_hints::Mode,
+
     /// The number of version 2 peers the checkpoint sync engine downloads from
     /// at the same time. A value of 0 is raised to 1.
     pub v2_target_peers: usize,
@@ -366,6 +387,8 @@ impl Default for Config {
             v2_checkpoint_sync: false,
             v2_lookahead_bytes: engine.lookahead_bytes,
             v2_min_peer_rate: engine.min_peer_rate,
+            // Spentness hints are opt-in.
+            v2_spentness_hints: Default::default(),
             v2_target_peers: engine.target_peers,
 
             // A few max-length checkpoints.
@@ -447,6 +470,24 @@ async fn wait_for_engine_claim(owner: &mut watch::Receiver<SyncOwner>) {
     if owner.wait_for(|owner| !owner.is_legacy()).await.is_err() {
         std::future::pending::<()>().await;
     }
+}
+
+/// Holds the syncer back after genesis until the spentness-hints decision is
+/// made ([`ChainSync::with_hints_gate`]).
+///
+/// The state's writer adopts hints only before block 1 commits, and the
+/// checkpoint sync engine claims block download only after genesis. Without
+/// this gate, a syncer that queued blocks above genesis before the claim could
+/// commit block 1 first, and the state would sync without hints for good.
+#[derive(Debug)]
+struct HintsGate {
+    /// `true` once the hints task finished, with or without an artifact. A
+    /// dropped sender counts as `true`.
+    decided: watch::Receiver<bool>,
+
+    /// When the syncer stops waiting and syncs without hints, or `None` to
+    /// wait as long as acquisition takes.
+    deadline: Option<Instant>,
 }
 
 /// Ownership channels whose owner is always this syncer, for a node that does
@@ -577,6 +618,10 @@ where
     /// sync engine. Inert, so this syncer always owns it, unless
     /// [`ChainSync::with_ownership`] replaces it.
     ownership: LegacyOwnership,
+
+    /// Holds this syncer back after genesis while the state may still adopt
+    /// spentness hints, or `None` once there is nothing to wait for.
+    hints: Option<HintsGate>,
 }
 
 /// A sync round that ended early, and why.
@@ -747,6 +792,7 @@ where
             utxo_race_drops: 0,
             diagnostics,
             ownership: inert_ownership(),
+            hints: None,
         };
 
         (new_syncer, sync_status)
@@ -765,6 +811,25 @@ where
         self
     }
 
+    /// Holds this syncer back after genesis until `decided` is `true` or its
+    /// sender is dropped: the spentness-hints task has finished, with or
+    /// without an artifact, so the state has decided whether it syncs with
+    /// hints.
+    ///
+    /// The checkpoint sync engine claims block download right after genesis
+    /// when hints may apply, and this syncer acknowledges that claim while it
+    /// waits. Without `timeout`, it waits as long as acquisition takes; with
+    /// it, it syncs without hints once `timeout` has passed since this call.
+    pub fn with_hints_gate(
+        mut self,
+        decided: watch::Receiver<bool>,
+        timeout: Option<Duration>,
+    ) -> Self {
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        self.hints = Some(HintsGate { decided, deadline });
+        self
+    }
+
     /// Runs the syncer to synchronize the chain and keep it synchronized.
     #[instrument(skip(self))]
     pub async fn sync(mut self) -> Result<(), Report> {
@@ -775,6 +840,10 @@ where
 
         loop {
             self.wait_for_download_ownership().await;
+            if !self.wait_for_hints_decision().await {
+                // The engine claimed block download: acknowledge the claim first.
+                continue;
+            }
 
             let start_tip = self.latest_chain_tip.best_tip_height();
             let result = self.try_to_sync().await;
@@ -1012,6 +1081,46 @@ where
                 }
             }
         }
+    }
+
+    /// Waits until the spentness-hints decision is made, so that this syncer
+    /// commits no block above genesis that the state could still write with
+    /// hints ([`HintsGate`]).
+    ///
+    /// Returns `true` once the decision is made, or the gate's deadline has
+    /// passed, and from then on without waiting. Returns `false` if the
+    /// checkpoint sync engine claimed block download first: the caller then
+    /// acknowledges the claim, and calls this again once it owns block
+    /// download.
+    async fn wait_for_hints_decision(&mut self) -> bool {
+        let Some(gate) = self.hints.as_mut() else {
+            return true;
+        };
+
+        let deadline = gate.deadline;
+        let timed_out = async move {
+            match deadline {
+                Some(deadline) => sleep_until(deadline).await,
+                None => std::future::pending().await,
+            }
+        };
+
+        tokio::select! {
+            // An error is a dropped sender, which counts as decided.
+            _ = gate.decided.wait_for(|decided| *decided) => {
+                debug!("the spentness-hints decision is made, starting sync");
+            }
+            () = timed_out => {
+                warn!(
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "the spentness-hints decision took too long, syncing without hints"
+                );
+            }
+            () = wait_for_engine_claim(&mut self.ownership.owner) => return false,
+        }
+
+        self.hints = None;
+        true
     }
 
     /// Tries to synchronize the chain once, using the existing `extra_hashes`.

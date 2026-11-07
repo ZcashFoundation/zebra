@@ -121,7 +121,14 @@ fn format_upgrades(
         // Adds the `sync_meta_by_height` column family, which new blocks write at commit time,
         // and backfills it for existing blocks.
         Box::new(add_sync_metadata::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 8])
+        // The spentness hint column families are created empty when the database is opened. This
+        // is a reusable major upgrade: v29 state moves to v30 without a resync, and 29.x readers,
+        // which cannot handle a partial hinted state's missing UTXOs, never open a v30 directory.
+        Box::new(no_migration::NoMigration::new(
+            "add spentness hint column families",
+            Version::new(30, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 9])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

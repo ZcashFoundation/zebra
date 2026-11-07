@@ -18,9 +18,11 @@ use crate::protocol::{
         MAX_USER_AGENT_LENGTH,
     },
     v2::{
+        constants::{MAX_OBJECT_OFFSET, MAX_OBJECT_REQUEST_LEN},
         handshake::{decode_record, InitRecord},
+        object::ObjectHash,
         record::RecordCodec,
-        request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request},
+        request::{max_body_len, GetBlocks, GetHeaders, GetObject, GetTx, Request},
         response::{read_headers, read_objects, write_headers_response, ObjectResult},
         txref::{ShortTxId, TxRef},
         types::ErrorCode,
@@ -115,7 +117,8 @@ fn block_hash_strategy() -> impl Strategy<Value = block::Hash> {
     any::<[u8; 32]>().prop_map(block::Hash)
 }
 
-/// A strategy for any of the five requests, with small lists.
+/// A strategy for any of the six requests, with small lists, and `get-object`
+/// requests anywhere within the draft's bounds.
 ///
 /// The count limits are pinned in `vectors.rs`; these tests cover the
 /// encoding, so they keep the lists short.
@@ -137,6 +140,18 @@ fn request_strategy() -> impl Strategy<Value = Request> {
         vec(txref_strategy(), 0..=8).prop_map(|txrefs| Request::Tx(GetTx { txrefs })),
         Just(Request::Addr),
         Just(Request::Mempool),
+        (
+            any::<[u8; 32]>(),
+            0..=MAX_OBJECT_OFFSET,
+            0..=MAX_OBJECT_REQUEST_LEN,
+        )
+            .prop_map(|(hash, offset, length)| {
+                Request::Object(GetObject {
+                    hash: ObjectHash(hash),
+                    offset,
+                    length,
+                })
+            }),
     ]
 }
 

@@ -74,6 +74,9 @@ version 2 peers are recorded in a separate version 2 address book.
 - Serving `get-hashes` requests, which a peer uses to fetch the hash, size,
   and transaction, transparent output, and note counts of up to 50,000
   consecutive blocks. See [Serving known hashes](#serving-known-hashes).
+- Serving `get-object` requests, which a peer uses to download a
+  synchronization artifact, such as the spentness-hint artifact, by its
+  SHA-256 hash. See [Serving objects](#serving-objects).
 - Downloading the checkpointed part of the chain with `get-block-range`, when
   `sync.v2_checkpoint_sync` is set. See
   [Checkpoint sync over version 2](#checkpoint-sync-over-version-2).
@@ -189,6 +192,29 @@ Serving is bounded so that it cannot crowd out the node's other work:
 
 Serving `get-hashes` is always on when `v2_listen_addr` is set. Unlike block
 ranges, answers are small and few, so there is no setting to turn it off.
+
+## Serving objects
+
+A node with `v2_listen_addr` set advertises the `NODE_SYNC_ARTIFACTS` service in
+its version 2 handshake, and answers `get-object` requests from its version 2
+peers. A request names an object by its SHA-256 hash, and a byte range of at
+most 32 MiB. The node serves the objects in its object index: today, only the
+[spentness-hint artifact](spentness-hints.md#serving-the-artifact) for the
+running release's pin, when the node has it. It answers that it does not have
+any other object, and a request for no data, or for data at or past the end of
+an object, with the object's size alone. The requester checks the whole
+object's hash, so a node's answer is never trusted on its own.
+
+Serving is bounded so that it cannot crowd out the node's other work:
+
+- Each peer can have two `get-object` downloads at once, and the node serves
+  eight in total. A request beyond either limit is refused, and the peer asks
+  another node. Size answers and objects the node does not have take no slot.
+- The node reads the object from disk 1 MiB at a time, and writes each piece
+  before it reads the next.
+- The node finishes every answer a few seconds before the request's deadline,
+  and earlier if a peer reads a piece too slowly, so a peer that reads slowly
+  gets a shorter answer and asks again for the rest.
 
 ## Checkpoint sync over version 2
 
@@ -365,3 +391,9 @@ of, set `v2_peer_discovery = false` on both nodes.
 Node B logs `connected to initial v2 peer` at the default `info` level. Node A
 logs the version 2 handshake at the `debug` level, for example with
 `RUST_LOG=zebra_network=debug`. `getpeerinfo` does not list version 2 peers yet.
+
+## Spentness hints
+
+A node with an empty state can build its UTXO set below the final checkpoint
+from a pinned artifact that version 2 peers serve. See
+[Spentness hints](spentness-hints.md).

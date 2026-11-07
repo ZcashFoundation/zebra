@@ -34,6 +34,11 @@ path = "src/bin/search-issue-refs/main.rs"
 required-features = ["search-issue-refs"]
 
 [[bin]]
+name = "spentness-hints"
+path = "src/bin/spentness-hints/main.rs"
+required-features = ["spentness-hints"]
+
+[[bin]]
 name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
@@ -54,6 +59,16 @@ known-hashes = [
     "tokio",
     "zebra-node-services/rpc-client"
 ]
+
+spentness-hints = [
+    "rocksdb",
+    "sha2",
+    "tempfile",
+    "zebra-state"
+]
+
+# Matches the state's experimental elasticsearch indexing, which changes its API
+elasticsearch = ["zebra-state?/elasticsearch"]
 
 search-issue-refs = [
     "regex",
@@ -80,6 +95,12 @@ zebra-rpc = { path = "../zebra-rpc", version = "19.0.0" }
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
 
+# These crates are needed for the spentness-hints binary
+rocksdb = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+zebra-state = { path = "../zebra-state", version = "16.0.0", optional = true }
+
 # These crates are needed for the search-issue-refs binary
 regex = { workspace = true, optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts.
@@ -93,6 +114,7 @@ zcash_protocol.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }
+zebra-state = { path = "../zebra-state", version = "16.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test/", version = "5.0.0" }
 

@@ -185,6 +185,32 @@ impl ZebraDb {
         Some(utxo)
     }
 
+    /// Iterates the complete finalized UTXO set in output-location order.
+    ///
+    /// Offline tools that need the exact UTXO set at a block, such as spentness-hint
+    /// generation, must use a database that does not change during the iteration.
+    pub fn utxos_by_location(
+        &self,
+    ) -> impl Iterator<Item = (OutputLocation, transparent::OrderedUtxo)> + '_ {
+        let utxo_by_out_loc = self
+            .db
+            .cf_handle("utxo_by_out_loc")
+            .expect("the state schema always contains utxo_by_out_loc");
+
+        self.db.zs_forward_range_iter(&utxo_by_out_loc, ..).map(
+            |(output_location, output): (OutputLocation, transparent::Output)| {
+                (
+                    output_location,
+                    transparent::OrderedUtxo::new(
+                        output,
+                        output_location.height(),
+                        output_location.transaction_index().as_usize(),
+                    ),
+                )
+            },
+        )
+    }
+
     /// Returns the unspent transparent outputs for a [`transparent::Address`] in the finalized
     /// chain `query_height_range`, at most `limit` of them.
     ///
@@ -500,6 +526,39 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
+        address_balances: AddressBalanceLocationUpdates,
+    ) {
+        self.prepare_transparent_transaction_batch_omitting(
+            zebra_db,
+            network,
+            finalized,
+            new_outputs_by_out_loc,
+            spent_utxos_by_outpoint,
+            spent_utxos_by_out_loc,
+            &HashSet::new(),
+            #[cfg(feature = "indexer")]
+            out_loc_by_outpoint,
+            address_balances,
+        )
+    }
+
+    /// [`Self::prepare_transparent_transaction_batch`], where the new outputs in
+    /// `omitted_outputs` get address transaction entries, but no UTXO or address UTXO
+    /// entries.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_transparent_transaction_batch_omitting(
+        &mut self,
+        zebra_db: &ZebraDb,
+        network: &Network,
+        finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        omitted_outputs: &HashSet<OutputLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         mut address_balances: AddressBalanceLocationUpdates,
     ) {
         let db = &zebra_db.db;
@@ -517,10 +576,11 @@ impl DiskWriteBatch {
 
         // Write the new and spent transparent output index entries. These passes no longer
         // touch `address_balances`; they only read each entry's `address_location()`.
-        self.prepare_new_transparent_outputs_batch(
+        self.prepare_new_transparent_outputs_batch_omitting(
             db,
             network,
             new_outputs_by_out_loc,
+            omitted_outputs,
             &address_balances,
         );
         self.prepare_spent_transparent_outputs_batch(
@@ -671,12 +731,32 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
-    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
         network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        address_balances: &AddressBalanceLocationUpdates,
+    ) {
+        self.prepare_new_transparent_outputs_batch_omitting(
+            db,
+            network,
+            new_outputs_by_out_loc,
+            &HashSet::new(),
+            address_balances,
+        )
+    }
+
+    /// [`Self::prepare_new_transparent_outputs_batch`], where the outputs in
+    /// `omitted_outputs` get address transaction entries, but no UTXO or address UTXO
+    /// entries. Spentness hints omit the outputs that are spent by their terminal height.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn prepare_new_transparent_outputs_batch_omitting(
+        &mut self,
+        db: &DiskDb,
+        network: &Network,
+        new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        omitted_outputs: &HashSet<OutputLocation>,
         address_balances: &AddressBalanceLocationUpdates,
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
@@ -689,6 +769,7 @@ impl DiskWriteBatch {
         for (new_output_location, utxo) in new_outputs_by_out_loc {
             let unspent_output = &utxo.output;
             let receiving_address = unspent_output.address(network);
+            let omitted = omitted_outputs.contains(new_output_location);
 
             if let Some(receiving_address) = receiving_address {
                 let receiving_address_location = match address_balances {
@@ -703,13 +784,15 @@ impl DiskWriteBatch {
                 };
 
                 // Create a link from the AddressLocation to the new OutputLocation in the database.
-                let address_unspent_output =
-                    AddressUnspentOutput::new(receiving_address_location, *new_output_location);
-                self.zs_insert(
-                    &utxo_loc_by_transparent_addr_loc,
-                    address_unspent_output,
-                    (),
-                );
+                if !omitted {
+                    let address_unspent_output =
+                        AddressUnspentOutput::new(receiving_address_location, *new_output_location);
+                    self.zs_insert(
+                        &utxo_loc_by_transparent_addr_loc,
+                        address_unspent_output,
+                        (),
+                    );
+                }
 
                 // Create a link from the AddressLocation to the new TransactionLocation in the database.
                 // Unlike the OutputLocation link, this will never be deleted.
@@ -723,7 +806,9 @@ impl DiskWriteBatch {
             // Use the OutputLocation to store a copy of the new Output in the database.
             // (For performance reasons, we don't want to deserialize the whole transaction
             // to get an output.)
-            self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
+            if !omitted {
+                self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
+            }
         }
     }
 

@@ -34,7 +34,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 29;
+const DATABASE_FORMAT_VERSION: u64 = 30;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -45,6 +45,15 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.0.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
+///   families, which hold the omitted outputs and the construction record of a hinted sync
+///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the
+///   journal is emptied when a hinted sync completes. This is a major bump: a partial hinted
+///   state leaves the omitted outputs out of `utxo_by_out_loc`, which 29.x readers cannot
+///   handle, so they must never open it through their minor-version downgrade path. Compatible
+///   v29 state is moved to `state/v30` without a resync or record rewrite. Hinted construction
+///   only starts on an empty state, so every partial hinted state is created in v30. A
+///   never-hinted v30 directory can be renamed back to v29 for rollback; a hinted one cannot.
 /// - 29.1.0: adds the `sync_meta_by_height` column family: 64 bytes of per-block synchronization
 ///   metadata (size, transaction and note commitment counts, ZIP 221 per-pool transaction counts,
 ///   the ZIP 244 authorizing data root, and the cumulative transparent output count, which gives
@@ -64,7 +73,7 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

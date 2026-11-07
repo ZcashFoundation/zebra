@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'Added `SyncPeer::get_object`, which fetches a byte range of a synchronization artifact from one version 2 peer, so the caller can blame that peer for the whole object, and `sync_peer::ObjectChunk`, its answer. An answer cut short by the request deadline or a reset keeps the data received, and a framing violation or a size that changes between answers closes the connection.'
+time: 2026-11-06T03:06:03.900074554Z

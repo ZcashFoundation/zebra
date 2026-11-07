@@ -19,7 +19,7 @@ use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check,
-        finalized_state::{FinalizedState, ZebraDb},
+        finalized_state::{FinalizedState, SpentnessHintsReceiver, SpentnessWriter, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
@@ -148,6 +148,9 @@ struct WriteBlockWorkerTask {
     backup_dir_path: Option<PathBuf>,
     /// Excludes authentication against a snapshot during retention-changing mutations.
     early_relay: Arc<super::early_relay::EarlyRelayState>,
+    /// Delivers the spentness-hint artifact, if this state applies hints,
+    /// and the max checkpoint height that bounds the hinted blocks.
+    spentness_hints: Option<(SpentnessHintsReceiver, Height)>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -201,6 +204,7 @@ impl BlockWriteSender {
             network = %non_finalized_state.network
         )
     )]
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         finalized_state: FinalizedState,
         non_finalized_state: NonFinalizedState,
@@ -209,6 +213,7 @@ impl BlockWriteSender {
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
         early_relay: Arc<super::early_relay::EarlyRelayState>,
+        spentness_hints: Option<(SpentnessHintsReceiver, Height)>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -240,6 +245,7 @@ impl BlockWriteSender {
                     non_finalized_state_sender,
                     backup_dir_path,
                     early_relay,
+                    spentness_hints,
                 }
                 .run()
             })
@@ -281,9 +287,19 @@ impl WriteBlockWorkerTask {
             non_finalized_state_sender,
             backup_dir_path,
             early_relay,
+            spentness_hints,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
+
+        // The spentness writer is owned by this task, never by the shared `FinalizedState`.
+        // Without a receiver, it still detects an incomplete hinted sync, and refuses to
+        // continue it without hints.
+        let (spentness_hints, max_checkpoint_height) = spentness_hints
+            .take()
+            .unwrap_or_else(|| (watch::channel(None).1, Height::MIN));
+        let mut spentness =
+            SpentnessWriter::new(&finalized_state.db, spentness_hints, max_checkpoint_height);
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
@@ -344,9 +360,10 @@ impl WriteBlockWorkerTask {
             // Try committing the block, but keep notifications until its context is published.
             let (checkpoint_verified, rsp_tx, _) = ordered_block;
             let height = checkpoint_verified.height;
-            let result = match finalized_state.commit_finalized(
+            let result = match finalized_state.commit_finalized_with_spentness(
                 checkpoint_verified,
                 prev_finalized_note_commitment_trees.take(),
+                spentness.as_mut(),
             ) {
                 Ok((finalized, note_commitment_trees)) => {
                     let hash = finalized.hash;
@@ -354,6 +371,15 @@ impl WriteBlockWorkerTask {
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
                     Ok(hash)
+                }
+                Err(error) if error.spentness_failure().is_some() => {
+                    // Retrying the block would repeat a hint artifact defect, and the state can
+                    // not continue the sync without hints, so stop Zebra.
+                    let failure = format!("{error:?}");
+                    let finalized_tip = finalized_state.db.tip();
+                    drop(_context_update);
+                    let _ = rsp_tx.send(Err(error));
+                    spentness_failure_stops_zebra(&failure, finalized_tip);
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -582,11 +608,28 @@ impl WriteBlockWorkerTask {
                 let _context_update = early_relay.updating_context();
                 tracing::trace!("finalizing block past the reorg limit");
                 let contextually_verified_with_trees = non_finalized_state.finalize();
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
+                // Hints never apply here: hinted blocks are at most the max checkpoint height.
+                // The writer is still passed, so an incomplete hinted sync fails instead of
+                // continuing without hints.
+                let committed = finalized_state.commit_finalized_direct_with_spentness(
+                    contextually_verified_with_trees,
+                    prev_finalized_note_commitment_trees.take(),
+                    "commit contextually-verified request",
+                    spentness.as_mut(),
+                );
+                prev_finalized_note_commitment_trees = match committed {
+                    Ok((_, note_commitment_trees)) => Some(note_commitment_trees),
+                    Err(error) if error.spentness_failure().is_some() => {
+                        spentness_failure_stops_zebra(
+                            &format!("{error:?}"),
+                            finalized_state.db.tip(),
+                        );
+                    }
+                    Err(error) => panic!(
+                        "unexpected finalized block commit error: note commitment and history \
+                         trees were already checked by the non-finalized state: {error:?}"
+                    ),
+                };
 
                 // Keep the old snapshot's root visible until the database contains it.
                 update_latest_chain_channels(
@@ -629,3 +672,27 @@ impl WriteBlockWorkerTask {
 
 #[cfg(test)]
 mod tests;
+
+/// Stops Zebra after the finalized writer failed to apply spentness hints, with the commit's
+/// `failure` and the finalized tip, which stays at the last block before the failure.
+///
+/// The failure is an artifact defect, or a hinted sync that cannot continue, such as one resumed
+/// without its artifact. Retrying the block repeats it, and a block write task that stopped
+/// quietly would leave Zebra running with its sync stalled, so this panics, which stops Zebra:
+/// its profiles abort on panic.
+fn spentness_failure_stops_zebra(
+    failure: &str,
+    finalized_tip: Option<(block::Height, block::Hash)>,
+) -> ! {
+    tracing::error!(
+        %failure,
+        ?finalized_tip,
+        "applying spentness hints failed, stopping Zebra",
+    );
+    panic!(
+        "applying spentness hints failed at finalized tip {finalized_tip:?}: {failure}. Hint: a \
+         hinted sync resumed without its artifact can continue after a restart with the \
+         v2_spentness_hints mode it started with; for a defective artifact, delete the state and \
+         sync again with v2_spentness_hints = \"off\"."
+    );
+}
