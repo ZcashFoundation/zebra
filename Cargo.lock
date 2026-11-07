@@ -4374,7 +4374,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "git+https://github.com/ZcashFoundation/reddsa?rev=c443b2bbb063f6e21acf721eb53f671b88816477#c443b2bbb063f6e21acf721eb53f671b88816477"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=ffe6e5bd5815b51aa1cc8bf17c5c53f025ca73ee#ffe6e5bd5815b51aa1cc8bf17c5c53f025ca73ee"
 dependencies = [
  "blake2b_simd",
  "byteorder",
