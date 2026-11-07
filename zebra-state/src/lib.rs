@@ -57,7 +57,7 @@ pub use request::{
 pub use request::Spend;
 
 pub use response::{
-    AnyTx, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
+    AnyTx, BlockHeader, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
     NonFinalizedBlocksListener, OutputWithMetadata, ReadResponse, Response,
 };
 pub use service::{
