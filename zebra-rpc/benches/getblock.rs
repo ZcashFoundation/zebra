@@ -2,6 +2,8 @@
 //!
 //! - Verbosity 0: the RPC deserializes the stored block, then re-serializes and hex-encodes it.
 //!   `raw` compares that with hex-encoding the stored bytes directly.
+//! - State reads: `ReadRequest::Block` + serialize vs `ReadRequest::RawBlock` through a
+//!   `ReadStateService` with the continuous mainnet vectors finalized, and the same for transactions.
 //! - Verbosity 2: the RPC builds a `TransactionObject` for every transaction, then serializes
 //!   it to JSON. `verbose` measures the whole step and its per-transaction parts.
 //!
@@ -19,6 +21,7 @@
 use std::{io::Cursor, sync::Arc};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use tower::ServiceExt;
 
 use zebra_chain::{
     block::{Block, SerializedBlock},
@@ -126,6 +129,81 @@ fn bench_raw(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_state(c: &mut Criterion) {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime builds");
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|bytes| Arc::new(Block::zcash_deserialize(Cursor::new(*bytes)).expect("valid block")))
+        .collect();
+    let (_state, read_state, _tip, _tip_change) = runtime.block_on(zebra_state::populated_state(
+        blocks.clone(),
+        &Network::Mainnet,
+    ));
+
+    let read = |request| {
+        runtime
+            .block_on(read_state.clone().oneshot(request))
+            .expect("state read succeeds")
+    };
+
+    let mut group = c.benchmark_group("getblock verbosity 0 state");
+    // Genesis transactions are not indexed, so skip it.
+    for block in blocks.iter().skip(1).step_by(4) {
+        let height = block.coinbase_height().expect("valid coinbase height");
+        let txid = block.transactions[0].hash();
+        let label = format!(
+            "{} ({} tx, {} B)",
+            height.0,
+            block.transactions.len(),
+            block.zcash_serialized_size()
+        );
+
+        group.bench_function(BenchmarkId::new("block: Block + serialize", &label), |b| {
+            b.iter(
+                || match read(zebra_state::ReadRequest::Block(height.into())) {
+                    zebra_state::ReadResponse::Block(Some(block)) => SerializedBlock::from(block),
+                    _ => unreachable!("block is in the state"),
+                },
+            )
+        });
+        group.bench_function(BenchmarkId::new("block: RawBlock", &label), |b| {
+            b.iter(
+                || match read(zebra_state::ReadRequest::RawBlock(height.into())) {
+                    zebra_state::ReadResponse::RawBlock(Some(block)) => block,
+                    _ => unreachable!("block is in the state"),
+                },
+            )
+        });
+        group.bench_function(
+            BenchmarkId::new("tx: AnyChainTransaction + serialize", &label),
+            |b| {
+                b.iter(
+                    || match read(zebra_state::ReadRequest::AnyChainTransaction(txid)) {
+                        zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => {
+                            let tx: Arc<zebra_chain::transaction::Transaction> = tx.into();
+                            SerializedTransaction::from(tx)
+                        }
+                        _ => unreachable!("transaction is in the state"),
+                    },
+                )
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new("tx: AnyChainRawTransaction", &label),
+            |b| {
+                b.iter(
+                    || match read(zebra_state::ReadRequest::AnyChainRawTransaction(txid)) {
+                        zebra_state::ReadResponse::RawTransaction(Some(tx)) => tx,
+                        _ => unreachable!("transaction is in the state"),
+                    },
+                )
+            },
+        );
+    }
+
+    group.finish();
+}
+
 fn bench_verbose(c: &mut Criterion) {
     let mut group = c.benchmark_group("getblock verbosity 2");
 
@@ -197,5 +275,5 @@ fn bench_verbose(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_raw, bench_verbose);
+criterion_group!(benches, bench_raw, bench_state, bench_verbose);
 criterion_main!(benches);
