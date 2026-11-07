@@ -58,6 +58,70 @@ fn mempool_storage_crud_exact_mainnet() {
 }
 
 #[test]
+fn mempool_storage_rejects_submission_evicted_with_ancestor() {
+    let _init_guard = zebra_test::init();
+    let parent = Network::Mainnet
+        .unmined_transactions_in_blocks(..=10)
+        .find(|tx| {
+            let outputs = tx.transaction.transaction.outputs();
+            !outputs.is_empty() && outputs.iter().all(|output| !output.is_dust())
+        })
+        .expect("early mainnet block fixtures contain a non-dust coinbase transaction");
+    let parent_id = parent.transaction.id;
+    let outpoint = OutPoint::from_usize(parent_id.mined_id(), 0);
+    let mut child = parent.clone();
+    child.transaction = Arc::new(
+        parent
+            .transaction
+            .transaction
+            .as_ref()
+            .clone()
+            .with_transparent_inputs(vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: 0,
+            }]),
+    )
+    .into();
+    let child_id = child.transaction.id;
+    assert_eq!(parent.eviction_weight(), child.eviction_weight());
+
+    // Either transaction can be selected; retry until eviction selects the ancestor.
+    for _ in 0..64 {
+        let mut storage = Storage::new(&config::Config {
+            tx_cost_limit: parent.cost(),
+            ..Default::default()
+        });
+        assert_eq!(
+            storage.insert(parent.clone(), vec![], None, &mut HashSet::new()),
+            Ok(parent_id)
+        );
+        let result = storage.insert(child.clone(), vec![outpoint], None, &mut HashSet::new());
+        assert!(!storage.contains_transaction_exact(&child_id.mined_id()));
+
+        if !storage.contains_transaction_exact(&parent_id.mined_id()) {
+            let rejection = SameEffectsChainRejectionError::RandomlyEvicted;
+            assert_eq!(result, Err(rejection.clone().into()));
+            assert_eq!(
+                storage.rejection_error(&child_id),
+                Some(rejection.clone().into())
+            );
+            assert_eq!(
+                storage.rejection_error(&parent_id),
+                Some(rejection.clone().into())
+            );
+            assert_eq!(
+                storage.insert(child, vec![outpoint], None, &mut HashSet::new()),
+                Err(rejection.into())
+            );
+            return;
+        }
+    }
+
+    panic!("equal-weight random eviction should select the ancestor within 64 attempts");
+}
+
+#[test]
 fn mempool_storage_basic() -> Result<()> {
     let _init_guard = zebra_test::init();
 

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reject submitted transactions removed as dependents during mempool eviction.
+time: 2026-11-07T21:50:26.746233146+01:00
