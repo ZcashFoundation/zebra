@@ -97,6 +97,22 @@ pub enum Request {
         max_bytes: u32,
     },
 
+    /// Asks this node's inbound service for best-chain sync-metadata
+    /// entries, to serve a version 2 `get-hashes` request.
+    ///
+    /// Inbound-only, refused like [`Request::BlockRange`].
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::SyncHashes`](super::Response::SyncHashes).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    SyncHashes {
+        /// The height of the first entry.
+        start: block::Height,
+        /// The most entries to return; at most 50,000.
+        count: u32,
+    },
+
     /// Request blocks from this node on a connection that negotiated experimental early relay.
     ///
     /// Only the inbound connection creates this request, based on both peers' service bits.
@@ -353,6 +369,9 @@ impl fmt::Display for Request {
             Request::BlockRange {
                 count, max_bytes, ..
             } => format!("BlockRange {{ count: {count}, max_bytes: {max_bytes} }}"),
+            Request::SyncHashes { start, count } => {
+                format!("SyncHashes {{ start: {start:?}, count: {count} }}")
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
@@ -395,6 +414,7 @@ impl Request {
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::BlockRange { .. } => "BlockRange",
+            Request::SyncHashes { .. } => "SyncHashes",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",

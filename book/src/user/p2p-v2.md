@@ -71,6 +71,9 @@ version 2 peers are recorded in a separate version 2 address book.
 - Serving `get-block-range` requests, which a syncing peer uses to download
   up to 64 MiB of consecutive blocks in one stream. See
   [Serving block ranges](#serving-block-ranges).
+- Serving `get-hashes` requests, which a peer uses to fetch the hash, size,
+  and transaction, transparent output, and note counts of up to 50,000
+  consecutive blocks. See [Serving known hashes](#serving-known-hashes).
 - Downloading the checkpointed part of the chain with `get-block-range`, when
   `sync.v2_checkpoint_sync` is set. See
   [Checkpoint sync over version 2](#checkpoint-sync-over-version-2).
@@ -152,6 +155,41 @@ Serving is bounded so that it cannot crowd out the node's other work:
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
 request.
 
+## Serving known hashes
+
+A node with `v2_listen_addr` set also answers `get-hashes` requests from its
+version 2 peers. A request names a start height and a count of at most 50,000
+heights. The answer has one entry per block of the best chain, from the start
+height up: the block's hash, its size, and its transaction, transparent
+output, and note commitment counts. A full answer is about 2 MB. A requester
+must check the entries against a pinned known-hash list before it uses them,
+so a node's answer is never trusted on its own.
+
+Zebra answers with a prefix of the requested heights:
+
+- It stops 1,000 blocks below its best tip, so it never serves an entry that a
+  chain reorganization could change. A node whose chain is no longer than
+  that answers with no entries.
+- It stops at the first block whose entry it has not stored. The 29.1.0
+  database upgrade stores the entries of blocks the node already has, from
+  genesis upwards, in the background. While it runs, the node serves entries
+  only up to the height the upgrade has reached, and answers requests above
+  it with no entries. New blocks store their entries when they are committed.
+
+Serving is bounded so that it cannot crowd out the node's other work:
+
+- Each peer can have two `get-hashes` streams open at once, separate from its
+  other requests and from its block-range streams, and the node serves eight
+  in total. A request beyond either limit is refused, and the peer asks
+  another node.
+- A peer must read the answer within 5 seconds. Otherwise the stream is
+  cancelled, and the node refuses that connection's `get-hashes` requests for
+  60 seconds, so peers that never read their answers cannot keep the node's
+  eight streams busy.
+
+Serving `get-hashes` is always on when `v2_listen_addr` is set. Unlike block
+ranges, answers are small and few, so there is no setting to turn it off.
+
 ## Checkpoint sync over version 2
 
 With `sync.v2_checkpoint_sync = true`, Zebra downloads the part of the chain
@@ -202,6 +240,40 @@ How it works:
 - While the engine downloads, the mempool and block gossip stay off, as they do
   during a legacy initial sync.
 
+### Known-hash anchors
+
+With a known-hash list, the engine can start and end a download at any height
+below the list's end, not only at checkpoints. The list pins the SHA-256 of
+each 50,000-height chunk of `get-hashes` entries. The engine fetches the
+chunks it needs from its version 2 peers, a few chunks above the committed tip
+at a time, and uses a chunk only once it matches its pin. A chunk that does not
+match is fetched again from another peer, and the peer that sent it is not
+penalized, because it may simply have a different view of the chain. The
+entries give each block's exact size, so the engine asks for about 16 MiB of
+blocks just above the tip and 64 MiB deeper. It also checks that each block it
+downloads has the hash of its verified entry. Where a chunk is not verified
+yet, the engine downloads whole checkpoint intervals as before, so a slow list
+never stops it. Blocks are still committed one checkpoint interval at a time.
+
+Zebra pins a known-hash list for Mainnet, up to height 3,522,060, and for
+the default Testnet, up to height 3,466,400. Regtest and custom testnets have
+no list unless they configure one with `v2_known_hash_pins`, for example with
+the pins that
+[`zebra-utils`' `known-hashes` tool](https://github.com/ZcashFoundation/zebra/tree/main/zebra-utils#known-hashes)
+prints:
+
+```toml
+[sync.v2_known_hash_pins]
+max_height = 99_999
+chunk_hashes = ["<64 hex digits>", "<64 hex digits>"]
+```
+
+Zebra does not start if the pins do not cover exactly heights `0` to
+`max_height`, if `max_height` is above the final checkpoint, or if they are set
+for Mainnet or the default Testnet. Nodes serve entries only up to 1,000 blocks
+below their tips, so a list is only fetched from peers whose chains are at
+least that much longer.
+
 The engine logs when it takes over and when it hands back:
 
 ```text
@@ -217,6 +289,7 @@ Its settings are in the `[sync]` section:
 | `v2_lookahead_bytes` | `536870912` (512 MiB) | The most block data the engine requests ahead of the committed tip. More keeps more peers busy and uses more memory. Values below `2000000`, one maximum-size block, are raised to it. |
 | `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
 | `v2_target_peers` | `8` | The number of peers the engine downloads from at once. `0` is raised to `1`. |
+| `v2_known_hash_pins` | unset | A known-hash list for Regtest or a custom testnet (see [Known-hash anchors](#known-hash-anchors)). |
 
 The engine reports which component owns block download and how its downloads
 go in these metrics, and its progress in the usual `state.*` and
@@ -228,7 +301,7 @@ go in these metrics, and its progress in the usual `state.*` and
 | `sync.v2.lookahead.bytes` | gauge | The block data the engine has requested or downloaded and not yet committed, counted against `v2_lookahead_bytes` (downloaded blocks count three times their size, for their size in memory) |
 | `sync.v2.peer.rate` | histogram | Each downloading peer's measured rate, in bytes per second, sampled four times a second |
 | `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (below `v2_min_peer_rate` for 10 seconds) or `slow` (below a quarter of the median rate for 15 seconds) |
-| `sync.v2.unit.bytes` | histogram | The bytes of each completed download unit, one or more checkpoint intervals |
+| `sync.v2.unit.bytes` | histogram | The bytes of each completed download unit, one or more checkpoint intervals, or a run of blocks between known hashes |
 
 ## Known limitations
 

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added the `sync_meta_by_height` column family (database format 29.1.0) with per-block synchronization metadata for version 2 peers, backfilled by a format upgrade for existing databases.
+time: 2026-11-05T21:00:00Z

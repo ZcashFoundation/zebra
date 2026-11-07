@@ -2352,3 +2352,50 @@ async fn block_range_requests_fail_without_a_read_state() -> Result<(), BoxError
 
     Ok(())
 }
+
+/// A version 2 `get-hashes` request is a read of the sync metadata entries, which are returned
+/// unchanged, and without a read state the request fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_hashes_requests_read_sync_metadata() -> Result<(), BoxError> {
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let entries = vec![zebra_chain::block::SyncHashEntry::for_block(
+        &block,
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.len(),
+    )];
+    let read_state = MockService::build().for_unit_tests();
+    let mut inbound = setup_block_range_serving(Some(read_state.clone())).await;
+
+    let response = inbound.ready().await?.call(Request::SyncHashes {
+        start: Height(1),
+        count: 10,
+    });
+    let mut read_state_handle = read_state.clone();
+    let expected = entries.clone();
+    let answer = async move {
+        read_state_handle
+            .expect_request(ReadRequest::SyncHashes {
+                start: Height(1),
+                count: 10,
+            })
+            .await
+            .respond(ReadResponse::SyncHashes(expected));
+    };
+    let (response, ()) = futures::join!(response, answer);
+    assert_eq!(response?, Response::SyncHashes(entries));
+
+    let mut inbound = setup_block_range_serving(None).await;
+    let response = inbound
+        .ready()
+        .await?
+        .call(Request::SyncHashes {
+            start: Height(1),
+            count: 10,
+        })
+        .await;
+    assert!(response.is_err(), "the request fails, got {response:?}");
+
+    Ok(())
+}

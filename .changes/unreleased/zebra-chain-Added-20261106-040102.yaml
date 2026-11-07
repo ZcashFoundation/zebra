@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added the pinned Mainnet and Testnet known-hash lists, `MAINNET_KNOWN_HASHES` (heights 0 to 3,522,060) and `TESTNET_KNOWN_HASHES` (heights 0 to 3,466,400), which `KnownHashListSpec::for_network` now returns.
+time: 2026-11-06T04:01:02.118539394Z

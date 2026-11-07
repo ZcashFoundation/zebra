@@ -25,6 +25,7 @@ use crate::service::finalized_state::ZebraDb;
 
 pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
+pub(crate) mod add_sync_metadata;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
@@ -117,7 +118,10 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // Adds the `sync_meta_by_height` column family, which new blocks write at commit time,
+        // and backfills it for existing blocks.
+        Box::new(add_sync_metadata::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

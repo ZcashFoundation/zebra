@@ -1,0 +1,4 @@
+project: zebra-utils
+kind: Added
+body: Added the `known-hashes` binary (behind the `known-hashes` feature), which sweeps a node's blocks over RPC up to the final checkpoint, chains every swept hash to its parent and to the checkpoint list, and prints the SHA-256 chunk pins of the known-hash list.
+time: 2026-11-06T03:43:26.000000000Z

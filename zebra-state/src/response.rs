@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, Block, ChainHistoryMmrRootHash, SyncHashEntry},
     block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
@@ -583,6 +583,9 @@ pub enum ReadResponse {
     /// height order, each block the parent of the one before it.
     AncestorBlocks(Vec<Arc<Block>>),
 
+    /// The response to a [`ReadRequest::SyncHashes`] request.
+    SyncHashes(Vec<SyncHashEntry>),
+
     /// The response to a `FindForkPoint` request.
     /// Returns the height and hash of the fork point, or `None` if no locator entry is
     /// on the best chain.
@@ -785,7 +788,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
             | ReadResponse::ForkPoint(_)
-            | ReadResponse::AncestorBlocks(_) => {
+            | ReadResponse::AncestorBlocks(_)
+            | ReadResponse::SyncHashes(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

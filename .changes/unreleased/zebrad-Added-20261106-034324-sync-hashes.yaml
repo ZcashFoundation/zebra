@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added serving of `get-hashes` requests from version 2 peers, so they can read this node's per-block synchronization metadata.
+time: 2026-11-06T03:43:24.000000000Z

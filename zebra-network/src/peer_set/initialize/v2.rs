@@ -41,7 +41,10 @@ use crate::{
         self,
         v2::{
             addr_relay::AddrRelay,
-            connection::{global_block_range_permits, spawn_connection, ConnectionParams},
+            connection::{
+                global_block_range_permits, global_hashes_permits, spawn_connection,
+                ConnectionParams,
+            },
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
@@ -147,6 +150,7 @@ where
                 )),
                 serve_block_ranges: config.v2_serve_block_ranges,
                 block_range_permits: global_block_range_permits(),
+                hashes_permits: global_hashes_permits(),
             },
             endpoint,
             identity,

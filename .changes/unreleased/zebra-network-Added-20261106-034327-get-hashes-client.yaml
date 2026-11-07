@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Added `SyncPeer::get_hashes`, which fetches unverified `get-hashes` entries from a version 2 peer, and closes the connection with `PROTOCOL_ERROR` for a non-conforming response, and `sync_peer::HASHES_STREAMS_PER_PEER`, the number of `get-hashes` exchanges one `SyncPeer` runs at once, apart from its bulk streams.
+time: 2026-11-06T03:43:27.000000000Z

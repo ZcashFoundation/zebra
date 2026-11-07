@@ -13,8 +13,8 @@ use zebra_chain::{
 
 use super::{
     constants::{
-        GET_BLOCK_RANGE_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
-        MAX_TXS_PER_REQUEST,
+        GET_BLOCK_RANGE_REQUEST_LEN, GET_HASHES_REQUEST_LEN, MAX_BLOCKS_PER_REQUEST,
+        MAX_LOCATOR_HASHES, MAX_TXS_PER_REQUEST,
     },
     txref::TxRef,
     types::StreamType,
@@ -22,8 +22,10 @@ use super::{
 };
 
 pub mod block_range;
+pub mod hashes;
 
 pub use block_range::GetBlockRange;
+pub use hashes::GetHashes;
 
 /// The longest body a conforming request on `stream_type` can have, or `None`
 /// for a type this node does not serve; a request is read up to this bound, so
@@ -39,6 +41,8 @@ pub fn max_body_len(stream_type: StreamType) -> Option<usize> {
         StreamType::GetAddr | StreamType::GetMempool => 0,
         // A final hash, a count, and a byte bound.
         StreamType::GetBlockRange => GET_BLOCK_RANGE_REQUEST_LEN,
+        // A start height and a count.
+        StreamType::GetHashes => GET_HASHES_REQUEST_LEN,
         _ => return None,
     })
 }
@@ -67,6 +71,9 @@ pub enum Request {
 
     /// A `get-block-range` request (stream type `0x07`).
     BlockRange(GetBlockRange),
+
+    /// A `get-hashes` request (stream type `0x06`).
+    Hashes(GetHashes),
 }
 
 impl Request {
@@ -79,6 +86,7 @@ impl Request {
             Request::Addr => StreamType::GetAddr,
             Request::Mempool => StreamType::GetMempool,
             Request::BlockRange(_) => StreamType::GetBlockRange,
+            Request::Hashes(_) => StreamType::GetHashes,
         }
     }
 
@@ -91,14 +99,15 @@ impl Request {
             Request::Tx(request) => request.write(&mut body)?,
             Request::Addr | Request::Mempool => {}
             Request::BlockRange(request) => request.write(&mut body)?,
+            Request::Hashes(request) => request.write(&mut body)?,
         }
         Ok(body.into())
     }
 
     /// Decodes the complete body of a request received on `stream_type`.
     ///
-    /// Only the five served request types and `get-block-range` have a format
-    /// here; any other type is [`NotARequest`](WireError::NotARequest). The stream's owner decides
+    /// Only the served request types have a format here; any other type is
+    /// [`NotARequest`](WireError::NotARequest). The stream's owner decides
     /// before calling whether such a stream is refused or a connection error,
     /// and refuses unknown type bytes as `UNSUPPORTED_STREAM_TYPE` without
     /// reading a request.
@@ -111,6 +120,7 @@ impl Request {
             StreamType::GetAddr => Request::Addr,
             StreamType::GetMempool => Request::Mempool,
             StreamType::GetBlockRange => Request::BlockRange(GetBlockRange::read(&mut reader)?),
+            StreamType::GetHashes => Request::Hashes(GetHashes::read(&mut reader)?),
             stream_type => return Err(WireError::NotARequest { stream_type }),
         };
         ensure_consumed(reader, "request")?;

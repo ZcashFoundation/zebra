@@ -248,8 +248,8 @@ pub struct Inbound {
     /// Read-only context for compact reconstruction; absent until explicitly configured.
     compact_relay: Option<(Network, zs::ReadStateService)>,
 
-    /// Read-only state for serving version 2 `get-block-range` requests; absent until
-    /// explicitly configured, and then every block range request fails.
+    /// Read-only state for serving version 2 `get-block-range` and `get-hashes` requests; absent
+    /// until explicitly configured, and then every such request fails.
     block_range_state: Option<ReadState>,
 
     /// Bounds mempool scans and detached blocking checks across all peer connections.
@@ -298,7 +298,8 @@ impl Inbound {
         self
     }
 
-    /// Provides the read-only state that version 2 `get-block-range` requests are served from.
+    /// Provides the read-only state that version 2 `get-block-range` and `get-hashes` requests are
+    /// served from.
     pub fn with_block_range_state<S>(mut self, read_state: S) -> Self
     where
         S: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = zs::BoxError>
@@ -788,6 +789,21 @@ impl Service<zn::Request> for Inbound {
                     zs::ReadResponse::AncestorBlocks(blocks) => zn::Response::BlockRange(blocks),
                     _ => unreachable!("zebra-state should always respond to an `AncestorBlocks` request with an `AncestorBlocks` response"),
                 })
+                    .boxed()
+            }
+
+            // The version 2 connection bounds how many of these it serves at once; the state reads
+            // at most `count` sync metadata rows, which the wire format bounds.
+            zn::Request::SyncHashes { start, count } => {
+                let Some(read_state) = self.block_range_state.clone() else {
+                    return async { Err("sync hashes state is unavailable".into()) }.boxed();
+                };
+                read_state
+                    .oneshot(zs::ReadRequest::SyncHashes { start, count })
+                    .map_ok(|resp| match resp {
+                        zs::ReadResponse::SyncHashes(entries) => zn::Response::SyncHashes(entries),
+                        _ => unreachable!("zebra-state should always respond to a `SyncHashes` request with a `SyncHashes` response"),
+                    })
                     .boxed()
             }
         }

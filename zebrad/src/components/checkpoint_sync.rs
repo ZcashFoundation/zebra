@@ -14,7 +14,10 @@
 //! - [`engine`]: the engine task, window and commit path;
 //! - [`scheduler`]: unit planning, pull budgets, stalls, end-game;
 //! - [`convert`]: raw bytes → `CheckpointVerifiedBlock` on rayon;
-//! - [`anchors`]: checkpoint-list anchors.
+//! - [`anchors`]: checkpoint-list anchors;
+//! - [`known_hashes`]: the known-hash list, fetched from peers and verified
+//!   against its pins, as a [`HashSource`](scheduler::HashSource) that
+//!   anchors units at every listed height.
 //!
 //! The supervisor's state machine:
 //!
@@ -38,7 +41,11 @@ use tokio::{
     time,
 };
 
-use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{
+    block,
+    chain_tip::ChainTip,
+    parameters::{known_hashes::KnownHashListSpec, Network},
+};
 use zebra_consensus::CommittedTip;
 use zebra_network::{types::PeerServices, SyncPeer};
 
@@ -46,10 +53,13 @@ use crate::BoxError;
 
 use anchors::Anchors;
 use engine::{Charged, EngineExit, EngineRun, RangePeer};
+use known_hashes::{ChunkPins, HashPeer, KnownHashes, PinnedList};
+use scheduler::HashSource;
 
 pub mod anchors;
 pub mod convert;
 pub mod engine;
+pub mod known_hashes;
 pub mod scheduler;
 
 pub use engine::EngineConfig;
@@ -190,6 +200,10 @@ where
     ///   `zs::Request::CommitCheckpointVerifiedBlock`);
     /// - `latest_chain_tip`: the engine starts only once
     ///   `best_tip_height().is_some()`, after the legacy syncer's genesis;
+    /// - `known_hashes`: the network's known-hash list, from
+    ///   [`known_hashes::known_hash_list`], if it has one. Each engine run
+    ///   fetches its chunks from `peers` and anchors units at its verified
+    ///   entries, and at checkpoints where they are not resident yet;
     /// - `hints_gate`: `Some` when spentness hints may apply (a later
     ///   change passes it for a non-`Off` mode on an empty state; `start`
     ///   passes `None`). The supervisor then
@@ -197,6 +211,7 @@ where
     ///   count and gap, and the engine submits no commit until the gate's
     ///   value is `true` (acquisition finished, with or without an artifact).
     ///   If the gate's sender is dropped, it is treated as `true`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: EngineConfig,
         network: Network,
@@ -205,7 +220,15 @@ where
         latest_chain_tip: ZSTip,
         ownership: EngineOwnership,
         hints_gate: Option<watch::Receiver<bool>>,
+        known_hashes: Option<KnownHashListSpec>,
     ) -> Self {
+        let known_hashes = known_hashes.map(|spec| {
+            Arc::new(PinnedList {
+                spec,
+                network: network.clone(),
+            }) as Arc<dyn ChunkPins>
+        });
+
         CheckpointSync {
             supervisor: Supervisor::new(
                 config,
@@ -215,6 +238,7 @@ where
                 latest_chain_tip,
                 ownership,
                 hints_gate,
+                known_hashes,
             ),
         }
     }
@@ -238,6 +262,9 @@ struct Supervisor<P, ZS, ZSTip> {
     latest_chain_tip: ZSTip,
     ownership: EngineOwnership,
     hints_gate: Option<watch::Receiver<bool>>,
+    /// The known-hash list's pins, if the network has a list. Each run
+    /// fetches the chunks it needs again: at most 4 of about 2 MB each.
+    known_hashes: Option<Arc<dyn ChunkPins>>,
     charged: Charged,
     generation: u64,
     /// The IP addresses of the peers the last run blamed for its lack of
@@ -251,7 +278,7 @@ struct Supervisor<P, ZS, ZSTip> {
 
 impl<P, ZS, ZSTip> Supervisor<P, ZS, ZSTip>
 where
-    P: RangePeer,
+    P: RangePeer + HashPeer,
     ZS: tower::Service<zebra_state::Request, Response = zebra_state::Response, Error = BoxError>
         + Send
         + Clone
@@ -268,6 +295,7 @@ where
         latest_chain_tip: ZSTip,
         ownership: EngineOwnership,
         hints_gate: Option<watch::Receiver<bool>>,
+        known_hashes: Option<Arc<dyn ChunkPins>>,
     ) -> Self {
         Supervisor {
             config,
@@ -278,6 +306,7 @@ where
             latest_chain_tip,
             ownership,
             hints_gate,
+            known_hashes,
             charged: Charged::default(),
             generation: 0,
             blamed: BTreeSet::new(),
@@ -310,6 +339,19 @@ where
                 self.wait_idle().await;
                 continue;
             };
+
+            // Start fetching the known-hash chunks above the tip now, so that
+            // they arrive while the syncer cancels its downloads, and the
+            // run's first units can already be anchored at known hashes.
+            let mut hashes = self.known_hashes.clone().map(|pins| {
+                Box::new(KnownHashes::with_pins(pins, self.peers.clone())) as Box<dyn HashSource>
+            });
+            if let Some(hashes) = hashes.as_mut() {
+                hashes.request(
+                    tip.next().expect("tips are below the maximum height"),
+                    target,
+                );
+            }
 
             // Claiming: publish the claim and wait for the syncer to cancel
             // its downloads.
@@ -353,6 +395,7 @@ where
                     unit_lengths: self.ownership.unit_lengths.clone(),
                     charged: self.charged.clone(),
                     blamed: self.blamed.clone(),
+                    hashes,
                 }
                 .run()
                 .await
@@ -361,6 +404,7 @@ where
                     exit: EngineExit::TargetReached,
                     base: start,
                     blamed: BTreeSet::new(),
+                    known_hash_units: 0,
                 }
             };
 
@@ -399,6 +443,7 @@ where
                 exit = ?outcome.exit,
                 engine_base = ?outcome.base,
                 durable_tip = ?durable.map(|(height, _)| height),
+                known_hash_units = outcome.known_hash_units,
                 "checkpoint sync engine handed block download back to the legacy syncer"
             );
             // Only the last run's blame counts: a peer blamed earlier may

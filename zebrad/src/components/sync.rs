@@ -38,7 +38,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        checkpoint_sync::{EngineConfig, LegacyOwnership, SyncOwner},
+        checkpoint_sync::{known_hashes::KnownHashPins, EngineConfig, LegacyOwnership, SyncOwner},
         sync::downloads::BlockDownloadVerifyError,
     },
     config::ZebradConfig,
@@ -342,6 +342,16 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+
+    /// The known-hash list pins for Regtest or a custom testnet, which let
+    /// version 2 checkpoint sync anchor its downloads at every height of the
+    /// list instead of only at checkpoints.
+    ///
+    /// Each pin is the SHA-256 of one 50,000-height chunk of `get-hashes`
+    /// entries, as 64 hex digits. Unset by default. Mainnet and the default
+    /// Testnet use the pins compiled into Zebra, and refuse this field: Zebra
+    /// does not start if it is set for them.
+    pub v2_known_hash_pins: Option<KnownHashPins>,
 }
 
 impl Default for Config {
@@ -378,6 +388,9 @@ impl Default for Config {
             // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
+
+            // Mainnet and the default Testnet use their compiled-in lists.
+            v2_known_hash_pins: None,
         }
     }
 }

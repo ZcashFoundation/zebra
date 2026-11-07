@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SyncHashEntry},
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -134,6 +134,12 @@ pub enum Response {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     BlockRange(Vec<Arc<Block>>),
 
+    /// The entries for a [`Request::SyncHashes`](super::Request::SyncHashes):
+    /// entry `k` is height `start + k` of the best chain; a prefix of the
+    /// request, ending at least `MAX_BLOCK_REORG_HEIGHT` below the tip.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    SyncHashes(Vec<SyncHashEntry>),
+
     /// Verified mempool candidates matching unique compact short IDs by exact witnessed identity.
     ///
     /// Local-only response to [`super::Request::CompactBlockTransactions`], never sent on the wire.
@@ -166,6 +172,9 @@ impl fmt::Display for Response {
                 format!("CompactBlockTransactions({})", transactions.len())
             }
             Response::BlockRange(blocks) => format!("BlockRange {{ blocks: {} }}", blocks.len()),
+            Response::SyncHashes(entries) => {
+                format!("SyncHashes {{ entries: {} }}", entries.len())
+            }
 
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks)
@@ -223,6 +232,7 @@ impl Response {
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
             Response::BlockRange(_) => "BlockRange",
+            Response::SyncHashes(_) => "SyncHashes",
         }
     }
 
