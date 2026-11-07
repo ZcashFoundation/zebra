@@ -2327,6 +2327,49 @@ async fn post_handoff_semantic_dispatch_rechecks_ready_admission() {
     .expect("the post-handoff semantic dispatch regression finishes");
 }
 
+/// When every child of the last checkpoint verified block is queued before that block is sent,
+/// the state starts the handoff to non-finalized commits on its next request, without waiting
+/// for another block.
+#[tokio::test(flavor = "multi_thread")]
+async fn children_queued_before_the_last_checkpoint_commit_without_another_block() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+        let [genesis, block_1, block_2] = [
+            &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..],
+            &zebra_test::vectors::BLOCK_MAINNET_2_BYTES[..],
+        ]
+        .map(|bytes| bytes.zcash_deserialize_into::<Arc<Block>>().unwrap());
+
+        state
+            .queue_and_commit_to_finalized_state(genesis.into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        // Block 2 is queued before block 1, the last checkpoint verified block, is sent.
+        let child =
+            state.queue_and_commit_to_non_finalized_state(block_2.clone().prepare(), None, None);
+        state
+            .queue_and_commit_to_finalized_state(block_1.clone().into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.read_service.db.finalized_tip_hash(), block_1.hash());
+
+        // Any request polls the state ready first.
+        state.ready().await.unwrap();
+        assert_eq!(
+            child.await.unwrap().unwrap(),
+            block_2.hash(),
+            "the queued child commits"
+        );
+    })
+    .await
+    .expect("the queued child commits without another block");
+}
+
 /// Start the real writer with a finalized genesis, leaving block 1 absent for orphan queue tests.
 async fn mined_notification_test_state() -> (StateService, Arc<Block>) {
     let (mut state, _, _, _) =

@@ -72,7 +72,7 @@ const _: () = assert!(
 );
 
 /// One whole run.
-const TEST_TIMEOUT: Duration = Duration::from_secs(900);
+pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// One node reaching a height.
 const SYNC_TIMEOUT: Duration = Duration::from_secs(600);
@@ -114,7 +114,7 @@ fn loopback(port: u16) -> SocketAddr {
 }
 
 /// Regtest with NU5 from height 1, and `checkpoints`, or genesis only for `None`.
-fn regtest(checkpoints: Option<Vec<(Height, block::Hash)>>) -> Network {
+pub(crate) fn regtest(checkpoints: Option<Vec<(Height, block::Hash)>>) -> Network {
     Network::new_regtest(RegtestParameters {
         activation_heights: ConfiguredActivationHeights {
             nu5: Some(1),
@@ -126,14 +126,14 @@ fn regtest(checkpoints: Option<Vec<(Height, block::Hash)>>) -> Network {
 }
 
 /// The addresses of one node.
-struct Ports {
-    rpc: u16,
-    p2p: SocketAddr,
-    quic: SocketAddr,
+pub(crate) struct Ports {
+    pub(crate) rpc: u16,
+    pub(crate) p2p: SocketAddr,
+    pub(crate) quic: SocketAddr,
 }
 
 impl Ports {
-    fn reserve() -> Result<Self> {
+    pub(crate) fn reserve() -> Result<Self> {
         Ok(Ports {
             rpc: reserve_tcp_port()?,
             p2p: loopback(reserve_tcp_port()?),
@@ -141,7 +141,7 @@ impl Ports {
         })
     }
 
-    fn rpc_client(&self) -> RpcRequestClient {
+    pub(crate) fn rpc_client(&self) -> RpcRequestClient {
         RpcRequestClient::new_with_timeout(loopback(self.rpc), TEST_TIMEOUT)
     }
 }
@@ -151,7 +151,7 @@ impl Ports {
 ///
 /// The crawler interval is long, so loopback nodes do not open connections beyond the
 /// configured ones.
-fn node_config(
+pub(crate) fn node_config(
     network: &Network,
     ports: &Ports,
     legacy_peers: &[SocketAddr],
@@ -170,11 +170,11 @@ fn node_config(
     Ok(config)
 }
 
-fn start_node(dir: TempDir) -> Result<TestChild<TempDir>> {
+pub(crate) fn start_node(dir: TempDir) -> Result<TestChild<TempDir>> {
     dir.spawn_child(args!["start"])?.with_timeout(TEST_TIMEOUT)
 }
 
-fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
+pub(crate) fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
     child.kill(false)?;
     child
         .wait_with_output()?
@@ -183,14 +183,18 @@ fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
     Ok(())
 }
 
-async fn block_count(client: &RpcRequestClient) -> Option<u32> {
+pub(crate) async fn block_count(client: &RpcRequestClient) -> Option<u32> {
     client
         .json_result_from_call::<u32>("getblockcount", "[]")
         .await
         .ok()
 }
 
-async fn wait_for_height(client: &RpcRequestClient, height: u32, node: &str) -> Result<()> {
+pub(crate) async fn wait_for_height(
+    client: &RpcRequestClient,
+    height: u32,
+    node: &str,
+) -> Result<()> {
     tokio::time::timeout(SYNC_TIMEOUT, async {
         loop {
             if block_count(client)
@@ -206,7 +210,7 @@ async fn wait_for_height(client: &RpcRequestClient, height: u32, node: &str) -> 
     .map_err(|_| eyre!("{node} did not reach height {height} within {SYNC_TIMEOUT:?}"))
 }
 
-async fn mine_to(client: &RpcRequestClient, best_tip: u32) -> Result<()> {
+pub(crate) async fn mine_to(client: &RpcRequestClient, best_tip: u32) -> Result<()> {
     loop {
         let have = block_count(client)
             .await
@@ -241,7 +245,7 @@ async fn known_hash_pins(client: &RpcRequestClient, max_height: u32) -> Result<K
     })
 }
 
-async fn block_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash> {
+pub(crate) async fn block_hash(client: &RpcRequestClient, height: u32) -> Result<block::Hash> {
     Ok(client
         .json_result_from_call::<String>("getblockhash", format!("[{height}]"))
         .await

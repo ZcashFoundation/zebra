@@ -377,6 +377,8 @@ Rust API: [`zebrad::components::sync::Config`](https://docs.rs/zebrad/latest/zeb
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `download_concurrency_limit` | `usize` | `50` | Parallel block-download requests. Values below `1` are raised to `1` with a warning. The old key `max_concurrent_block_requests` is an accepted alias. |
+| `headers_first` | `bool` | `true` | Syncs and stores the header chain first, from legacy peers with `getheaders` and version 2 peers with `get-headers`, and checks every header's proof of work, difficulty and checkpoints before it downloads that block. With `false`, the syncer finds blocks with `getblocks`, which only legacy peers answer, so it needs legacy peers. |
+| `header_sync_concurrency` | `usize` | `8` | The number of checkpoint spans of headers that headers-first sync downloads at the same time, below the final checkpoint. A value of 0 is raised to 1. |
 | `v2_checkpoint_sync` | `bool` | `false` | Downloads the checkpointed part of the chain from version 2 peers with `get-block-range` requests, beside the legacy syncer. Needs `network.v2_listen_addr` and version 2 peers. See [Checkpoint sync over version 2](p2p-v2.md#checkpoint-sync-over-version-2). |
 | `v2_lookahead_bytes` | `u64` | `536870912` (512 MiB) | The most block data the checkpoint sync engine requests ahead of the committed tip, in bytes. Values below 2000000, one maximum-size block, are raised to it. |
 | `v2_min_peer_rate` | `u64` | `262144` (256 KiB/s) | The slowest rate, in bytes per second, at which the engine keeps downloading from a peer before moving its request to another peer. Values below `16384` (16 KiB/s) are raised to it. |

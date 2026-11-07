@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added `check::check_header_context`, which checks a block header''s difficulty threshold and time against the previous headers of its chain, for headers that arrive before their bodies.'
+time: 2026-11-06T20:23:31Z

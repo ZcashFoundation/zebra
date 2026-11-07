@@ -730,6 +730,10 @@ pub struct EngineRun<P, ZS> {
     /// its verified entries where they are resident, and at checkpoints
     /// elsewhere.
     pub hashes: Option<Box<dyn HashSource>>,
+    /// With headers-first sync, the verified header chain tip: the engine
+    /// plans no unit above the highest checkpoint at or below it, so it
+    /// requests no body before its header is verified.
+    pub header_tip: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 enum StreamItem {
@@ -839,6 +843,7 @@ where
             charged,
             blamed: excluded,
             hashes,
+            mut header_tip,
         } = self;
 
         let now = Instant::now();
@@ -846,6 +851,14 @@ where
         let mut scheduler = Scheduler::new(&config, anchors.clone(), start, target, charged, now);
         if let Some(hashes) = hashes {
             scheduler = scheduler.with_hash_source(hashes);
+        }
+        let header_ceiling = |tip: Option<block::Height>| {
+            anchors
+                .at_or_below(tip.unwrap_or(block::Height(0)).min(target))
+                .0
+        };
+        if let Some(header_tip) = header_tip.as_mut() {
+            scheduler.set_ceiling(header_ceiling(*header_tip.borrow_and_update()));
         }
         let mut window: Window<CheckpointVerifiedBlock> = Window::new(start);
         let (events_tx, mut events) = mpsc::channel(
@@ -1126,6 +1139,14 @@ where
                     }
                 }
 
+                tip = wait_for_header_tip(&mut header_tip) => {
+                    // A dropped sender keeps the last ceiling: Zebra is
+                    // shutting down.
+                    if let Some(tip) = tip {
+                        scheduler.set_ceiling(header_ceiling(tip));
+                    }
+                }
+
                 open = wait_for_gate(&mut hints_gate), if !gate_open => {
                     gate_open = open;
                     // Count the failures from here: the frontier could not
@@ -1185,6 +1206,21 @@ where
             known_hash_units,
         }
     }
+}
+
+/// Waits for the header chain tip to change, and returns the new tip, or
+/// `None` once its sender is dropped. Never resolves without a header tip.
+async fn wait_for_header_tip(
+    header_tip: &mut Option<watch::Receiver<Option<block::Height>>>,
+) -> Option<Option<block::Height>> {
+    let Some(receiver) = header_tip.as_mut() else {
+        return std::future::pending().await;
+    };
+    if receiver.changed().await.is_err() {
+        *header_tip = None;
+        return None;
+    }
+    Some(*receiver.borrow_and_update())
 }
 
 /// Waits for the hints gate to open. Returns `true` once it is open or its

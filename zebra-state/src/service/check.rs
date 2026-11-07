@@ -133,6 +133,45 @@ pub(crate) fn block_is_valid_for_recent_chain(
     Ok(())
 }
 
+/// Checks the difficulty threshold and time of `header`, at `height`, against
+/// the previous headers of its chain.
+///
+/// `context` holds the previous headers in reverse height order, starting with
+/// the parent at `height - 1`. Only the first `PoWAveragingWindow(height) +
+/// PoWMedianBlockSpan` headers are used, and fewer are enough near genesis.
+/// The caller checks that `header` links to `context[0]`.
+///
+/// This is the same rule [`block_is_valid_for_recent_chain`] applies to a
+/// block, for headers that arrive before their bodies.
+pub fn check_header_context(
+    context: &[Arc<block::Header>],
+    header: &block::Header,
+    height: block::Height,
+    network: &Network,
+) -> Result<(), ValidateContextError> {
+    let previous_height = height
+        .previous()
+        .map_err(|_| ValidateContextError::NotReadyToBeCommitted)?;
+
+    if context.is_empty() {
+        return Err(ValidateContextError::NotReadyToBeCommitted);
+    }
+
+    let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
+        header.time,
+        previous_height,
+        network,
+        context
+            .iter()
+            .map(|header| (header.difficulty_threshold, header.time)),
+    );
+
+    check::difficulty_threshold_and_time_are_valid(
+        header.difficulty_threshold,
+        difficulty_adjustment,
+    )
+}
+
 /// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
 ///

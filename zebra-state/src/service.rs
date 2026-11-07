@@ -82,6 +82,7 @@ pub mod check;
 pub(crate) mod early_relay;
 
 pub(crate) mod finalized_state;
+pub(crate) mod header_write;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod pruning;
@@ -154,6 +155,9 @@ pub(crate) struct StateService {
 
     /// Channels to send blocks to the block write task.
     block_write_sender: write::BlockWriteSender,
+
+    /// The channel to the header writer, the only writer of the header chain.
+    header_write_sender: tokio::sync::mpsc::UnboundedSender<header_write::CommitHeadersMessage>,
 
     /// The [`block::Hash`] of the most recent block sent on
     /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
@@ -521,6 +525,8 @@ impl StateService {
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
+        let header_write_sender = header_write::spawn(finalized_state.db.clone(), network.clone());
+
         let finalized_block_write_last_sent_hash =
             tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
                 .await
@@ -533,6 +539,7 @@ impl StateService {
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
+            header_write_sender,
             finalized_block_write_last_sent_hash,
             finalized_block_write_last_sent_height: finalized_tip_height,
             finalized_reset_next_height: None,
@@ -1010,6 +1017,37 @@ impl StateService {
             rsp_rx
         };
 
+        if self.finish_checkpoint_commits_if_ready() {
+            // The queued non-finalized blocks were sent.
+        } else if self.semantic_handoff_started()
+            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
+        {
+            self.send_ready_non_finalized(parent_hash, ready);
+
+            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
+                "Finalized state must have at least one block before committing non-finalized state",
+            );
+
+            self.non_finalized_state_queued_blocks
+                .prune_by_height(finalized_tip_height);
+
+            self.non_finalized_block_write_sent_hashes
+                .prune_by_height(finalized_tip_height);
+        } else {
+            tracing::trace!("unready to verify, returning early");
+        }
+
+        // Ready parents and descendants take priority over retained orphans. There is no await
+        // between insertion, dispatch, and trimming, so only the incoming block is transiently extra.
+        self.non_finalized_state_queued_blocks.prune_overflow();
+
+        rsp_rx
+    }
+
+    /// Starts the handoff from checkpoint verified to non-finalized commits and sends the queued
+    /// non-finalized blocks, if the last checkpoint verified block has been sent and has queued
+    /// children. Returns `true` if it did.
+    fn finish_checkpoint_commits_if_ready(&mut self) -> bool {
         // Start the handoff for a semantic child of the configured maximum checkpoint.
         // Checking the parent's height as well as its hash rejects height-skipping orphans whose
         // parent is merely an intermediate checkpoint. An unspecified maximum retains hash-based
@@ -1050,29 +1088,10 @@ impl StateService {
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if self.semantic_handoff_started()
-            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
-        {
-            self.send_ready_non_finalized(parent_hash, ready);
-
-            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
-
-            self.non_finalized_state_queued_blocks
-                .prune_by_height(finalized_tip_height);
-
-            self.non_finalized_block_write_sent_hashes
-                .prune_by_height(finalized_tip_height);
+            true
         } else {
-            tracing::trace!("unready to verify, returning early");
+            false
         }
-
-        // Ready parents and descendants take priority over retained orphans. There is no await
-        // between insertion, dispatch, and trimming, so only the incoming block is transiently extra.
-        self.non_finalized_state_queued_blocks.prune_overflow();
-
-        rsp_rx
     }
 
     /// Returns whether semantic block admission has started locally or completed in the writer.
@@ -1380,6 +1399,11 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+
+        // The children of the last checkpoint verified block can all be queued before that block
+        // is sent to the writer. Then no later commit request starts the handoff to non-finalized commits,
+        // so start it here, on the next request: the syncer keeps polling the state.
+        self.finish_checkpoint_commits_if_ready();
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -1749,6 +1773,27 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Used by headers-first sync to store verified headers ahead of their bodies.
+            Request::CommitHeaders(headers) => {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let sent = self
+                    .header_write_sender
+                    .send(header_write::CommitHeadersMessage { headers, rsp_tx });
+
+                async move {
+                    if sent.is_err() {
+                        return Err(header_write::CommitHeadersError::WriterStopped.into());
+                    }
+
+                    let committed = rsp_rx
+                        .await
+                        .map_err(|_| header_write::CommitHeadersError::WriterStopped)??;
+
+                    Ok(Response::HeadersCommitted(committed))
+                }
+                .boxed()
+            }
+
             // Used by sync, inbound, and block verifier to check if a block is already in the state
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
@@ -1853,6 +1898,9 @@ impl Service<Request> for StateService {
             | Request::BestChainNextMedianTimePast
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
+            | Request::HeaderTip
+            | Request::HeaderLocator
+            | Request::HeaderChainHashes { .. }
             | Request::Transaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
@@ -2191,6 +2239,24 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(
                 read::block_locator(state.latest_best_chain(), &state.db).unwrap_or_default(),
             )),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderTip => Ok(ReadResponse::HeaderTip(state.db.header_chain_tip())),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderLocator => {
+                Ok(ReadResponse::HeaderLocator(read::header_locator(&state.db)))
+            }
+
+            // Used by the syncer to download bodies for stored headers.
+            ReadRequest::HeaderChainHashes {
+                known_blocks,
+                limit,
+            } => Ok(ReadResponse::BlockHashes(read::header_chain_hashes(
+                &state.db,
+                &known_blocks,
+                limit,
+            ))),
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {

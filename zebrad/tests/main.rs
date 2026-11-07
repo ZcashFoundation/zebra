@@ -21,6 +21,24 @@
 //!   generation, and lightwalletd full syncs. Run on scheduled or manually
 //!   selected GCP jobs. (hours – days)
 //!
+//! ### Opt-in integration tests
+//!
+//! Some `integration::` tests run several nodes through thousands of Regtest
+//! blocks, so the `default` and `ci` nextest profiles leave them out with their
+//! `default-filter` in `.config/nextest.toml`, and no CI job runs them:
+//!
+//! - `integration::v2_checkpoint_sync::`
+//! - `integration::headers_first_sync::`
+//!
+//! They are also `#[ignore]`d. Run them with `--ignore-default-filter --run-ignored=all`, in
+//! release, one at a time:
+//!
+//! ```console
+//! cargo nextest run --release -p zebrad --ignore-default-filter --run-ignored=all \
+//!     --test-threads 1 \
+//!     -E 'test(/^integration::(v2_checkpoint_sync|headers_first_sync)::/)'
+//! ```
+//!
 //! ## Running tests
 //!
 //! ```console
