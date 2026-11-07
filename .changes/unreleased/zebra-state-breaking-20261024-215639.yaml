@@ -1,0 +1,17 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Added `Config::prune_blocks_older_than` for opt-in finalized-body pruning; struct literals must
+  supply it or use `Config::default()`. Invalid retention returns
+  `StateInitError::InvalidPruningRetention`; opening pruned state with a different spending-index
+  mode returns `StateInitError::PrunedIndexModeMismatch` before writes are allowed. Archive state
+  stays in v29 for rollback to 7.0.0. Pruning-configured state moves compatible v29 directories to
+  v30 without a resync, isolating deleted bodies from older readers. Format selection uses
+  `Config::state_database_format_version`; an existing v30 directory takes precedence over v29.
+  Keep a separate archive backup before pruning; returning to archive writes after deletion
+  requires an archive snapshot or full resync.
+  Pruning caches its restart witness and waits without deletion when no witness is available.
+  State-service startup reports initialization errors using their actionable display message.
+  Directory reuse preserves unfinished migration versions, and read-only opens reject records
+  requiring migrations even when the database is already in the current-major directory.
+time: 2026-10-24T21:56:39.657594727+02:00

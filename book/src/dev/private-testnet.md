@@ -30,15 +30,16 @@ below uses `Nu7Private` and `[0, 1, 0, 7]`, giving `nu7private-00010007`. Under
 | `state/vN/testnet` | `state/vN/nu7private-00010007` |
 | `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
 
-Use the actual database version `N` supported by the test binary. The NU7/NSM
-database uses `v29`. Prepare the public snapshot with a v29-compatible writer
-before forking: its registered upgrade automatically moves compatible v28 state
-into `state/v29` when no v29 database exists, without a public Testnet resync.
-Legacy records remain readable with a zero NSM balance; new writes use the wider
-layout. Stop Zebra again before copying the upgraded snapshot, and keep the
-snapshot and any copied non-finalized blocks below the private activation.
+Use the actual database version `N` supported by the test binary. Current builds
+use `v30`. Prepare an archive snapshot with a v30-compatible writer before forking:
+its registered upgrade moves compatible v29 state into `state/v30` when no v30
+database exists, without a public Testnet resync. Keep pruning disabled while
+preparing the archive. Legacy records remain readable with a zero NSM balance;
+new writes retain the wider NSM layout. Stop Zebra again before copying the
+upgraded snapshot, and keep the snapshot and any copied non-finalized blocks below
+the private activation.
 
-Retain an untouched v28 backup before upgrading if rollback is needed.
+Retain an untouched v29 archive backup before upgrading if rollback is needed.
 `state.delete_old_database = false` does not preserve the directory that the
 upgrade moves. Manually renaming or symlinking versioned directories is not a
 substitute for the supported upgrade. Upgrade direct database readers, including

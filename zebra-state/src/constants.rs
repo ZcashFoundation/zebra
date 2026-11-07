@@ -45,6 +45,10 @@ const DATABASE_FORMAT_VERSION: u64 = 29;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.0.0: isolates historical body deletion from older archive readers in a separate directory.
+///   Only pruning-configured nodes move compatible v29 state to `state/v30`, without rewriting
+///   records. Archives stay in v29 for rollback to older binaries. Keep a separate archive backup
+///   before pruning: the move is not a copy, and deleted bodies cannot be restored in place.
 /// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
 ///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
 ///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
@@ -64,10 +68,10 @@ const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 /// significant format compatibility fix.
 const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 
-/// Returns the full semantic version of the currently running state database format code.
+/// Returns the full semantic version of the archive state database format code.
 ///
-/// This is the version implemented by the Zebra code that's currently running,
-/// the version on disk can be different.
+/// Use [`Config::state_database_format_version()`] to select the running format for a configuration
+/// and network. The version on disk can be different.
 pub fn state_database_format_version_in_code() -> Version {
     Version {
         major: DATABASE_FORMAT_VERSION,

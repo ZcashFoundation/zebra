@@ -127,7 +127,12 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // The major directory isolates body deletion from older archive readers.
+        Box::new(no_migration::NoMigration::new(
+            "isolate pruned state from archive readers",
+            Version::new(30, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -304,7 +309,6 @@ impl DbFormatChange {
     }
 
     /// Returns true if this format change/check happens at startup.
-    #[allow(dead_code)]
     pub fn is_run_at_startup(&self) -> bool {
         !matches!(self, CheckNewBlocksCurrent { .. })
     }
@@ -427,10 +431,12 @@ impl DbFormatChange {
             .expect("historical availability must be readable before changing the format");
         if history.is_pruned() {
             if let Upgrade {
-                older_disk_version, ..
+                older_disk_version,
+                newer_running_version,
             } = self
             {
                 if let Some(upgrade) = format_upgrades(Some(older_disk_version.clone()))
+                    .take_while(|upgrade| upgrade.version() <= *newer_running_version)
                     .find(|upgrade| upgrade.requires_full_history())
                 {
                     panic!(
@@ -578,7 +584,10 @@ impl DbFormatChange {
                 db.path()
             )
         });
-        db.mark_ready_for_pruning();
+        // Runtime and shutdown checks do not finish cancelled spending-index conversions.
+        if self.is_run_at_startup() {
+            db.mark_ready_for_pruning();
+        }
 
         let initial_disk_version = self
             .initial_disk_version()
@@ -642,7 +651,9 @@ impl DbFormatChange {
         };
 
         // Apply or validate format upgrades
-        for upgrade in format_upgrades(Some(older_disk_version.clone())) {
+        for upgrade in format_upgrades(Some(older_disk_version.clone()))
+            .take_while(|upgrade| upgrade.version() <= *newer_running_version)
+        {
             if upgrade.needs_migration() {
                 let timer = CodeTimer::start();
 

@@ -34,6 +34,27 @@ replacement that does the same job.
 
 ### Pruned history
 
+Archive operation remains the default. To prune historical transaction bodies, add:
+
+```toml
+[state]
+prune_blocks_older_than = 10000
+```
+
+The minimum is 10,000 bodies on Mainnet and Testnet, or `MAX_BLOCK_REORG_HEIGHT + 1` (1,001) on
+Regtest; zero is invalid. The window is measured from the durable finalized tip. Genesis and all
+non-finalized blocks remain available. Restart safety checks can retain an older witness body,
+temporarily keeping more history than requested.
+
+Pruning is irreversible. Increasing retention only widens the future window; it does not restore
+deleted bodies or fill gaps in a restored snapshot. To disable pruning after deletion, restore an
+archive snapshot or fully resync in a separate cache directory. Normal RocksDB compaction reclaims
+space eventually, without an immediate disk-reduction guarantee. Retained validation state and
+indexes continue growing.
+
+Enabling pruning immediately disables archive-service advertisement and rejects zcashd sidecars,
+even before deletion. Headers and retained data remain available to peers.
+
 For `getblock` verbosity 0, 2, or 3, unavailable historical bodies return code `-32603`
 (`RPC_INTERNAL_ERROR`) and `"Block not available (pruned data)"`, matching zcashd.
 Verbosity 3 also fails if a spent output's parent transaction is unavailable, even when the
@@ -51,7 +72,6 @@ These fields describe stored data, not a configured retention target.
 Historical headers, transaction IDs, address balances and UTXOs, treestates, and subtrees remain
 available from retained indexes. The [gRPC history contract](../api.md#historical-data-availability)
 uses an explicit status rather than silently ending a stream when bodies are unavailable.
-These contracts do not enable transaction-body deletion or add a pruning configuration option.
 
 ### Pruned output versions
 
