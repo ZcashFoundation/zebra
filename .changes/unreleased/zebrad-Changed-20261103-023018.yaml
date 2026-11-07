@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Zebra no longer gossips peer addresses as full nodes (`NODE_NETWORK`) when it never learned their services, and gossips an inbound peer's listener address with the services that peer advertised.
-time: 2026-11-03T02:30:18.301895024+01:00

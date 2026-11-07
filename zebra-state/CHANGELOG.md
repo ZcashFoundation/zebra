@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [17.0.0] - 2026-11-07
+
+### Breaking Changes
+
+- Remove the `elasticsearch` feature, the `Config::elasticsearch_url`, `elasticsearch_username` and `elasticsearch_password` fields, the `FinalizedState::elastic_db` and `elastic_blocks` fields, the `FinalizedState::elasticsearch` method, the `enable_elastic_db` argument of `FinalizedState::new`, and `RedactedString`.
+- Return `ChainTipBlock` instead of `CheckpointVerifiedBlock` from `FinalizedState::commit_finalized`, moving created outputs into the database commit instead of copying them. Callers should use the returned chain-tip summary rather than the consumed checkpoint block.
+
+### Changed
+
+- Avoid formatting whole verified blocks into commit spans; retain compact height and hash context.
+- An ephemeral database keeps its format version file in its own temporary directory and creates no other temporary directories. `database_format_version_on_disk` returns `Ok(None)` for an ephemeral config, since its database is only created when opened.
+
 ## [16.0.0] - 2026-10-22
 
 ### Breaking Changes
