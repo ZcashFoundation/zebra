@@ -54,6 +54,9 @@ There are two ways to run the pair:
   `[zcashd_compat].manage_zcashd = true`, passing the peer-pinning arguments
   automatically.
 
+For mining pools, see the [tested reward-to-payout procedure](mining-pools.md#tested-sidecar-payout-path)
+and its wallet RPC, fee, and privacy-policy limits.
+
 ## Quick start: the installer
 
 The recommended way to set up either variant is the interactive installer:

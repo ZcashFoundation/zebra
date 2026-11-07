@@ -16,6 +16,9 @@ does not promise byte-identical responses. Where Zebra diverges from
 This page describes Zebra 7.0.0-rc.0 and Zallet 0.1.0-beta.3. Zallet releases after
 0.1.0-beta.3 read chain data only from Zebra; see
 [Running Zallet with Zebra](zallet.md) for what that requires of `zebrad`.
+For pool integrations, see the [payout RPC compatibility table and tested sidecar
+procedure](mining-pools.md#wallet-rpc-compatibility); ownership does not imply that
+an unmodified payout processor works with Zallet.
 
 ## Where the boundary falls today
 

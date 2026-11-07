@@ -11,6 +11,11 @@ The `zebra-mining` branch of the ZcashFoundation s-nomp fork includes fixes that
 - Disable mining pool operator payments and miner payments (they just pay to the address configured for the node)
 - Provide basic compatibility with Zebra's RPC interface
 
+For an explicitly pinned adapter with long polling and same-parent job updates, see the
+[pool guide](mining-pools.md#tested-s-nomp-adapter). Its separate
+[sidecar payout setup](mining-pools.md#tested-sidecar-payout-path) was tested on Regtest, not by
+these testnet instructions.
+
 ## Install, run, and sync Zebra
 
 1. Configure `zebrad.toml`:
