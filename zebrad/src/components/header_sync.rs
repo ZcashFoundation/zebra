@@ -40,7 +40,10 @@ use std::{
 use chrono::Utc;
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{self, StreamExt};
-use tokio::time::{sleep, timeout};
+use tokio::{
+    sync::watch,
+    time::{sleep, timeout},
+};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
@@ -126,6 +129,8 @@ pub struct HeaderSync<ZN, ZS> {
     peers: ZN,
     state: ZS,
     concurrency: usize,
+    /// Publishes the header chain tip, see [`HeaderSync::with_tip_sender`].
+    tip_sender: Option<watch::Sender<Option<Height>>>,
 }
 
 impl<ZN, ZS> HeaderSync<ZN, ZS>
@@ -144,6 +149,26 @@ where
             peers,
             state,
             concurrency: concurrency.max(1),
+            tip_sender: None,
+        }
+    }
+
+    /// Publishes the header chain tip to `tip_sender` whenever the task reads
+    /// or moves it, for the block downloaders that must stay below it.
+    pub fn with_tip_sender(mut self, tip_sender: watch::Sender<Option<Height>>) -> Self {
+        self.tip_sender = Some(tip_sender);
+        self
+    }
+
+    /// Records the header chain tip `height` in the metrics and publishes it.
+    fn publish_tip(&self, height: Height) {
+        metrics::gauge!("sync.headers.tip.height").set(f64::from(height.0));
+        if let Some(tip_sender) = self.tip_sender.as_ref() {
+            tip_sender.send_if_modified(|published| {
+                let changed = *published != Some(height);
+                *published = Some(height);
+                changed
+            });
         }
     }
 
@@ -181,7 +206,7 @@ where
             return Ok(0);
         };
 
-        metrics::gauge!("sync.headers.tip.height").set(f64::from(tip.0 .0));
+        self.publish_tip(tip.0);
 
         if tip.0 < self.checkpoints.max_height() {
             self.sync_checkpoint_spans(tip).await
@@ -414,7 +439,7 @@ where
 
         // A batch has at most `MAX_COMMIT_HEADERS` headers, so the count fits in a u64.
         metrics::counter!("sync.headers.committed.count").increment(committed.added as u64);
-        metrics::gauge!("sync.headers.tip.height").set(f64::from(committed.tip.0 .0));
+        self.publish_tip(committed.tip.0);
         if committed.reorged {
             metrics::counter!("sync.headers.reorg.count").increment(1);
         }
