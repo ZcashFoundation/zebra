@@ -227,6 +227,8 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
   The local builder is cleaned up on self-hosted runners; hosted VMs discard it with the job.
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
+  API comparisons cover every workspace library, including unpublished libraries and libraries
+  added or removed between revisions; binary-only packages are skipped.
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
 - **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
