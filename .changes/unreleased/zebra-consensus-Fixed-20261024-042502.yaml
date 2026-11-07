@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Prepare Orchard verification batches on blocking workers while admitting bundles, rather than on async workers or only at flush ([#11995](https://github.com/ZcashFoundation/zebra/pull/11995)).
+time: 2026-10-24T04:25:02.952627198+02:00
