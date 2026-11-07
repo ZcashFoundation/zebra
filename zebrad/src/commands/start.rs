@@ -425,6 +425,10 @@ impl StartCmd {
             )
             .await;
 
+        if let Some(cache) = &early_blocks {
+            cache.set_recipients(block_advertiser.early_relay_recipients());
+        }
+
         // Start health server if configured (after sync_status is available)
 
         info!("initializing verifiers");

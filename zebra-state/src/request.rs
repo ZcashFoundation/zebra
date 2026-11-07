@@ -1073,7 +1073,7 @@ pub enum Request {
         block: Arc<Block>,
         /// If true, authenticate even when caching is disabled or full, against a parent retained
         /// in any published non-finalized chain. Missing snapshot context returns no guard.
-        /// If false, skip disabled caching and restrict admission to the current best tip.
+        /// If false, skip disabled caching or absent recipients and admit only the current best tip.
         require_authentication: bool,
     },
 
@@ -1514,7 +1514,7 @@ pub enum ReadRequest {
     MiningCandidateChanges,
 
     /// Returns [`ReadResponse::EarlyRelayCache`], enabling early block retention while the cache
-    /// or one of its subscribers is held. Independent of mining and never enabled by default.
+    /// or one of its subscribers is held, subject to its recipient restriction. Independent of mining.
     EarlyRelayCache,
 
     /// Checks height and contextual difficulty/time for a child of the published best-chain tip.
