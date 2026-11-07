@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added the opt-in `sync.v2_checkpoint_sync` engine, which downloads checkpointed blocks from version 2 peers with `get-block-range`, its `v2_lookahead_bytes`, `v2_min_peer_rate` and `v2_target_peers` settings, and the `sync.v2.owner`, `sync.v2.lookahead.bytes`, `sync.v2.peer.rate`, `sync.v2.stalls` and `sync.v2.unit.bytes` metrics.
+time: 2026-11-05T23:00:00.000000000+00:00

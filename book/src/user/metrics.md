@@ -155,6 +155,11 @@ with `sync.downloads.in_flight`.
 - `sync_step_timeout`: one sync step took longer than the block verify timeout, which usually indicates a hang. If a block was waiting for network capacity when the timeout fired, the round ends as `block_error` with the `network_ready_timeout` kind instead.
 - `block_error`: a block download or verify error restarted the sync. The error's `kind` is in the `waiting to restart sync` log.
 
+A round that ends because the [version 2 checkpoint sync engine](p2p-v2.md#checkpoint-sync-over-version-2)
+takes over block download is not counted. The `sync.v2.owner` gauge shows which of them owns block download,
+and the other `sync.v2.*` metrics show how the engine's downloads go: see
+[its metrics](p2p-v2.md#checkpoint-sync-over-version-2).
+
 `kind` names the error, for example `not_found`, `download_timed_out`, `invalid`, `verify_timeout`,
 `utxo_lookup_timeout`, `already_verified`, or `cancelled`.
 

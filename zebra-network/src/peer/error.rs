@@ -112,6 +112,11 @@ pub enum PeerError {
     #[error("request is only valid for inbound serving")]
     InboundOnlyRequest,
 
+    /// A request that only the version 2 protocol carries was submitted to a
+    /// legacy connection.
+    #[error("request is only served on version 2 connections")]
+    V2OnlyRequest,
+
     /// A queued advert lost authorization before its local write started.
     #[error("peer authorization was revoked before advert delivery")]
     AdvertAuthorizationRevoked,
@@ -187,6 +192,7 @@ impl PeerError {
             PeerError::NoReadyPeers => "NoReadyPeers".into(),
             PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
             PeerError::InboundOnlyRequest => "InboundOnlyRequest".into(),
+            PeerError::V2OnlyRequest => "V2OnlyRequest".into(),
             PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked".into(),
             PeerError::InboundTimeout => "InboundTimeout".into(),
             PeerError::ServiceShutdown => "ServiceShutdown".into(),

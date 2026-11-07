@@ -61,6 +61,12 @@ use crate::{
 
 use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
+pub(crate) mod block_range;
+
+pub(crate) use block_range::{global_block_range_permits, BlockRangeServing};
+
+use block_range::{serve_block_range, PendingRange};
+
 /// How many of one peer's request streams may be served at once.
 ///
 /// The legacy connection serves one request at a time per peer. Two keeps
@@ -146,6 +152,10 @@ const MAX_TX_LOOKUPS_PER_RESPONSE: usize = MAX_TX_INV_IN_SENT_MESSAGE as usize;
 /// `get_addr_allowed` is cleared by the first `get-addr` request it lets
 /// through; a `get-addr` request is refused while it is clear. The `get-addr`
 /// answer comes from `address_book`.
+///
+/// A `get-block-range` request is read within the request deadline like any
+/// other, but its response is bounded per chunk and in total instead (see
+/// [`block_range`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn serve<S>(
     send: SendStream,
@@ -156,6 +166,7 @@ pub(super) async fn serve<S>(
     get_addr_allowed: Arc<AtomicBool>,
     address_book: Option<V2BookHandle>,
     events: Events,
+    block_ranges: BlockRangeServing,
 ) where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -165,7 +176,8 @@ pub(super) async fn serve<S>(
     // One deadline for the whole exchange: a peer that reads its responses slowly, or asks for
     // many entries, cannot hold a request permit and the request's objects for longer than a
     // requester waits for a response. Dropping the exchange at the deadline releases both.
-    let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let accepted = tokio::time::Instant::now();
+    let deadline = accepted + REQUEST_TIMEOUT;
     let mut response = ResponseSend {
         send,
         written: false,
@@ -175,17 +187,41 @@ pub(super) async fn serve<S>(
         serve_inner(
             &mut response,
             &mut recv,
-            inbound_service,
+            inbound_service.clone(),
             permits,
             &overloads,
             &get_addr_allowed,
             address_book.as_ref(),
+            &block_ranges,
         ),
     )
     .await;
-    // The response did not complete in time: abandon the request.
-    let abandoned = Outcome::Refuse(response.abandon_code());
-    match served.unwrap_or(Err(abandoned)) {
+    let served = match served {
+        Ok(Ok(Some(range))) => {
+            // # Security
+            //
+            // A range response is too large to fit in one request deadline. It holds only its own
+            // range permits, which bound how many are served at once, and is bounded per chunk and
+            // in total from here.
+            let inbound_service = Inbound {
+                service: inbound_service,
+                overloads: &overloads,
+            };
+            serve_block_range(
+                &mut response,
+                range,
+                inbound_service,
+                accepted + block_ranges.stream_timeout(),
+                block_ranges.min_progress(),
+            )
+            .await
+        }
+        Ok(Ok(None)) => Ok(()),
+        Ok(Err(outcome)) => Err(outcome),
+        // The response did not complete in time: abandon the request.
+        Err(_elapsed) => Err(Outcome::Refuse(response.abandon_code())),
+    };
+    match served {
         // The peer went away or cancelled the stream: nothing to do.
         Ok(()) | Err(Outcome::Transport) => {}
         Err(Outcome::Violation { reason, code }) => {
@@ -234,6 +270,11 @@ impl From<WireError> for Outcome {
 /// Reads the request, answers it, and writes the response. The caller
 /// bounds the whole exchange, every wait here included, by the request
 /// deadline.
+///
+/// A `get-block-range` request is only read here: it is returned, with the
+/// permits it was admitted with, for the caller to serve outside the request
+/// deadline.
+#[allow(clippy::too_many_arguments)]
 async fn serve_inner<S>(
     response: &mut ResponseSend,
     recv: &mut RecvStream,
@@ -242,7 +283,8 @@ async fn serve_inner<S>(
     overloads: &Overloads,
     get_addr_allowed: &AtomicBool,
     address_book: Option<&V2BookHandle>,
-) -> Result<(), Outcome>
+    block_ranges: &BlockRangeServing,
+) -> Result<Option<PendingRange>, Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -281,11 +323,24 @@ where
     // # Security
     //
     // Only a few of one peer's requests are buffered and reach the inbound service at once; the
-    // rest wait here, holding nothing, until the peer's share frees up.
-    let _permit = permits
-        .acquire_owned()
-        .await
-        .map_err(|_closed| Outcome::Transport)?;
+    // rest wait here, holding nothing, until the peer's share frees up. Range requests hold none
+    // of these permits: they are bounded by their own, which are never waited for, so excess
+    // range streams are refused at once, and never starve the peer's other requests. A range
+    // stream claims its peer permit here, and the node permit only once its request is decoded,
+    // so streams that never send a request cannot hold the node's permits.
+    let mut range_permit = match stream_type {
+        StreamType::GetBlockRange => Some(block_ranges.claim_peer()?),
+        _ => None,
+    };
+    let _permit = match range_permit {
+        Some(_) => None,
+        None => Some(
+            permits
+                .acquire_owned()
+                .await
+                .map_err(|_closed| Outcome::Transport)?,
+        ),
+    };
 
     // The body, up to the peer finishing its direction, bounded by what the type allows.
     let body = recv
@@ -325,6 +380,13 @@ where
             serve_addr(response, address_book).await
         }
         WireRequest::Mempool => serve_mempool(response, inbound_service).await,
+        WireRequest::BlockRange(request) => {
+            let peer = range_permit
+                .take()
+                .expect("claimed above, because only a get-block-range stream decodes to one");
+            let permits = block_ranges.claim_node(peer)?;
+            return Ok(Some(PendingRange { request, permits }));
+        }
     }?;
 
     metrics::counter!(
@@ -335,7 +397,7 @@ where
 
     // `finish` only fails if the stream was already closed, which the peer may do at will.
     let _ = response.send.finish();
-    Ok(())
+    Ok(None)
 }
 
 /// Calls the inbound service, mapping its failures to stream refusals, or,

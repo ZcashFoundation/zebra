@@ -299,7 +299,7 @@ fn transport(error: impl std::fmt::Display) -> Failure {
 /// draft's `CANCELLED` code (draft, "Request Streams"). After the response
 /// has been read to its FIN, quinn has already released the stream and `stop`
 /// does nothing.
-struct ResponseStream(RecvStream);
+pub(crate) struct ResponseStream(pub(crate) RecvStream);
 
 impl ResponseStream {
     /// The stream as a buffered reader: the response readers take result and CompactSize bytes
@@ -320,7 +320,7 @@ impl Drop for ResponseStream {
 /// error), the stream is reset with `CANCELLED` rather than finished, which
 /// the peer would read as a truncated request and close the connection with
 /// `PROTOCOL_ERROR` (draft, "Request Streams", "Stream Types").
-pub(super) struct RequestSend(pub(super) Option<SendStream>);
+pub(crate) struct RequestSend(pub(crate) Option<SendStream>);
 
 impl Drop for RequestSend {
     fn drop(&mut self) {
@@ -445,7 +445,8 @@ async fn drive_inner(
         | Request::AdvertiseCompactBlock(..)
         | Request::CheckCompactHeader(_)
         | Request::CompactBlockTransactions(_)
-        | Request::CheckCompactBlock(_) => {
+        | Request::CheckCompactBlock(_)
+        | Request::BlockRange { .. } => {
             return Err(Failure::Refused(PeerError::InboundOnlyRequest))
         }
     };

@@ -73,6 +73,30 @@ pub enum Request {
     /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source.
     BlocksByHash(HashSet<block::Hash>),
 
+    /// Asks this node's inbound service for the ancestor chain of `from_hash`,
+    /// to serve a version 2 `get-block-range` request.
+    ///
+    /// Inbound-only: only the version 2 connection's `get-block-range` server
+    /// creates it. The peer set and version 2 connections refuse
+    /// it as an outbound request with [`PeerError::InboundOnlyRequest`], and
+    /// legacy connections with [`PeerError::V2OnlyRequest`].
+    ///
+    /// [`PeerError::InboundOnlyRequest`]: crate::PeerError::InboundOnlyRequest
+    /// [`PeerError::V2OnlyRequest`]: crate::PeerError::V2OnlyRequest
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::BlockRange`](super::Response::BlockRange).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    BlockRange {
+        /// The hash of the first (highest) block to return.
+        from_hash: block::Hash,
+        /// The most blocks to return; at least 1.
+        count: u32,
+        /// The most serialized bytes to return, the first block exempt.
+        max_bytes: u32,
+    },
+
     /// Request blocks from this node on a connection that negotiated experimental early relay.
     ///
     /// Only the inbound connection creates this request, based on both peers' service bits.
@@ -326,6 +350,9 @@ impl fmt::Display for Request {
             Request::EarlyBlocksByHash(hashes) => {
                 format!("EarlyBlocksByHash({})", hashes.len())
             }
+            Request::BlockRange {
+                count, max_bytes, ..
+            } => format!("BlockRange {{ count: {count}, max_bytes: {max_bytes} }}"),
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
@@ -367,6 +394,7 @@ impl Request {
 
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
+            Request::BlockRange { .. } => "BlockRange",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",

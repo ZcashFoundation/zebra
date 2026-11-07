@@ -315,7 +315,18 @@ pub struct SemanticallyVerifiedBlock {
 pub struct CheckpointVerifiedBlock {
     verified: SemanticallyVerifiedBlock,
     auth_data_root: Option<AuthDataRoot>,
+    commit_aids: Option<Arc<CommitAids>>,
 }
+
+/// Per-block data a sync engine attaches to a [`CheckpointVerifiedBlock`] so
+/// the finalized writer can skip work.
+///
+/// Always absent for now. The verified tree
+/// roots PR adds `tree_roots`, adopted per pool and per block only after the
+/// following header verifies (zips#1346 S:265-280).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CommitAids {}
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -724,6 +735,19 @@ impl CheckpointVerifiedBlock {
     pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
         self.auth_data_root
     }
+
+    /// Attaches commit aids. No caller sets them yet: the verified tree
+    /// roots change is the first.
+    pub fn with_commit_aids(mut self, aids: Arc<CommitAids>) -> Self {
+        self.commit_aids = Some(aids);
+        self
+    }
+
+    /// The attached commit aids, if any; the finalized writer ignores them
+    /// until the roots PR.
+    pub fn commit_aids(&self) -> Option<&Arc<CommitAids>> {
+        self.commit_aids.as_ref()
+    }
 }
 
 impl SemanticallyVerifiedBlock {
@@ -757,6 +781,7 @@ impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
         Self {
             verified,
             auth_data_root: None,
+            commit_aids: None,
         }
     }
 }
@@ -1717,6 +1742,30 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
+    /// Returns the ancestor chain of the block with `hash`, in any chain, for
+    /// serving version 2 `get-block-range` requests.
+    ///
+    /// Looks `hash` up in every non-finalized chain, then the finalized
+    /// state; walks parents in memory, then switches to finalized height
+    /// order, checking the hash at the entry height. The first block is
+    /// always returned; later blocks only while the running serialized size
+    /// stays within `max_bytes`, and at most `count` blocks in all.
+    ///
+    /// Returns
+    ///
+    /// [`ReadResponse::AncestorBlocks`]: descending height order, each block
+    /// the parent of the one before it; empty if `hash` is unknown; shorter
+    /// than `count` at genesis, at the byte bound, or (after #12189) at a
+    /// pruned body.
+    AncestorBlocks {
+        /// The hash of the first (highest) block.
+        hash: block::Hash,
+        /// The most blocks to return; 0 returns nothing.
+        count: u32,
+        /// The most serialized bytes to return, the first block exempt.
+        max_bytes: u64,
+    },
+
     /// Finds the fork point between the locator `known_blocks` and the best chain.
     ///
     /// `known_blocks` is a block locator. Returns the most recent locator entry that is
@@ -2004,6 +2053,7 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
+            ReadRequest::AncestorBlocks { .. } => "ancestor_blocks",
             ReadRequest::FindForkPoint { .. } => "find_fork_point",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",

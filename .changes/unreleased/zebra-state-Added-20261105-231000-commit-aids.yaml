@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `CommitAids` and `CheckpointVerifiedBlock::{with_commit_aids, commit_aids}`, an optional per-block attachment for data a sync engine passes to the finalized writer. Nothing sets it yet.
+time: 2026-11-05T23:10:00.000000000Z
