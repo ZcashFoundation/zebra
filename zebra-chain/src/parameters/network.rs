@@ -232,15 +232,19 @@ impl Network {
 
     /// Returns true if the maximum block time rule is active for `network` and `height`.
     ///
-    /// Always returns true if `network` is the Mainnet.
+    /// If `network` is the Mainnet, the `height` should be at least 2 to return true.
     /// If `network` is the Testnet, the `height` should be at least
     /// TESTNET_MAX_TIME_START_HEIGHT to return true.
     /// Returns false otherwise.
     ///
-    /// Part of the consensus rules at <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    /// > For each block at block height 2 or greater on Mainnet, or block height 653606 or
+    /// > greater on Testnet, `nTime` MUST be less than or equal to the median-time-past of that
+    /// > block plus 90 · 60 seconds.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     pub fn is_max_block_time_enforced(&self, height: block::Height) -> bool {
         match self {
-            Network::Mainnet => true,
+            Network::Mainnet => height >= block::Height(2),
             // TODO: Move `TESTNET_MAX_TIME_START_HEIGHT` to a field on testnet::Parameters (#8364)
             Network::Testnet(_params) => height >= super::TESTNET_MAX_TIME_START_HEIGHT,
         }
