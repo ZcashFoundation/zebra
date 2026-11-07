@@ -1331,6 +1331,44 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            Request::KnownBlocks(hashes) => {
+                self.drain_finalized_resets();
+                self.drain_non_finalized_rejected_hashes();
+                let hashes: Vec<_> = hashes
+                    .into_iter()
+                    .map(|hash| {
+                        let known = self.known_sent_hash(&hash).or_else(|| {
+                            self.non_finalized_state_queued_blocks
+                                .has(hash)
+                                .then_some(KnownBlock::Queue)
+                        });
+                        (hash, known)
+                    })
+                    .collect();
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let state = read_service.latest_non_finalized_state();
+                    let locations = hashes
+                        .into_iter()
+                        .map(|(hash, known)| {
+                            known.or_else(|| {
+                                read::non_finalized_state_contains_block_hash(&state, hash).or_else(
+                                    || {
+                                        read::finalized_state_contains_block_hash(
+                                            &read_service.db,
+                                            hash,
+                                        )
+                                    },
+                                )
+                            })
+                        })
+                        .collect();
+                    Ok(Response::KnownBlocks(locations))
+                }
+                .boxed()
+            }
+
             // The expected error type for this request is `InvalidateError`
             Request::InvalidateBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {

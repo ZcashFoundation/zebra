@@ -450,6 +450,7 @@ where
 }
 
 /// A sync round that ended early, and why.
+#[derive(Debug)]
 struct RestartError {
     reason: RestartReason,
     /// The block error kind, for [`RestartReason::BlockError`].
@@ -937,18 +938,15 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
 
-                    let mut first_unknown = None;
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        if !self.state_contains(hash).await? {
-                            first_unknown = Some(i);
-                            break;
-                        }
-                    }
+                    let known_blocks = self.known_blocks(hashes.clone()).await?;
+                    let first_unknown = known_blocks
+                        .iter()
+                        .position(|loc| matches!(loc, None | Some(zs::KnownBlock::Queue)));
+                    let hashes = hashes.as_slice();
 
                     debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
@@ -1006,13 +1004,21 @@ where
 
         debug!(?self.prospective_tips);
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
-            debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+        // State can advance during fanout. Compact unknown hashes in place, preserving download
+        // order.
+        let known_blocks = self
+            .known_blocks(download_set.iter().copied().collect())
+            .await?;
+        let mut retained = 0;
+        for (index, loc) in known_blocks.into_iter().enumerate() {
+            if matches!(loc, None | Some(zs::KnownBlock::Queue)) {
+                if retained != index {
+                    download_set.swap_indices(retained, index);
+                }
+                retained += 1;
             }
         }
+        download_set.truncate(retained);
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
@@ -1662,6 +1668,29 @@ where
                     Ok(())
                 }
             }
+        }
+    }
+
+    /// Returns each block's state location in request order, including queued blocks.
+    async fn known_blocks(
+        &mut self,
+        hashes: Vec<block::Hash>,
+    ) -> Result<Vec<Option<zs::KnownBlock>>, Report> {
+        if hashes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zs::Request::KnownBlocks(hashes))
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::KnownBlocks(locations) => Ok(locations),
+            _ => unreachable!("wrong response to known blocks request"),
         }
     }
 
