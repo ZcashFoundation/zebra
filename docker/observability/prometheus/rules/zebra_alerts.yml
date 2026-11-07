@@ -64,7 +64,7 @@ groups:
     rules:
       # Critical: Negative value pool would indicate a bug (should never happen - Zebra rejects such blocks)
       - alert: ValuePoolNegative
-        expr: state_finalized_value_pool_transparent < 0 or state_finalized_value_pool_sprout < 0 or state_finalized_value_pool_sapling < 0 or state_finalized_value_pool_orchard < 0
+        expr: state_finalized_value_pool_transparent < 0 or state_finalized_value_pool_sprout < 0 or state_finalized_value_pool_sapling < 0 or state_finalized_value_pool_orchard < 0 or state_finalized_value_pool_deferred < 0
         for: 0m
         labels:
           severity: critical
