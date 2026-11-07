@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: The RPC compatibility middleware now forwards plain JSON-RPC 2.0 requests and their responses unchanged instead of parsing and re-encoding them, which removes up to tens of milliseconds per large `getblock` response. JSON-RPC 1.0 requests from `lightwalletd` and `zcash-cli` are still converted as before.
+body: The RPC compatibility middleware now forwards plain JSON-RPC 2.0 requests and their responses unchanged instead of parsing and re-encoding them, which removes up to tens of milliseconds per large `getblock` response. Responses to JSON-RPC 1.0 requests from `lightwalletd` and `zcash-cli` are converted by rewriting only their first and last bytes, so large results are no longer re-parsed either.
 time: 2026-11-07T11:00:00.000000-03:00

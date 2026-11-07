@@ -35,6 +35,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
 ///
 /// Requests that are already canonical JSON-RPC 2.0, and their responses, are forwarded unchanged.
+/// Responses to 1.0 requests are converted by rewriting only their head and tail, keeping `result` as is.
 ///
 /// ### Add missing `content-type` HTTP header
 ///
@@ -204,13 +205,101 @@ impl<S> HttpRequestMiddleware<S> {
 
         let (parts, body) = response.into_parts();
         let bytes = body.collect().await?.to_bytes();
-        let body =
-            if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
-                HttpBody::from(serde_json::to_vec(&response.into_version(version)).expect("valid"))
-            } else {
-                bytes_body(bytes)
-            };
-        Ok(HttpResponse::from_parts(parts, body))
+        Ok(HttpResponse::from_parts(
+            parts,
+            bytes_body(response_to_version(bytes, version)),
+        ))
+    }
+}
+
+/// Converts a JSON-RPC 2.0 response body to `version`, splicing it when it has the
+/// `jsonrpsee` layout and parsing it otherwise.
+pub(super) fn response_to_version(bytes: Bytes, version: JsonRpcVersion) -> Bytes {
+    splice_response(&bytes, version).unwrap_or_else(|| reencode_response(bytes, version))
+}
+
+/// Parses a response body and re-encodes it as `version`, or returns it unchanged if it doesn't parse.
+pub(super) fn reencode_response(bytes: Bytes, version: JsonRpcVersion) -> Bytes {
+    match serde_json::from_slice::<JsonRpcResponse>(&bytes) {
+        Ok(response) => serde_json::to_vec(&response.into_version(version))
+            .expect("valid")
+            .into(),
+        Err(_) => bytes,
+    }
+}
+
+/// The longest response `id` the splice looks for, so it only scans the head of the body.
+const MAX_SPLICED_ID_LEN: usize = 256;
+
+/// Converts a `jsonrpsee` response, `{"jsonrpc":"2.0","id":…,"result":…}` or `…"error":…}`,
+/// to a 1.0 `version` by rewriting its head and tail. Returns `None` for any other layout.
+pub(super) fn splice_response(body: &[u8], version: JsonRpcVersion) -> Option<Bytes> {
+    let head: &[u8] = match version {
+        JsonRpcVersion::Lightwalletd => br#"{"jsonrpc":"1.0","id":"#,
+        JsonRpcVersion::Bitcoind => br#"{"id":"#,
+        JsonRpcVersion::TwoPointZero | JsonRpcVersion::Unknown => return None,
+    };
+    let rest = body.strip_prefix(br#"{"jsonrpc":"2.0","id":"#)?;
+    let (id, rest) = rest.split_at(scalar_len(&rest[..rest.len().min(MAX_SPLICED_ID_LEN)])?);
+    let rest = rest.strip_suffix(b"}")?;
+
+    // The id and error are short, so re-encode them as the parsing path does.
+    let reencode = |value: &[u8]| {
+        serde_json::from_slice::<serde_json::Value>(value)
+            .ok()
+            .and_then(|value| serde_json::to_vec(&value).ok())
+    };
+    let id = reencode(id)?;
+    if let Some(result) = rest.strip_prefix(br#","result":"#) {
+        return is_one_value(result).then(|| splice(head, &id, result, b"null"));
+    }
+    let error = reencode(rest.strip_prefix(br#","error":"#)?)?;
+    Some(splice(head, &id, b"null", &error))
+}
+
+/// Joins the parts of a 1.0 response, which has both `result` and `error`, as zcashd sends.
+fn splice(head: &[u8], id: &[u8], result: &[u8], error: &[u8]) -> Bytes {
+    let parts: [&[u8]; 7] = [
+        head,
+        id,
+        br#","result":"#,
+        result,
+        br#","error":"#,
+        error,
+        b"}",
+    ];
+    parts.concat().into()
+}
+
+/// Returns the length of the string, number or `null` at the start of `head`, if it is followed
+/// by a comma in `head`. Strings end at their closing quote, other values at the comma.
+fn scalar_len(head: &[u8]) -> Option<usize> {
+    if head.first() != Some(&b'"') {
+        return memchr::memchr(b',', head);
+    }
+    let mut end = 1;
+    loop {
+        end += memchr::memchr2(b'"', b'\\', head.get(end..)?)?;
+        if head[end] == b'"' {
+            return Some(end + 1);
+        }
+        end += 2;
+    }
+}
+
+/// Returns true if `value` looks like one JSON value from its first and last bytes.
+/// Scalars are short, so they are parsed; containers and strings are trusted to `jsonrpsee`.
+fn is_one_value(value: &[u8]) -> bool {
+    match (value.first(), value.last()) {
+        (Some(b'{'), Some(b'}')) | (Some(b'['), Some(b']')) => true,
+        (Some(b'"'), Some(b'"')) => value.len() >= 2,
+        (Some(b'{' | b'[' | b'"'), _) => false,
+        (Some(first), Some(last)) => {
+            !first.is_ascii_whitespace()
+                && !last.is_ascii_whitespace()
+                && serde_json::from_slice::<serde::de::IgnoredAny>(value).is_ok()
+        }
+        _ => false,
     }
 }
 
@@ -355,7 +444,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-enum JsonRpcVersion {
+pub(super) enum JsonRpcVersion {
     /// bitcoind used a mishmash of 1.0, 1.1, and 2.0 for its JSON-RPC.
     Bitcoind,
     /// lightwalletd uses the above mishmash, but also breaks spec to include a
