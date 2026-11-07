@@ -445,6 +445,12 @@ impl ZebraDb {
     pub fn size(&self) -> u64 {
         self.db.size()
     }
+
+    /// Returns the estimated total disk space usage of the database, measured at most
+    /// [`DiskDb::SIZE_CACHE_TTL`](crate::service::finalized_state::DiskDb::SIZE_CACHE_TTL) ago.
+    pub fn cached_size(&self) -> u64 {
+        self.db.cached_size()
+    }
 }
 
 impl Drop for ZebraDb {

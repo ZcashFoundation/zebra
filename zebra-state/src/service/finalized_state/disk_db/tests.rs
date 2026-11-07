@@ -72,3 +72,38 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that `cached_size` reuses a fresh measurement and re-measures a stale one.
+#[test]
+fn cached_size_reuses_fresh_measurement() {
+    use std::time::{Duration, Instant};
+
+    use zebra_chain::parameters::Network;
+
+    use crate::{service::finalized_state::FinalizedState, Config};
+
+    let _init_guard = zebra_test::init();
+
+    let state = FinalizedState::new(&Config::ephemeral(), &Network::Mainnet)
+        .expect("opening an ephemeral database should succeed");
+    let db: &DiskDb = state.db.db();
+
+    assert_eq!(db.cached_size(), db.size());
+
+    let sentinel = db.size() + 12_345;
+    *db.size_cache.lock().unwrap() = Some((Instant::now(), sentinel));
+    assert_eq!(db.cached_size(), sentinel, "a fresh measurement is reused");
+    assert_eq!(
+        state.db.clone().cached_size(),
+        sentinel,
+        "clones share the cache"
+    );
+
+    let stale = Instant::now() - DiskDb::SIZE_CACHE_TTL - Duration::from_secs(1);
+    *db.size_cache.lock().unwrap() = Some((stale, sentinel));
+    assert_eq!(
+        db.cached_size(),
+        db.size(),
+        "a stale measurement is replaced"
+    );
+}
