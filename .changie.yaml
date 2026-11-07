@@ -60,10 +60,15 @@ projects:
       key: tower-fallback
       changelog: tower-fallback/CHANGELOG.md
 # Order follows the section order in book/src/dev/changelog-guidelines.md.
-# Only `Breaking Changes` has a key, to keep `Breaking Changes` out of fragment
-# file names; note that setting a key disables the label, so it is `-k breaking`
-# on the command line while the other kinds stay `-k Fixed` and so on.
+# Only `Network Upgrade` and `Breaking Changes` have keys, to keep spaces out of
+# fragment file names; note that setting a key disables the label, so it is
+# `-k network-upgrade` and `-k breaking` on the command line while the other kinds
+# stay `-k Fixed` and so on. `network-upgrade` is for zebrad only: it is the one
+# kind that releases a new zebrad major version.
 kinds:
+    - key: network-upgrade
+      label: Network Upgrade
+      auto: major
     - key: breaking
       label: Breaking Changes
       auto: major
