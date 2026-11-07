@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: sapling_prover() now returns SaplingCoinbaseProver instead of LocalTxProver. It supports coinbase outputs only and loads bundled output parameters lazily; Sapling spend proving is no longer supported.
+time: 2026-11-06T16:09:48.321723744+01:00
