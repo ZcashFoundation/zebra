@@ -41,6 +41,39 @@ mod tests;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// Bound duplicate-verification waiting without making sync depend on a gossip task's lifetime.
+pub(crate) const SHARED_VERIFY_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Completion of verification for one exact, immutable downloaded body.
+pub(crate) enum InFlightVerification {
+    Owner(watch::Sender<bool>),
+    Waiting(watch::Receiver<bool>),
+}
+
+impl InFlightVerification {
+    /// Reuse only a successful commit; failure, cancellation, or timeout permits independent work.
+    pub(crate) async fn already_verified(&mut self) -> bool {
+        match self {
+            Self::Owner(_) => false,
+            Self::Waiting(result) => matches!(
+                timeout(
+                    SHARED_VERIFY_TIMEOUT,
+                    result.wait_for(|committed| *committed)
+                )
+                .await,
+                Ok(Ok(_))
+            ),
+        }
+    }
+
+    /// Notify waiters only after the verifier has committed the body.
+    pub(crate) fn complete(self, committed: bool) {
+        if let Self::Owner(result) = self {
+            result.send_replace(committed);
+        }
+    }
+}
+
 /// Blocks being downloaded or verified by sync and inbound gossip.
 ///
 /// Gossip only claims unclaimed hashes. Sync always holds its hashes, because an advertisement
@@ -53,6 +86,7 @@ struct DownloadOwners {
     count: usize,
     source: Option<(Weak<block::Block>, PeerSocketAddr)>,
     other_sources: Vec<(Weak<block::Block>, PeerSocketAddr)>,
+    verification: Option<(Weak<block::Block>, watch::Receiver<bool>)>,
 }
 
 impl DownloadOwners {
@@ -152,6 +186,27 @@ pub(crate) struct InFlightDownload {
 }
 
 impl InFlightDownload {
+    /// Share only the exact authenticated body, never a header hash with different authorizing data.
+    pub(crate) fn verification(&self, block: &Arc<block::Block>) -> InFlightVerification {
+        let mut downloads = self
+            .downloads
+            .0
+            .lock()
+            .expect("download ownership lock is not poisoned");
+        let owners = downloads
+            .get_mut(&self.hash)
+            .expect("the download guard keeps its hash registered");
+        if let Some((body, result)) = &owners.verification {
+            // A retained Weak prevents address reuse; Arc identity also binds all body commitments.
+            if std::ptr::eq(body.as_ptr(), Arc::as_ptr(block)) {
+                return InFlightVerification::Waiting(result.clone());
+            }
+        }
+        let (result, receiver) = watch::channel(false);
+        owners.verification = Some((Arc::downgrade(block), receiver));
+        InFlightVerification::Owner(result)
+    }
+
     /// Record the supplier before verification can publish an early-relay candidate.
     pub(crate) fn set_source(&mut self, block: &Arc<block::Block>, source: Option<PeerSocketAddr>) {
         let Some(source) = source else {
@@ -821,6 +876,10 @@ where
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
                 let mut pressure_error = None;
                 let verification = async {
+                    let mut shared = ownership.verification(&block);
+                    if shared.already_verified().await {
+                        return Ok(hash);
+                    }
                     loop {
                         let request = if early_relay {
                             zebra_consensus::Request::CommitEarlyRelay(block.clone())
@@ -834,6 +893,7 @@ where
                             .and_then(|error| error.downcast_ref::<zebra_consensus::RouterError>())
                             .is_some_and(zebra_consensus::RouterError::is_resource_pressure);
                         if !pressure {
+                            shared.complete(result.is_ok());
                             return result;
                         }
                         pressure_error = result.err();

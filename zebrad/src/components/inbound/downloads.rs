@@ -716,14 +716,18 @@ where
                 }
             }
 
+            let mut shared = ownership.verification(&block);
+            if shared.already_verified().await {
+                return Ok((hash, block_height));
+            }
             let request = if early_relay {
                 zebra_consensus::Request::CommitEarlyRelay(block)
             } else {
                 zebra_consensus::Request::Commit(block)
             };
-            verifier
-                .oneshot(request)
-                .await
+            let result = verifier.oneshot(request).await;
+            shared.complete(result.is_ok());
+            result
                 .map(|hash| (hash, block_height))
                 .map_err(|e| (e, advertiser_addr))
         }

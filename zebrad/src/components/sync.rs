@@ -52,11 +52,13 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::Downloads;
+pub(crate) use downloads::Downloads;
 use hedge::SuccessHedge;
 
 pub(crate) use diagnostics::{RestartReason, SyncDiagnostics};
 pub(crate) use downloads::InFlightDownloads;
+#[cfg(test)]
+pub(crate) use downloads::SHARED_VERIFY_TIMEOUT;
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub(crate) use gossip::gossip_early_blocks;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
