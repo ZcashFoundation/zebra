@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Add `no_duplicate_transparent_spends` to reject duplicate transparent outpoints within and across block transactions before transaction verification, without allocating for blocks without transparent spends.
+time: 2026-11-13T11:00:39.283999796+01:00

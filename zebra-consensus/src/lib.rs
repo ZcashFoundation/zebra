@@ -52,6 +52,7 @@ pub mod transaction;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::check::difficulty_is_valid;
 
+pub use block::check::no_duplicate_transparent_spends;
 pub use block::{
     check::body_matches_header, Request, ShieldedActionCounts, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
