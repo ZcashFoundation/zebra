@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Enable parallel public RedPallas point decoding with Pasta 0.6.2 and inherit RedDSA's empty/singleton fast paths. RedPallas and RedJubjub singleton verification no longer draws batch weights ([#12343](https://github.com/ZcashFoundation/zebra/pull/12343)).
+time: 2026-11-07T18:46:26.92298122+01:00
