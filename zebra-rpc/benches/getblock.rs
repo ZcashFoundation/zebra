@@ -6,6 +6,8 @@
 //!   `ReadStateService` with the continuous mainnet vectors finalized, and the same for transactions.
 //! - Verbosity 2: the RPC builds a `TransactionObject` for every transaction, then serializes
 //!   it to JSON. `verbose` measures the whole step and its per-transaction parts.
+//! - `getblock rpc`: end-to-end `get_block` latency through `RpcImpl` against a populated state,
+//!   including every state read the method issues.
 //!
 //! # Test data
 //!
@@ -21,15 +23,22 @@
 use std::{io::Cursor, sync::Arc};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use tower::ServiceExt;
+use tower::{buffer::Buffer, ServiceExt};
 
 use zebra_chain::{
     block::{Block, SerializedBlock},
+    chain_sync_status::MockSyncStatus,
     parameters::Network,
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::SerializedTransaction,
 };
-use zebra_rpc::client::{GetBlockResponse, TransactionObject};
+use zebra_network::address_book_peers::MockAddressBookPeers;
+use zebra_node_services::BoxError;
+use zebra_rpc::{
+    client::{GetBlockResponse, TransactionObject},
+    methods::{RpcImpl, RpcServer},
+};
+use zebra_test::mock_service::MockService;
 
 /// Returns `(label, raw bytes, parsed block)` for each benchmarked mainnet block.
 fn blocks() -> Vec<(String, &'static [u8], Arc<Block>)> {
@@ -275,5 +284,65 @@ fn bench_verbose(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_raw, bench_state, bench_verbose);
+fn bench_rpc(c: &mut Criterion) {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let _guard = rt.enter();
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|bytes| bytes.zcash_deserialize_into().expect("valid block"))
+        .collect();
+    let tip = (blocks.len() - 1).to_string();
+    let tip_hash = blocks.last().expect("non-empty").hash().to_string();
+
+    let (state, read_state, latest_chain_tip, _) =
+        rt.block_on(zebra_state::populated_state(blocks, &Network::Mainnet));
+
+    // Same service wiring as the `rpc_getblock` vector test.
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _queue) = RpcImpl::new(
+        Network::Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC bench",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state, 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let mut group = c.benchmark_group("getblock rpc");
+    for (label, id, verbosity) in [
+        ("v1 by height", &tip, 1),
+        ("v1 by hash", &tip_hash, 1),
+        ("v2 by height", &tip, 2),
+        ("v3 by height", &tip, 3),
+    ] {
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                rt.block_on(rpc.get_block(id.clone(), Some(verbosity)))
+                    .expect("block exists")
+            })
+        });
+    }
+    group.bench_function("getblockheader by height", |b| {
+        b.iter(|| {
+            rt.block_on(rpc.get_block_header(tip.clone(), Some(true)))
+                .expect("block exists")
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_raw, bench_state, bench_verbose, bench_rpc);
 criterion_main!(benches);
