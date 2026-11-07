@@ -167,9 +167,12 @@ Three rules keep the quota usable:
    the MSRV matrix. Each is seeded from a single build (`zebrad`, which has the
    widest dependency closure; `zebra-rpc` for the MSRV build since it does not
    build `zebrad` and `zebra-rpc` is second widest option).
-3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
-   crate-matrix generator in `test-crates.yml` set `cache: false`.
+3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, and the crate-matrix generator
+   in `test-crates.yml` set `cache: false`.
    The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
+
+The dependency-check Docker action provides its own Rust toolchain. The `deny` matrix therefore
+does not install Rust or restore a Rust cache on the host.
 
 To inspect the current state:
 
