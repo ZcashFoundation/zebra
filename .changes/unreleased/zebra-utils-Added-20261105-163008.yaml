@@ -1,4 +1,4 @@
 project: zebra-utils
 kind: Added
-body: Added the `spentness-hints` binary, behind the `spentness-hints` feature, which replays a validated archive state to a final checkpoint, and generates and audits spentness-hint artifacts.
+body: Added the `spentness-hints` binary, behind the `spentness-hints` feature, which replays a validated archive state to a final checkpoint, and generates and audits spentness-hint artifacts. It reports a block it can't read from the archive as an error.
 time: 2026-11-05T16:30:08.395855648-05:00

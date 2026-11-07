@@ -72,7 +72,7 @@ The `getblockchaininfo` response describes actual stored history, not the config
   retained body suffix. Genesis remains available separately below it. This floor is derived
   from the first retained transaction row above genesis, not a separately persisted pruning marker.
   A node [started from a state snapshot](state-snapshot-sync.md#after-the-bootstrap) also records
-  the snapshot's window start, and reports the higher of the two from its first start.
+  the snapshot height, its first body, and reports the higher of the two from its first start.
 
 For historical queries:
 
@@ -139,13 +139,15 @@ deletion while compaction runs, so also monitor free space and the existing Rock
 Syncing a pruned node from genesis still downloads and validates every block. An empty pruned
 node can instead bootstrap from a state snapshot at a height `H`, downloaded from
 [version 2 protocol](p2p-v2.md) peers that advertise `NODE_SYNC_ARTIFACTS`, and sync only the
-blocks above `H`. The snapshot ships the complete state at `H` and the 2,304 most recent blocks,
-so the node starts with `pruneheight` at the snapshot's window start and advertises
-`NODE_NETWORK_LIMITED` from its first start. The history below the window is never downloaded.
+blocks above `H`. The snapshot ships the complete state at `H`, the headers of the 2,304 most
+recent blocks, and the body of block `H` only, so the node starts with `pruneheight` at `H`, and
+advertises `NODE_NETWORK_LIMITED` once its tip is 2,304 finalized blocks above `H`. The bodies
+below `H` are never downloaded.
 
 The snapshot is checked against a commitment, and the commitment's producer is trusted with the
-UTXO set, the nullifier and anchor sets, the value pools, and the address indexes, which the node
-cannot verify without the history. The feature is experimental, off by default, and documented in
+UTXO set, the nullifier and anchor sets, and the value pools, which the node cannot verify
+without the history. The node rebuilds its address indexes from the UTXO set. The feature is on by
+default for pruned nodes, falls back to a normal sync when it cannot run, and is documented in
 [Starting a pruned node from a state snapshot](state-snapshot-sync.md), including what is verified,
 what is trusted, and how to export and serve a snapshot from a stopped node.
 

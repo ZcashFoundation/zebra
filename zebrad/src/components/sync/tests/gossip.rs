@@ -1220,6 +1220,7 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
                 latest_chain_tip,
                 misbehavior_sender,
                 pipeline_budget: Default::default(),
+                read_state: None,
             })
             .is_ok());
         let mut inbound = Inbound::new(1, setup_rx).with_submitted_blocks(cache.clone());

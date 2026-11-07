@@ -94,6 +94,11 @@ fn syncer_with_ownership(
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -224,6 +229,11 @@ async fn inert_ownership_never_blocks() {
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();

@@ -9,7 +9,10 @@ use crate::{
         },
         Network,
     },
-    state_snapshot::{ObjectHash, StateSnapshotCommitment},
+    state_snapshot::{
+        ObjectHash, StateSnapshotCommitment, MAINNET_STATE_SNAPSHOT_BLOCK_HASH,
+        MAINNET_STATE_SNAPSHOT_HEIGHT, MAINNET_STATE_SNAPSHOT_MANIFEST,
+    },
 };
 
 /// The SHA-256 hash of the empty string, from FIPS 180-4's test vectors.
@@ -79,13 +82,48 @@ fn commitment_serializes_as_height_and_hex_hashes() {
     assert!(serde_json::from_value::<StateSnapshotCommitment>(unknown).is_err());
 }
 
+/// Only Mainnet pins a commitment, once its manifest is filled in.
 #[test]
-fn no_network_pins_a_commitment_yet() {
+fn only_mainnet_pins_a_commitment() {
     let _init_guard = zebra_test::init();
 
     for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
-        assert_eq!(network.state_snapshot_commitment(), None, "{network}");
+        let pinned = network.state_snapshot_commitment();
+        if network == Network::Mainnet {
+            assert_eq!(pinned.is_some(), MAINNET_STATE_SNAPSHOT_MANIFEST.is_some());
+            if let Some(pinned) = pinned {
+                assert_eq!(pinned.height, MAINNET_STATE_SNAPSHOT_HEIGHT);
+                assert_eq!(
+                    pinned.block_hash.to_string(),
+                    MAINNET_STATE_SNAPSHOT_BLOCK_HASH
+                );
+            }
+        } else {
+            assert_eq!(pinned, None, "{network}");
+        }
     }
+}
+
+/// The pinned Mainnet snapshot block is the checkpoint at its height, and the
+/// block after it is at or below the last checkpoint, which the import
+/// preconditions require.
+#[test]
+fn the_pinned_mainnet_snapshot_block_is_a_checkpoint() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = Network::Mainnet.checkpoint_list();
+    let hash: block::Hash = MAINNET_STATE_SNAPSHOT_BLOCK_HASH.parse().unwrap();
+    assert_eq!(checkpoints.hash(MAINNET_STATE_SNAPSHOT_HEIGHT), Some(hash));
+    assert!(
+        (MAINNET_STATE_SNAPSHOT_HEIGHT + 1).unwrap() <= checkpoints.max_height(),
+        "the block after the pinned snapshot is checkpoint-verified"
+    );
+    assert!(
+        crate::parameters::NetworkUpgrade::Nu5
+            .activation_height(&Network::Mainnet)
+            .is_some_and(|nu5| nu5 <= MAINNET_STATE_SNAPSHOT_HEIGHT),
+        "NU5 is active at the pinned snapshot height"
+    );
 }
 
 /// Bytes `0, 1, ..., 31`, which read differently in each byte order.

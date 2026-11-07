@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Fixed a dropped state service keeping its database open: the RocksDB metrics task held a database handle forever, so the same process could not open the database again. The task now stops when the state service is dropped.'
+time: 2026-11-07T21:22:17Z

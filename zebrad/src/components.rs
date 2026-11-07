@@ -6,6 +6,7 @@
 //! don't fit the async context well.
 
 pub mod checkpoint_sync;
+pub mod header_sync;
 pub mod health;
 pub mod inbound;
 #[allow(missing_docs)]

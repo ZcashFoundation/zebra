@@ -1,9 +1,10 @@
 //! A snapshot-shaped finalized database for tests.
 //!
 //! The snapshot importer is not needed here: a Regtest chain is committed block by block, then
-//! every block row below the snapshot window is deleted and the `snapshot_base` marker is
-//! written. That is the shape DESIGN §3 and §7 describe: genesis, the complete window
-//! `L..=H`, the `block_info` row below the window, the validation state at `H`, and the
+//! every block row below the snapshot window and every body below the snapshot height is
+//! deleted, and the `snapshot_base` marker is written. That is the shape DESIGN §3 and §7
+//! describe, with the format 2 bodies: genesis, the hashes and headers of the window `L..=H`,
+//! the body of `H`, the `block_info` rows from `L - 1`, the validation state at `H`, and the
 //! transaction index pairs of every transaction that still has an unspent output.
 
 use std::{path::PathBuf, sync::Arc};
@@ -221,8 +222,9 @@ pub(crate) fn append(state: &mut FinalizedState, tip: u32, kind: Coinbase) {
 }
 
 /// Deletes every block row below `window_start` except genesis, keeping the `block_info` row
-/// just below the window and every transaction index pair, then writes the marker for a
-/// snapshot at the finalized tip whose `deferred_checks` are still pending.
+/// just below the window and every transaction index pair, and every body below the finalized
+/// tip except genesis, then writes the marker for a snapshot at the finalized tip whose
+/// `deferred_checks` are still pending.
 pub(crate) fn carve(
     state: &FinalizedState,
     window_start: Height,
@@ -260,7 +262,7 @@ pub(crate) fn carve(
     batch.zs_delete_range(
         &db.cf_handle("tx_by_loc").expect("column family exists"),
         TransactionLocation::min_for_height(Height(1)),
-        TransactionLocation::min_for_height(window_start),
+        TransactionLocation::min_for_height(height),
     );
     let base = SnapshotBase {
         window_start,

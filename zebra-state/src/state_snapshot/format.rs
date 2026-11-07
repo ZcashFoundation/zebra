@@ -10,10 +10,10 @@
 //! # Manifest
 //!
 //! ```text
-//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (1)
+//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
 //! genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 //! [Regtest and custom testnets only: parameters_hash 32]
-//! component_count u16 (28), then each component in [`ComponentId`] order:
+//! component_count u16 (24), then each component in [`ComponentId`] order:
 //!   component_id u16 ‖ entry_count u64 ‖ piece_count u32 ‖ pieces[ size u32 ‖ sha256 32 ]
 //! ```
 //!
@@ -48,21 +48,27 @@ pub use canonical::canonical_value;
 /// The string every manifest starts with.
 pub const MAGIC: &[u8; 20] = b"ZEBRA-STATE-SNAPSHOT";
 
-/// The number of complete blocks a snapshot ships, ending at its height: the
-/// `NODE_NETWORK_LIMITED` window, so the importing node serves the recent
-/// blocks from the start (design, "Snapshot contents").
+/// The number of block hashes, headers and block infos a snapshot ships,
+/// ending at its height: the headers window, which gives the block after the
+/// snapshot its difficulty and time context, and `getblockheader` its answers
+/// (design, "Snapshot contents"). Only the snapshot block's body is shipped
+/// with them.
 pub const WINDOW_LEN: u32 = 2304;
 
-/// Returns the first height of the window of complete blocks that a snapshot
-/// at `height` ships: `L = max(1, H - 2303)`. Genesis is shipped as well.
+/// Returns the first height of the headers window that a snapshot at `height`
+/// ships: `L = max(1, H - 2303)`. Genesis is shipped as well.
 pub fn window_start(height: block::Height) -> block::Height {
     block::Height(height.0.saturating_sub(WINDOW_LEN - 1).max(1))
 }
 
 /// The snapshot format this code reads and writes. It changes only when the
-/// shipped encodings change; the importer maps it onto the running database
-/// format.
-pub const SNAPSHOT_FORMAT: u16 = 1;
+/// shipped components or encodings change; the importer maps it onto the
+/// running database format.
+///
+/// Format 2 ships the bodies of genesis and the snapshot block only, instead of
+/// the whole window's, and no index the importer can rebuild: the transaction
+/// hashes by location, and the address balance, UTXO and transaction indexes.
+pub const SNAPSHOT_FORMAT: u16 = 2;
 
 /// The largest manifest, 1 MiB: a manifest is fetched whole before it is
 /// decoded, so this bounds the download and the decode.
@@ -92,73 +98,62 @@ pub enum ComponentId {
     HeightByHash = 1,
     /// `block_header_by_height`.
     Headers = 2,
-    /// `tx_by_loc`: the bodies of the window blocks and genesis.
+    /// `tx_by_loc`: the bodies of genesis and the snapshot block.
     Transactions = 3,
-    /// `hash_by_tx_loc`.
-    HashByTxLoc = 4,
-    /// `tx_loc_by_hash`.
-    TxLocByHash = 5,
+    /// `tx_loc_by_hash`. The importer rebuilds its inverse, `hash_by_tx_loc`.
+    TxLocByHash = 4,
     /// `block_info`.
-    BlockInfo = 6,
-    /// `utxo_by_out_loc`: the UTXO set.
-    Utxos = 7,
-    /// `balance_by_transparent_addr`.
-    AddressBalances = 8,
-    /// `utxo_loc_by_transparent_addr_loc`.
-    AddressUtxos = 9,
-    /// `tx_loc_by_transparent_addr_loc`.
-    AddressTxs = 10,
+    BlockInfo = 5,
+    /// `utxo_by_out_loc`: the UTXO set. The importer rebuilds the address
+    /// balance and UTXO indexes from it.
+    Utxos = 6,
     /// `sprout_nullifiers`.
-    SproutNullifiers = 11,
+    SproutNullifiers = 7,
     /// `sapling_nullifiers`.
-    SaplingNullifiers = 12,
+    SaplingNullifiers = 8,
     /// `orchard_nullifiers`.
-    OrchardNullifiers = 13,
+    OrchardNullifiers = 9,
     /// `ironwood_nullifiers`.
-    IronwoodNullifiers = 14,
+    IronwoodNullifiers = 10,
     /// `sprout_anchors`: each root with its whole Sprout tree.
-    SproutAnchors = 15,
+    SproutAnchors = 11,
     /// `sapling_anchors`.
-    SaplingAnchors = 16,
+    SaplingAnchors = 12,
     /// `orchard_anchors`.
-    OrchardAnchors = 17,
+    OrchardAnchors = 13,
     /// `ironwood_anchors`.
-    IronwoodAnchors = 18,
+    IronwoodAnchors = 14,
     /// `sapling_note_commitment_tree`.
-    SaplingTree = 19,
+    SaplingTree = 15,
     /// `orchard_note_commitment_tree`.
-    OrchardTree = 20,
+    OrchardTree = 16,
     /// `ironwood_note_commitment_tree`.
-    IronwoodTree = 21,
+    IronwoodTree = 17,
     /// `sapling_note_commitment_subtree`.
-    SaplingSubtrees = 22,
+    SaplingSubtrees = 18,
     /// `orchard_note_commitment_subtree`.
-    OrchardSubtrees = 23,
+    OrchardSubtrees = 19,
     /// `ironwood_note_commitment_subtree`.
-    IronwoodSubtrees = 24,
+    IronwoodSubtrees = 20,
     /// `sprout_note_commitment_tree`: the Sprout tree at the snapshot height.
-    SproutTipTree = 25,
+    SproutTipTree = 21,
     /// `history_tree`.
-    HistoryTree = 26,
+    HistoryTree = 22,
     /// `tip_chain_value_pool`.
-    ValuePools = 27,
+    ValuePools = 23,
 }
 
 impl ComponentId {
     /// Every component, in manifest order: `ALL[id]` is the component with
     /// wire id `id`.
-    pub const ALL: [ComponentId; 28] = [
+    pub const ALL: [ComponentId; 24] = [
         ComponentId::HashByHeight,
         ComponentId::HeightByHash,
         ComponentId::Headers,
         ComponentId::Transactions,
-        ComponentId::HashByTxLoc,
         ComponentId::TxLocByHash,
         ComponentId::BlockInfo,
         ComponentId::Utxos,
-        ComponentId::AddressBalances,
-        ComponentId::AddressUtxos,
-        ComponentId::AddressTxs,
         ComponentId::SproutNullifiers,
         ComponentId::SaplingNullifiers,
         ComponentId::OrchardNullifiers,
@@ -201,13 +196,9 @@ impl ComponentId {
             ComponentId::HeightByHash => "height_by_hash",
             ComponentId::Headers => "block_header_by_height",
             ComponentId::Transactions => "tx_by_loc",
-            ComponentId::HashByTxLoc => "hash_by_tx_loc",
             ComponentId::TxLocByHash => "tx_loc_by_hash",
             ComponentId::BlockInfo => "block_info",
             ComponentId::Utxos => "utxo_by_out_loc",
-            ComponentId::AddressBalances => "balance_by_transparent_addr",
-            ComponentId::AddressUtxos => "utxo_loc_by_transparent_addr_loc",
-            ComponentId::AddressTxs => "tx_loc_by_transparent_addr_loc",
             ComponentId::SproutNullifiers => "sprout_nullifiers",
             ComponentId::SaplingNullifiers => "sapling_nullifiers",
             ComponentId::OrchardNullifiers => "orchard_nullifiers",
@@ -239,7 +230,6 @@ impl ComponentId {
             ComponentId::BlockInfo
                 | ComponentId::ValuePools
                 | ComponentId::HistoryTree
-                | ComponentId::AddressBalances
                 | ComponentId::SaplingTree
                 | ComponentId::OrchardTree
                 | ComponentId::IronwoodTree

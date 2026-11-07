@@ -1423,6 +1423,39 @@ pub enum Request {
     /// If the state is empty, the block locator is also empty.
     BlockLocator,
 
+    /// Stores a batch of contiguous block headers on the header chain, ahead of
+    /// their bodies.
+    ///
+    /// The headers must have passed the context-free checks in
+    /// `zebra_consensus::header`. The state checks that they connect to the
+    /// header chain, their checkpoints, and each header's difficulty and time
+    /// against the previous headers, then appends them, or replaces the stored
+    /// headers above a fork point if the batch has more work.
+    ///
+    /// Returns [`Response::HeadersCommitted`], or a
+    /// [`CommitHeadersError`](crate::CommitHeadersError).
+    CommitHeaders(Vec<Arc<block::Header>>),
+
+    /// Returns [`Response::HeaderTip`] with the tip of the header chain: the
+    /// highest stored header above the finalized tip, or the finalized tip.
+    HeaderTip,
+
+    /// Returns [`Response::HeaderLocator`] with a block locator over the header
+    /// chain, with the height of each hash, starting at the header tip.
+    HeaderLocator,
+
+    /// Finds the first hash in `known_blocks` that is on the header chain, and
+    /// returns [`Response::BlockHashes`] with up to `limit` header chain hashes
+    /// above it, in height order.
+    ///
+    /// Returns an empty list if no hash in `known_blocks` is on the header chain.
+    HeaderChainHashes {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// The most hashes to return.
+        limit: u32,
+    },
+
     /// Looks up a transaction by hash in the current best chain.
     ///
     /// Returns
@@ -1657,6 +1690,10 @@ impl Request {
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
+            Request::CommitHeaders(_) => "commit_headers",
+            Request::HeaderTip => "header_tip",
+            Request::HeaderLocator => "header_locator",
+            Request::HeaderChainHashes { .. } => "header_chain_hashes",
             Request::Transaction(_) => "transaction",
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
@@ -1909,6 +1946,42 @@ pub enum ReadRequest {
     ///
     /// If the state is empty, the block locator is also empty.
     BlockLocator,
+
+    /// Returns [`ReadResponse::HeaderTip`] with the tip of the header chain.
+    ///
+    /// See [`Request::HeaderTip`].
+    HeaderTip,
+
+    /// Returns [`ReadResponse::HeaderLocator`] with a block locator over the
+    /// header chain.
+    ///
+    /// See [`Request::HeaderLocator`].
+    HeaderLocator,
+
+    /// Returns [`ReadResponse::BlockHashes`] with up to `limit` header chain
+    /// hashes above the first of `known_blocks` on the header chain.
+    ///
+    /// See [`Request::HeaderChainHashes`].
+    HeaderChainHashes {
+        /// Hashes of known blocks, ordered from highest height to lowest height.
+        known_blocks: Vec<block::Hash>,
+        /// The most hashes to return.
+        limit: u32,
+    },
+
+    /// Returns [`ReadResponse::HeaderChainRange`] with the headers on the header chain from
+    /// `start`, in height order: at most `count` of them, and at most
+    /// [`MAX_COMMIT_HEADERS`](crate::MAX_COMMIT_HEADERS), stopping below the first height the
+    /// header chain has no header for.
+    ///
+    /// Unlike the other header reads, this includes the headers above the finalized tip, whose
+    /// blocks have not been verified yet.
+    HeaderChainRange {
+        /// The height of the first header.
+        start: block::Height,
+        /// The most headers to return.
+        count: u32,
+    },
 
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.
@@ -2288,6 +2361,10 @@ impl ReadRequest {
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",
+            ReadRequest::HeaderTip => "header_tip",
+            ReadRequest::HeaderLocator => "header_locator",
+            ReadRequest::HeaderChainHashes { .. } => "header_chain_hashes",
+            ReadRequest::HeaderChainRange { .. } => "header_chain_range",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::AncestorBlocks { .. } => "ancestor_blocks",
@@ -2363,6 +2440,15 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::BlockLocator => Ok(ReadRequest::BlockLocator),
+            Request::HeaderTip => Ok(ReadRequest::HeaderTip),
+            Request::HeaderLocator => Ok(ReadRequest::HeaderLocator),
+            Request::HeaderChainHashes {
+                known_blocks,
+                limit,
+            } => Ok(ReadRequest::HeaderChainHashes {
+                known_blocks,
+                limit,
+            }),
             Request::FindBlockHashes { known_blocks, stop } => {
                 Ok(ReadRequest::FindBlockHashes { known_blocks, stop })
             }
@@ -2385,6 +2471,8 @@ impl TryFrom<Request> for ReadRequest {
             | Request::InvalidateBlock(_)
             | Request::PreciousBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
+
+            Request::CommitHeaders(_) => Err("ReadService does not write headers"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \

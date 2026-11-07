@@ -138,3 +138,52 @@ fn mean_target_uses_pow_limit_through_exact_window_height() {
         }
     }
 }
+
+/// Below a full averaging window, the expected threshold is the minimum difficulty, as in
+/// zcashd and in the first Mainnet and Testnet blocks.
+#[test]
+fn first_blocks_use_the_minimum_difficulty() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let headers: Vec<_> = network
+            .blockchain_map()
+            .iter()
+            .enumerate()
+            .take_while(|(index, (height, _))| usize::try_from(**height) == Ok(*index))
+            .map(|(_, (_, bytes))| {
+                bytes
+                    .zcash_deserialize_into::<Block>()
+                    .expect("test data deserializes")
+                    .header
+            })
+            .collect();
+        assert!(headers.len() > 2, "{network} has test blocks");
+
+        for height in 1..headers.len() {
+            let context = headers[..height]
+                .iter()
+                .rev()
+                .map(|header| (header.difficulty_threshold, header.time));
+            let adjustment = AdjustedDifficulty::new_from_header_time(
+                headers[height].time,
+                block::Height(u32::try_from(height - 1).expect("test heights fit in u32")),
+                &network,
+                context,
+            );
+
+            assert_eq!(
+                adjustment.expected_difficulty_threshold(),
+                network.target_difficulty_limit().to_compact(),
+                "{network} {height}",
+            );
+            assert_eq!(
+                adjustment.expected_difficulty_threshold(),
+                headers[height].difficulty_threshold,
+                "{network} {height}",
+            );
+        }
+    }
+}

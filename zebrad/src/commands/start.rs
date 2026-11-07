@@ -104,7 +104,9 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, Submitt
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
-        checkpoint_sync, health,
+        checkpoint_sync,
+        header_sync::HeaderSync,
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
@@ -116,7 +118,7 @@ use crate::{
             serving,
         },
         sync::{
-            self, record_tip_block_delay, show_block_chain_progress, StateSnapshotFallback,
+            self, record_tip_block_delay, show_block_chain_progress,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
         },
         tokio::{RuntimeRun, TokioComponent},
@@ -129,6 +131,7 @@ use crate::{
 #[cfg(feature = "internal-miner")]
 use crate::components;
 
+mod snapshot_headers;
 mod spentness_hints;
 
 /// Start the application (default command)
@@ -200,23 +203,24 @@ impl StartCmd {
             return Ok(());
         }
 
-        match config.sync.state_snapshot_fallback {
-            StateSnapshotFallback::Error => Err(eyre!(
+        let fallback = config.sync.state_snapshot_fallback;
+        if fallback.exits(config.sync.state_snapshot.is_some(), true) {
+            Err(eyre!(
                 "the state snapshot was rejected by an earlier bootstrap, and \
-                 sync.state_snapshot_fallback is \"error\", so Zebra exits without opening the \
+                 sync.state_snapshot_fallback is \"{}\", so Zebra exits without opening the \
                  state or syncing from genesis. Use a different trusted commitment, or investigate \
                  the rejection and remove its marker before retrying it. Set \
                  sync.state_snapshot_fallback = \"genesis\" to sync from genesis without retrying \
-                 the rejected snapshot"
-            )),
-            StateSnapshotFallback::Genesis => {
-                warn!(
-                    "the state snapshot was rejected by an earlier bootstrap, and \
-                     sync.state_snapshot_fallback is \"genesis\": syncing from genesis without \
-                     retrying the rejected snapshot"
-                );
-                Ok(())
-            }
+                 the rejected snapshot",
+                fallback.name()
+            ))
+        } else {
+            warn!(
+                fallback = fallback.name(),
+                "the state snapshot was rejected by an earlier bootstrap: syncing from genesis \
+                 without retrying the rejected snapshot"
+            );
+            Ok(())
         }
     }
 
@@ -341,6 +345,7 @@ impl StartCmd {
         latest_chain_tip: ZSTip,
         known_hashes: Option<KnownHashListSpec>,
         hints_gate: Option<watch::Receiver<bool>>,
+        header_tip: Option<watch::Receiver<Option<zebra_chain::block::Height>>>,
     ) -> tokio::task::JoinHandle<Result<(), Report>>
     where
         ZS: tower::Service<
@@ -390,6 +395,10 @@ impl StartCmd {
             known_hashes,
         )
         .with_charged(charged);
+        let supervisor = match header_tip {
+            Some(header_tip) => supervisor.with_headers_first(header_tip),
+            None => supervisor,
+        };
 
         tokio::spawn(
             async move {
@@ -408,6 +417,9 @@ impl StartCmd {
     /// A pruned node that retains at least `NODE_NETWORK_LIMITED_BLOCKS` recent blocks advertises
     /// limited service instead, which only version 2 peers are told about. Pruning keeps at least
     /// the configured retention of recent bodies, so the advertisement holds while the node syncs.
+    ///
+    /// A node bootstrapped from a state snapshot has no bodies below the snapshot height, so it
+    /// starts without limited service, and [`Self::limited_service_from`] says when it gains it.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
@@ -420,17 +432,42 @@ impl StartCmd {
                 ));
             }
             services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
-            if config
-                .state
-                .prune_blocks_older_than
-                .is_some_and(|retention| {
-                    retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
-                })
-            {
+            if Self::retains_limited_blocks(config) && history.snapshot_base.is_none() {
                 services.insert(zebra_network::types::PeerServices::NODE_NETWORK_LIMITED);
             }
         }
         Ok(services)
+    }
+
+    /// Returns whether the configured pruning retains at least the recent blocks that limited
+    /// service promises.
+    fn retains_limited_blocks(config: &ZebradConfig) -> bool {
+        config
+            .state
+            .prune_blocks_older_than
+            .is_some_and(|retention| {
+                retention >= zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+            })
+    }
+
+    /// Returns the best chain tip height from which a node bootstrapped from a state snapshot
+    /// advertises limited service to version 2 peers, or `None` for any other node.
+    ///
+    /// The node has every body from the snapshot height `H`, so it holds the recent blocks
+    /// limited service promises once its tip is `NODE_NETWORK_LIMITED_BLOCKS` above `H`. It waits
+    /// until those blocks are finalized, `MAX_BLOCK_REORG_HEIGHT` more, because non-finalized
+    /// blocks can be reorged away.
+    pub(super) fn limited_service_from(
+        config: &ZebradConfig,
+        history: zebra_state::HistoryCapabilities,
+    ) -> Option<Height> {
+        let base = history.snapshot_base?;
+        if !Self::retains_limited_blocks(config) {
+            return None;
+        }
+        let blocks = zebra_network::constants::NODE_NETWORK_LIMITED_BLOCKS
+            .checked_add(zebra_state::MAX_BLOCK_REORG_HEIGHT)?;
+        base.height.0.checked_add(blocks).map(Height)
     }
 
     /// Starts the node, rejecting incompatible pruning settings before opening writable state.
@@ -548,56 +585,28 @@ impl StartCmd {
             resources::node_cores(&config),
         );
 
-        // An empty pruned node may bootstrap from a state snapshot before the state
-        // opens: the import renames a complete database into place, and `zebra_state::init`
-        // then opens it at the snapshot height like any other state.
+        // A pruned node that bootstraps from a state snapshot starts like any other node: it opens
+        // its state, starts the network, and syncs and verifies headers from genesis. Then it
+        // checks the snapshot against those headers, downloads it, and replaces its header-only
+        // state with it, keeping the headers (see `snapshot_headers`). It commits no block above
+        // genesis before that, so it downloads no body it won't keep.
         let snapshot_store = zebra_state::state_snapshot::store::ArtifactStore::new(
             &config.state,
             &config.network.network,
         );
-        let mut bootstrapped_height = None;
         let snapshot_decision = decision::should_bootstrap(&config, &snapshot_store);
         Self::handle_rejected_snapshot(&config, &snapshot_decision)?;
-        if let Decision::Bootstrap { commitment, peers } = snapshot_decision {
-            info!(
-                height = commitment.height.0,
-                hash = %commitment.block_hash,
-                manifest = %commitment.manifest,
-                peers = peers.len(),
-                "{}",
-                Stage::BootstrapStarted
-            );
-            match bootstrap::bootstrap(&config, commitment, peers, &snapshot_memory).await {
-                Ok(()) => bootstrapped_height = Some(commitment.height),
-                Err(error) => match config.sync.state_snapshot_fallback {
-                    StateSnapshotFallback::Error => {
-                        return Err(Report::new(error).wrap_err(
-                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
-                             is \"error\", so Zebra exits instead of continuing with normal sync. \
-                             Check sync.state_snapshot_peers and the commitment. An aborted \
-                             download is retried on the next start; a rejected snapshot needs a \
-                             different trusted commitment, or investigation and removal of its \
-                             rejection marker before it is retried. Set \
-                             sync.state_snapshot_fallback = \"genesis\" to sync from genesis, or \
-                             sync.state_snapshot_sync = false to turn snapshot sync off",
-                        ));
-                    }
-                    StateSnapshotFallback::Genesis => {
-                        warn!(
-                            %error,
-                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
-                             is \"genesis\": syncing from genesis instead"
-                        );
-                    }
-                },
-            }
-        }
+        let header_sync_marker =
+            decision::header_sync_marker(&config.state, &config.network.network);
+        let mut snapshot_plan = match snapshot_decision {
+            Decision::Bootstrap { commitment, peers } => Some((commitment, peers)),
+            Decision::Skip(_) => None,
+        };
+        // The marker is written before a new state is created, so a later start can still
+        // bootstrap if this one stops before it bootstraps or gives up, and is deleted before
+        // normal sync commits blocks.
+        Self::set_header_sync_marker(&header_sync_marker, snapshot_plan.is_some())?;
 
-        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
-        // index once the scan finishes. The network does not wait for it: every node with an
-        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
-        // yet as not found. The scan starts after the bootstrap, so a snapshot downloaded just
-        // now is in the index.
         // With any hints mode, a node with version 2 enabled serves the saved
         // spentness-hint artifact to its version 2 peers. The state snapshot store's
         // objects are added to the same index, which the network serves `get-object`
@@ -611,17 +620,6 @@ impl StartCmd {
                 })
             })
             .unzip();
-        if let Some(served_objects) = served_objects
-            .clone()
-            .filter(|_| config.sync.serve_state_snapshots)
-        {
-            info!(store = %snapshot_store.root().display(), "scanning the state snapshot store to serve");
-            serving::object_index(
-                snapshot_store.clone(),
-                config.network.network.clone(),
-                served_objects,
-            );
-        }
 
         info!("initializing node state");
         let (checkpoint_list, max_checkpoint_height) =
@@ -638,42 +636,34 @@ impl StartCmd {
             config.sync.v2_spentness_hints,
             config.sync.v2_checkpoint_sync,
         )?;
-        let (state_hints, spentness_hints_receiver) =
-            spentness_hints::StateHints::new(spentness_hints_mode).unzip();
-        let state_checkpoint_verify_concurrency_limit =
-            config.sync.checkpoint_verify_concurrency_limit
-                * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1);
-        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            match spentness_hints_receiver {
-                Some(spentness_hints_receiver) => {
-                    zebra_state::init_with_spentness(
-                        config.state.clone(),
-                        &config.network.network,
-                        max_checkpoint_height,
-                        state_checkpoint_verify_concurrency_limit,
-                        spentness_hints_receiver,
-                        memory_plan.state,
-                    )
-                    .await
-                }
-                None => {
-                    zebra_state::init_with_limits(
-                        config.state.clone(),
-                        &config.network.network,
-                        max_checkpoint_height,
-                        state_checkpoint_verify_concurrency_limit,
-                        memory_plan.state,
-                    )
-                    .await
-                }
-            };
-        let node_hints = state_hints.and_then(|state_hints| {
-            state_hints.for_state(
-                &latest_chain_tip,
-                read_only_state_service.has_incomplete_spentness_hints(),
-                read_only_state_service.incomplete_spentness_commitment(),
-            )
-        });
+        let (
+            mut state_hints,
+            state_service,
+            mut read_only_state_service,
+            mut latest_chain_tip,
+            mut chain_tip_change,
+        ) = Self::open_state(
+            &config,
+            max_checkpoint_height,
+            spentness_hints_mode,
+            memory_plan.state,
+        )
+        .await;
+
+        // A state with a block above genesis is not header-only: an earlier start installed a
+        // snapshot or gave up on it, but stopped before it deleted the marker.
+        if snapshot_plan.is_some()
+            && latest_chain_tip
+                .best_tip_height()
+                .is_some_and(|height| height > Height(0))
+        {
+            info!(
+                "the state database is not header-only, so the state snapshot bootstrap does not \
+                 run"
+            );
+            snapshot_plan = None;
+            Self::set_header_sync_marker(&header_sync_marker, false)?;
+        }
 
         // A tip-only budget cannot sync to the last checkpoint, and a node already past it
         // needs no initial sync share (memory page, "How the budget is split").
@@ -710,6 +700,224 @@ impl StartCmd {
             }
         }
 
+        // The network starts before the bootstrap, so a node that plans to bootstrap advertises
+        // the services of the snapshot node it will be, including if it gives up and syncs
+        // normally.
+        let history = match &snapshot_plan {
+            Some((commitment, _)) => Self::planned_snapshot_history(commitment),
+            None => Self::history_capabilities(&read_only_state_service).await?,
+        };
+        let local_services = Self::network_services(&config, history)?;
+        let limited_service_from = Self::limited_service_from(&config, history);
+
+        info!("initializing network");
+        // The service that our node uses to respond to requests by peers. The
+        // load_shed middleware ensures that we reduce the size of the peer set
+        // in response to excess load.
+        //
+        // # Security
+        //
+        // This layer stack is security-sensitive, modifying it can cause hangs,
+        // or enable denial of service attacks.
+        //
+        // See `zebra_network::Connection::drive_peer_request()` for details.
+        //
+        // The inbound service gets the read-only state in its setup data, because a bootstrap
+        // replaces the state the network starts with.
+        let (setup_tx, setup_rx) = oneshot::channel();
+        let submitted_blocks = SubmittedBlockCache::default();
+        let inbound = ServiceBuilder::new()
+            .load_shed()
+            .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
+            .timeout(MAX_INBOUND_RESPONSE_TIME)
+            .service(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
+                    .with_submitted_blocks(submitted_blocks.clone()),
+            );
+
+        // The checkpoint sync engine streams blocks from the version 2 connections
+        // that this registry collects, and the bootstrap finds peers that serve state snapshots
+        // in it.
+        let (v2_sync_peers, sync_peers) =
+            if config.sync.v2_checkpoint_sync || snapshot_plan.is_some() {
+                let (sender, receiver) = zebra_network::SyncPeersSender::spawn();
+                (Some(sender), Some(receiver))
+            } else {
+                (None, None)
+            };
+        let network_config = zebra_network::Config {
+            v2_sync_peers,
+            object_source,
+            v2_limited_service_from: limited_service_from,
+            ..config.network.clone()
+        };
+
+        // The network follows the chain tip of the state that is open.
+        let (network_tip, network_chain_tip) = snapshot_headers::ReopenableChainTip::new(
+            latest_chain_tip.clone(),
+            snapshot_plan.is_some(),
+        );
+        let (peer_set, address_book, misbehavior_sender, block_advertiser) =
+            zebra_network::init_with_limits(
+                network_config,
+                local_services,
+                inbound,
+                network_chain_tip,
+                user_agent(),
+                zcashd_compat_block_gossip_peer_ips,
+                memory_plan.network,
+            )
+            .await;
+
+        let mut state = ServiceBuilder::new()
+            .buffer(Self::state_buffer_bound(&config))
+            .service(state_service);
+
+        // Headers-first sync stores the verified header chain ahead of the bodies, and runs for a
+        // bootstrap even without `sync.headers_first`.
+        let mut header_sync = (config.sync.headers_first || snapshot_plan.is_some())
+            .then(|| Self::spawn_header_sync(&config, peer_set.clone(), state.clone()));
+
+        let mut bootstrapped_height = None;
+        let mut bootstrapped_successor = None;
+        if let Some((commitment, peers)) = snapshot_plan {
+            let (_, header_tip) = header_sync
+                .as_ref()
+                .expect("headers-first sync runs for a bootstrap");
+            let staged = snapshot_headers::sync_headers_and_stage(
+                &config,
+                commitment,
+                peers,
+                peer_set.clone(),
+                state.clone(),
+                read_only_state_service.clone(),
+                latest_chain_tip.clone(),
+                header_tip.clone(),
+                sync_peers
+                    .clone()
+                    .expect("the peer registry is spawned for a bootstrap"),
+                &snapshot_memory,
+            )
+            .await;
+
+            let installed = match staged {
+                Ok(staged) => {
+                    // The header-only state is closed, so the installation can carry its headers
+                    // into the snapshot and replace it, and then the node opens the snapshot.
+                    if let Some((header_sync_task, _)) = header_sync.take() {
+                        header_sync_task.abort();
+                        let _ = header_sync_task.await;
+                    }
+                    Self::close_state((
+                        state_hints,
+                        state,
+                        read_only_state_service,
+                        latest_chain_tip,
+                        chain_tip_change,
+                    ))
+                    .await;
+
+                    let installed = staged.install().await;
+
+                    let state_service;
+                    (
+                        state_hints,
+                        state_service,
+                        read_only_state_service,
+                        latest_chain_tip,
+                        chain_tip_change,
+                    ) = Self::open_state(
+                        &config,
+                        max_checkpoint_height,
+                        spentness_hints_mode,
+                        memory_plan.state,
+                    )
+                    .await;
+                    state = ServiceBuilder::new()
+                        .buffer(Self::state_buffer_bound(&config))
+                        .service(state_service);
+                    network_tip.reopen(latest_chain_tip.clone());
+                    header_sync = config
+                        .sync
+                        .headers_first
+                        .then(|| Self::spawn_header_sync(&config, peer_set.clone(), state.clone()));
+
+                    installed
+                }
+                Err(error) => Err(error),
+            };
+
+            match installed {
+                Ok(bootstrapped) => {
+                    bootstrapped_height = Some(commitment.height);
+                    bootstrapped_successor = bootstrapped.successor;
+                    Self::set_header_sync_marker(&header_sync_marker, false)?;
+                }
+                Err(error) => {
+                    let fallback = config.sync.state_snapshot_fallback;
+                    let rejected = matches!(error, bootstrap::BootstrapError::Rejected(_));
+                    if fallback.exits(config.sync.state_snapshot.is_some(), rejected) {
+                        return Err(Report::new(error).wrap_err(format!(
+                            "the state snapshot bootstrap failed and sync.state_snapshot_fallback \
+                             is \"{}\", so Zebra exits instead of continuing with normal \
+                             sync. Check sync.state_snapshot_peers and the commitment. An aborted \
+                             download is retried on the next start; a rejected snapshot needs a \
+                             different trusted commitment, or investigation and removal of its \
+                             rejection marker before it is retried. Set \
+                             sync.state_snapshot_fallback = \"genesis\" to sync from genesis, or \
+                             sync.state_snapshot_sync = false to turn snapshot sync off",
+                            fallback.name()
+                        )));
+                    }
+                    warn!(
+                        %error,
+                        fallback = fallback.name(),
+                        "the state snapshot bootstrap failed: syncing normally from the synced \
+                         headers instead"
+                    );
+                    Self::set_header_sync_marker(&header_sync_marker, false)?;
+                }
+            }
+        }
+        network_tip.end_bootstrap();
+        // Headers-first sync only ran for the bootstrap.
+        if !config.sync.headers_first {
+            if let Some((header_sync_task, _)) = header_sync.take() {
+                header_sync_task.abort();
+            }
+        }
+
+        // Serving scans the artifact store on a blocking thread, and publishes its objects in the
+        // index once the scan finishes. The network does not wait for it: every node with an
+        // object source advertises `NODE_SYNC_ARTIFACTS`, and answers the objects it does not hold
+        // yet as not found. The scan starts after the bootstrap, so a snapshot downloaded just
+        // now is in the index.
+        if let Some(served_objects) = served_objects
+            .clone()
+            .filter(|_| config.sync.serve_state_snapshots)
+        {
+            info!(store = %snapshot_store.root().display(), "scanning the state snapshot store to serve");
+            serving::object_index(
+                snapshot_store.clone(),
+                config.network.network.clone(),
+                served_objects,
+            );
+        }
+
+        // The bootstrap checked block `H + 1` against the headers to the next checkpoint and the
+        // snapshot's history tree, so commit it before the block verifier and sync start: they
+        // then start above it, and nothing downloads it again.
+        if let Some(successor) = bootstrapped_successor {
+            Self::commit_snapshot_successor(&mut state, successor).await;
+        }
+        let node_hints = state_hints.and_then(|state_hints| {
+            state_hints.for_state(
+                &latest_chain_tip,
+                read_only_state_service.has_incomplete_spentness_hints(),
+                read_only_state_service.incomplete_spentness_commitment(),
+            )
+        });
+
         let state_tip_height = latest_chain_tip
             .best_tip_height()
             .unwrap_or(zebra_chain::block::Height(0));
@@ -720,14 +928,7 @@ impl StartCmd {
             sync::check_checkpoint_gaps(&checkpoint_list, max_checkpoint_height, state_tip_height)?;
         }
 
-        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_only_state_service
-            .clone()
-            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
-            .await
-            .map_err(|error| eyre!(error))?
-        else {
-            unreachable!("state returns history capabilities for its capabilities request");
-        };
+        let history = Self::history_capabilities(&read_only_state_service).await?;
         let snapshot_height = history
             .snapshot_base
             .map(|base| base.height)
@@ -740,7 +941,13 @@ impl StartCmd {
                 Stage::StateInitialized
             );
         }
-        let local_services = Self::network_services(&config, history)?;
+        if let Some(height) = limited_service_from {
+            info!(
+                height = height.0,
+                "advertising limited service to version 2 peers from this chain tip height, once \
+                 the recent blocks above the snapshot height are committed"
+            );
+        }
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
@@ -758,64 +965,6 @@ impl StartCmd {
         } else {
             None
         };
-
-        let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound(&config))
-            .service(state_service);
-
-        info!("initializing network");
-        // The service that our node uses to respond to requests by peers. The
-        // load_shed middleware ensures that we reduce the size of the peer set
-        // in response to excess load.
-        //
-        // # Security
-        //
-        // This layer stack is security-sensitive, modifying it can cause hangs,
-        // or enable denial of service attacks.
-        //
-        // See `zebra_network::Connection::drive_peer_request()` for details.
-        let (setup_tx, setup_rx) = oneshot::channel();
-        let submitted_blocks = SubmittedBlockCache::default();
-        let inbound = ServiceBuilder::new()
-            .load_shed()
-            .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
-            .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(
-                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx)
-                    .with_submitted_blocks(submitted_blocks.clone())
-                    .with_early_blocks(early_blocks.clone())
-                    .with_compact_relay(
-                        config.network.network.clone(),
-                        read_only_state_service.clone(),
-                    )
-                    .with_block_range_state(read_only_state_service.clone()),
-            );
-
-        // The checkpoint sync engine streams blocks from the version 2 connections
-        // that this registry collects.
-        let (v2_sync_peers, sync_peers) = if config.sync.v2_checkpoint_sync {
-            let (sender, receiver) = zebra_network::SyncPeersSender::spawn();
-            (Some(sender), Some(receiver))
-        } else {
-            (None, None)
-        };
-        let network_config = zebra_network::Config {
-            v2_sync_peers,
-            object_source,
-            ..config.network.clone()
-        };
-
-        let (peer_set, address_book, misbehavior_sender, block_advertiser) =
-            zebra_network::init_with_limits(
-                network_config,
-                local_services,
-                inbound,
-                latest_chain_tip.clone(),
-                user_agent(),
-                zcashd_compat_block_gossip_peer_ips,
-                memory_plan.network,
-            )
-            .await;
 
         // Spentness hints need the checkpoint sync engine (`effective_mode`), so they
         // share its peer registry, and the engine commits nothing above genesis until
@@ -880,6 +1029,13 @@ impl StartCmd {
         .await;
 
         let engine_charged = checkpoint_sync::engine::Charged::default();
+        // Headers-first sync publishes its header chain tip, and the checkpoint
+        // sync engine downloads no body above it.
+        let (header_sync_task_handle, header_tip) = match header_sync {
+            Some((header_sync_task, header_tip)) => (header_sync_task, Some(header_tip)),
+            None => (tokio::spawn(std::future::pending().in_current_span()), None),
+        };
+
         let mut checkpoint_sync_task_handle = Self::spawn_checkpoint_sync_engine(
             &config,
             &memory_plan,
@@ -890,6 +1046,7 @@ impl StartCmd {
             latest_chain_tip.clone(),
             known_hashes,
             hints_gate,
+            header_tip,
         );
 
         info!("initializing syncer");
@@ -963,6 +1120,11 @@ impl StartCmd {
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
             pipeline_budget: syncer.pipeline_budget(),
+            read_state: Some(inbound::InboundReadState {
+                network: config.network.network.clone(),
+                read_state: read_only_state_service.clone(),
+                early_blocks: early_blocks.clone(),
+            }),
         };
         setup_tx
             .send(setup_data)
@@ -1326,6 +1488,7 @@ impl StartCmd {
         pin!(indexer_rpc_task_handle);
         pin!(lightwalletd_rpc_task_handle);
         pin!(syncer_task_handle);
+        pin!(header_sync_task_handle);
         pin!(block_gossip_task_handle);
         pin!(block_notify_task_handle);
         pin!(zmq_task_handle);
@@ -1405,6 +1568,10 @@ impl StartCmd {
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
+
+                header_sync_result = &mut header_sync_task_handle => header_sync_result
+                    .expect("unexpected panic in the headers-first sync task")
+                    .map(|_| info!("headers-first sync task exited")),
 
                 // The checkpoint sync engine hands block download back to the syncer
                 // before it exits, so Zebra keeps running without it.
@@ -1544,6 +1711,7 @@ impl StartCmd {
         health_task_handle.abort();
         tip_delay_task_handle.abort();
         syncer_task_handle.abort();
+        header_sync_task_handle.abort();
         checkpoint_sync_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();
@@ -1600,6 +1768,196 @@ impl StartCmd {
         );
 
         exit_status
+    }
+
+    /// Commits the checked block after the snapshot height, which the bootstrap fetched, as a
+    /// checkpoint-verified block. If the commit fails, block sync downloads the block instead.
+    async fn commit_snapshot_successor<S>(state: &mut S, successor: Arc<zebra_chain::block::Block>)
+    where
+        S: tower::Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        >,
+    {
+        /// How long the commit of one checked block may take.
+        const SUCCESSOR_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        let hash = successor.hash();
+        let height = successor.coinbase_height().map(|height| height.0);
+        let request = zebra_state::Request::CommitCheckpointVerifiedBlock(
+            zebra_state::CheckpointVerifiedBlock::from(successor),
+        );
+        let commit = async { tower::Service::call(state.ready().await?, request).await };
+        match tokio::time::timeout(SUCCESSOR_COMMIT_TIMEOUT, commit).await {
+            Ok(Ok(_)) => info!(
+                ?height,
+                %hash,
+                "committed the block after the snapshot height that the bootstrap checked"
+            ),
+            Ok(Err(error)) => warn!(
+                ?height,
+                %hash,
+                %error,
+                "could not commit the block after the snapshot height that the bootstrap \
+                 checked: block sync downloads it instead"
+            ),
+            Err(_) => warn!(
+                ?height,
+                %hash,
+                "committing the block after the snapshot height that the bootstrap checked \
+                 timed out: block sync downloads it instead"
+            ),
+        }
+    }
+
+    /// Creates the marker that says the state holds only the headers synced for a state snapshot
+    /// bootstrap when `header_only` is set, and deletes it otherwise.
+    fn set_header_sync_marker(marker: &std::path::Path, header_only: bool) -> Result<(), Report> {
+        let result = if header_only {
+            marker
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(marker, []))
+        } else {
+            match std::fs::remove_file(marker) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                result => result,
+            }
+        };
+
+        result.map_err(|error| {
+            eyre!(error).wrap_err(format!(
+                "could not update the header-only state marker {}",
+                marker.display()
+            ))
+        })
+    }
+
+    /// Returns the history of the state that a bootstrap from `commitment` installs, with every
+    /// header from genesis.
+    fn planned_snapshot_history(
+        commitment: &zebra_chain::state_snapshot::StateSnapshotCommitment,
+    ) -> zebra_state::HistoryCapabilities {
+        let window_start = zebra_state::state_snapshot::import::window_start(commitment.height);
+        zebra_state::HistoryCapabilities {
+            lowest_retained_height: commitment.height,
+            lowest_known_height: window_start,
+            lowest_header_height: Height::MIN,
+            snapshot_base: Some(zebra_state::SnapshotBase {
+                window_start,
+                height: commitment.height,
+                block_hash: commitment.block_hash,
+                manifest: commitment.manifest,
+                deferred_checks: 0,
+            }),
+        }
+    }
+
+    /// Reads the history capabilities of the open state.
+    async fn history_capabilities(
+        read_state: &zebra_state::ReadStateService,
+    ) -> Result<zebra_state::HistoryCapabilities, Report> {
+        let zebra_state::ReadResponse::HistoryCapabilities(history) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+            .await
+            .map_err(|error| eyre!(error))?
+        else {
+            unreachable!("state returns history capabilities for its capabilities request");
+        };
+
+        Ok(history)
+    }
+
+    /// Spawns headers-first sync, and returns its task and its header chain tip.
+    fn spawn_header_sync(
+        config: &ZebradConfig,
+        peer_set: zebra_network::NetworkService,
+        state: tower::buffer::Buffer<
+            BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+            zebra_state::Request,
+        >,
+    ) -> (
+        tokio::task::JoinHandle<Result<(), Report>>,
+        watch::Receiver<Option<Height>>,
+    ) {
+        info!("initializing headers-first sync");
+        let (tip_sender, header_tip) = watch::channel(None);
+        let header_sync = HeaderSync::new(
+            &config.network.network,
+            peer_set,
+            state,
+            config.sync.header_sync_concurrency,
+        )
+        .with_tip_sender(tip_sender);
+
+        (
+            tokio::spawn(header_sync.run().in_current_span()),
+            header_tip,
+        )
+    }
+
+    /// Drops the services of a state, on a blocking thread, because the last one waits for the
+    /// state's threads to finish and closes the database.
+    async fn close_state<T: Send + 'static>(state: T) {
+        if let Err(error) = tokio::task::spawn_blocking(move || drop(state)).await {
+            warn!(%error, "the task that closes the header-only state failed");
+        }
+    }
+
+    /// Opens the state, with a spentness hints receiver for `spentness_hints_mode`, and the
+    /// memory budget's state `limits`.
+    #[allow(clippy::type_complexity)]
+    async fn open_state(
+        config: &ZebradConfig,
+        max_checkpoint_height: Height,
+        spentness_hints_mode: zebra_chain::parameters::spentness_hints::Mode,
+        limits: zebra_state::MemoryLimits,
+    ) -> (
+        Option<spentness_hints::StateHints>,
+        BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+        zebra_state::ReadStateService,
+        zebra_state::LatestChainTip,
+        zebra_state::ChainTipChange,
+    ) {
+        let (state_hints, spentness_hints_receiver) =
+            spentness_hints::StateHints::new(spentness_hints_mode).unzip();
+        let state_checkpoint_verify_concurrency_limit =
+            config.sync.checkpoint_verify_concurrency_limit
+                * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1);
+        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+            match spentness_hints_receiver {
+                Some(spentness_hints_receiver) => {
+                    zebra_state::init_with_spentness(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                        spentness_hints_receiver,
+                        limits,
+                    )
+                    .await
+                }
+                None => {
+                    zebra_state::init_with_limits(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                        limits,
+                    )
+                    .await
+                }
+            };
+
+        (
+            state_hints,
+            state_service,
+            read_only_state_service,
+            latest_chain_tip,
+            chain_tip_change,
+        )
     }
 
     /// Returns the bound for the state service buffer,

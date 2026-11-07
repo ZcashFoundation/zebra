@@ -1,13 +1,16 @@
 //! Import round trips on a populated Regtest database, and the snapshots the
 //! importer refuses.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use bincode::Options;
 
 use zebra_chain::{
     amount::Amount,
-    block::Height,
+    block::{self, Height},
     orchard, sapling,
     serialization::ZcashSerialize,
     sprout,
@@ -132,8 +135,9 @@ fn import_round_trip() {
     assert_eq!(
         state.db.history_capabilities().unwrap(),
         HistoryCapabilities {
-            lowest_retained_height: window_start(HEIGHT),
+            lowest_retained_height: HEIGHT,
             lowest_known_height: window_start(HEIGHT),
+            lowest_header_height: window_start(HEIGHT),
             snapshot_base: Some(base),
         }
     );
@@ -153,8 +157,15 @@ fn import_round_trip() {
             .map(|utxo| utxo.utxo.output),
     );
     assert_eq!(
-        state.db.address_balance(&fixture::address(3)),
-        chain.state.db.address_balance(&fixture::address(3)),
+        state
+            .db
+            .address_balance_location(&fixture::address(3))
+            .map(|balance| balance.balance()),
+        chain
+            .state
+            .db
+            .address_balance_location(&fixture::address(3))
+            .map(|balance| balance.balance()),
     );
     assert!(
         chain
@@ -358,7 +369,7 @@ fn tampered_utxo_set_is_refused() {
     let result = import_tampered(&chain, |records| {
         records.get_mut(&ComponentId::Utxos).unwrap().remove(0);
     });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    assert_eq!(refused_by(&result), ImportCheck::ValuePools);
 
     let network = chain.network.clone();
     let result = import_tampered(&chain, |records| {
@@ -379,74 +390,197 @@ fn tampered_utxo_set_is_refused() {
     assert_eq!(refused_by(&result), ImportCheck::ValuePools);
 }
 
-/// Adds `change` to the balance in an address balance record, which is its
-/// first 8 bytes, little-endian.
-fn add_to_balance(balance: &mut [u8], change: i64) {
-    let (amount, _) = balance.split_first_chunk_mut::<8>().unwrap();
-    *amount = (i64::from_le_bytes(*amount) + change).to_le_bytes();
-}
-
-/// An address balance that is not the sum of the address's unspent outputs is
-/// refused: one that is off, two that are off in opposite directions, and one
-/// for an address without unspent outputs.
+/// The importer rebuilds the address balance and UTXO indexes from the UTXO
+/// set: each balance and UTXO row is the source's, except that the received
+/// totals start at zero, and the address transaction index is empty below the
+/// snapshot height.
 #[test]
-fn tampered_address_balance_is_refused() {
+fn address_indexes_are_rebuilt_from_the_utxo_set() {
     let _init_guard = zebra_test::init();
     let chain = fixture::chain();
-    let result = import_tampered(&chain, |records| {
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(3).as_bytes(),
-            ),
-            1,
-        );
-    });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    let records = fixture::select(&chain.state);
+    let import = fixture::import(&chain, &records, &chain.network, 0);
+    import.result.unwrap();
+    let state = FinalizedState::new_with_debug(
+        &import.config,
+        &chain.network,
+        false,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
 
-    let result = import_tampered(&chain, |records| {
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(3).as_bytes(),
-            ),
-            -1,
-        );
-        add_to_balance(
-            record(
-                records,
-                ComponentId::AddressBalances,
-                &fixture::address(4).as_bytes(),
-            ),
-            1,
-        );
-    });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    let source_utxos = fixture::rows(&chain.state, ComponentId::Utxos);
+    assert!(!source_utxos.is_empty());
+    let cf_rows = |state: &FinalizedState, cf: &str| -> Vec<(Vec<u8>, Vec<u8>)> {
+        let cf = state.db.cf_handle(cf).unwrap();
+        state
+            .db
+            .zs_forward_range_iter::<_, crate::service::finalized_state::RawBytes, crate::service::finalized_state::RawBytes, _>(&cf, ..)
+            .map(|(key, value)| (key.raw_bytes().clone(), value.raw_bytes().clone()))
+            .collect()
+    };
+    let utxo_index = "utxo_loc_by_transparent_addr_loc";
+    assert_eq!(
+        cf_rows(&state, utxo_index),
+        cf_rows(&chain.state, utxo_index)
+    );
 
-    let result = import_tampered(&chain, |records| {
-        let address = zebra_chain::transparent::Address::from_pub_key_hash(
-            zebra_chain::parameters::NetworkKind::Regtest,
-            [0xee; 20],
-        );
-        let mut value = vec![0; 24];
-        add_to_balance(&mut value, 5);
-        records
-            .get_mut(&ComponentId::AddressBalances)
-            .unwrap()
-            .push((address.as_bytes().to_vec(), value));
-    });
-    assert_eq!(refused_by(&result), ImportCheck::AddressIndex);
+    for height in 0..5 {
+        let address = fixture::address(height);
+        let source = chain.state.db.address_balance_location(&address).unwrap();
+        let imported = state.db.address_balance_location(&address).unwrap();
+        assert_eq!(imported.balance(), source.balance(), "{address}");
+        assert_eq!(imported.address_location(), source.address_location());
+        assert!(source.received() > 0);
+        assert_eq!(imported.received(), 0, "the received total is unknown");
+    }
+    assert!(cf_rows(&state, "tx_loc_by_transparent_addr_loc").is_empty());
 }
 
-/// A window block body whose transactions do not have the header's merkle
+/// The headers above the snapshot height that the bootstrap fetched are
+/// checked against the window headers and stored in the header chain, so
+/// headers-first sync continues after them; headers that do not follow the
+/// snapshot block, or have an invalid time, are refused.
+#[test]
+fn headers_above_the_snapshot_are_checked_and_stored() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let records = fixture::select(&chain.state);
+    let (height, hash) = chain.state.db.tip().unwrap();
+    let successor = fixture::successor(&chain);
+
+    let import = |headers: &[Arc<block::Header>]| {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            prune_blocks_older_than: Some(MAX_BLOCK_REORG_HEIGHT + 1),
+            ..Config::default()
+        };
+        let export = fixture::export(
+            &records,
+            &chain.network,
+            height,
+            hash,
+            &cache.path().join("pieces"),
+            300,
+        );
+        let result =
+            fixture::import_export_with_headers(&export, &chain.network, &config, 0, headers);
+        (cache, config, result)
+    };
+
+    let (_cache, config, result) = import(std::slice::from_ref(&successor.header));
+    result.unwrap();
+    let state = FinalizedState::new_with_debug(
+        &config,
+        &chain.network,
+        false,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        state.db.stored_header_tip(),
+        Some((Height(HEIGHT.0 + 1), successor.hash())),
+        "the header chain continues after the snapshot block"
+    );
+    assert_eq!(state.db.tip(), Some((height, hash)));
+    drop(state);
+
+    let mut orphan = *successor.header;
+    orphan.previous_block_hash = block::Hash([0x55; 32]);
+    let (_cache, _config, result) = import(&[Arc::new(orphan)]);
+    assert_eq!(refused_by(&result), ImportCheck::Headers);
+
+    let mut early = *successor.header;
+    early.time = chain.state.db.block_header(Height(0).into()).unwrap().time;
+    let (_cache, _config, result) = import(&[Arc::new(early)]);
+    assert_eq!(refused_by(&result), ImportCheck::Headers);
+}
+
+/// When the window starts at height one, the shipped genesis header continues
+/// it, so the first header above a short snapshot is checked against a context
+/// that includes genesis. Its time is above the median-time-past of heights
+/// 0..=6, but not above that of heights 1..=6.
+#[test]
+fn headers_above_a_window_from_height_one_include_genesis_in_their_context() {
+    let _init_guard = zebra_test::init();
+    let network = fixture::network();
+    let dir = tempfile::tempdir().unwrap();
+    let db = super::super::open_raw(dir.path()).unwrap();
+
+    let genesis = block::genesis::regtest_genesis_block().header.clone();
+    let mut headers = vec![genesis.clone()];
+    for height in 1..=6u32 {
+        let previous = *headers[headers.len() - 1];
+        let mut header = previous;
+        header.previous_block_hash = previous.hash();
+        header.time = genesis.time + chrono::Duration::seconds(75 * i64::from(height));
+        header.nonce[0..4].copy_from_slice(&height.to_le_bytes());
+        headers.push(Arc::new(header));
+    }
+    let shipped = db
+        .cf_handle(ComponentId::Headers.column_family())
+        .expect("the column family exists");
+    for (height, header) in headers.iter().enumerate() {
+        // The heights are at most 6.
+        let height = Height(height as u32);
+        db.put_cf(shipped, height.as_bytes(), header.as_bytes())
+            .unwrap();
+    }
+    let base = SnapshotBase {
+        window_start: Height(1),
+        height: Height(6),
+        block_hash: headers[6].hash(),
+        manifest: ObjectHash([0; 32]),
+        deferred_checks: 0,
+    };
+    assert_eq!(window_start(base.height), base.window_start);
+
+    let mut above = *headers[6];
+    above.previous_block_hash = headers[6].hash();
+    above.time = genesis.time + chrono::Duration::seconds(75 * 4);
+    super::super::headers::store_headers_above(&db, &base, &network, &[Arc::new(above)])
+        .expect("the header's time is above the median-time-past from genesis");
+
+    let stored = db
+        .cf_handle(crate::service::finalized_state::HEADER_BY_HEIGHT)
+        .expect("the column family exists");
+    assert_eq!(
+        db.get_cf(stored, Height(7).as_bytes()).unwrap(),
+        Some(above.as_bytes().to_vec()),
+        "the header above the snapshot is stored"
+    );
+}
+
+/// Two transactions at one location are refused: the rebuilt hash index would
+/// lose one of them.
+#[test]
+fn transactions_sharing_a_location_are_refused() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let below_window = TransactionLocation::from_usize(Height(3), 0).as_bytes();
+    let other = TransactionLocation::from_usize(Height(4), 0).as_bytes();
+    let result = import_tampered(&chain, |records| {
+        for (_, location) in records.get_mut(&ComponentId::TxLocByHash).unwrap() {
+            if *location == other {
+                *location = below_window.to_vec();
+            }
+        }
+    });
+    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
+}
+
+/// A snapshot block body whose transactions do not have the header's merkle
 /// root is refused, even when its transaction index rows match it.
 #[test]
-fn tampered_window_body_is_refused() {
+fn tampered_snapshot_block_body_is_refused() {
     let _init_guard = zebra_test::init();
     let chain = fixture::chain();
-    let location = TransactionLocation::from_usize(Height(HEIGHT.0 - 1), 0).as_bytes();
+    let location = TransactionLocation::from_usize(HEIGHT, 0).as_bytes();
     let result = import_tampered(&chain, |records| {
         let body = record(records, ComponentId::Transactions, &location);
         let coinbase = Transaction::from_bytes(&body);
@@ -455,10 +589,30 @@ fn tampered_window_body_is_refused() {
         outputs[0].value = (outputs[0].value + Amount::try_from(1).unwrap()).unwrap();
         let tampered = coinbase.with_transparent_outputs(outputs);
         *body = tampered.zcash_serialize_to_vec().unwrap();
-        *record(records, ComponentId::HashByTxLoc, &location) = tampered.hash().as_bytes().to_vec();
         let index = records.get_mut(&ComponentId::TxLocByHash).unwrap();
         index.retain(|(hash, _)| *hash != old_hash.as_bytes());
         index.push((tampered.hash().as_bytes().to_vec(), location.to_vec()));
+    });
+    assert_eq!(refused_by(&result), ImportCheck::Window);
+}
+
+/// A snapshot that ships a window body below the snapshot block, which the
+/// importing node would never keep, is refused.
+#[test]
+fn window_body_below_the_snapshot_block_is_refused() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let below = Height(HEIGHT.0 - 1);
+    let body = fixture::rows(&chain.state, ComponentId::Transactions)
+        .into_iter()
+        .filter(|(key, _)| Height::from_bytes(&key[..3]) == below)
+        .collect::<Vec<_>>();
+    assert!(!body.is_empty(), "the fixture block below H has a body");
+    let result = import_tampered(&chain, |records| {
+        records
+            .get_mut(&ComponentId::Transactions)
+            .unwrap()
+            .extend(body);
     });
     assert_eq!(refused_by(&result), ImportCheck::Window);
 }
@@ -633,40 +787,14 @@ fn tampered_indexes_are_refused() {
     });
     assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
 
-    // Location index rows that point at each other's transactions.
+    // A location above the snapshot height.
+    let above = TransactionLocation::from_usize(Height(HEIGHT.0 + 1), 0).as_bytes();
     let result = import_tampered(&chain, |records| {
         for (_, location) in records.get_mut(&ComponentId::TxLocByHash).unwrap() {
-            if *location == below_window {
-                *location = other.to_vec();
-            } else if *location == other {
-                *location = below_window.to_vec();
+            if *location == other {
+                *location = above.to_vec();
             }
         }
-    });
-    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
-
-    // An address transaction row for a transaction whose outputs are all spent, so its index
-    // rows are not shipped.
-    let spent = TransactionLocation::from_usize(Height(9), 0).as_bytes();
-    let row = fixture::rows(&chain.state, ComponentId::AddressTxs)
-        .into_iter()
-        .find(|(key, _)| key[8..] == spent)
-        .expect("the coinbase at height 9 pays an address");
-    let result = import_tampered(&chain, |records| {
-        records.get_mut(&ComponentId::AddressTxs).unwrap().push(row);
-    });
-    assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
-
-    // An unspent output whose transaction has neither index row.
-    let result = import_tampered(&chain, |records| {
-        records
-            .get_mut(&ComponentId::HashByTxLoc)
-            .unwrap()
-            .retain(|(location, _)| *location != below_window);
-        records
-            .get_mut(&ComponentId::TxLocByHash)
-            .unwrap()
-            .retain(|(_, location)| *location != below_window);
     });
     assert_eq!(refused_by(&result), ImportCheck::TransactionIndex);
 
@@ -867,6 +995,7 @@ fn caller_built_ssts_are_reused_only_for_their_piece() {
         &export.manifest,
         export.commitment,
         0,
+        &[],
         &chain.network,
         &config,
         &export.pieces,

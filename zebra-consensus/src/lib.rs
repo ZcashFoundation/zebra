@@ -41,6 +41,7 @@ mod block;
 #[cfg(feature = "fuzzing")]
 pub mod block;
 mod checkpoint;
+pub mod header;
 mod primitives;
 mod script;
 

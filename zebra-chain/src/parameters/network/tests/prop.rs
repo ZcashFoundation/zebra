@@ -26,7 +26,7 @@ proptest! {
     fn max_block_times_correct_enforcement(height in any::<Height>()) {
         let _init_guard = zebra_test::init();
 
-        assert!(Network::Mainnet.is_max_block_time_enforced(height));
+        assert_eq!(Network::Mainnet.is_max_block_time_enforced(height), Height(2) <= height);
         assert_eq!(Network::new_default_testnet().is_max_block_time_enforced(height), TESTNET_MAX_TIME_START_HEIGHT <= height);
     }
 }

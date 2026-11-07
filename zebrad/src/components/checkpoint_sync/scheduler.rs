@@ -372,6 +372,9 @@ pub struct Scheduler {
     anchors: Anchors,
     estimator: SizeEstimator,
     target: block::Height,
+    /// The highest height planned for now: the target, or with headers-first
+    /// sync the highest checkpoint at or below the verified header chain tip.
+    ceiling: block::Height,
 
     /// The lowest uncommitted height.
     frontier: block::Height,
@@ -431,6 +434,7 @@ impl Scheduler {
             anchors,
             estimator: SizeEstimator::default(),
             target,
+            ceiling: target,
             frontier: start,
             planned_through: start.previous().ok(),
             planned_spans: BTreeMap::new(),
@@ -451,6 +455,15 @@ impl Scheduler {
             hashes: None,
             known_hash_units: 0,
         }
+    }
+
+    /// Plans no unit above `ceiling`, a checkpoint, until it is raised: with
+    /// headers-first sync, no body is requested before its header is
+    /// verified. Units already planned stay planned, and the ceiling never
+    /// rises above the target.
+    pub fn set_ceiling(&mut self, ceiling: block::Height) {
+        debug_assert!(self.anchors.contains(ceiling), "ceilings are checkpoints");
+        self.ceiling = ceiling.min(self.target);
     }
 
     /// Plans units at the verified entries of `source` where they are
@@ -924,15 +937,16 @@ impl Scheduler {
     // Planning
 
     /// Plans the next unit above `planned_through` into the queue. Returns
-    /// `false` when everything up to the target is planned.
+    /// `false` when everything up to the ceiling is planned.
     fn plan_unit(&mut self) -> bool {
+        let limit = self.target.min(self.ceiling);
         let start = match self.planned_through {
-            Some(planned) if planned >= self.target => return false,
+            Some(planned) if planned >= limit => return false,
             Some(planned) => planned.next().expect("below the target"),
             None => block::Height(0),
         };
 
-        let (end, end_hash, anchor, est) = self.plan_piece(start, self.target, None);
+        let (end, end_hash, anchor, est) = self.plan_piece(start, limit, None);
         self.planned_through = Some(end);
         self.planned_spans.insert(end, start);
         self.enqueue(start, end, end_hash, anchor, est);

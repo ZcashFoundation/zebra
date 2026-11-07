@@ -81,6 +81,38 @@ fn advertised_services_depend_on_the_protocol() {
     );
 }
 
+/// A snapshot-born node advertises `NODE_NETWORK_LIMITED` to version 2 peers only once the
+/// chain tip reaches its threshold, and the threshold is runtime-only.
+#[test]
+fn limited_service_starts_at_its_tip_height() {
+    let _init_guard = zebra_test::init();
+
+    let base = PeerServices::NODE_SYNC_ARTIFACTS;
+    let limited = base | PeerServices::NODE_NETWORK_LIMITED;
+    let from = Some(Height(100));
+    assert_eq!(
+        Config::v2_services_now(None, Some(Height(1_000)), base),
+        base
+    );
+    assert_eq!(Config::v2_services_now(from, None, base), base);
+    assert_eq!(Config::v2_services_now(from, Some(Height(99)), base), base);
+    assert_eq!(
+        Config::v2_services_now(from, Some(Height(100)), base),
+        limited
+    );
+    assert_eq!(
+        Config::v2_services_now(from, Some(Height(101)), base),
+        limited
+    );
+
+    let config = Config {
+        v2_limited_service_from: from,
+        ..Config::default()
+    };
+    let toml = toml::to_string(&config).unwrap();
+    assert!(!toml.contains("limited"), "{toml}");
+}
+
 /// The objects a node serves are runtime-only: a config never writes them, a config file that
 /// names them is rejected, and two configs are equal only if they watch the same object index.
 #[test]

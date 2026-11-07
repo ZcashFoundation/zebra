@@ -178,6 +178,20 @@ state tip` warning with the `reason`, `kind`, and `error`. The `chain updates ha
 includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
 `oldest_in_flight_secs`.
 
+## Headers-first sync metrics
+
+[Headers-first sync](startup.md#sync-headers-first) stores the header chain ahead of the block
+bodies. Compare `sync.headers.tip.height` with `zcash.chain.verified.block.height` to see how
+far the header chain runs ahead of the committed blocks.
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `sync.headers.tip.height` | gauge | The height of the stored header chain tip |
+| `sync.headers.committed.count` | counter | Headers that passed every check, including difficulty and time, and were stored |
+| `sync.headers.invalid.count` | counter | Header responses rejected for invalid proof of work or Equihash solutions, and checkpoint spans whose headers don't end at their checkpoint |
+| `sync.headers.reorg.count` | counter | Header commits that switched to a fork with more work |
+| `sync.headers_first.response.hash.count` | histogram | Block hashes the syncer read from the stored header chain per request |
+
 ## Network metric aggregation
 
 Network metrics omit per-peer labels to bound the number of time series.

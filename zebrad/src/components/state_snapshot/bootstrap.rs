@@ -43,7 +43,8 @@ use zebra_state::{
     state_snapshot::{
         format::{ComponentId, Manifest, PieceManifest, MAX_MANIFEST_BYTES, MAX_PIECE_BYTES},
         import::{
-            build_piece_sst, decode_history_tree, import_dir, import_state_snapshot, sst_path,
+            build_piece_sst, carry_header_chain, decode_history_tree, import_dir,
+            import_state_snapshot, sst_path,
         },
         store::ArtifactStore,
         SnapshotError,
@@ -59,8 +60,12 @@ use super::{
     scheduler::{PieceDescriptor, PieceStore, Scheduler, SchedulerError, VerifiedPiece},
 };
 
+mod sync_peer_service;
+
 #[cfg(test)]
 mod tests;
+
+use sync_peer_service::SyncPeerService;
 
 /// The manifest must be fetched and verified within this long of the bootstrap
 /// peers connecting.
@@ -295,19 +300,30 @@ pub(crate) enum FetchError {
     Skip(String),
 }
 
-/// Bootstraps the state from the snapshot `commitment` names, downloading
-/// from `peers`, and returns once the imported database has been renamed into
-/// place.
+/// What a finished bootstrap hands to the node.
+#[derive(Clone, Debug, Default)]
+pub struct Bootstrapped {
+    /// The checked block `H + 1`, if a bootstrap peer served it. The node
+    /// commits it right after it opens the imported state, before block sync
+    /// starts, so sync starts above it.
+    pub successor: Option<Arc<Block>>,
+}
+
+/// Downloads and imports the snapshot `commitment` names from `peers`, and
+/// returns the checked database, staged beside the node's state, for
+/// [`StagedSnapshot::install`].
+///
+/// `synced_headers` are the node's synced and verified headers from the
+/// snapshot height `H` to the checkpoint after it: the chain checks use them
+/// instead of fetching headers from the peers, and a snapshot whose block at
+/// `H` is not on them is rejected.
 pub async fn bootstrap(
     config: &ZebradConfig,
     commitment: StateSnapshotCommitment,
     peers: Vec<String>,
+    synced_headers: Option<Vec<Arc<Header>>>,
     memory: &MemoryLimits,
-) -> Result<(), BootstrapError> {
-    let network = config.network.network.clone();
-    let store = ArtifactStore::new(&config.state, &network);
-    let import_root = import_dir(&config.state);
-
+) -> Result<StagedSnapshot, BootstrapError> {
     // 1. Each attempt gets its own workspace, and holds a lock on it while it runs. Another
     // bootstrap may still be using a sibling directory, so the shared import root is never
     // removed, and only workspaces that no attempt holds are swept.
@@ -342,54 +358,269 @@ pub async fn bootstrap(
         Stage::PeersReady
     );
 
-    let result = async {
-        let workspace = create_import_workspace(&import_root).await?;
-        let temp_root = workspace.path.clone();
-        let result = run(
-            config,
-            &network,
-            &store,
-            &temp_root,
-            commitment,
-            peers,
-            connected_at,
-            memory,
-        )
-        .await;
-
-        match &result {
-            Ok(()) => {}
-            Err(BootstrapError::Rejected(reason)) => {
-                error!(
-                    manifest = %commitment.manifest,
-                    reason,
-                    "the state snapshot failed a check of its contents: marking it as rejected"
-                );
-                if let Err(error) = store.mark_rejected(commitment.manifest) {
-                    warn!(?error, "could not mark the state snapshot as rejected");
-                }
-            }
-            Err(error) => {
-                error!(%error, "the state snapshot bootstrap did not finish");
-            }
-        }
-        if result.is_err() {
-            if let Err(error) = remove_dir(&temp_root).await {
-                warn!(
-                    ?error,
-                    "could not delete this attempt's state snapshot import workspace"
-                );
-            }
-        }
-        // A workspace that could not be deleted is left to the next attempt's sweep.
-        workspace.release().await;
-        result
-    }
+    let result = stage(
+        config,
+        commitment,
+        peers,
+        connected_at,
+        synced_headers,
+        memory,
+    )
     .await;
 
     // Every exit after dialling, including workspace creation failure, closes and drains the
     // short-lived endpoints before the caller can start genesis fallback.
     close_bootstrap_after(result, bootstrap_peers.close()).await
+}
+
+/// Downloads and imports the snapshot `commitment` names from version 2 `peers`
+/// that advertise state snapshot service, connected since `connected_at`, like
+/// [`bootstrap`] does once it has dialled its peers.
+///
+/// `peers` can be the connected version 2 peers of the node's own network, so the
+/// bootstrap opens no other connection to them.
+pub async fn bootstrap_from_connected(
+    config: &ZebradConfig,
+    commitment: StateSnapshotCommitment,
+    peers: Vec<zn::SyncPeer>,
+    synced_headers: Option<Vec<Arc<Header>>>,
+    memory: &MemoryLimits,
+) -> Result<StagedSnapshot, BootstrapError> {
+    if peers.is_empty() {
+        return Err(BootstrapError::Aborted(
+            "no connected version 2 peer serves state snapshots".to_string(),
+        ));
+    }
+    let peers = Peers::new(
+        peers
+            .into_iter()
+            .map(|peer| {
+                (
+                    peer.addr(),
+                    Buffer::new(SyncPeerService::new(peer), PEER_BUFFER_BOUND),
+                )
+            })
+            .collect(),
+    );
+    info!(
+        peers = peers.clients.len(),
+        addrs = ?peers.addrs(),
+        "{}",
+        Stage::PeersReady
+    );
+
+    stage(
+        config,
+        commitment,
+        peers,
+        Instant::now(),
+        synced_headers,
+        memory,
+    )
+    .await
+}
+
+/// Runs the flow on `peers`, in a new workspace, and returns the staged database.
+async fn stage<S>(
+    config: &ZebradConfig,
+    commitment: StateSnapshotCommitment,
+    peers: Peers<S>,
+    connected_at: Instant,
+    synced_headers: Option<Vec<Arc<Header>>>,
+    memory: &MemoryLimits,
+) -> Result<StagedSnapshot, BootstrapError>
+where
+    S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let network = config.network.network.clone();
+    let store = ArtifactStore::new(&config.state, &network);
+    let import_root = import_dir(&config.state);
+
+    let workspace = create_import_workspace(&import_root).await?;
+    let temp_root = workspace.path.clone();
+    let result = run(
+        config,
+        &network,
+        &store,
+        &temp_root,
+        commitment,
+        peers,
+        connected_at,
+        synced_headers,
+        memory,
+    )
+    .await;
+
+    match &result {
+        Ok(_) => {}
+        Err(BootstrapError::Rejected(reason)) => {
+            error!(
+                manifest = %commitment.manifest,
+                reason,
+                "the state snapshot failed a check of its contents: marking it as rejected"
+            );
+            if let Err(error) = store.mark_rejected(commitment.manifest) {
+                warn!(?error, "could not mark the state snapshot as rejected");
+            }
+        }
+        Err(error) => {
+            error!(%error, "the state snapshot bootstrap did not finish");
+        }
+    }
+    match result {
+        Ok(staged) => Ok(StagedSnapshot {
+            workspace,
+            staged,
+            store: store.clone(),
+            serve_state_snapshots: config.sync.serve_state_snapshots,
+        }),
+        Err(error) => {
+            discard_workspace(workspace).await;
+            Err(error)
+        }
+    }
+}
+
+/// Deletes a failed attempt's workspace, and releases it.
+async fn discard_workspace(workspace: ImportWorkspace) {
+    if let Err(error) = remove_dir(&workspace.path).await {
+        warn!(
+            ?error,
+            "could not delete this attempt's state snapshot import workspace"
+        );
+    }
+    // A workspace that could not be deleted is left to the next attempt's sweep.
+    workspace.release().await;
+}
+
+/// A downloaded, imported and checked state snapshot database, staged in its
+/// attempt's workspace until [`StagedSnapshot::install`] renames it into place.
+///
+/// Dropping it without installing leaves the workspace to the next attempt's
+/// sweep.
+#[derive(Debug)]
+pub struct StagedSnapshot {
+    /// The attempt's workspace, locked until the installation finishes.
+    workspace: ImportWorkspace,
+
+    /// What [`run`] staged.
+    staged: Staged,
+
+    /// The shared artifact store the pieces were stored in.
+    store: ArtifactStore,
+
+    /// Whether the node keeps the pieces to serve them.
+    serve_state_snapshots: bool,
+}
+
+/// The staged database and what its installation needs.
+#[derive(Debug)]
+struct Staged {
+    commitment: StateSnapshotCommitment,
+    deferred_checks: u8,
+    successor: Option<Arc<Block>>,
+    checked_headers: usize,
+    staged_db_path: PathBuf,
+    db_path: PathBuf,
+    backup: Option<PathBuf>,
+    piece_paths: HashMap<ObjectHash, PathBuf>,
+}
+
+impl StagedSnapshot {
+    /// The checked block `H + 1`, if a bootstrap peer served it.
+    pub fn successor(&self) -> Option<&Arc<Block>> {
+        self.staged.successor.as_ref()
+    }
+
+    /// Renames the staged database into place, and returns what the node needs
+    /// from the bootstrap.
+    ///
+    /// The node's state database, if there is one, must hold only the headers
+    /// the node synced from genesis, and be closing: the installation waits
+    /// until the node has closed it, copies its headers into the staged
+    /// database, and replaces it. Fails, leaving the node's state database as
+    /// it was, if its headers don't link genesis to the snapshot's window.
+    pub async fn install(self) -> Result<Bootstrapped, BootstrapError> {
+        let StagedSnapshot {
+            workspace,
+            staged,
+            store,
+            serve_state_snapshots,
+        } = self;
+        let result = install_staged(staged, &workspace.path, &store, serve_state_snapshots).await;
+        match result {
+            Ok(bootstrapped) => {
+                workspace.release().await;
+                Ok(bootstrapped)
+            }
+            Err(error) => {
+                error!(%error, "the state snapshot was not installed");
+                discard_workspace(workspace).await;
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Carries the synced headers into the staged database, installs it, and cleans up.
+async fn install_staged(
+    staged: Staged,
+    temp_root: &Path,
+    store: &ArtifactStore,
+    serve_state_snapshots: bool,
+) -> Result<Bootstrapped, BootstrapError> {
+    let Staged {
+        commitment,
+        deferred_checks,
+        successor,
+        checked_headers,
+        staged_db_path,
+        db_path,
+        backup,
+        piece_paths,
+    } = staged;
+
+    let replaces_synced_state = db_path.exists();
+    if replaces_synced_state {
+        let (source, staged) = (db_path.clone(), staged_db_path.clone());
+        let carried = tokio::task::spawn_blocking(move || carry_header_chain(&source, &staged))
+            .await
+            .map_err(|error| {
+                BootstrapError::Aborted(format!("the header carrying task failed: {error}"))
+            })??;
+        info!(
+            below_window = carried.below_window,
+            above_snapshot = carried.above_snapshot,
+            "carried the synced headers into the state snapshot, so the node keeps every header \
+             from genesis"
+        );
+    }
+
+    install_staged_snapshot_replacing(
+        staged_db_path,
+        db_path.clone(),
+        backup,
+        replaces_synced_state,
+    )
+    .await?;
+
+    info!(path = %db_path.display(), "{}", Stage::SstsIngested);
+    info!(path = %db_path.display(), deferred_checks, "{}", Stage::ChecksDone);
+    info!(path = %db_path.display(), height = commitment.height.0, "{}", Stage::StateRenamed);
+    if checked_headers > 0 {
+        info!(
+            from = commitment.height.0 + 1,
+            headers = checked_headers,
+            "stored the checked headers above the snapshot height for headers-first sync"
+        );
+    }
+
+    // Cleanup cannot undo a successful installation or trigger genesis
+    // fallback after the database has been renamed into place.
+    finish_install(piece_paths, temp_root, store, serve_state_snapshots).await?;
+
+    Ok(Bootstrapped { successor })
 }
 
 async fn close_bootstrap_after<T>(
@@ -464,7 +695,7 @@ impl PieceStore for AttemptStore {
     }
 }
 
-/// Steps 3 to 7 of the flow, from the manifest to the renamed database.
+/// Steps 3 to 6 of the flow, from the manifest to the staged database.
 #[allow(clippy::too_many_arguments)]
 async fn run<S>(
     config: &ZebradConfig,
@@ -474,8 +705,9 @@ async fn run<S>(
     commitment: StateSnapshotCommitment,
     mut peers: Peers<S>,
     connected_at: Instant,
+    synced_headers: Option<Vec<Arc<Header>>>,
     memory: &MemoryLimits,
-) -> Result<(), BootstrapError>
+) -> Result<Staged, BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -530,7 +762,18 @@ where
     let history_root = history_tree.hash();
 
     // 4. The block-hash and successor-commitment checks.
-    let deferred_checks = check_chain(&mut peers, network, commitment, &history_root).await?;
+    let ChainChecks {
+        deferred_checks,
+        successor,
+        headers,
+    } = check_chain_with(
+        &mut peers,
+        network,
+        commitment,
+        &history_root,
+        synced_headers,
+    )
+    .await?;
     if peers.is_empty() {
         return Err(BootstrapError::Aborted(
             "every bootstrap peer was excluded during the chain checks".to_string(),
@@ -564,11 +807,12 @@ where
     let staged_db_path =
         staged_config.db_path(zebra_state::constants::STATE_DATABASE_KIND, major, network);
     {
-        let (temp_root, manifest, network, pieces) = (
+        let (temp_root, manifest, network, pieces, headers) = (
             temp_root.to_path_buf(),
             manifest.clone(),
             network.clone(),
             piece_paths.clone(),
+            headers.clone(),
         );
         tokio::task::spawn_blocking(move || {
             import_state_snapshot(
@@ -576,6 +820,7 @@ where
                 &manifest,
                 commitment,
                 deferred_checks,
+                &headers,
                 &network,
                 &staged_config,
                 &pieces,
@@ -588,21 +833,17 @@ where
         .map_err(snapshot_fault)?;
     }
     let backup = config.state.non_finalized_state_backup_dir(network);
-    install_staged_snapshot(staged_db_path, db_path.clone(), backup).await?;
 
-    info!(path = %db_path.display(), "{}", Stage::SstsIngested);
-    info!(path = %db_path.display(), deferred_checks, "{}", Stage::ChecksDone);
-    info!(path = %db_path.display(), height = commitment.height.0, "{}", Stage::StateRenamed);
-
-    // 7. Cleanup cannot undo a successful installation or trigger genesis
-    // fallback after the database has been renamed into place.
-    finish_install(
+    Ok(Staged {
+        commitment,
+        deferred_checks,
+        successor,
+        checked_headers: headers.len(),
+        staged_db_path,
+        db_path,
+        backup,
         piece_paths,
-        temp_root,
-        store,
-        config.sync.serve_state_snapshots,
-    )
-    .await
+    })
 }
 
 /// The suffix of the lock file next to each import workspace. The attempt that uses the
@@ -800,6 +1041,7 @@ async fn create_import_workspace(import_root: &Path) -> Result<ImportWorkspace, 
 /// Renames an already checked database from `staged` to `target`, unless Zebra
 /// has started shutting down. Errors after the rename are cleanup errors and
 /// do not turn the successful installation into a bootstrap failure.
+#[cfg(test)]
 async fn install_staged_snapshot(
     staged: PathBuf,
     target: PathBuf,
@@ -808,6 +1050,26 @@ async fn install_staged_snapshot(
     install_staged_snapshot_with_hook(staged, target, backup, || {}).await
 }
 
+/// Installs the staged database like [`install_staged_snapshot`], replacing the
+/// node's header-only state database at `target` when `replace` is set.
+async fn install_staged_snapshot_replacing(
+    staged: PathBuf,
+    target: PathBuf,
+    backup: Option<PathBuf>,
+    replace: bool,
+) -> Result<(), BootstrapError> {
+    install_staged_snapshot_using(
+        staged,
+        target,
+        backup,
+        replace,
+        || {},
+        |from, to| fs::rename(from, to),
+    )
+    .await
+}
+
+#[cfg(test)]
 async fn install_staged_snapshot_with_hook<F>(
     staged: PathBuf,
     target: PathBuf,
@@ -817,7 +1079,7 @@ async fn install_staged_snapshot_with_hook<F>(
 where
     F: FnOnce() + Send + 'static,
 {
-    install_staged_snapshot_using(staged, target, backup, before_rename, |from, to| {
+    install_staged_snapshot_using(staged, target, backup, false, before_rename, |from, to| {
         fs::rename(from, to)
     })
     .await
@@ -833,6 +1095,7 @@ async fn install_staged_snapshot_with_rename_failure(
         staged,
         target,
         backup,
+        false,
         || {},
         |_, _| Err(io::Error::other("injected state snapshot rename failure")),
     )
@@ -843,6 +1106,7 @@ async fn install_staged_snapshot_using<F, R>(
     staged: PathBuf,
     target: PathBuf,
     backup: Option<PathBuf>,
+    replace: bool,
     before_rename: F,
     rename: R,
 ) -> Result<(), BootstrapError>
@@ -858,7 +1122,7 @@ where
         let parent = target.parent().ok_or_else(|| {
             SnapshotError::Unsupported(format!("no directory for the state database {target:?}"))
         })?;
-        if target.exists() {
+        if target.exists() && !replace {
             return Err(SnapshotError::Unsupported(format!(
                 "a state database already exists at {target:?}"
             ))
@@ -879,7 +1143,23 @@ where
         let preserved_backup = preserve_backup(backup)?;
         before_rename();
 
+        // The replaced header-only state is moved aside, and only deleted once the snapshot is in
+        // its place.
+        let replaced = match replace.then(|| set_aside(&target)).transpose()? {
+            Some(Some(replaced)) => Some(replaced),
+            _ => None,
+        };
+
         if let Err(source) = rename(&staged, &target) {
+            if let Some(replaced) = &replaced {
+                if let Err(restore) = fs::rename(replaced, &target) {
+                    return Err(SnapshotError::Unsupported(format!(
+                        "the state snapshot rename failed ({source}); the replaced state could \
+                         not be restored to {target:?} ({restore}), and remains at {replaced:?}"
+                    ))
+                    .into());
+                }
+            }
             if let Some((preserved, backup)) = preserved_backup {
                 let restore = if backup.exists() {
                     Err(io::Error::new(
@@ -903,6 +1183,17 @@ where
                 source,
             }
             .into());
+        }
+
+        if let Some(replaced) = replaced {
+            if let Err(error) = fs::remove_dir_all(&replaced) {
+                warn!(
+                    ?error,
+                    path = %replaced.display(),
+                    "the state snapshot was installed, but the replaced header-only state could \
+                     not be deleted"
+                );
+            }
         }
 
         if let Some((preserved, _)) = preserved_backup {
@@ -933,6 +1224,27 @@ where
     .map_err(|error| {
         BootstrapError::Aborted(format!("the state snapshot install task failed: {error}"))
     })?
+}
+
+/// Moves the database at `target` to a unique sibling, and returns its new path, or `None`
+/// if there is no database there.
+fn set_aside(target: &Path) -> Result<Option<PathBuf>, SnapshotError> {
+    let name = target.file_name().ok_or_else(|| {
+        SnapshotError::Unsupported(format!("no directory name for the state {target:?}"))
+    })?;
+    let aside = target.with_file_name(format!(
+        ".{}.replaced-{}",
+        name.to_string_lossy(),
+        import_nonce()
+    ));
+    match fs::rename(target, &aside) {
+        Ok(()) => Ok(Some(aside)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(SnapshotError::Io {
+            path: target.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// Moves `backup` to a unique sibling, returning the preserved and original paths.
@@ -1637,7 +1949,10 @@ where
 
 /// Checks that `block` is block `H + 1`: it hashes to the authenticated
 /// `successor_hash`, chains from `hash_h`, has the successor's coinbase
-/// height, and its merkle root covers its transactions.
+/// height, and passes the body checks the checkpoint verifier runs, because
+/// the node commits it as a checkpoint-verified block: the coinbase is first
+/// and only first, and the merkle root covers its transactions, with no
+/// duplicate transaction (CVE-2012-2459).
 pub(crate) fn check_successor_block(
     hash_h: block::Hash,
     successor_hash: block::Hash,
@@ -1663,9 +1978,20 @@ pub(crate) fn check_successor_block(
             successor_height.0
         ));
     }
-    let merkle_root: block::merkle::Root = block.transactions.iter().collect();
+    zebra_consensus::coinbase_is_first(block)
+        .map_err(|error| format!("the block's coinbase is invalid: {error}"))?;
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+    let merkle_root: block::merkle::Root = transaction_hashes.iter().copied().collect();
     if block.header.merkle_root != merkle_root {
         return Err("the block's merkle root does not cover its transactions".to_string());
+    }
+    // A duplicate keeps the merkle root (CVE-2012-2459). The txids commit to each transaction's
+    // consensus branch ID, so a list with the authenticated root and no duplicate is the block's.
+    let unique: std::collections::HashSet<_> = transaction_hashes.iter().collect();
+    if unique.len() != transaction_hashes.len() {
+        return Err(
+            "the block's transactions are invalid: a transaction is duplicated".to_string(),
+        );
     }
 
     Ok(())
@@ -1684,18 +2010,88 @@ pub(crate) fn check_successor_commitment(
     block.header.commitment_bytes.0 == <[u8; 32]>::from(expected)
 }
 
-/// Runs the chain checks and returns the [`SnapshotBase`] `DEFERRED_*` bits of
-/// the checks no peer could serve.
+/// Checks the snapshot against the node's `synced` headers from the snapshot
+/// height to `checkpoint`, and returns the headers above the snapshot height.
+///
+/// Headers-first sync verified them, and they end at the checkpoint, so they
+/// are the chain's: a snapshot block that isn't on them is rejected.
+pub(crate) fn check_synced_headers(
+    synced: Vec<Arc<Header>>,
+    commitment: StateSnapshotCommitment,
+    checkpoint: (Height, block::Hash),
+) -> Result<Vec<Arc<Header>>, BootstrapError> {
+    let expected_len = usize::try_from(checkpoint.0 - commitment.height)
+        .ok()
+        .and_then(|len| len.checked_add(1));
+    if Some(synced.len()) != expected_len
+        || synced.last().map(|header| header.hash()) != Some(checkpoint.1)
+    {
+        return Err(BootstrapError::Aborted(format!(
+            "the synced headers from the snapshot height {} don't end at the checkpoint at {}",
+            commitment.height.0, checkpoint.0 .0
+        )));
+    }
+    let synced_hash = synced[0].hash();
+    if synced_hash != commitment.block_hash {
+        return Err(BootstrapError::Rejected(format!(
+            "the snapshot names block {} at height {}, but the synced header chain, which the \
+             checkpoint at {} verifies, has block {synced_hash} there",
+            commitment.block_hash, commitment.height.0, checkpoint.0 .0
+        )));
+    }
+
+    Ok(synced[1..].to_vec())
+}
+
+/// The results of the chain checks.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ChainChecks {
+    /// The [`SnapshotBase`] `DEFERRED_*` bits of the checks no peer could serve.
+    pub(crate) deferred_checks: u8,
+
+    /// The checked copy of block `H + 1`, if a peer served one. Its hash is
+    /// authenticated by the headers that chain it to the next checkpoint, and
+    /// its authorizing data by the snapshot's history tree, so the node commits
+    /// it right after the import instead of downloading it again.
+    pub(crate) successor: Option<Arc<Block>>,
+
+    /// The headers `H + 1..=C` that chain the snapshot block to the next
+    /// checkpoint, with their proof of work checked, or none if no peer served
+    /// them. The importer checks their difficulty and time and stores them, so
+    /// headers-first sync continues after them.
+    pub(crate) headers: Vec<Arc<Header>>,
+}
+
+/// Runs the chain checks and returns the deferred checks and the checked
+/// successor block.
 ///
 /// A snapshot whose `hash(H)` differs from the checkpoint at `H` is rejected.
 /// A successor check succeeds when any fetched copy commits to the history
 /// tree; invalid copies blame only their peers.
+#[cfg(test)]
 pub(crate) async fn check_chain<S>(
     peers: &mut Peers<S>,
     network: &Network,
     commitment: StateSnapshotCommitment,
     history_root: &ChainHistoryMmrRootHash,
-) -> Result<u8, BootstrapError>
+) -> Result<ChainChecks, BootstrapError>
+where
+    S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    check_chain_with(peers, network, commitment, history_root, None).await
+}
+
+/// Runs the chain checks like [`check_chain`], with the node's `synced_headers`
+/// from the snapshot height to the next checkpoint instead of headers fetched
+/// from the peers, when there are some.
+pub(crate) async fn check_chain_with<S>(
+    peers: &mut Peers<S>,
+    network: &Network,
+    commitment: StateSnapshotCommitment,
+    history_root: &ChainHistoryMmrRootHash,
+    synced_headers: Option<Vec<Arc<Header>>>,
+) -> Result<ChainChecks, BootstrapError>
 where
     S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -1734,7 +2130,11 @@ where
 
     // The chain to the next checkpoint authenticates `hash(H)` when it is not a checkpoint, and
     // always authenticates the header of `H + 1`, which check 3 needs.
-    let Some(headers) = fetch_header_chain(peers, hash_h, h, checkpoint).await? else {
+    let headers = match synced_headers {
+        Some(synced) => Some(check_synced_headers(synced, commitment, checkpoint)?),
+        None => fetch_header_chain(peers, hash_h, h, checkpoint).await?,
+    };
+    let Some(headers) = headers else {
         if !h_is_checkpoint {
             warn!(
                 height = h.0,
@@ -1754,7 +2154,10 @@ where
              tree roots instead"
         );
         deferred_checks |= SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            ..ChainChecks::default()
+        });
     };
 
     info!(
@@ -1770,6 +2173,23 @@ where
         .expect("a verified chain to a checkpoint above H has a header")
         .hash();
 
+    // The headers chain to a checkpoint, so they are the chain's, but the node stores them for
+    // headers-first sync, which checks every header's proof of work before it stores it.
+    if let Err(error) = zebra_consensus::header::verify_headers(
+        network,
+        successor_height,
+        headers.clone(),
+        chrono::Utc::now(),
+    )
+    .await
+    {
+        return Err(BootstrapError::Aborted(format!(
+            "the headers from the snapshot block to the checkpoint at height {} fail their proof \
+             of work checks, so the checkpoint list or the clock is wrong: {error}",
+            checkpoint_height.0
+        )));
+    }
+
     // Check 3: one matching copy is enough. Transaction authorizing data is
     // not covered by the txid Merkle root, so a bad copy can have the
     // authenticated header yet fail the commitment check. Every fetched body
@@ -1784,7 +2204,7 @@ where
     )
     .await;
     let copy_count = copies.len();
-    let mut matching_copy = false;
+    let mut matching_copy = None;
     for (peer, block) in copies {
         let block = match block {
             Ok(block) => block,
@@ -1795,7 +2215,7 @@ where
         };
 
         if check_successor_commitment(history_root, &block) {
-            matching_copy = true;
+            matching_copy = Some(block);
         } else {
             peers.blame(
                 peer,
@@ -1805,13 +2225,17 @@ where
         }
     }
 
-    if matching_copy {
+    if let Some(successor) = matching_copy {
         info!(
             height = successor_height.0,
             hash = %successor_hash,
             "a copy of the block after the snapshot height commits to the snapshot's history tree"
         );
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            successor: Some(successor),
+            headers,
+        });
     }
 
     if copy_count == 0 {
@@ -1823,7 +2247,11 @@ where
              tree roots instead"
         );
         deferred_checks |= SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
-        return Ok(deferred_checks);
+        return Ok(ChainChecks {
+            deferred_checks,
+            successor: None,
+            headers,
+        });
     }
 
     Err(BootstrapError::Aborted(format!(

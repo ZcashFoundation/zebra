@@ -3,5 +3,5 @@ kind: Added
 body: >-
   Added `v2_bootstrap_clients` and `BootstrapPeers`, which dial up to eight version 2 peers that
   advertise `NODE_SYNC_ARTIFACTS` from client-only QUIC endpoints with bulk receive windows, for a
-  state-snapshot bootstrap that runs before the peer set exists, and close them afterwards.
+  state-snapshot bootstrap, and close them afterwards.
 time: 2026-11-03T12:01:00.000000000Z

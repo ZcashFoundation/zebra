@@ -252,6 +252,19 @@ where
         self
     }
 
+    /// Plans the engine's downloads only up to the highest checkpoint at or
+    /// below `header_tip`, the header chain tip that headers-first sync
+    /// publishes, so that the engine downloads no body before its header is
+    /// verified. The engine still claims block download as before, and waits
+    /// for the headers.
+    pub fn with_headers_first(
+        mut self,
+        header_tip: watch::Receiver<Option<block::Height>>,
+    ) -> Self {
+        self.supervisor.header_tip = Some(header_tip);
+        self
+    }
+
     /// Runs until shutdown. Errors only on a fatal defect (a wrong
     /// checkpoint or pin), after handing ownership back to the legacy
     /// syncer.
@@ -283,6 +296,9 @@ struct Supervisor<P, ZS, ZSTip> {
     /// cancel its downloads, over and over. Keyed by IP address rather than
     /// connection, so that reconnecting does not clear the blame.
     blamed: BTreeSet<IpAddr>,
+    /// With headers-first sync, the header chain tip, see
+    /// [`CheckpointSync::with_headers_first`].
+    header_tip: Option<watch::Receiver<Option<block::Height>>>,
 }
 
 impl<P, ZS, ZSTip> Supervisor<P, ZS, ZSTip>
@@ -319,6 +335,7 @@ where
             charged: Charged::default(),
             generation: 0,
             blamed: BTreeSet::new(),
+            header_tip: None,
         }
     }
 
@@ -405,6 +422,7 @@ where
                     charged: self.charged.clone(),
                     blamed: self.blamed.clone(),
                     hashes,
+                    header_tip: self.header_tip.clone(),
                 }
                 .run()
                 .await

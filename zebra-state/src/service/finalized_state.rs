@@ -30,6 +30,8 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     value_balance::ValueBalance,
 };
+// The state snapshot importer stores the headers above the snapshot height.
+pub(crate) use zebra_db::header_chain::{HEADER_BY_HEIGHT, HEIGHT_BY_HEADER_HASH};
 use zebra_db::{
     chain::BLOCK_INFO,
     spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
@@ -94,8 +96,12 @@ pub use disk_format::KV;
 
 pub use disk_format::upgrade::{restorable_db_source_versions, restorable_db_versions};
 
-// The state snapshot format decodes and re-encodes these values.
-pub(crate) use disk_format::{chain::LegacyHistoryTreeParts, transparent::AddressBalanceLocation};
+// The state snapshot format decodes and re-encodes these values, and the importer rebuilds the
+// address indexes with them.
+pub(crate) use disk_format::{
+    chain::LegacyHistoryTreeParts,
+    transparent::{AddressBalanceLocation, AddressUnspentOutput},
+};
 
 // The state snapshot exporter refuses databases that need a migration.
 pub(crate) use disk_format::upgrade::can_read_without_migration;
@@ -151,6 +157,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Spentness hints
     SPENTNESS_JOURNAL,
     SPENTNESS_ARTIFACT,
+    // Headers stored ahead of their block bodies by headers-first sync
+    HEADER_BY_HEIGHT,
+    HEIGHT_BY_HEADER_HASH,
     // Snapshot sync. Always registered, and empty unless the database was imported from a
     // state snapshot.
     SNAPSHOT_BASE,

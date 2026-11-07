@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'Fixed the state service waiting for another block before it committed the queued children of the last checkpoint verified block, when they were all queued before that block reached disk. The service now starts committing them on its next request.'
+time: 2026-11-06T22:16:03Z

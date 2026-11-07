@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: 'Changed block sync to download block bodies only for headers that headers-first sync has verified and stored: the legacy syncer takes its block hashes from the stored header chain instead of `getblocks` requests to peers, and the version 2 checkpoint sync engine requests blocks only up to the highest checkpoint at or below the header chain tip. Block download now waits for header sync. Set `[sync] headers_first = false` to keep the previous `getblocks` walk.'
+time: 2026-11-06T20:50:05Z

@@ -141,6 +141,27 @@ pub struct InboundSetupData {
     /// Use [`ChainSync::pipeline_budget`](crate::components::ChainSync::pipeline_budget), so gossip
     /// follows the syncer's bound. The default has no bound.
     pub pipeline_budget: PipelineBudget,
+
+    /// The read-only state the network's requests are answered from, which
+    /// replaces any given to the builder methods.
+    ///
+    /// `zebrad start` gives it here instead of to the builder, because the network can start
+    /// before the state it serves from is opened: a state snapshot bootstrap replaces the state
+    /// the network started with.
+    pub read_state: Option<InboundReadState>,
+}
+
+/// The read-only state services of [`InboundSetupData::read_state`].
+pub struct InboundReadState {
+    /// The network, for compact block reconstruction.
+    pub network: Network,
+
+    /// The read-only state, for compact block reconstruction and for version 2
+    /// `get-block-range` and `get-hashes` requests.
+    pub read_state: zs::ReadStateService,
+
+    /// Authenticated uncommitted bodies, for negotiated early-relay connections.
+    pub early_blocks: Option<zs::EarlyRelayCache>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -357,7 +378,19 @@ impl Service<zn::Request> for Inbound {
                         latest_chain_tip,
                         misbehavior_sender,
                         pipeline_budget,
+                        read_state,
                     } = setup_data;
+
+                    if let Some(InboundReadState {
+                        network,
+                        read_state,
+                        early_blocks,
+                    }) = read_state
+                    {
+                        self.compact_relay = Some((network, read_state.clone()));
+                        self.block_range_state = Some(BoxCloneService::new(read_state));
+                        self.early_blocks = early_blocks;
+                    }
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 

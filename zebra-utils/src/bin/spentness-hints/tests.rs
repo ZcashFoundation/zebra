@@ -113,6 +113,7 @@ fn spending_archive(path: &Path, spent_coinbase: Height) -> Result<(FinalizedSta
                 let spent = state
                     .db
                     .block(spent_coinbase.into())
+                    .map_err(|error| eyre!("could not read the spent coinbase: {error}"))?
                     .ok_or_else(|| eyre!("fixture lacks the spent coinbase"))?;
                 let coinbase = &spent.transactions[0];
                 let first = spend_all_outputs(coinbase, coinbase);
