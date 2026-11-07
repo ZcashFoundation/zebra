@@ -167,10 +167,11 @@ for the operator rollback rules.
 
 ### The v32-to-v33 variable-height migration
 
-Format 33 replaces every fixed three-byte block height in 27 column families with
-a canonical variable-width encoding, including the `snapshot_base` marker and the
+Format 33 replaces every fixed three-byte block height in 29 column families with
+a canonical variable-width encoding, including the `snapshot_base` marker, the
 checkpoint sync families `sync_meta_by_height` (height keys) and
-`spentness_journal` (output location keys). The `spentness_artifact` record keeps
+`spentness_journal` (output location keys), and the headers-first sync families
+`header_by_height` (height keys) and `height_by_header_hash` (height values). The `spentness_artifact` record keeps
 its fixed four-byte height and is not rewritten. Every earlier format, including
 snapshot-born v32 state, stores fixed-width heights, so the migration sits above
 the v32 snapshot barrier. Format 33 prefers a v32 source, then v31, then older

@@ -207,6 +207,18 @@ const AFFECTED_FAMILIES: &[Family] = &[
         key: Part::OutputLocation,
         value: Part::Unchanged,
     },
+    // The header chain column families, which hold the headers that headers-first sync verified
+    // ahead of their bodies.
+    Family {
+        name: "header_by_height",
+        key: Part::Height,
+        value: Part::Unchanged,
+    },
+    Family {
+        name: "height_by_header_hash",
+        key: Part::Unchanged,
+        value: Part::Height,
+    },
 ];
 
 #[derive(Clone, Copy)]

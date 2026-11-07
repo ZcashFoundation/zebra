@@ -50,8 +50,8 @@ const DATABASE_FORMAT_VERSION: u64 = 33;
 ///
 /// Version history:
 /// - 33.0.0: replaces fixed three-byte heights with a canonical length-prefixed, minimally
-///   big-endian encoding in 27 column families, including `snapshot_base`, `sync_meta_by_height`
-///   and `spentness_journal`. The newest reusable source, v32 with v31, v30 and v29 fallbacks, moves
+///   big-endian encoding in 29 column families, including `snapshot_base`, `sync_meta_by_height`,
+///   `spentness_journal`, `header_by_height` and `height_by_header_hash`. The newest reusable source, v32 with v31, v30 and v29 fallbacks, moves
 ///   to `state/v33`, then rewrites those records from a persistent checkpoint before serving reads,
 ///   committing blocks, or running older pending upgrades such as the 29.1 backfill. The version
 ///   file reaches v33 only after the rewrite and every intervening upgrade. The rewrite is one-way:

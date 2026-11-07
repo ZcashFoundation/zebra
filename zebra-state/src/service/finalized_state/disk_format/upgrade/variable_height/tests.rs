@@ -60,6 +60,8 @@ const EXPECTED_FAMILIES: &[&str] = &[
     "snapshot_base",
     "sync_meta_by_height",
     "spentness_journal",
+    "header_by_height",
+    "height_by_header_hash",
 ];
 
 type Records = BTreeMap<String, Vec<(Vec<u8>, Vec<u8>)>>;
@@ -1229,12 +1231,18 @@ async fn open_and_wait(config: &Config) -> FinalizedState {
 ///
 /// A database created at each version moves from its own directory to the running directory, and
 /// the height rewrite runs first, so the 29.1 backfill reads the blocks with the current codec. A
-/// 29.0 database has no synchronization metadata, and from 30.0 on a database can hold the
-/// checkpoint sync column families, whose heights and output locations the rewrite converts.
+/// 29.0 database has no synchronization metadata, from 30.0 on a database can hold the
+/// checkpoint sync column families, and from 30.1 on the header chain column families, whose
+/// heights and output locations the rewrite converts.
 #[tokio::test]
 async fn every_registered_format_upgrades_through_the_height_rewrite() {
     let _guard = zebra_test::init();
     let (current_records, blocks, build) = current_chain_records();
+    let header_above = zebra_test::vectors::MAINNET_BLOCKS[&3]
+        .zcash_deserialize_into::<Arc<Block>>()
+        .unwrap()
+        .header
+        .clone();
     let journal_key = OutputLocation::from_usize(Height(2), 1, 3).as_bytes();
     let journal_value = vec![0x5a; 40];
     let record_key = vec![0x7c; 32];
@@ -1279,6 +1287,7 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
         let mut source_records = current_records.clone();
         let mut expected = current_records.clone();
         let has_spentness_hints = (major, minor) >= (30, 0);
+        let has_header_chain = (major, minor) >= (30, 1);
         if (major, minor) == (29, 0) {
             // Format 29.0 has no synchronization metadata, and the upgrade backfills it.
             source_records.insert("sync_meta_by_height".to_string(), Vec::new());
@@ -1290,6 +1299,21 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
             source_records.insert(
                 "spentness_artifact".to_string(),
                 vec![(record_key.clone(), record_value.clone())],
+            );
+            expected = source_records.clone();
+        }
+        if has_header_chain {
+            // A header that headers-first sync verified above the finalized tip.
+            source_records.insert(
+                "header_by_height".to_string(),
+                vec![(Height(3).as_bytes().to_vec(), header_above.as_bytes())],
+            );
+            source_records.insert(
+                "height_by_header_hash".to_string(),
+                vec![(
+                    header_above.hash().as_bytes().to_vec(),
+                    Height(3).as_bytes().to_vec(),
+                )],
             );
             expected = source_records.clone();
         }
@@ -1317,7 +1341,12 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
         );
         let families_on_disk =
             rocksdb::DB::list_cf(&rocksdb::Options::default(), &legacy_path).unwrap();
-        for name in ["sync_meta_by_height", "spentness_journal", "snapshot_base"] {
+        for name in [
+            "sync_meta_by_height",
+            "spentness_journal",
+            "header_by_height",
+            "snapshot_base",
+        ] {
             assert_eq!(
                 families_on_disk.iter().any(|family| family == name),
                 family_exists_at(name, &version),
@@ -1334,6 +1363,13 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
                 legacy_cf("spentness_journal"),
                 [vec![0, 0, 2, 0, 1, 0, 0, 3]],
                 "the {version} fixture has a fixed-width journal key"
+            );
+        }
+        if has_header_chain {
+            assert_eq!(
+                legacy_cf("header_by_height"),
+                [vec![0, 0, 3]],
+                "the {version} fixture has a fixed-width header chain key"
             );
         }
 
