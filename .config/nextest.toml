@@ -19,7 +19,7 @@ slow-timeout = { period = "5m", terminate-after = 4 }
 # headers-first sync tests two nodes through 1,100 blocks, on released loopback ports, and the
 # state snapshot bootstrap and shutdown tests run two nodes through a multi-minute bootstrap or
 # 2,000 blocks, so they only run when selected with `--ignore-default-filter`.
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::headers_first_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::headers_first_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|pruned_node_discovers_the_snapshot_server_and_keeps_every_header|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
 
@@ -30,7 +30,7 @@ failure-output = "immediate"
 # time on the 4-CPU runners.
 test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::headers_first_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(/^integration::v2_checkpoint_sync::/) and not test(/^integration::headers_first_sync::/) and not test(/^integration::regtest::state_snapshot::(pruned_node_bootstraps_from_a_state_snapshot|pruned_node_discovers_the_snapshot_server_and_keeps_every_header|artifact_server_sigterm_during_sync_exits_successfully)$/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # Record retry attempts for the unit test job summary.
 [profile.ci.junit]
@@ -96,10 +96,10 @@ retries = 1
 filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_restart) or test(=integration::regtest::pruning::pruned_node_never_advertises_unservable_blocks)'
 threads-required = "num-test-threads"
 
-# The snapshot bootstrap test reserves eight loopback ports the same way. The default filters
-# leave it out, because its nodes take minutes to mine, export, bootstrap, and sync.
+# The snapshot bootstrap tests reserve loopback ports the same way. The default filters
+# leave them out, because their nodes take minutes to mine, export, bootstrap, and sync.
 [[profile.default.overrides]]
-filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot)'
+filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot) or test(=integration::regtest::state_snapshot::pruned_node_discovers_the_snapshot_server_and_keeps_every_header)'
 threads-required = "num-test-threads"
 
 [[profile.ci.overrides]]
@@ -107,7 +107,7 @@ filter = 'test(=integration::regtest::pruning::pruning_preserves_spends_across_r
 threads-required = "num-test-threads"
 
 [[profile.ci.overrides]]
-filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot)'
+filter = 'test(=integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot) or test(=integration::regtest::state_snapshot::pruned_node_discovers_the_snapshot_server_and_keeps_every_header)'
 threads-required = "num-test-threads"
 
 # Force live Testnet peer-limit tests to run serially with each other, while

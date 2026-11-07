@@ -471,10 +471,12 @@ fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
 
 /// With the default `"auto"` fallback, an empty pruned node whose snapshot no peer serves still
 /// starts, and syncs normally from genesis.
+///
+/// The node has no peers at all, so it gives up when its header chain stops growing.
 #[tokio::test(flavor = "multi_thread")]
 async fn pruned_node_starts_normally_when_no_peer_serves_the_snapshot() -> Result<()> {
     let _init_guard = zebra_test::init();
-    tokio::time::timeout(Duration::from_secs(120), async {
+    tokio::time::timeout(Duration::from_secs(300), async {
         // A checkpoint above the snapshot height, so the decision rule's preconditions hold.
         let network = regtest(Some(vec![
             (Height(0), regtest(None).genesis_hash()),
@@ -497,9 +499,11 @@ async fn pruned_node_starts_normally_when_no_peer_serves_the_snapshot() -> Resul
         config.sync.state_snapshot_peers = vec![loopback(reserve_udp_port()?).to_string()];
         let mut node = start_node(testdir()?.with_config(&mut config)?)?;
 
-        node.expect_stdout_line_matches(regex::escape(&Stage::BootstrapStarted.to_string()))?;
         node.expect_stdout_line_matches(
-            "the state snapshot bootstrap failed: syncing from genesis instead",
+            "syncing and verifying headers from genesis before the state snapshot bootstrap",
+        )?;
+        node.expect_stdout_line_matches(
+            "the state snapshot bootstrap failed: syncing normally from the synced headers instead",
         )?;
         let client = RpcRequestClient::new_with_timeout(loopback(rpc), TEST_TIMEOUT);
         wait_for_mempool_activation(&client).await?;
@@ -1068,6 +1072,149 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
 
 /// A failed export is a process failure with its diagnostic on stderr, not a successful command
 /// whose stdout only looks like an error log.
+/// A pruned node with no configured bootstrap peers syncs and verifies headers from genesis,
+/// finds the snapshot server among the version 2 peers that connect to it, bootstraps from it,
+/// and keeps every header from genesis, but no body below the snapshot height.
+#[ignore = "runs two nodes through a multi-minute snapshot bootstrap; run it with \
+            --run-ignored=all --ignore-default-filter"]
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_node_discovers_the_snapshot_server_and_keeps_every_header() -> Result<()> {
+    /// How far above `H` A mines before B starts.
+    const TIP_ABOVE_H: u32 = 400;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let network = regtest(None);
+        let key_a = TransparentSigningKey::random();
+        let rpc_a = reserve_tcp_port()?;
+        let p2p_a = loopback(reserve_tcp_port()?);
+        let quic_a = loopback(reserve_udp_port()?);
+        let rpc_b = reserve_tcp_port()?;
+        let p2p_b = loopback(reserve_tcp_port()?);
+        let quic_b = loopback(reserve_udp_port()?);
+
+        // A mines until `H` is finalized, stops there, and exports the snapshot at `H`.
+        let mut config_a = node_config(&network, rpc_a, p2p_a, RETENTION_A, &key_a)?;
+        config_a.state.debug_stop_at_height = Some(H);
+        config_a.tracing.filter =
+            Some("warn,zebra_state::service::finalized_state=info".to_owned());
+        let mut node_a = start_node(testdir()?.with_config(&mut config_a)?)?;
+        let dir_a = node_a
+            .dir
+            .take()
+            .expect("retain the state directory for the export");
+        let a = RpcRequestClient::new_with_timeout(loopback(rpc_a), TEST_TIMEOUT);
+        wait_for_mempool_activation(&a).await?;
+        if let Err(error) = mine_to(&a, H + MAX_BLOCK_REORG_HEIGHT).await {
+            tracing::info!(%error, "the last generate call lost the stopping node");
+        }
+        node_a.expect_stdout_line_matches("stopping at configured height")?;
+        node_a.kill(true)?;
+        node_a.wait_with_output()?;
+        let mut export = dir_a
+            .spawn_child(args!["export-state-snapshot", "--height": H.to_string()])?
+            .with_timeout(TEST_TIMEOUT)?;
+        let dir_a = export
+            .dir
+            .take()
+            .expect("retain the state directory for serving");
+        let export = export.wait_with_output()?.assert_success()?;
+        let commitment = parse_commitment(&String::from_utf8_lossy(&export.output.stdout))?;
+
+        // A serves the snapshot over version 2, mines above `H`, and dials B over both protocols:
+        // B is told about neither A nor any other bootstrap peer.
+        config_a.state.debug_stop_at_height = None;
+        config_a.sync.serve_state_snapshots = true;
+        config_a.network.v2_listen_addr = Some(quic_a);
+        config_a.network.initial_testnet_peers = [p2p_b.to_string()].into();
+        config_a.network.initial_v2_peers = [quic_b.to_string()].into();
+        config_a.tracing.filter = Some("info".to_owned());
+        let mut node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
+        let dir_a = node_a
+            .dir
+            .take()
+            .expect("retain the state directory for the restart");
+        wait_for_mempool_activation(&a).await?;
+        let tip_a = block_count(&a)
+            .await
+            .ok_or_else(|| eyre!("A restarted without a tip"))?
+            .max(H + TIP_ABOVE_H);
+        mine_to(&a, tip_a).await?;
+
+        // Checkpoints from A's chain at genesis, `H`, `H + 2` and `H + CHECKPOINT_GAP`, so the
+        // header chain from genesis to `H` is one span longer than Mainnet's spans.
+        let mut checkpoints = vec![(Height(0), network.genesis_hash())];
+        for height in [H, H + 2, H + CHECKPOINT_GAP] {
+            checkpoints.push((Height(height), block_hash(&a, height).await?));
+        }
+        let network_b = regtest(Some(checkpoints));
+
+        // B: empty and pruned, with the exported commitment, and no bootstrap peers.
+        let key_b = TransparentSigningKey::random();
+        let mut config_b = node_config(&network_b, rpc_b, p2p_b, RETENTION_B, &key_b)?;
+        config_b.sync.full_verify_concurrency_limit = 1;
+        config_b.sync.parallel_cpu_threads = 1;
+        config_b.network.v2_listen_addr = Some(quic_b);
+        config_b.network.initial_testnet_peers.clear();
+        config_b.network.initial_v2_peers.clear();
+        config_b.sync.state_snapshot_sync = true;
+        config_b.sync.state_snapshot = Some(commitment);
+        config_b.sync.state_snapshot_peers.clear();
+        config_b.tracing.filter = Some("info".to_owned());
+        let mut node_b = start_node(testdir()?.with_config(&mut config_b)?)?;
+        let b = RpcRequestClient::new_with_timeout(loopback(rpc_b), TEST_TIMEOUT);
+
+        node_b.expect_stdout_line_matches(
+            "syncing and verifying headers from genesis before the state snapshot bootstrap",
+        )?;
+        // A dialled B before B listened, so restart A to dial B again.
+        stop_node(node_a)?;
+        let node_a = start_node(dir_a)?;
+        node_b.expect_stdout_line_matches(
+            "the header chain reached the checkpoint after the state snapshot",
+        )?;
+        node_b.expect_stdout_line_matches(
+            "found connected version 2 peers that serve state snapshots",
+        )?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::BootstrapStarted.to_string()))?;
+        node_b.expect_stdout_line_matches(format!(
+            "carried the synced headers into the state snapshot.*below_window={}",
+            L - 1
+        ))?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::StateRenamed.to_string()))?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::StateInitialized.to_string()))?;
+
+        wait_for_mempool_activation(&b).await?;
+        wait_for_height(&b, tip_a, SYNC_TIMEOUT, "node B").await?;
+        assert_eq!(block_hash(&b, tip_a).await?, block_hash(&a, tip_a).await?);
+        let info = blockchain_info(&b).await?;
+        assert_eq!(info["pruned"], true);
+
+        // Every header from genesis is stored, and is A's.
+        for height in 0..=tip_a {
+            let params = format!(r#"["{height}", false]"#);
+            let header_b = b
+                .json_result_from_call::<String>("getblockheader", &params)
+                .await
+                .map_err(|error| eyre!("B has no header at {height}: {error}"))?;
+            let header_a = a
+                .json_result_from_call::<String>("getblockheader", &params)
+                .await
+                .map_err(|error| eyre!(error))?;
+            assert_eq!(header_b, header_a, "the header at {height}");
+        }
+        // But no body below the snapshot height.
+        for height in [1, L - 1, L, H - 1] {
+            get_block_error(&b, height, 0).await?;
+        }
+
+        stop_node(node_b)?;
+        stop_node(node_a)?;
+        Ok(())
+    })
+    .await?
+}
+
 #[test]
 fn export_failure_uses_stderr_and_a_nonzero_exit() -> Result<()> {
     let _init_guard = zebra_test::init();

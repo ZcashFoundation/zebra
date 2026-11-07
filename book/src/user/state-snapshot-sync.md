@@ -5,9 +5,9 @@ A [pruned node](pruning.md) with an empty state can download a **state snapshot*
 Zebra's finalized state at a height `H`: the UTXO set, the nullifier and anchor sets, the note
 commitment trees, the value pools, the hashes and headers of the 2,304 most recent blocks, and the
 body of block `H`. It ships nothing the node would not keep: no older block bodies, and no index
-the node can rebuild, such as the address balances. The node checks the snapshot against a
-_commitment_, installs it as its state, keeps the checked headers up to the next checkpoint, and
-then syncs only the blocks above `H`. On Mainnet that replaces about 278 GB of block history with
+the node can rebuild, such as the address balances. The node first syncs and verifies the block
+headers from genesis, like any node. Then it checks the snapshot against a _commitment_ and against
+those headers, installs it as its state, keeps every header, and syncs only the blocks above `H`. On Mainnet that replaces about 278 GB of block history with
 about 2 GB.
 
 This is not the same as the [published state archives](snapshots.md). Those are tar archives of a
@@ -33,9 +33,8 @@ trusted with the chain state**, in the same way the checkpoints compiled into Ze
 
 Before the downloaded database is used, Zebra checks these parts against the chain:
 
-- The hash of block `H`. It must equal Zebra's checkpoint at `H`, or chain through headers to the
-  next checkpoint above `H`. If no peer serves those headers, the checkpoint verifier checks it
-  when it reaches that checkpoint, and stalls with a specific error if it does not match.
+- The hash of block `H`. It must equal Zebra's checkpoint at `H`, and be the hash at `H` on the
+  header chain the node synced and verified, which reaches the next checkpoint above `H`.
 - The history tree at `H`, and through it the Sapling, Orchard, and Ironwood note commitment
   trees. Block `H + 1` commits to the history tree, and the history tree commits to the tree
   roots, which Zebra recomputes from the shipped trees rather than reading cached values. Zebra
@@ -46,10 +45,11 @@ Before the downloaded database is used, Zebra checks these parts against the cha
 - The window of headers `L..=H`, where `L = max(1, H − 2303)`: the headers link to each other,
   the bodies of genesis and block `H` match their transaction IDs and merkle roots, and the genesis
   block hashes to the network's genesis hash. The snapshot ships no other body.
-- The headers from `H + 1` to the next checkpoint, which the hash check above fetches: their proof
-  of work, and their difficulty and time against the window headers. Zebra stores them, so
-  headers-first sync continues after them, and commits the checked copy of block `H + 1` before
-  block sync starts, so it does not download that block again.
+- The headers from `H + 1` to the next checkpoint, from the synced header chain: their proof of
+  work, and their difficulty and time against the window headers. Zebra commits the checked copy
+  of block `H + 1` before block sync starts, so it does not download that block again.
+- The headers below `L`, from the synced header chain: they must link genesis to the first
+  header of the window, or the snapshot is not installed.
 
 It also checks that the snapshot is consistent with itself: every UTXO's transaction has a
 location, no two transactions share one, the UTXO total matches the transparent value pool, and
@@ -93,11 +93,14 @@ fails is logged once at `info`, and the node syncs normally:
 - `[state] prune_blocks_older_than` is set, because only pruned nodes can start from a snapshot;
 - `[state] ephemeral = false`;
 - `cache_dir` holds no state database for the network, in the current format or in a previous
-  format Zebra could reuse;
+  format Zebra could reuse, except one that only holds the headers an earlier start synced for a
+  bootstrap;
 - a commitment is pinned or configured, and allowed on the network;
 - `[consensus] checkpoint_sync = true`, NU5 is active at `H`, `H + 1` is at or below the last
   checkpoint Zebra knows, and the history tree at `H` is not empty;
-- `[sync] state_snapshot_peers`, or when it is empty `[network] initial_v2_peers`, names a peer;
+- `[sync] state_snapshot_peers`, or when it is empty `[network] initial_v2_peers`, names a peer,
+  or `[network] v2_listen_addr` is set, so the node can find peers that serve snapshots among the
+  version 2 peers it connects to;
 - [zcashd-compat mode](zcashd-compat.md) is off, because it needs an archive node;
 - the snapshot was not rejected by an earlier attempt on this `cache_dir`.
 
@@ -130,8 +133,11 @@ state_snapshot_peers = ["203.0.113.10:8233"]
 state_snapshot_fallback = "auto"
 ```
 
-The snapshot peers are only used for the download, over a short-lived version 2 connection that
-Zebra opens before its network starts. They are not added to the node's peers. To keep syncing
+Without configured snapshot peers, the node downloads from the version 2 peers it is connected to
+that advertise `NODE_SYNC_ARTIFACTS`, whether it dialled them, they dialled it, or it discovered
+them, so a node with `[network] v2_listen_addr` set needs no snapshot peers. The snapshot peers are
+only used for the download, over short-lived version 2 connections next to the node's network.
+They are not added to the node's peers. To keep syncing
 blocks from them over the version 2 protocol afterwards, also set `[network] v2_listen_addr` and
 list them in `[network] initial_v2_peers`. The node syncs the blocks above `H` from its usual
 peers over either protocol. Because block `H` is recent, the node counts as near the network tip
@@ -142,12 +148,20 @@ Every key is described in the [`[sync]` configuration reference](config.md#sync)
 
 ## What happens at startup
 
+A node that bootstraps starts like any other node: it opens its state and starts its network.
+Then it syncs and verifies the block headers from genesis to the checkpoint after `H`, and logs
+`syncing and verifying headers from genesis before the state snapshot bootstrap`. Until it has
+bootstrapped or given up, it commits only the genesis block, so it downloads no body it would not
+keep. It gives up, and syncs normally from its headers, if its header chain stops growing for two
+minutes, or if no connected version 2 peer advertises `NODE_SYNC_ARTIFACTS` within two minutes of
+the headers reaching that checkpoint.
+
 The bootstrap logs one line per stage at `info`, each starting with `state snapshot stage:`. In
 order:
 
 | Stage | Meaning |
 | --- | --- |
-| `bootstrap started` | The conditions above hold, so Zebra bootstraps from the commitment. |
+| `bootstrap started` | The headers reached the checkpoint after `H`, and Zebra has peers to download from. |
 | `bootstrap peers ready` | The snapshot peers are connected and advertise `NODE_SYNC_ARTIFACTS`. |
 | `manifest verified` | The manifest hashes to the commitment, and matches it and the network. |
 | `first piece verified` | The first piece hashed to its manifest entry. |
@@ -155,7 +169,7 @@ order:
 | `SST files built` | Every piece was turned into a database file. |
 | `SST files ingested` | The new database holds every piece. |
 | `import checks done` | The chain and self-consistency checks passed. |
-| `state renamed into place` | The new database is now the node's state. |
+| `state renamed into place` | The new database, with the synced headers, replaced the node's state. |
 | `state initialized` | The state service started on it. |
 | `first commit above the snapshot height` | The first block above `H` was committed. |
 | `block after the snapshot height committed` | Block `H + 1` was committed, so the trees are verified. |
@@ -176,24 +190,25 @@ If the snapshot's contents fail a check, the snapshot is **rejected**: Zebra rec
 hash under `<cache_dir>/state-snapshots/<network>/rejected/` and does not try that snapshot again
 in this `cache_dir`. A download that cannot complete is **aborted** and records nothing. In both
 cases `[sync] state_snapshot_fallback` decides what happens next. With the default `"auto"`, Zebra
-continues with a normal sync from genesis, unless the snapshot was configured in
+continues with a normal sync from the headers it synced, unless the snapshot was configured in
 `[sync] state_snapshot` and rejected, which exits like `"error"`. With `"error"`, Zebra exits with
-an actionable message. An aborted download leaves no state,
-so the next start retries it; a rejected snapshot still exits on later starts until you configure a
+an actionable message. An aborted download leaves a state with only the synced headers, which the
+next start bootstraps over; a rejected snapshot still exits on later starts until you configure a
 different trusted commitment, or investigate the failure and remove its rejection marker. With
-`"genesis"`, Zebra continues with a normal sync from genesis and does not retry a rejected
-snapshot. A normal sync creates the state, so after `"auto"` or `"genesis"` falls back, later
-starts continue that sync and never bootstrap: delete the state directory to try the snapshot
-again.
+`"genesis"`, Zebra continues with a normal sync and does not retry a rejected snapshot. A normal
+sync commits blocks to the state, so after `"auto"` or `"genesis"` falls back, later starts
+continue that sync and never bootstrap: delete the state directory to try the snapshot again.
 
 ## After the bootstrap
 
-The node's blocks start at the snapshot height `H`, and its headers at the window start `L`:
+The node's blocks start at the snapshot height `H`, but it keeps every header from genesis:
 
 - `getblockchaininfo` reports `pruned: true` and `pruneheight` equal to `H`, even before the
   node's own pruning deletes anything. Genesis is available separately below it.
 - The blocks from `H` to the tip are complete. The blocks from `L` to `H − 1` have hashes and
-  headers, so `getblockheader` answers for them, but no bodies. Blocks below `L` are unknown. The
+  headers, so `getblockheader` answers for them, but no bodies. Blocks below `L` only have their
+  headers, which `getblockheader` returns with `verbose = false`; the node has no other data for
+  them. The
   node never downloads the missing bodies: there is no backfill. Requests for them fail, as they
   do on a [pruned node](pruning.md#rpc-and-peer-behaviour), and `gettxout` returns `null` for
   `version` when the creating transaction is below `H`.
@@ -296,8 +311,13 @@ import.
   [no ALPN identifier for them](p2p-v2.md#known-limitations).
 - The bodies below `H` are never downloaded. A node that needs them must sync from genesis or
   restore an [archive](snapshots.md) instead.
-- The headers below `L` are not downloaded either, so a snapshot-born node does not serve them.
-- Snapshot peers are not discovered: `NODE_SYNC_ARTIFACTS` peers must be configured.
+- A snapshot-born node keeps the headers below `L`, but does not serve them to peers yet.
+- Without configured snapshot peers, the node needs `[network] v2_listen_addr` to find
+  `NODE_SYNC_ARTIFACTS` peers, and it advertises the services of a snapshot node from its start,
+  even if it then gives up and syncs normally, until it restarts.
+- While it syncs headers for a bootstrap, the node also connects to peers that don't serve old
+  blocks, since it only needs their headers. If it then gives up and syncs from genesis, those
+  connections can slow the sync until they are replaced by peers that serve old blocks.
 - A node that bootstrapped from a snapshot does not serve
   [known hashes](p2p-v2.md#serving-known-hashes): it answers every `get-hashes` request with no
   entries, because its per-block counts would need the history below `L`.

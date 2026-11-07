@@ -29,6 +29,9 @@
 //!
 //! - `integration::v2_checkpoint_sync::`
 //! - `integration::headers_first_sync::`
+//! - `integration::regtest::state_snapshot::pruned_node_bootstraps_from_a_state_snapshot`,
+//!   `pruned_node_discovers_the_snapshot_server_and_keeps_every_header` and
+//!   `artifact_server_sigterm_during_sync_exits_successfully`
 //!
 //! They are also `#[ignore]`d. Run them with `--ignore-default-filter --run-ignored=all`, in
 //! release, one at a time:
@@ -37,6 +40,8 @@
 //! cargo nextest run --release -p zebrad --ignore-default-filter --run-ignored=all \
 //!     --test-threads 1 \
 //!     -E 'test(/^integration::(v2_checkpoint_sync|headers_first_sync)::/)'
+//! cargo nextest run --release -p zebrad --ignore-default-filter --run-ignored=all \
+//!     --test-threads 1 -E 'test(/^integration::regtest::state_snapshot::/)'
 //! ```
 //!
 //! ## Running tests

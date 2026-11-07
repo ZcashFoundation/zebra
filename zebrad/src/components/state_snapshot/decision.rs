@@ -1,5 +1,5 @@
 //! The decision rule: whether `zebrad start` bootstraps from a
-//! state snapshot before it initializes the state.
+//! state snapshot, after it syncs headers from genesis.
 //!
 //! Every condition must hold, and the first that fails is logged once at
 //! info, so an operator who enabled snapshot sync can see why it did not run.
@@ -26,7 +26,10 @@ pub enum Decision {
     Bootstrap {
         /// The commitment the snapshot is verified against.
         commitment: StateSnapshotCommitment,
-        /// The peers to download from, as `host:port` strings.
+        /// The peers to download from, as `host:port` strings. When there are
+        /// none, the node downloads from the connected version 2 peers that
+        /// advertise `NODE_SYNC_ARTIFACTS`, which it finds through peer
+        /// discovery.
         peers: Vec<String>,
     },
 
@@ -63,7 +66,8 @@ pub enum SkipReason {
     PreconditionFailed(Precondition),
 
     /// Neither `[sync] state_snapshot_peers` nor `[network] initial_v2_peers`
-    /// names a peer.
+    /// names a peer, and the version 2 protocol is off, so the node can't
+    /// find peers that serve state snapshots.
     NoPeers,
 
     /// zcashd-compat mode is on, which needs an archive node.
@@ -115,7 +119,8 @@ impl fmt::Display for SkipReason {
                 "the history tree is empty at the snapshot height"
             }
             SkipReason::NoPeers => {
-                "neither sync.state_snapshot_peers nor network.initial_v2_peers names a peer"
+                "neither sync.state_snapshot_peers nor network.initial_v2_peers names a peer, \
+                 and network.v2_listen_addr is not set, so no peer can be discovered"
             }
             SkipReason::ZcashdCompat => "zcashd-compat mode is on",
             SkipReason::Rejected => "the snapshot was rejected by an earlier bootstrap",
@@ -172,12 +177,20 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     if let Some(existing) = existing_state_database(&config.state, network) {
-        info!(
-            path = %existing.display(),
-            "a state database exists, so the state snapshot bootstrap does not run; \
-             delete it to bootstrap from a snapshot"
-        );
-        return Decision::Skip(SkipReason::ExistingState);
+        if header_sync_marker(&config.state, network).exists() {
+            info!(
+                path = %existing.display(),
+                "the state database holds only the headers an earlier start synced for the state \
+                 snapshot bootstrap, so the bootstrap runs again"
+            );
+        } else {
+            info!(
+                path = %existing.display(),
+                "a state database exists, so the state snapshot bootstrap does not run; \
+                 delete it to bootstrap from a snapshot"
+            );
+            return Decision::Skip(SkipReason::ExistingState);
+        }
     }
 
     let commitment = match select_commitment(&config.sync, network) {
@@ -191,7 +204,7 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     let peers = bootstrap_peers(config);
-    if peers.is_empty() {
+    if peers.is_empty() && config.network.v2_listen_addr.is_none() {
         return Decision::Skip(SkipReason::NoPeers);
     }
 
@@ -204,6 +217,19 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     Decision::Bootstrap { commitment, peers }
+}
+
+/// Returns the path of the marker that says the node's state database holds only the headers it
+/// synced for a state snapshot bootstrap, which the bootstrap replaces.
+///
+/// The node creates it before it opens a new state to sync headers for a bootstrap, and deletes
+/// it before it commits any block above genesis, or once the snapshot is installed. A state with
+/// the marker is still a header-only state, which a later start can bootstrap over.
+pub fn header_sync_marker(config: &zebra_state::Config, network: &Network) -> std::path::PathBuf {
+    zebra_state::state_snapshot::import::import_dir(config).join(format!(
+        "{}-headers-before-snapshot",
+        network.lowercase_name()
+    ))
 }
 
 /// Returns the path of a state database the bootstrap must not overwrite: the
