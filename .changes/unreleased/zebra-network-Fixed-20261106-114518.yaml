@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: Exclude the actual supplying peer from early block fanout using the new source argument to `Request::AdvertiseEarlyBlock`, without changing committed block gossip.
+time: 2026-11-06T11:45:18.028403826+01:00

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Avoid echoing early block announcements to their supplying peer, skip early fanout when a canceled download loses its supplier, and skip redundant inbound downloads of locally authenticated early-relay blocks and validated pending submissions.
+time: 2026-11-06T11:45:21.929332697+01:00
