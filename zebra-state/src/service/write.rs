@@ -514,8 +514,24 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
+            let tip_block_height = non_finalized_state
+                .best_tip()
+                .expect("just successfully inserted a non-finalized block above")
+                .0;
+            let mut pruned_chains = Vec::new();
+            if non_finalized_state.chain_count() > 1 {
+                let finalizing_height =
+                    Height(tip_block_height.0.saturating_sub(MAX_BLOCK_REORG_HEIGHT));
+                if non_finalized_state
+                    .root_height()
+                    .is_some_and(|height| height <= finalizing_height)
+                {
+                    // Discard conflicting forks before publishing, without copying the best chain.
+                    pruned_chains = non_finalized_state.prune_for_finalization(finalizing_height);
+                }
+            }
             let phase_start = Instant::now();
-            let tip_block_height = update_latest_chain_channels(
+            update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
                 chain_tip_sender,
@@ -537,30 +553,32 @@ impl WriteBlockWorkerTask {
 
             // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+            drop(pruned_chains);
 
             // Finish retention before receiving another block; finalization errors remain fatal.
+            // The best chain keeps written blocks, so its published snapshot isn't copied, and the
+            // blocks stay readable there until the next write pops them.
             let phase_start = Instant::now();
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
-            {
+            loop {
+                let finalized_tip_height = finalized_state
+                    .db
+                    .finalized_tip_height()
+                    .expect("non-finalized blocks have a finalized parent");
+                if tip_block_height - finalized_tip_height <= i64::from(MAX_BLOCK_REORG_HEIGHT) {
+                    break;
+                }
+
                 tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees = non_finalized_state.finalize();
+                let contextually_verified_with_trees = non_finalized_state
+                    .finalize_keeping_best_chain(
+                        (finalized_tip_height + 1)
+                            .expect("the best tip is above the finalized tip"),
+                    );
                 prev_finalized_note_commitment_trees = finalized_state
                             .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
                             .expect(
                                 "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                             ).1.into();
-
-                // Keep the old snapshot's root visible until the database contains it.
-                update_latest_chain_channels(
-                    non_finalized_state,
-                    &finalized_state.db,
-                    chain_tip_sender,
-                    non_finalized_state_sender,
-                    backup_dir_path.as_deref(),
-                );
             }
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",
