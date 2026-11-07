@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Changed
+body: >-
+  `ReadRequest::UsageInfo` returns a disk usage estimate refreshed with the periodic database
+  metrics, about every 30 seconds, for the primary state service; read-only secondary services
+  still measure it on demand.
+time: 2026-10-12T16:10:02.000000000+02:00

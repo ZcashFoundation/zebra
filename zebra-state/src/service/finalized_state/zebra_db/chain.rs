@@ -16,9 +16,16 @@ use std::{
     sync::Arc,
 };
 
+use rayon::prelude::*;
+
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
-    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::{Block, Height},
+    block_info::BlockInfo,
+    history_tree::HistoryTree,
+    serialization::{CompactSizeMessage, ZcashSerialize as _},
+    transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -31,6 +38,9 @@ use crate::{
     },
     HashOrHeight, ValidateContextError,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// The name of the History Tree column family.
 ///
@@ -289,11 +299,7 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
-        // Get the block size to store with the BlockInfo. This is a bit wasteful
-        // since the block header and txs were serialized previously when writing
-        // them to the DB, and we could get the size if we modified the database
-        // code to return the size of data written; but serialization should be cheap.
-        let block_size = finalized.block.zcash_serialized_size();
+        let block_size = block_serialized_size(&finalized.block);
 
         let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
             &finalized.height,
@@ -302,4 +308,22 @@ impl DiskWriteBatch {
 
         Ok(())
     }
+}
+
+/// Sum independent transaction sizes in parallel, retaining the exact block wire framing.
+fn block_serialized_size(block: &Block) -> usize {
+    if block.transactions.len() < super::PARALLEL_BLOCK_TX_THRESHOLD {
+        return block.zcash_serialized_size();
+    }
+
+    let transactions_size: usize = block
+        .transactions
+        .par_iter()
+        .map(|tx| tx.zcash_serialized_size())
+        .sum();
+    let tx_count_size = CompactSizeMessage::try_from(block.transactions.len())
+        .expect("verified blocks have a valid transaction count")
+        .zcash_serialized_size();
+
+    block.header.zcash_serialized_size() + tx_count_size + transactions_size
 }

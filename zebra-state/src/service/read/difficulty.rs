@@ -121,6 +121,7 @@ pub(crate) fn mining_candidate_chain_info(
         block.clone(),
         network,
         &history,
+        None,
     )
     .ok()?;
     let mut sapling = read::tree::sapling_tree(chain, db, tip_hash.into())?;

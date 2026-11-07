@@ -17,6 +17,7 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
+use rayon::prelude::*;
 
 use zebra_chain::{
     amount::NonNegative,
@@ -472,34 +473,28 @@ impl ZebraDb {
             })
             .collect();
 
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
-            finalized
-                .block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.inputs().into_iter())
-                .flat_map(|input| input.outpoint())
-                .map(|outpoint| {
-                    (
-                        outpoint,
-                        // Some utxos are spent in the same block, so they will be in
-                        // `tx_hash_indexes` and `new_outputs`
-                        self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
-                        }),
-                        self.utxo(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| {
-                                finalized
-                                    .new_outputs
-                                    .get(&outpoint)
-                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
-                            })
-                            .expect("already checked UTXO was in state or block"),
-                    )
-                })
-                .collect();
+        // Read spent UTXOs before deleting any, including outputs created in this block.
+        let outpoints: Vec<_> = finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs())
+            .filter_map(|input| input.outpoint())
+            .collect();
+        let read_spent = |outpoint| {
+            read_spent_utxo(
+                self,
+                finalized.height,
+                outpoint,
+                &tx_hash_indexes,
+                &finalized.new_outputs,
+            )
+        };
+        let spent_utxos: Vec<_> = if outpoints.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
+            outpoints.into_par_iter().map(read_spent).collect()
+        } else {
+            outpoints.into_iter().map(read_spent).collect()
+        };
 
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             spent_utxos
@@ -533,14 +528,22 @@ impl ZebraDb {
 
         // Get the current address balances, before the transactions in this block
 
-        fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
+        fn read_addr_locs<T: Send, F: Fn(&transparent::Address) -> Option<T> + Sync>(
             changed_addresses: HashSet<transparent::Address>,
             f: F,
         ) -> HashMap<transparent::Address, T> {
-            changed_addresses
-                .into_iter()
-                .filter_map(|address| Some((address, f(&address)?)))
-                .collect()
+            let read_address = |address| Some((address, f(&address)?));
+            if changed_addresses.len() >= super::PARALLEL_BLOCK_READ_THRESHOLD {
+                changed_addresses
+                    .into_par_iter()
+                    .filter_map(read_address)
+                    .collect()
+            } else {
+                changed_addresses
+                    .into_iter()
+                    .filter_map(read_address)
+                    .collect()
+            }
         }
 
         // # Performance
@@ -597,6 +600,29 @@ impl ZebraDb {
     pub fn write_batch(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         self.db.write(batch)
     }
+}
+
+/// Resolve a spent output from disk or from an earlier transaction in this block.
+fn read_spent_utxo(
+    db: &ZebraDb,
+    height: Height,
+    outpoint: transparent::OutPoint,
+    tx_hash_indexes: &HashMap<transaction::Hash, usize>,
+    new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> (transparent::OutPoint, OutputLocation, transparent::Utxo) {
+    let db_out_loc = db.output_location(&outpoint);
+    let out_loc = db_out_loc.unwrap_or_else(|| lookup_out_loc(height, &outpoint, tx_hash_indexes));
+    let utxo = db_out_loc
+        .and_then(|loc| db.utxo_by_location(loc))
+        .map(|ordered_utxo| ordered_utxo.utxo)
+        .or_else(|| {
+            new_outputs
+                .get(&outpoint)
+                .map(|ordered_utxo| ordered_utxo.utxo.clone())
+        })
+        .expect("spent UTXOs were already checked to exist in the state or block");
+
+    (outpoint, out_loc, utxo)
 }
 
 /// Lookup the output location for an outpoint.
@@ -731,6 +757,19 @@ impl DiskWriteBatch {
         self.zs_insert(&hash_by_height, height, hash);
         self.zs_insert(&height_by_hash, hash, height);
 
+        // Indexed parallel collection preserves transaction order for the batch inserts.
+        let raw_transactions: Option<Vec<_>> =
+            (block.transactions.len() >= super::PARALLEL_BLOCK_TX_THRESHOLD).then(|| {
+                block
+                    .transactions
+                    .par_iter()
+                    .map(|tx| {
+                        tx.zcash_serialize_to_vec()
+                            .expect("verified transactions have a valid serialization")
+                    })
+                    .collect()
+            });
+
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
             .iter()
@@ -740,7 +779,15 @@ impl DiskWriteBatch {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
             // Commit each transaction's data
-            self.zs_insert(&tx_by_loc, transaction_location, transaction);
+            if let Some(raw_transactions) = &raw_transactions {
+                self.zs_insert(
+                    &tx_by_loc,
+                    transaction_location,
+                    raw_transactions[transaction_index].as_slice(),
+                );
+            } else {
+                self.zs_insert(&tx_by_loc, transaction_location, transaction);
+            }
 
             // Index each transaction hash and location
             self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);
