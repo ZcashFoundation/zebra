@@ -1981,9 +1981,6 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
             genesis.clone().into(),
         ))
         .await?;
-    let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await? else {
-        panic!("chain-info request must return chain info");
-    };
     let coinbase = |height| {
         Arc::new(Transaction::test_v5(
             NetworkUpgrade::Nu5,
@@ -2008,20 +2005,38 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
         .find(|tx| tx.version() == 5 && tx.has_shielded_data())
         .unwrap()
         .clone();
-    block.transactions = vec![coinbase(Height(1)), transaction.clone()];
-    let header = Arc::make_mut(&mut block.header);
-    header.previous_block_hash = genesis.hash();
-    header.difficulty_threshold = info.expected_difficulty;
-    header.time = info.cur_time.into();
-    header.merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
-    Arc::make_mut(&mut block.header).commitment_bytes =
-        <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-            &info
-                .chain_history_root
-                .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
-            &block.auth_data_root(),
-        ))
-        .into();
+    // Commit a coinbase-only parent before admitting a child above the published non-finalized tip.
+    for height in [Height(1), Height(2)] {
+        let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await?
+        else {
+            panic!("chain-info request must return chain info");
+        };
+        block.transactions = vec![coinbase(height)];
+        if height == Height(2) {
+            block.transactions.push(transaction.clone());
+        }
+        let header = Arc::make_mut(&mut block.header);
+        header.previous_block_hash = info.tip_hash;
+        header.difficulty_threshold = info.expected_difficulty;
+        header.time = info.cur_time.into();
+        header.merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block.header).commitment_bytes =
+            <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                &info
+                    .chain_history_root
+                    .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+                &block.auth_data_root(),
+            ))
+            .into();
+        if height == Height(1) {
+            state
+                .clone()
+                .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                    CheckpointVerifiedBlock::from(Arc::new(block.clone())).into(),
+                ))
+                .await?;
+        }
+    }
     let block = Arc::new(block);
     let compact = Arc::new(CompactBlock::from_block(&block, 7)?);
 
@@ -2059,7 +2074,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     let mut malformed = (*compact).clone();
     malformed.prefilled.clear();
     let mut wrong_height = (*compact).clone();
-    wrong_height.prefilled[0].1 = coinbase(Height(2));
+    wrong_height.prefilled[0].1 = coinbase(Height(3));
     let mut wrong_parent = (*compact).clone();
     Arc::make_mut(&mut wrong_parent.header).previous_block_hash = block::Hash([0; 32]);
     let mut wrong_time = (*compact).clone();
