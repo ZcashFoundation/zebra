@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [16.0.0] - 2026-11-07
+
+### Changed
+
+- Disabled Nagle's algorithm (`TCP_NODELAY`) on inbound and outbound peer TCP connections, including isolated connections from `connect_isolated_tcp_direct`, so a small message sent right after another one no longer waits for the peer to acknowledge the first.
+- The crawler started by `init` now adds the initial peers to the address book again when it has no outbound connections and no peers ready to connect to, at most once every `constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL`, waiting at most `constants::INITIAL_PEER_RECOVERY_TIMEOUT` for them to load ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+- `AddressBook::update` with a `MetaAddr::new_initial_peer` change for a failed peer now makes the peer eligible for another connection attempt after the usual reconnection delay ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+- `Config::initial_peers` now reads the disk cache first, and stops retrying failed DNS lookups when there are cached peers ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+- The `zebra.net.in.errors` `error` label uses the serialization error kind, and handshake `remote_version` and `negotiated_version` labels use known protocol versions or `other` ([#11874](https://github.com/ZcashFoundation/zebra/pull/11874)).
+- Prevent requests from starting wire writes to peers banned, or made obsolete by a network upgrade, after readiness checking, including while waiting for the connection to become writable.
+- Omit addresses with unknown services from `MetaAddr::sanitize()` and preserve handshake services for alternate addresses.
+
+### Fixed
+
+- Peer misbehaviour scores are no longer dropped when several arrive while the batched scores are being written to the address book ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).
+
+### Security
+
+- Keep at most 500 block hashes from a `FindBlocks` response, the most a peer serves for a `getblocks` request, so a peer can't make the syncer process up to 50,000 hashes per response.
+
 ## [15.0.0] - 2026-10-22
 
 ### Breaking Changes
