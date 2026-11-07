@@ -331,3 +331,40 @@ fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn sent_hashes_prune_out_of_order_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let low: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let high: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let prepared_low = low.clone().prepare();
+    let prepared_high = high.clone().prepare();
+    let outpoint = prepared_low
+        .new_outputs
+        .keys()
+        .find(|outpoint| !prepared_high.new_outputs.contains_key(outpoint))
+        .unwrap();
+
+    for checkpoint_verified in [false, true] {
+        let mut sent = SentHashes::default();
+        for block in [&high, &low] {
+            if checkpoint_verified {
+                sent.add_finalized(&Arc::clone(block).into());
+            } else {
+                sent.add(&Arc::clone(block).prepare());
+            }
+        }
+        sent.finish_batch();
+        sent.prune_by_height(prepared_low.height);
+        assert!(!sent.contains(&prepared_low.hash));
+        assert!(sent.utxo(outpoint).is_none());
+        assert!(sent.contains(&prepared_high.hash));
+        for (outpoint, ordered_utxo) in &prepared_high.new_outputs {
+            assert_eq!(sent.utxo(outpoint), Some(ordered_utxo.utxo.clone()));
+        }
+    }
+
+    Ok(())
+}
