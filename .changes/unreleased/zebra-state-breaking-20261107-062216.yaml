@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Handle the new `AwaitUtxos` request and `Utxos` response variants in exhaustive matches ([#11186](https://github.com/ZcashFoundation/zebra/pull/11186)).
+time: 2026-11-07T06:22:16.276854155+01:00
