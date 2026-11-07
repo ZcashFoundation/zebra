@@ -722,3 +722,83 @@ fn partial_headers_below_the_window_are_not_known() {
         assert!(!history.knows_block(Height(WINDOW_START - 1)));
     }
 }
+
+/// Returns a closed header-only database under `cache_dir`, with genesis and `headers` from
+/// height one, and its path.
+fn header_only_state(
+    cache_dir: std::path::PathBuf,
+    headers: &[Arc<block::Header>],
+) -> std::path::PathBuf {
+    let mut source = open(&config(cache_dir, Some(RETENTION))).expect("a fresh state opens");
+    append(&mut source, 0, Coinbase::Branched);
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(&source.db, Height(1), headers);
+    source.db.write_batch(batch).unwrap();
+    let path = source.db.path().to_path_buf();
+    drop(source);
+    path
+}
+
+#[test]
+fn synced_headers_are_carried_into_a_snapshot_database() {
+    use crate::state_snapshot::import::{carry_header_chain, CarriedHeaders};
+
+    let _init_guard = zebra_test::init();
+
+    // The chain to the snapshot block, and two headers above it.
+    let staged_cache = tempfile::tempdir().unwrap();
+    let mut chain = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    append(&mut chain, TIP, Coinbase::Branched);
+    let mut headers: Vec<Arc<block::Header>> = (1..=TIP)
+        .map(|height| chain.db.block_header(Height(height).into()).unwrap())
+        .collect();
+    for _ in 0..2 {
+        let parent = headers.last().unwrap().hash();
+        let mut child = **headers.last().unwrap();
+        child.previous_block_hash = parent;
+        headers.push(Arc::new(child));
+    }
+    let base = carve(&chain, Height(WINDOW_START), 0);
+    let staged = chain.db.path().to_path_buf();
+    drop(chain);
+
+    // A header-only state whose headers stop below the window can't be carried, and nothing
+    // is written.
+    let short_cache = tempfile::tempdir().unwrap();
+    let short = header_only_state(
+        short_cache.path().to_path_buf(),
+        &headers[..WINDOW_START as usize - 2],
+    );
+    assert!(carry_header_chain(&short, &staged).is_err());
+    let state = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    assert_eq!(state.db.header_by_height_cf().zs_get(&Height(1)), None);
+    drop(state);
+
+    // A complete one is.
+    let source_cache = tempfile::tempdir().unwrap();
+    let source = header_only_state(source_cache.path().to_path_buf(), &headers);
+    assert_eq!(
+        carry_header_chain(&source, &staged).unwrap(),
+        CarriedHeaders {
+            below_window: WINDOW_START - 1,
+            above_snapshot: 2,
+        }
+    );
+
+    let state = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    let history = state.db.history_capabilities().unwrap();
+    assert_eq!(history.lowest_header_height, Height::MIN);
+    assert_eq!(history.snapshot_base, Some(base));
+    for (index, header) in headers.iter().enumerate() {
+        let height = Height(u32::try_from(index).unwrap() + 1);
+        assert_eq!(
+            state.db.any_header(height).as_ref(),
+            Some(header),
+            "{height:?}"
+        );
+    }
+    assert_eq!(
+        state.db.header_chain_tip(),
+        Some((Height(TIP + 2), headers.last().unwrap().hash()))
+    );
+}

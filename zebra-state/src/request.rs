@@ -1810,6 +1810,20 @@ pub enum ReadRequest {
         limit: u32,
     },
 
+    /// Returns [`ReadResponse::HeaderChainRange`] with the headers on the header chain from
+    /// `start`, in height order: at most `count` of them, and at most
+    /// [`MAX_COMMIT_HEADERS`](crate::MAX_COMMIT_HEADERS), stopping below the first height the
+    /// header chain has no header for.
+    ///
+    /// Unlike the other header reads, this includes the headers above the finalized tip, whose
+    /// blocks have not been verified yet.
+    HeaderChainRange {
+        /// The height of the first header.
+        start: block::Height,
+        /// The most headers to return.
+        count: u32,
+    },
+
     /// Finds the first hash that's in the peer's `known_blocks` and the local best chain.
     /// Returns a list of hashes that follow that intersection, from the best chain.
     ///
@@ -2191,6 +2205,7 @@ impl ReadRequest {
             ReadRequest::HeaderTip => "header_tip",
             ReadRequest::HeaderLocator => "header_locator",
             ReadRequest::HeaderChainHashes { .. } => "header_chain_hashes",
+            ReadRequest::HeaderChainRange { .. } => "header_chain_range",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
             ReadRequest::AncestorBlocks { .. } => "ancestor_blocks",

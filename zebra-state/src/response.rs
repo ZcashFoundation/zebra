@@ -679,6 +679,9 @@ pub enum ReadResponse {
     /// header chain, with the height of each hash.
     HeaderLocator(Vec<(block::Height, block::Hash)>),
 
+    /// Response to [`ReadRequest::HeaderChainRange`] with header chain headers, in height order.
+    HeaderChainRange(Vec<Arc<block::Header>>),
+
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
 
@@ -865,6 +868,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::UsageInfo(_)
+            | ReadResponse::HeaderChainRange(_)
             | ReadResponse::HistoryCapabilities(_)
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)

@@ -55,6 +55,8 @@ use super::{
 
 mod checks;
 mod headers;
+
+pub use headers::{carry_header_chain, CarriedHeaders};
 mod rebuild;
 mod records;
 

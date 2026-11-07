@@ -2277,6 +2277,19 @@ impl Service<ReadRequest> for ReadStateService {
                 limit,
             ))),
 
+            // Used by the state snapshot bootstrap, to check the snapshot against synced headers.
+            ReadRequest::HeaderChainRange { start, count } => {
+                let count = usize::try_from(count)
+                    .unwrap_or(usize::MAX)
+                    .min(crate::MAX_COMMIT_HEADERS);
+                let headers = (start.0..=block::Height::MAX.0)
+                    .take(count)
+                    .map_while(|height| state.db.any_header(block::Height(height)))
+                    .collect();
+
+                Ok(ReadResponse::HeaderChainRange(headers))
+            }
+
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {
                 Ok(ReadResponse::BlockHashes(read::find_chain_hashes(

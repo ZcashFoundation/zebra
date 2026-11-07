@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `ReadRequest::HeaderChainRange` and `ReadResponse::HeaderChainRange`, which read header chain headers by height, including those above the finalized tip, and `state_snapshot::import::carry_header_chain`, which copies the synced headers of a closed header-only state, from genesis, into a staged state snapshot database, so the node keeps every header.
+time: 2026-11-07T21:29:14Z
