@@ -1458,7 +1458,12 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(items).collect()).into()
+                    Request::BlocksByHash(
+                        block_hashes(items)
+                            .take(crate::constants::GETDATA_MAX_BLOCK_COUNT)
+                            .collect(),
+                    )
+                    .into()
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::TransactionsById(transaction_ids(items).collect()).into()

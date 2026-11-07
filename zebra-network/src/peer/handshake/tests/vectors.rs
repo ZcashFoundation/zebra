@@ -264,6 +264,108 @@ async fn outbound_direct_accepts_serving_peer() {
     assert_eq!(connection_info.remote.services, PeerServices::NODE_NETWORK);
 }
 
+/// The version and sender address use the same capabilities for archive and pruned nodes.
+#[tokio::test]
+async fn local_version_advertises_configured_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for archive in [false, true] {
+            let mut config = Config {
+                listen_addr: "127.0.0.1:8233".parse().unwrap(),
+                ..Config::default()
+            };
+            if !archive {
+                config.local_services.remove(PeerServices::NODE_NETWORK);
+            }
+            let expected = config.local_services;
+            let listen_addr = config.listen_addr;
+            let codec = Codec::builder().for_network(&config.network).finish();
+            let handshake = Handshake::builder()
+                .with_config(config)
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .finish()
+                .expect("the config and inbound service are set");
+            let (local, remote) = tokio::io::duplex(65536);
+            let mut remote = Framed::new(remote, codec);
+            let (client, ()) = tokio::join!(
+                handshake.oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: ConnectedAddr::new_outbound_direct(listen_addr.into()),
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                }),
+                async {
+                    let Message::Version(mut version) = remote.next().await.unwrap().unwrap()
+                    else {
+                        panic!("the handshake starts with a version message");
+                    };
+                    assert_eq!(version.services, expected);
+                    assert_eq!(
+                        version.address_from,
+                        AddrInVersion::new(listen_addr, expected),
+                    );
+                    version.services.insert(PeerServices::NODE_NETWORK);
+                    version.nonce = Nonce::default();
+                    remote.send(Message::Version(version)).await.unwrap();
+                    remote.send(Message::Verack).await.unwrap();
+                    assert_eq!(remote.next().await.unwrap().unwrap(), Message::Verack);
+                },
+            );
+            let _client = client.expect("the remote peer advertises archive service");
+        }
+    })
+    .await
+    .expect("service capability handshakes must finish within the test deadline");
+}
+
+/// Cached alternate listeners retain the service mask received in the version address.
+#[tokio::test]
+async fn alternate_listener_cache_preserves_advertised_services() {
+    let _init_guard = zebra_test::init();
+    timeout(TEST_TIMEOUT, async {
+        for services in [PeerServices::empty(), PeerServices::NODE_NETWORK] {
+            let network = Network::Mainnet;
+            let handshake = Handshake::builder()
+                .with_config(Config {
+                    network: network.clone(),
+                    ..Config::default()
+                })
+                .with_inbound_service(service_fn(|_req| async {
+                    Ok::<Response, BoxError>(Response::Nil)
+                }))
+                .finish()
+                .expect("the config and inbound service are set");
+            let (local, remote) = tokio::io::duplex(65536);
+            let _remote_peer =
+                AbortOnDropHandle::new(spawn_remote_peer(remote, &network, services));
+            let mut client = handshake
+                .oneshot(HandshakeRequest {
+                    data_stream: local,
+                    connected_addr: ConnectedAddr::new_inbound_direct(
+                        "127.0.0.2:41234".parse().unwrap(),
+                    ),
+                    connection_tracker: ActiveConnectionCounter::new_counter().track_connection(),
+                })
+                .await
+                .expect("inbound handshakes accept pruned peers");
+            // Keep the client alive: dropping it shuts down the connection before the reply.
+            let response = client.ready().await.unwrap().call(Request::Peers).await;
+            let Response::Peers(peers) = response.unwrap() else {
+                panic!("peer requests return cached listener addresses");
+            };
+
+            // Both the canonical listener and the TCP-IP-derived listener keep the services.
+            assert_eq!(peers.len(), 2);
+            for peer in peers {
+                assert_eq!(peer.services(), Some(services));
+            }
+        }
+    })
+    .await
+    .expect("cached listener requests must finish within the test deadline");
+}
+
 /// A rejected non-serving outbound peer must NOT have its advertised services recorded by the
 /// handshake: the rejection only applies while syncing, and storing non-serving services would
 /// permanently exclude the peer from outbound connections, so it could never be dialed once

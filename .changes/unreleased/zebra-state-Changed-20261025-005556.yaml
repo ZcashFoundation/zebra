@@ -1,0 +1,6 @@
+project: zebra-state
+kind: Changed
+body: >-
+  Block hash searches now stop at unavailable block bodies rather than advertising hashes across
+  missing history. Header searches still return retained historical headers.
+time: 2026-10-25T00:55:56.28802936+02:00
