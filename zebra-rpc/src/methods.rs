@@ -1174,10 +1174,9 @@ where
     /// Returns the block template that [`Self::spawn_block_template_updater()`] keeps precomputed,
     /// if it extends the current chain tip, and if it isn't the template the client already has.
     ///
-    /// The precomputed template's mempool transactions can be a few seconds old, which only costs
-    /// the miner the fees of the transactions that arrived in the meantime, and the next call picks
-    /// them up. But it always extends the current tip, so miners never work on a chain that Zebra
-    /// has already seen a block for.
+    /// If verified mempool membership changed, wakes the sole updater and waits up to 30 ms,
+    /// including the mempool query, for its replacement. Slow builds still allow the cached
+    /// response, and never start a competing foreground build.
     ///
     /// A long polling client waits here until the updater publishes a template it doesn't have
     /// yet, the chain tip changes, or its timestamp range expires during this request.
@@ -1211,6 +1210,7 @@ where
         // changes: the caller would wait out the updater's backstop on a template it has already
         // been told about.
         let mut template_changes = cache.subscribe();
+        let mut freshness_checked = false;
 
         // Clone the chain tip once, and mark the current tip seen: a receiver created fresh on
         // every iteration reports the tip it was created with as a change, so waiting on it would
@@ -1261,6 +1261,14 @@ where
                 return Ok(None);
             };
 
+            if !freshness_checked && cache.updater_is_running() {
+                freshness_checked = true;
+                cache
+                    .refresh_if_changed(&template, self.mempool.clone())
+                    .await;
+                // Even an unchanged snapshot can cross a publication or parent change.
+                continue;
+            }
             let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
             let now = self.template_clock_now();
             let max_time_reached =

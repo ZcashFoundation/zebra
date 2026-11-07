@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mining requests refresh stale block templates through the existing updater, coalescing full mempool freshness checks across callers and waiting at most 30 ms before returning cached work. Demand wakes recheck membership without bypassing the updater's burst or proof-cost pacing.
+time: 2026-11-06T11:33:48.491193055+01:00

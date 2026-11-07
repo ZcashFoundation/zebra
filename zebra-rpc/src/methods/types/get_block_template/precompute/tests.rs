@@ -479,14 +479,21 @@ async fn mempool_changes_compare_the_verified_set() {
         ))
     });
     let (events, mut receiver) = broadcast::channel(1);
+    let refresh = tokio::sync::Notify::new();
     let changed = wait_for_mempool_change(
         &mut receiver,
         mempool,
         &template_ids,
         Instant::now(),
         Instant::now(),
+        &refresh,
     );
     tokio::pin!(changed);
+    refresh.notify_one();
+    assert!(
+        futures::poll!(&mut changed).is_pending(),
+        "a demand wake for membership already published must not start another build",
+    );
 
     for _ in 0..20 {
         events
@@ -506,10 +513,96 @@ async fn mempool_changes_compare_the_verified_set() {
             [rejected_id].into_iter().collect(),
         ))
         .unwrap();
-    tokio::time::advance(MEMPOOL_THROTTLE).await;
+    assert!(futures::poll!(&mut changed).is_pending());
+    refresh.notify_one();
     tokio::time::timeout(Duration::from_millis(1), changed)
         .await
-        .expect("a collateral eviction must wake the updater even when its ID was not announced");
+        .expect("demand must recheck a collateral eviction during the rejection-only pause");
+}
+
+/// Demand refresh coalesces wakeups, observes publications without losing a wake, and stays bounded.
+#[tokio::test(start_paused = true)]
+async fn demand_refresh_waits_for_changed_work_with_a_bounded_deadline() {
+    let cache = TemplateCache::default();
+    let _updater = cache.claim_updater().unwrap();
+    let mut initial = template();
+    initial.long_poll_id =
+        LongPollInput::new(Height(1), initial.previous_block_hash, initial.max_time, [])
+            .generate_id();
+    cache.publish(initial.clone());
+    let (pool, snapshot) = watch::channel(HashSet::new());
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_checks = checks.clone();
+    let mempool = tower::service_fn(move |request| {
+        assert_eq!(request, mempool::Request::TransactionIds);
+        observed_checks.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(Ok::<_, zebra_node_services::BoxError>(
+            mempool::Response::TransactionIds(snapshot.borrow().clone()),
+        ))
+    });
+    let start = Instant::now();
+    cache.refresh_if_changed(&initial, mempool.clone()).await;
+    assert_eq!(start.elapsed(), Duration::ZERO);
+    {
+        let wake = cache.refresh.notified();
+        tokio::pin!(wake);
+        assert!(
+            futures::poll!(&mut wake).is_pending(),
+            "unchanged work needs no refresh"
+        );
+    }
+
+    let added = UnminedTxId::from_legacy_id(zebra_chain::transaction::Hash([1; 32]));
+    pool.send_replace([added].into_iter().collect());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    let first = cache.refresh_if_changed(&initial, mempool.clone());
+    let second = cache.refresh_if_changed(&initial, mempool.clone());
+    tokio::pin!(first, second);
+    assert!(futures::poll!(&mut first).is_pending());
+    assert!(futures::poll!(&mut second).is_ready());
+    assert_eq!(
+        checks.load(Ordering::SeqCst),
+        2,
+        "concurrent callers share the check"
+    );
+    cache.refresh.notified().await;
+    let wake = cache.refresh.notified();
+    tokio::pin!(wake);
+    assert!(
+        futures::poll!(&mut wake).is_pending(),
+        "requests share one wake"
+    );
+    let mut fresh = initial.clone();
+    fresh.long_poll_id = LongPollInput::new(
+        Height(1),
+        initial.previous_block_hash,
+        initial.max_time,
+        [added],
+    )
+    .generate_id();
+    cache.publish(fresh);
+    first.await;
+    assert_eq!(start.elapsed(), MEMPOOL_SHORT_PAUSE);
+
+    // A busy updater cannot hold the request beyond the same deadline.
+    cache.publish(initial.clone());
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    cache.refresh_if_changed(&initial, mempool).await;
+    assert_eq!(
+        start.elapsed(),
+        MEMPOOL_SHORT_PAUSE * 2 + DEMAND_REFRESH_TIMEOUT
+    );
+
+    tokio::time::advance(MEMPOOL_SHORT_PAUSE).await;
+    // A stalled mempool read shares the deadline rather than extending it.
+    let slow = tower::service_fn(|_| {
+        std::future::pending::<Result<mempool::Response, zebra_node_services::BoxError>>()
+    });
+    cache.refresh_if_changed(&initial, slow).await;
+    assert_eq!(
+        start.elapsed(),
+        MEMPOOL_SHORT_PAUSE * 3 + DEMAND_REFRESH_TIMEOUT * 2
+    );
 }
 
 /// Steady 20–100 tx/s flows use the short pause; a 9,000 tx/s burst waits for coalescing.
@@ -526,12 +619,14 @@ async fn mempool_arrivals_adapt_the_rebuild_pause() {
         });
         let (events, mut receiver) = broadcast::channel(1);
         let start = Instant::now();
+        let refresh = tokio::sync::Notify::new();
         let changed = wait_for_mempool_change(
             &mut receiver,
             mempool,
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            &refresh,
         );
         tokio::pin!(changed);
 
@@ -584,12 +679,14 @@ async fn mempool_buffered_bursts_extend_the_short_deadline() {
         });
         let (events, mut receiver) = broadcast::channel(1);
         let start = Instant::now();
+        let refresh = tokio::sync::Notify::new();
         let changed = wait_for_mempool_change(
             &mut receiver,
             mempool,
             &template_ids,
             start + MEMPOOL_SHORT_PAUSE,
             start + MEMPOOL_THROTTLE,
+            &refresh,
         );
         tokio::pin!(changed);
 
@@ -627,7 +724,7 @@ async fn mempool_buffered_bursts_extend_the_short_deadline() {
     }
 }
 
-/// Slow builds get an equal idle interval, including the backstop, but tip changes bypass it.
+/// Slow builds are paced even under demand refresh, but tip changes bypass the remaining pause.
 #[tokio::test(start_paused = true)]
 async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
     let _init_guard = zebra_test::init();
@@ -650,7 +747,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
     )
     .unwrap();
 
-    for change_tip in [false, true] {
+    for (change_tip, demand) in [(false, false), (true, false), (false, true)] {
         let (state_tip, state_tip_rx) = watch::channel(hash);
         let read_state = tower::service_fn({
             let state_tip_rx = state_tip_rx.clone();
@@ -732,7 +829,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
             network.clone(),
             miner_params,
             CoinbaseCache::default(),
-            cache,
+            cache.clone(),
             mempool,
             receiver,
             read_state,
@@ -765,6 +862,9 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
             state_tip.send_replace(new_hash);
             tip_sender.send_best_tip_hash(new_hash);
         } else {
+            if demand {
+                cache.refresh.notify_one();
+            }
             tokio::time::advance(Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL)).await;
             assert_eq!(*builds.borrow(), 1, "the backstop must not bypass pacing");
             tokio::time::advance(
