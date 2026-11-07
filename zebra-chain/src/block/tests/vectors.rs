@@ -313,7 +313,7 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
         ],
         LockTime::unlocked(),
     );
-    let utxos = HashMap::new();
+    let utxos = HashMap::<_, transparent::Utxo>::new();
 
     assert!(
         coinbase.value_balance(&utxos).is_err(),
@@ -381,7 +381,7 @@ fn genesis_transparent_outputs_are_not_issued_supply() {
         for network in [&network, &Network::Mainnet] {
             let change = genesis
                 .chain_value_pool_change(
-                    &HashMap::new(),
+                    &HashMap::<_, transparent::Utxo>::new(),
                     DeferredPoolBalanceChange::zero(),
                     network,
                     ValueBalance::zero(),
@@ -553,7 +553,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         )],
     );
     let pre_activation_change = before_activation.chain_value_pool_change(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         before_seed,
@@ -584,7 +584,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     );
     let deferred_change = DeferredPoolBalanceChange::new(deferred.constrain::<NegativeAllowed>()?);
     let (change, fees) = block.chain_value_pool_change_and_fees(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         deferred_change,
         &network,
         parent,
@@ -596,7 +596,7 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
     assert_eq!(after.total()?, (parent.total()? + total)?);
     let next = make_block(height.next()?, Vec::new());
     let next_change = next.chain_value_pool_change(
-        &HashMap::new(),
+        &HashMap::<_, transparent::Utxo>::new(),
         DeferredPoolBalanceChange::zero(),
         &network,
         after,
@@ -619,7 +619,12 @@ fn nsm_seed_reissuance_and_funding_follow_the_parent() -> Result<(), Box<dyn std
         ],
     );
     assert_eq!(
-        underfunded.chain_value_pool_change(&HashMap::new(), deferred_change, &network, parent)?,
+        underfunded.chain_value_pool_change(
+            &HashMap::<_, transparent::Utxo>::new(),
+            deferred_change,
+            &network,
+            parent,
+        )?,
         change,
         "ledger accounting does not validate funding payouts",
     );
