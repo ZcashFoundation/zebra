@@ -12,8 +12,8 @@ use std::{
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{
-    future::{self, FutureExt as _},
-    stream::{self, FuturesUnordered, StreamExt as _, TryStreamExt as _},
+    future::FutureExt as _,
+    stream::{FuturesUnordered, StreamExt as _},
 };
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
@@ -89,9 +89,6 @@ fn interleave_peer_hashes(
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
-
-/// Limits concurrent discovery membership checks against the shared state service.
-const KNOWN_BLOCK_CHECK_CONCURRENCY: usize = 16;
 
 /// Controls how many times we will retry each block download.
 ///
@@ -997,13 +994,10 @@ where
                         continue;
                     }
 
-                    let mut first_unknown = None;
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        if !self.state_contains(hash).await? {
-                            first_unknown = Some(i);
-                            break;
-                        }
-                    }
+                    let known_blocks = self.known_blocks(hashes.clone()).await?;
+                    let first_unknown = known_blocks
+                        .iter()
+                        .position(|loc| matches!(loc, None | Some(zs::KnownBlock::Queue)));
 
                     debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
@@ -1047,32 +1041,17 @@ where
         interleave_peer_hashes(&mut download_set, peer_hashes);
 
         // Filter after deduplication without discarding other peers' useful work.
-        let state = self.state.clone();
-        let download_set = stream::iter(download_set)
-            .map(move |hash| {
-                let state = state.clone();
-
-                async move {
-                    let response = state
-                        .oneshot(zs::Request::KnownBlock(hash))
-                        .await
-                        .map_err(|error| eyre!(error))?;
-                    let zs::Response::KnownBlock(location) = response else {
-                        unreachable!("wrong response to known block request");
-                    };
-
-                    // As in `state_contains`, queued blocks still need their parents downloaded.
-                    let is_known =
-                        location.is_some_and(|location| location != zs::KnownBlock::Queue);
-
-                    Ok::<_, Report>((!is_known).then_some(hash))
-                }
-            })
-            // Keep discovery order when splitting immediate and deferred downloads.
-            .buffered(KNOWN_BLOCK_CHECK_CONCURRENCY)
-            .try_filter_map(future::ok)
-            .try_collect::<IndexSet<_>>()
+        let known_blocks = self
+            .known_blocks(download_set.iter().copied().collect())
             .await?;
+        // As in `state_contains`, queued blocks still need their parents downloaded.
+        let download_set: IndexSet<_> = download_set
+            .into_iter()
+            .zip(known_blocks)
+            .filter_map(|(hash, location)| {
+                matches!(location, None | Some(zs::KnownBlock::Queue)).then_some(hash)
+            })
+            .collect();
 
         // Only eligible responses may supersede another response's candidate.
         // The download set also contains useful work from ineligible responses,
@@ -1802,6 +1781,29 @@ where
                     Ok(())
                 }
             }
+        }
+    }
+
+    /// Returns each block's state location in request order, including queued blocks.
+    async fn known_blocks(
+        &mut self,
+        hashes: Vec<block::Hash>,
+    ) -> Result<Vec<Option<zs::KnownBlock>>, Report> {
+        if hashes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zs::Request::KnownBlocks(hashes))
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zs::Response::KnownBlocks(locations) => Ok(locations),
+            _ => unreachable!("wrong response to known blocks request"),
         }
     }
 

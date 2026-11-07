@@ -275,6 +275,9 @@ async fn failed_tip_extensions_have_a_no_progress_deadline() {
                 zebra_state::Response::BlockLocator(vec![genesis_hash])
             }
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::KnownBlocks(requested) => {
+                zebra_state::Response::KnownBlocks(vec![None; requested.len()])
+            }
             _ => unreachable!("only known blocks and the locator are queried"),
         })
     });
@@ -361,6 +364,9 @@ async fn tip_progress_renews_an_in_progress_sync_step() {
                 zebra_state::Response::BlockLocator(vec![genesis_hash])
             }
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
+            zebra_state::Request::KnownBlocks(requested) => {
+                zebra_state::Response::KnownBlocks(vec![None; requested.len()])
+            }
             _ => unreachable!("only known blocks and the locator are queried"),
         })
     });
