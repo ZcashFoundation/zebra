@@ -5,7 +5,9 @@ body: >-
   `build_piece_sst` and imports a snapshot into a new finalized database with
   `import_state_snapshot`, which rebuilds the transaction hash index and the address balance and
   UTXO indexes from the shipped transaction locations and UTXO set. Address received totals start
-  at zero, and the address transaction index starts above the snapshot height. The database is
+  at zero, and the address transaction index starts above the snapshot height. It also checks the
+  headers above the snapshot height that the caller fetched against the window headers and stores
+  them in the header chain, so headers-first sync continues after them. The database is
   renamed into place only after it passes every check
   against its commitment, the import preconditions, the checkpoint at its height, its history
   tree, its window headers and the genesis and snapshot block bodies, its own indexes and value

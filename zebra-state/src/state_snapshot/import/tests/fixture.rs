@@ -538,11 +538,24 @@ pub(super) fn import_export(
     config: &Config,
     deferred_checks: u8,
 ) -> Result<SnapshotBase, SnapshotError> {
+    import_export_with_headers(export, network, config, deferred_checks, &[])
+}
+
+/// Imports `export` into the state `config` names, with the headers `headers_above` from the
+/// block after the snapshot height on.
+pub(super) fn import_export_with_headers(
+    export: &Export,
+    network: &Network,
+    config: &Config,
+    deferred_checks: u8,
+    headers_above: &[Arc<block::Header>],
+) -> Result<SnapshotBase, SnapshotError> {
     import_state_snapshot(
         &import_dir(config).join("bootstrap"),
         &export.manifest,
         export.commitment,
         deferred_checks,
+        headers_above,
         network,
         config,
         &export.pieces,

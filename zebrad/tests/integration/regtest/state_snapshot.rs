@@ -691,6 +691,11 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         for stage in EXPECTED_STAGES {
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
             if stage == Stage::StateRenamed {
+                // The headers from `H + 1` to the next checkpoint, which the bootstrap fetched and
+                // checked, are stored, so headers-first sync continues after them.
+                node_b.expect_stdout_line_matches(
+                    "stored the checked headers above the snapshot height",
+                )?;
                 // The bootstrap's checked copy of `H + 1` is committed before sync starts, so B
                 // does not download it again.
                 node_b.expect_stdout_line_matches(

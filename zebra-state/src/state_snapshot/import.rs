@@ -23,6 +23,7 @@ use std::{
     fs::{self, File},
     io::{self, BufReader, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use rayon::prelude::*;
@@ -53,6 +54,7 @@ use super::{
 };
 
 mod checks;
+mod headers;
 mod rebuild;
 mod records;
 
@@ -172,6 +174,10 @@ pub enum ImportCheck {
     /// height.
     ValuePools,
 
+    /// The headers above the snapshot height that the bootstrap fetched follow
+    /// the snapshot block and have a valid difficulty and time.
+    Headers,
+
     /// The database opens as the current format, describes the snapshot, and
     /// passes the database format checks.
     DatabaseFormat,
@@ -204,6 +210,7 @@ impl fmt::Display for ImportCheck {
             ImportCheck::TransactionIndex => "transaction index",
             ImportCheck::AddressIndex => "address index",
             ImportCheck::ValuePools => "value pool",
+            ImportCheck::Headers => "header chain",
             ImportCheck::DatabaseFormat => "database format",
         })
     }
@@ -489,6 +496,11 @@ pub fn decode_history_tree(
 /// itself when the snapshot height has a checkpoint, and records the others
 /// in the marker.
 ///
+/// `headers_above` are the headers from `H + 1` on that the caller fetched and
+/// checked the proof of work of, or none. The importer checks their difficulty
+/// and time against the window headers, and stores them in the database's
+/// header chain, so headers-first sync continues after them.
+///
 /// SST files the caller did not build are built here, from `pieces`. Every
 /// check of the design's trust model runs before the database is renamed into
 /// place, and any failure refuses the import: [`SnapshotError::Refused`] names
@@ -499,6 +511,7 @@ pub fn import_state_snapshot(
     manifest: &Manifest,
     commitment: StateSnapshotCommitment,
     deferred_checks: u8,
+    headers_above: &[Arc<block::Header>],
     network: &Network,
     config: &Config,
     pieces: &HashMap<ObjectHash, PathBuf>,
@@ -529,6 +542,7 @@ pub fn import_state_snapshot(
         rebuild::rebuild_indexes(&db, temp_root, network)?;
         let singletons = write_singletons(&db, manifest, base, network, pieces)?;
         checks::check_raw(&db, manifest, &base, network, &singletons)?;
+        headers::store_headers_above(&db, &base, network, headers_above)?;
         let version_path = import_path.join(DATABASE_FORMAT_VERSION_FILE_NAME);
         write_database_format_version_at_path(version_path.clone(), &running_version).map_err(
             |error| SnapshotError::Io {

@@ -539,6 +539,7 @@ where
     let ChainChecks {
         deferred_checks,
         successor,
+        headers,
     } = check_chain(&mut peers, network, commitment, &history_root).await?;
     if peers.is_empty() {
         return Err(BootstrapError::Aborted(
@@ -566,11 +567,12 @@ where
     let staged_db_path =
         staged_config.db_path(zebra_state::constants::STATE_DATABASE_KIND, major, network);
     {
-        let (temp_root, manifest, network, pieces) = (
+        let (temp_root, manifest, network, pieces, headers) = (
             temp_root.to_path_buf(),
             manifest.clone(),
             network.clone(),
             piece_paths.clone(),
+            headers.clone(),
         );
         tokio::task::spawn_blocking(move || {
             import_state_snapshot(
@@ -578,6 +580,7 @@ where
                 &manifest,
                 commitment,
                 deferred_checks,
+                &headers,
                 &network,
                 &staged_config,
                 &pieces,
@@ -595,6 +598,13 @@ where
     info!(path = %db_path.display(), "{}", Stage::SstsIngested);
     info!(path = %db_path.display(), deferred_checks, "{}", Stage::ChecksDone);
     info!(path = %db_path.display(), height = commitment.height.0, "{}", Stage::StateRenamed);
+    if !headers.is_empty() {
+        info!(
+            from = commitment.height.0 + 1,
+            headers = headers.len(),
+            "stored the checked headers above the snapshot height for headers-first sync"
+        );
+    }
 
     // 7. Cleanup cannot undo a successful installation or trigger genesis
     // fallback after the database has been renamed into place.
@@ -1712,6 +1722,12 @@ pub(crate) struct ChainChecks {
     /// its authorizing data by the snapshot's history tree, so the node commits
     /// it right after the import instead of downloading it again.
     pub(crate) successor: Option<Arc<Block>>,
+
+    /// The headers `H + 1..=C` that chain the snapshot block to the next
+    /// checkpoint, with their proof of work checked, or none if no peer served
+    /// them. The importer checks their difficulty and time and stores them, so
+    /// headers-first sync continues after them.
+    pub(crate) headers: Vec<Arc<Header>>,
 }
 
 /// Runs the chain checks and returns the deferred checks and the checked
@@ -1786,7 +1802,7 @@ where
         deferred_checks |= SnapshotBase::DEFERRED_SUCCESSOR_COMMITMENTS;
         return Ok(ChainChecks {
             deferred_checks,
-            successor: None,
+            ..ChainChecks::default()
         });
     };
 
@@ -1802,6 +1818,23 @@ where
         .first()
         .expect("a verified chain to a checkpoint above H has a header")
         .hash();
+
+    // The headers chain to a checkpoint, so they are the chain's, but the node stores them for
+    // headers-first sync, which checks every header's proof of work before it stores it.
+    if let Err(error) = zebra_consensus::header::verify_headers(
+        network,
+        successor_height,
+        headers.clone(),
+        chrono::Utc::now(),
+    )
+    .await
+    {
+        return Err(BootstrapError::Aborted(format!(
+            "the headers from the snapshot block to the checkpoint at height {} fail their proof \
+             of work checks, so the checkpoint list or the clock is wrong: {error}",
+            checkpoint_height.0
+        )));
+    }
 
     // Check 3: one matching copy is enough. Transaction authorizing data is
     // not covered by the txid Merkle root, so a bad copy can have the
@@ -1847,6 +1880,7 @@ where
         return Ok(ChainChecks {
             deferred_checks,
             successor: Some(successor),
+            headers,
         });
     }
 
@@ -1862,6 +1896,7 @@ where
         return Ok(ChainChecks {
             deferred_checks,
             successor: None,
+            headers,
         });
     }
 

@@ -30,9 +30,10 @@ use zebra_chain::{
     primitives::zcash_history::BlockCommitmentTreeRoots,
     value_balance::ValueBalance,
 };
+// The state snapshot importer stores the headers above the snapshot height.
+pub(crate) use zebra_db::header_chain::{HEADER_BY_HEIGHT, HEIGHT_BY_HEADER_HASH};
 use zebra_db::{
     chain::BLOCK_INFO,
-    header_chain::{HEADER_BY_HEIGHT, HEIGHT_BY_HEADER_HASH},
     spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
     sync_meta::SYNC_META_BY_HEIGHT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},

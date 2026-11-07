@@ -1,13 +1,16 @@
 //! Import round trips on a populated Regtest database, and the snapshots the
 //! importer refuses.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use bincode::Options;
 
 use zebra_chain::{
     amount::Amount,
-    block::Height,
+    block::{self, Height},
     orchard, sapling,
     serialization::ZcashSerialize,
     sprout,
@@ -433,6 +436,123 @@ fn address_indexes_are_rebuilt_from_the_utxo_set() {
         assert_eq!(imported.received(), 0, "the received total is unknown");
     }
     assert!(cf_rows(&state, "tx_loc_by_transparent_addr_loc").is_empty());
+}
+
+/// The headers above the snapshot height that the bootstrap fetched are
+/// checked against the window headers and stored in the header chain, so
+/// headers-first sync continues after them; headers that do not follow the
+/// snapshot block, or have an invalid time, are refused.
+#[test]
+fn headers_above_the_snapshot_are_checked_and_stored() {
+    let _init_guard = zebra_test::init();
+    let chain = fixture::chain();
+    let records = fixture::select(&chain.state);
+    let (height, hash) = chain.state.db.tip().unwrap();
+    let successor = fixture::successor(&chain);
+
+    let import = |headers: &[Arc<block::Header>]| {
+        let cache = tempfile::tempdir().unwrap();
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            prune_blocks_older_than: Some(MAX_BLOCK_REORG_HEIGHT + 1),
+            ..Config::default()
+        };
+        let export = fixture::export(
+            &records,
+            &chain.network,
+            height,
+            hash,
+            &cache.path().join("pieces"),
+            300,
+        );
+        let result =
+            fixture::import_export_with_headers(&export, &chain.network, &config, 0, headers);
+        (cache, config, result)
+    };
+
+    let (_cache, config, result) = import(std::slice::from_ref(&successor.header));
+    result.unwrap();
+    let state = FinalizedState::new_with_debug(
+        &config,
+        &chain.network,
+        false,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        state.db.stored_header_tip(),
+        Some((Height(HEIGHT.0 + 1), successor.hash())),
+        "the header chain continues after the snapshot block"
+    );
+    assert_eq!(state.db.tip(), Some((height, hash)));
+    drop(state);
+
+    let mut orphan = *successor.header;
+    orphan.previous_block_hash = block::Hash([0x55; 32]);
+    let (_cache, _config, result) = import(&[Arc::new(orphan)]);
+    assert_eq!(refused_by(&result), ImportCheck::Headers);
+
+    let mut early = *successor.header;
+    early.time = chain.state.db.block_header(Height(0).into()).unwrap().time;
+    let (_cache, _config, result) = import(&[Arc::new(early)]);
+    assert_eq!(refused_by(&result), ImportCheck::Headers);
+}
+
+/// When the window starts at height one, the shipped genesis header continues
+/// it, so the first header above a short snapshot is checked against a context
+/// that includes genesis. Its time is above the median-time-past of heights
+/// 0..=6, but not above that of heights 1..=6.
+#[test]
+fn headers_above_a_window_from_height_one_include_genesis_in_their_context() {
+    let _init_guard = zebra_test::init();
+    let network = fixture::network();
+    let dir = tempfile::tempdir().unwrap();
+    let db = super::super::open_raw(dir.path()).unwrap();
+
+    let genesis = block::genesis::regtest_genesis_block().header.clone();
+    let mut headers = vec![genesis.clone()];
+    for height in 1..=6u32 {
+        let previous = *headers[headers.len() - 1];
+        let mut header = previous;
+        header.previous_block_hash = previous.hash();
+        header.time = genesis.time + chrono::Duration::seconds(75 * i64::from(height));
+        header.nonce[0..4].copy_from_slice(&height.to_le_bytes());
+        headers.push(Arc::new(header));
+    }
+    let shipped = db
+        .cf_handle(ComponentId::Headers.column_family())
+        .expect("the column family exists");
+    for (height, header) in headers.iter().enumerate() {
+        // The heights are at most 6.
+        let height = Height(height as u32);
+        db.put_cf(shipped, height.as_bytes(), header.as_bytes())
+            .unwrap();
+    }
+    let base = SnapshotBase {
+        window_start: Height(1),
+        height: Height(6),
+        block_hash: headers[6].hash(),
+        manifest: ObjectHash([0; 32]),
+        deferred_checks: 0,
+    };
+    assert_eq!(window_start(base.height), base.window_start);
+
+    let mut above = *headers[6];
+    above.previous_block_hash = headers[6].hash();
+    above.time = genesis.time + chrono::Duration::seconds(75 * 4);
+    super::super::headers::store_headers_above(&db, &base, &network, &[Arc::new(above)])
+        .expect("the header's time is above the median-time-past from genesis");
+
+    let stored = db
+        .cf_handle(crate::service::finalized_state::HEADER_BY_HEIGHT)
+        .expect("the column family exists");
+    assert_eq!(
+        db.get_cf(stored, Height(7).as_bytes()).unwrap(),
+        Some(above.as_bytes().to_vec()),
+        "the header above the snapshot is stored"
+    );
 }
 
 /// Two transactions at one location are refused: the rebuilt hash index would
@@ -874,6 +994,7 @@ fn caller_built_ssts_are_reused_only_for_their_piece() {
         &export.manifest,
         export.commitment,
         0,
+        &[],
         &chain.network,
         &config,
         &export.pieces,
