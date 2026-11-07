@@ -1948,3 +1948,273 @@ async fn gossiped_block_genuinely_behind_tip_does_not_score_serving_peer() -> Re
 
     Ok(())
 }
+
+/// Compact reconstruction screens before a single witnessed-ID snapshot and never publishes bodies.
+#[tokio::test(flavor = "multi_thread")]
+async fn compact_reconstruction_screening_and_authentication() -> Result<(), BoxError> {
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash},
+        parameters::{testnet::ConfiguredActivationHeights, NetworkUpgrade},
+        serialization::ZcashSerialize,
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+    use zebra_network::compact::{BlockTransactions, CompactBlock};
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let (state, read, latest_chain_tip, _tip_changes) =
+        zebra_state::init(StateConfig::ephemeral(), &network, Height(0), 0).await;
+    let state = Buffer::new(state, 10);
+    let genesis = block::genesis::regtest_genesis_block();
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.clone().into(),
+        ))
+        .await?;
+    let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await? else {
+        panic!("chain-info request must return chain info");
+    };
+    let coinbase = |height| {
+        Arc::new(Transaction::test_v5(
+            NetworkUpgrade::Nu5,
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output::new(
+                Amount::try_from(1).unwrap(),
+                transparent::Script::new(&[0x51]),
+            )],
+            LockTime::unlocked(),
+            height,
+        ))
+    };
+    let mut block =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES.zcash_deserialize_into::<Block>()?;
+    let transaction = block
+        .transactions
+        .iter()
+        .find(|tx| tx.version() == 5 && tx.has_shielded_data())
+        .unwrap()
+        .clone();
+    block.transactions = vec![coinbase(Height(1)), transaction.clone()];
+    let header = Arc::make_mut(&mut block.header);
+    header.previous_block_hash = genesis.hash();
+    header.difficulty_threshold = info.expected_difficulty;
+    header.time = info.cur_time.into();
+    header.merkle_root = block.transactions.iter().map(|tx| tx.hash()).collect();
+    Arc::make_mut(&mut block.header).commitment_bytes =
+        <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &info
+                .chain_history_root
+                .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+            &block.auth_data_root(),
+        ))
+        .into();
+    let block = Arc::new(block);
+    let compact = Arc::new(CompactBlock::from_block(&block, 7)?);
+
+    let mut bytes = transaction.zcash_serialize_to_vec()?;
+    let signature_byte = bytes.len() - 1 - usize::from(transaction.orchard_bundle().is_none());
+    bytes[signature_byte] ^= 1;
+    let wrong: UnminedTx = bytes.zcash_deserialize_into::<Arc<Transaction>>()?.into();
+    let correct: UnminedTx = transaction.into();
+    assert_eq!(correct.id.mined_id(), wrong.id.mined_id());
+    assert_ne!(correct.id, wrong.id);
+
+    let (setup_tx, setup_rx) = oneshot::channel();
+    let mut inbound = Inbound::new(1, setup_rx).with_compact_relay(network.clone(), read.clone());
+    let mut mempool = MockService::build().for_unit_tests();
+    let mut peer_set = MockService::build().for_unit_tests();
+    let (block_verifier, mut verifier_called) = recording_block_verifier();
+    let (misbehavior_sender, mut misbehavior) = tokio::sync::mpsc::channel(1);
+    assert!(setup_tx
+        .send(InboundSetupData {
+            address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                SocketAddr::from(([0, 0, 0, 0], 0)),
+                &network,
+                DEFAULT_MAX_CONNS_PER_IP,
+                Span::none(),
+            ))),
+            block_download_peer_set: Buffer::new(BoxService::new(peer_set.clone()), 1),
+            block_verifier,
+            mempool: Buffer::new(BoxService::new(mempool.clone()), 1),
+            state: state.clone(),
+            latest_chain_tip,
+            misbehavior_sender,
+        })
+        .is_ok());
+
+    let mut malformed = (*compact).clone();
+    malformed.prefilled.clear();
+    let mut wrong_height = (*compact).clone();
+    wrong_height.prefilled[0].1 = coinbase(Height(2));
+    let mut wrong_parent = (*compact).clone();
+    Arc::make_mut(&mut wrong_parent.header).previous_block_hash = block::Hash([0; 32]);
+    let mut wrong_time = (*compact).clone();
+    Arc::make_mut(&mut wrong_time.header).time = genesis.header.time;
+    let mut wrong_difficulty = (*compact).clone();
+    Arc::make_mut(&mut wrong_difficulty.header).difficulty_threshold =
+        zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+            .zcash_deserialize_into::<Block>()?
+            .header
+            .difficulty_threshold;
+    for compact in [
+        malformed,
+        wrong_height,
+        wrong_parent,
+        wrong_time,
+        wrong_difficulty,
+    ] {
+        assert!(timeout(
+            Duration::from_secs(5),
+            inbound
+                .ready()
+                .await?
+                .call(Request::CompactBlockTransactions(Arc::new(compact)),)
+        )
+        .await?
+        .is_err());
+    }
+    mempool.expect_no_requests().await;
+    assert_eq!(
+        timeout(
+            Duration::from_secs(5),
+            inbound
+                .ready()
+                .await?
+                .call(Request::CheckCompactHeader(compact.clone()))
+        )
+        .await??,
+        Response::Nil,
+    );
+    mempool.expect_no_requests().await;
+
+    let query = inbound
+        .ready()
+        .await?
+        .call(Request::CompactBlockTransactions(compact.clone()));
+    let serve = async {
+        mempool
+            .expect_request(mempool::Request::TransactionIds)
+            .await
+            .respond(mempool::Response::TransactionIds(HashSet::from([
+                correct.id, wrong.id,
+            ])));
+        mempool
+            .expect_request(mempool::Request::TransactionsById(HashSet::from([
+                correct.id
+            ])))
+            .await
+            .respond(mempool::Response::Transactions(vec![correct]));
+    };
+    let (response, ()) = timeout(Duration::from_secs(5), async {
+        futures::join!(query, serve)
+    })
+    .await?;
+    let Response::CompactBlockTransactions(candidates) = response? else {
+        panic!("compact lookup must return candidates");
+    };
+    let reconstruction = compact.clone().reconstruct(candidates)?;
+    assert!(reconstruction.missing_indexes().is_empty());
+    let reconstructed = reconstruction.finish(BlockTransactions {
+        block_hash: block.hash(),
+        transactions: Vec::new(),
+    })?;
+    assert_eq!(reconstructed, block);
+
+    let ReadResponse::EarlyRelayCache(cache) =
+        read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
+    else {
+        panic!("cache request must return the early-relay cache");
+    };
+    let mut forged = (*block).clone();
+    forged.transactions[1] = wrong.transaction;
+    assert!(timeout(
+        Duration::from_secs(5),
+        inbound
+            .ready()
+            .await?
+            .call(Request::CheckCompactBlock(Arc::new(forged)),)
+    )
+    .await?
+    .is_err());
+    assert_eq!(
+        timeout(
+            Duration::from_secs(5),
+            inbound
+                .ready()
+                .await?
+                .call(Request::CheckCompactBlock(reconstructed),)
+        )
+        .await??,
+        Response::Nil
+    );
+    assert!(cache.get(&block.hash()).is_none());
+    let zebra_state::Response::EarlyRelay(Some(guard)) = state
+        .clone()
+        .oneshot(zebra_state::Request::EarlyRelay {
+            block: block.clone(),
+            require_authentication: true,
+        })
+        .await?
+    else {
+        panic!("the authenticated next-tip candidate must receive a guard");
+    };
+    guard.reject();
+    for request in [
+        Request::CheckCompactHeader(compact.clone()),
+        Request::CompactBlockTransactions(compact),
+        Request::CheckCompactBlock(block.clone()),
+    ] {
+        assert!(
+            timeout(Duration::from_secs(5), inbound.ready().await?.call(request),)
+                .await?
+                .is_err()
+        );
+    }
+    assert!(matches!(
+        read.oneshot(ReadRequest::Block(block.hash().into()))
+            .await?,
+        ReadResponse::Block(None)
+    ));
+    assert!(verifier_called.try_recv().is_err());
+    assert!(misbehavior.try_recv().is_err());
+    mempool.expect_no_requests().await;
+    peer_set.expect_no_requests().await;
+    Ok(())
+}
+
+#[test]
+fn compact_header_screening_checks_proof_of_work_and_shape() {
+    let block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+        .zcash_deserialize_into::<Block>()
+        .unwrap();
+    let mut compact = zebra_network::compact::CompactBlock::from_block(&block, 0).unwrap();
+    assert!(super::super::screen_compact_header(&compact, &Mainnet).is_ok());
+    Arc::make_mut(&mut compact.header).solution =
+        zebra_chain::work::equihash::Solution::Regtest([0; 36]);
+    assert!(super::super::screen_compact_header(&compact, &Mainnet).is_err());
+    let network = Network::new_regtest(
+        zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    assert!(super::super::screen_compact_header(&compact, &network).is_ok());
+    compact.prefilled[0].0 = 1;
+    assert!(super::super::screen_compact_header(&compact, &network).is_err());
+}
