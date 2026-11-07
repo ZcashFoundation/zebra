@@ -2787,3 +2787,56 @@ async fn mined_cached_future_time_suppresses_early_body_but_preserves_commit() {
     .await
     .expect("a live time check must not change normal cached commit handling");
 }
+
+/// Dropping every handle of a state closes its database, so the same process can open it
+/// again. The RocksDB metrics task used to keep a database handle forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_state_closes_its_database() {
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{DiskDb, STATE_COLUMN_FAMILIES_IN_CODE},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Default::default());
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let path = config.db_path(
+        STATE_DATABASE_KIND,
+        state_database_format_version_in_code().major,
+        &network,
+    );
+
+    let handles = super::init(config, &network, Height::MAX, 1).await;
+    // Let the metrics task start and take its database handle.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::task::spawn_blocking(move || drop(handles))
+        .await
+        .expect("dropping the state should not panic");
+
+    // The state's threads drop their handles as they exit, so retry for a while.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let column_families = DiskDb::construct_column_families(
+            DiskDb::options(),
+            &path,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+        );
+        match rocksdb::DB::open_cf_descriptors(&DiskDb::options(), &path, column_families) {
+            Ok(_db) => break,
+            Err(error) if std::time::Instant::now() < deadline => {
+                tracing::debug!(%error, "the dropped state's database is still open");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => panic!("the dropped state's database never closed: {error}"),
+        }
+    }
+}

@@ -228,6 +228,10 @@ pub(crate) struct StateService {
     /// Set to `f64::NAN` if `finalized_state_queued_blocks` is empty, because grafana shows NaNs
     /// as a break in the graph.
     max_finalized_queue_height: f64,
+
+    /// Stops the database metrics task when the state service is dropped, so the task doesn't
+    /// keep the database open.
+    _db_metrics_stop: tokio::sync::oneshot::Sender<()>,
 }
 
 /// A read-only service for accessing Zebra's cached blockchain state.
@@ -526,6 +530,7 @@ impl StateService {
         let pending_utxos = PendingUtxos::default();
 
         let header_write_sender = header_write::spawn(finalized_state.db.clone(), network.clone());
+        let (db_metrics_stop, mut db_metrics_stopped) = tokio::sync::oneshot::channel();
 
         let finalized_block_write_last_sent_hash =
             tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
@@ -552,6 +557,7 @@ impl StateService {
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
             max_finalized_queue_height: f64::NAN,
+            _db_metrics_stop: db_metrics_stop,
         };
         timer.finish_desc("initializing state service");
 
@@ -606,13 +612,16 @@ impl StateService {
             read_service.pruning_task = Some(task);
         }
 
-        // Spawn a background task to periodically export RocksDB metrics to Prometheus
+        // Spawn a background task to periodically export RocksDB metrics to Prometheus, until the
+        // state service is dropped.
         let db_for_metrics = read_service.db.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             loop {
-                interval.tick().await;
-                db_for_metrics.export_metrics();
+                tokio::select! {
+                    _ = &mut db_metrics_stopped => return,
+                    _ = interval.tick() => db_for_metrics.export_metrics(),
+                }
             }
         });
 
