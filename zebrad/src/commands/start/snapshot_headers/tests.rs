@@ -152,3 +152,58 @@ async fn the_network_chain_tip_follows_a_reopened_state() {
         Some((Height(0), network.genesis_hash()))
     );
 }
+
+/// The header-only state closes, so the bootstrap can replace it and the node can reopen it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_header_only_state_closes_and_reopens() {
+    use crate::{commands::StartCmd, config::ZebradConfig};
+    use tower::builder::ServiceBuilder;
+
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let mut config = ZebradConfig::default();
+    config.network.network =
+        Network::new_regtest(zebra_chain::parameters::testnet::RegtestParameters {
+            activation_heights: zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+                nu5: Some(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    config.state.cache_dir = cache.path().to_path_buf();
+    config.state.ephemeral = false;
+    config.state.prune_blocks_older_than = Some(zs::MIN_PRUNING_RETENTION);
+    let mode = zebra_chain::parameters::spentness_hints::Mode::Off;
+
+    let (hints, state_service, read_state, latest_chain_tip, chain_tip_change) =
+        StartCmd::open_state(&config, Height(0), mode).await;
+    let state = ServiceBuilder::new().buffer(10).service(state_service);
+    let peers = tower::service_fn(|_: zn::Request| async {
+        Err::<zn::Response, crate::BoxError>("no peers".into())
+    });
+    commit_genesis(peers, state.clone(), &config.network.network)
+        .await
+        .unwrap();
+    let (_switch, _network_tip) = ReopenableChainTip::new(latest_chain_tip.clone(), true);
+
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        StartCmd::close_state((hints, state, read_state, latest_chain_tip, chain_tip_change)),
+    )
+    .await
+    .expect("the state closes");
+    // The state's metrics task stops on its next poll, which the bootstrap's installation waits
+    // for before it touches the database.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let reopened = tokio::time::timeout(
+        Duration::from_secs(30),
+        StartCmd::open_state(&config, Height(0), mode),
+    )
+    .await
+    .expect("the state reopens");
+    assert_eq!(
+        reopened.3.best_tip_height_and_hash(),
+        Some((Height(0), config.network.network.genesis_hash()))
+    );
+}

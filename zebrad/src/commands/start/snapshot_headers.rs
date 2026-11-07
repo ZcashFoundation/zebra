@@ -28,7 +28,7 @@ use std::{
 
 use tokio::{
     sync::watch,
-    time::{sleep, timeout, Instant},
+    time::{sleep, timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
 
@@ -36,10 +36,12 @@ use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, merkle, Block, Header, Height},
     chain_tip::ChainTip,
     parameters::Network,
-    state_snapshot::StateSnapshotCommitment,
+    state_snapshot::{ObjectHash, StateSnapshotCommitment},
     transaction,
 };
-use zebra_network::{self as zn, types::PeerServices, InventoryResponse, SyncPeers};
+use zebra_network::{
+    self as zn, sync_peer::ObjectChunk, types::PeerServices, InventoryResponse, SyncPeer, SyncPeers,
+};
 use zebra_state::{self as zs, LatestChainTip};
 
 use crate::{
@@ -71,7 +73,7 @@ const GENESIS_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// How long the state can take to commit the genesis block.
 const GENESIS_COMMIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The most discovered peers the bootstrap dials.
+/// The most discovered peers the bootstrap uses.
 const MAX_DISCOVERED_PEERS: usize = 8;
 
 /// Syncs headers to the checkpoint after the snapshot, finds peers that serve
@@ -80,7 +82,8 @@ const MAX_DISCOVERED_PEERS: usize = 8;
 ///
 /// `configured_peers` are the bootstrap peers from the config; when there are
 /// none, the bootstrap uses the connected version 2 peers in `sync_peers` that
-/// advertise `NODE_SYNC_ARTIFACTS`. `header_tip` is headers-first sync's tip.
+/// advertise `NODE_SYNC_ARTIFACTS` and hold the snapshot's manifest.
+/// `header_tip` is headers-first sync's tip.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn sync_headers_and_stage<ZN, ZS>(
     config: &ZebradConfig,
@@ -115,10 +118,12 @@ where
 
     wait_for_header_tip(&mut header_tip, checkpoint.0).await?;
 
-    let peers = if configured_peers.is_empty() {
-        discover_snapshot_peers(sync_peers).await?
+    // Discovered peers are already connected, and usually allow one connection per IP address,
+    // so the bootstrap uses those connections. Configured peers are dialled.
+    let discovered = if configured_peers.is_empty() {
+        Some(discover_snapshot_peers(sync_peers, commitment.manifest).await?)
     } else {
-        configured_peers
+        None
     };
 
     let synced_headers = synced_headers(read_state, commitment.height, checkpoint).await?;
@@ -127,11 +132,19 @@ where
         height = commitment.height.0,
         hash = %commitment.block_hash,
         manifest = %commitment.manifest,
-        peers = peers.len(),
+        peers = discovered.as_ref().map_or(configured_peers.len(), Vec::len),
         "{}",
         Stage::BootstrapStarted
     );
-    bootstrap::bootstrap(config, commitment, peers, Some(synced_headers)).await
+    match discovered {
+        Some(peers) => {
+            bootstrap::bootstrap_from_connected(config, commitment, peers, Some(synced_headers))
+                .await
+        }
+        None => {
+            bootstrap::bootstrap(config, commitment, configured_peers, Some(synced_headers)).await
+        }
+    }
 }
 
 /// The first checkpoint above the snapshot height `height`.
@@ -279,48 +292,79 @@ pub(super) async fn wait_for_header_tip(
     }
 }
 
-/// Returns the addresses of the connected version 2 peers that advertise
-/// `NODE_SYNC_ARTIFACTS`, waiting up to [`DISCOVERY_TIMEOUT`] for the first.
+/// Returns the connected version 2 peers that hold the snapshot's `manifest`,
+/// one per IP address, waiting up to [`DISCOVERY_TIMEOUT`] for the first.
+///
+/// Every version 2 node advertises `NODE_SYNC_ARTIFACTS`, including the many
+/// that serve no state snapshot, so each connected peer that advertises it is
+/// asked for the first byte of the manifest, once per connection. Peers that
+/// connect later are asked as they connect, until one holds it.
 pub(super) async fn discover_snapshot_peers(
     mut sync_peers: SyncPeers,
-) -> Result<Vec<String>, BootstrapError> {
-    let serving = |sync_peers: &SyncPeers| -> Vec<String> {
-        let mut seen = HashSet::new();
-        sync_peers
-            .borrow()
+    manifest: ObjectHash,
+) -> Result<Vec<SyncPeer>, BootstrapError> {
+    let deadline = Instant::now() + DISCOVERY_TIMEOUT;
+    let mut asked = HashSet::new();
+
+    loop {
+        let candidates: Vec<SyncPeer> = sync_peers
+            .borrow_and_update()
             .iter()
             .filter(|peer| {
-                !peer.is_closed() && peer.services().contains(PeerServices::NODE_SYNC_ARTIFACTS)
+                !peer.is_closed()
+                    && peer.services().contains(PeerServices::NODE_SYNC_ARTIFACTS)
+                    && !asked.contains(&peer.addr())
             })
-            .map(|peer| peer.addr().to_string())
-            .filter(|addr| seen.insert(addr.clone()))
+            .cloned()
+            .collect();
+        asked.extend(candidates.iter().map(SyncPeer::addr));
+
+        let holders = futures::future::join_all(
+            candidates
+                .into_iter()
+                .map(|peer| async move { holds_object(&peer, manifest).await.then_some(peer) }),
+        )
+        .await;
+        let mut seen = HashSet::new();
+        let holders: Vec<SyncPeer> = holders
+            .into_iter()
+            .flatten()
+            .filter(|peer| seen.insert(peer.addr().ip()))
             .take(MAX_DISCOVERED_PEERS)
-            .collect()
-    };
+            .collect();
 
-    let found = timeout(DISCOVERY_TIMEOUT, async {
-        loop {
-            let peers = serving(&sync_peers);
-            if !peers.is_empty() {
-                return Some(peers);
-            }
-            sync_peers.changed().await.ok()?;
-        }
-    })
-    .await;
-
-    match found {
-        Ok(Some(peers)) => {
+        if !holders.is_empty() {
             info!(
-                ?peers,
+                peers = ?holders.iter().map(SyncPeer::addr).collect::<Vec<_>>(),
+                asked = asked.len(),
                 "found connected version 2 peers that serve state snapshots"
             );
-            Ok(peers)
+            return Ok(holders);
         }
-        Ok(None) | Err(_) => Err(BootstrapError::Aborted(format!(
-            "no connected version 2 peer advertised state snapshot service within \
-             {DISCOVERY_TIMEOUT:?}, and sync.state_snapshot_peers is empty"
-        ))),
+
+        match timeout_at(deadline, sync_peers.changed()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) | Err(_) => {
+                return Err(BootstrapError::Aborted(format!(
+                    "none of the {} connected version 2 peers that advertised state snapshot \
+                     service held the snapshot's manifest within {DISCOVERY_TIMEOUT:?}, and \
+                     sync.state_snapshot_peers is empty",
+                    asked.len()
+                )))
+            }
+        }
+    }
+}
+
+/// Returns whether `peer` serves the object `hash`, by asking it for the first byte.
+async fn holds_object(peer: &SyncPeer, hash: ObjectHash) -> bool {
+    match peer.get_object(hash, 0, 1).await {
+        Ok(ObjectChunk::Found { .. }) => true,
+        Ok(ObjectChunk::NotFound) => false,
+        Err(error) => {
+            debug!(peer = %peer.addr(), %error, "a version 2 peer didn't say if it serves an object");
+            false
+        }
     }
 }
 

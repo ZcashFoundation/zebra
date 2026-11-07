@@ -61,8 +61,12 @@ use super::{
     },
 };
 
+mod sync_peer_service;
+
 #[cfg(test)]
 mod tests;
+
+use sync_peer_service::SyncPeerService;
 
 /// The manifest must be fetched and verified within this long of the bootstrap
 /// peers connecting.
@@ -320,10 +324,6 @@ pub async fn bootstrap(
     peers: Vec<String>,
     synced_headers: Option<Vec<Arc<Header>>>,
 ) -> Result<StagedSnapshot, BootstrapError> {
-    let network = config.network.network.clone();
-    let store = ArtifactStore::new(&config.state, &network);
-    let import_root = import_dir(&config.state);
-
     // 1. Each attempt gets its own workspace, and holds a lock on it while it runs. Another
     // bootstrap may still be using a sibling directory, so the shared import root is never
     // removed, and only workspaces that no attempt holds are swept.
@@ -358,55 +358,109 @@ pub async fn bootstrap(
         Stage::PeersReady
     );
 
-    let result = async {
-        let workspace = create_import_workspace(&import_root).await?;
-        let temp_root = workspace.path.clone();
-        let result = run(
-            config,
-            &network,
-            &store,
-            &temp_root,
-            commitment,
-            peers,
-            connected_at,
-            synced_headers,
-        )
-        .await;
-
-        match &result {
-            Ok(_) => {}
-            Err(BootstrapError::Rejected(reason)) => {
-                error!(
-                    manifest = %commitment.manifest,
-                    reason,
-                    "the state snapshot failed a check of its contents: marking it as rejected"
-                );
-                if let Err(error) = store.mark_rejected(commitment.manifest) {
-                    warn!(?error, "could not mark the state snapshot as rejected");
-                }
-            }
-            Err(error) => {
-                error!(%error, "the state snapshot bootstrap did not finish");
-            }
-        }
-        match result {
-            Ok(staged) => Ok(StagedSnapshot {
-                workspace,
-                staged,
-                store: store.clone(),
-                serve_state_snapshots: config.sync.serve_state_snapshots,
-            }),
-            Err(error) => {
-                discard_workspace(workspace).await;
-                Err(error)
-            }
-        }
-    }
-    .await;
+    let result = stage(config, commitment, peers, connected_at, synced_headers).await;
 
     // Every exit after dialling, including workspace creation failure, closes and drains the
     // short-lived endpoints before the caller can start genesis fallback.
     close_bootstrap_after(result, bootstrap_peers.close()).await
+}
+
+/// Downloads and imports the snapshot `commitment` names from version 2 `peers`
+/// that advertise state snapshot service, connected since `connected_at`, like
+/// [`bootstrap`] does once it has dialled its peers.
+///
+/// `peers` can be the connected version 2 peers of the node's own network, so the
+/// bootstrap opens no other connection to them.
+pub async fn bootstrap_from_connected(
+    config: &ZebradConfig,
+    commitment: StateSnapshotCommitment,
+    peers: Vec<zn::SyncPeer>,
+    synced_headers: Option<Vec<Arc<Header>>>,
+) -> Result<StagedSnapshot, BootstrapError> {
+    if peers.is_empty() {
+        return Err(BootstrapError::Aborted(
+            "no connected version 2 peer serves state snapshots".to_string(),
+        ));
+    }
+    let peers = Peers::new(
+        peers
+            .into_iter()
+            .map(|peer| {
+                (
+                    peer.addr(),
+                    Buffer::new(SyncPeerService::new(peer), PEER_BUFFER_BOUND),
+                )
+            })
+            .collect(),
+    );
+    info!(
+        peers = peers.clients.len(),
+        addrs = ?peers.addrs(),
+        "{}",
+        Stage::PeersReady
+    );
+
+    stage(config, commitment, peers, Instant::now(), synced_headers).await
+}
+
+/// Runs the flow on `peers`, in a new workspace, and returns the staged database.
+async fn stage<S>(
+    config: &ZebradConfig,
+    commitment: StateSnapshotCommitment,
+    peers: Peers<S>,
+    connected_at: Instant,
+    synced_headers: Option<Vec<Arc<Header>>>,
+) -> Result<StagedSnapshot, BootstrapError>
+where
+    S: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+{
+    let network = config.network.network.clone();
+    let store = ArtifactStore::new(&config.state, &network);
+    let import_root = import_dir(&config.state);
+
+    let workspace = create_import_workspace(&import_root).await?;
+    let temp_root = workspace.path.clone();
+    let result = run(
+        config,
+        &network,
+        &store,
+        &temp_root,
+        commitment,
+        peers,
+        connected_at,
+        synced_headers,
+    )
+    .await;
+
+    match &result {
+        Ok(_) => {}
+        Err(BootstrapError::Rejected(reason)) => {
+            error!(
+                manifest = %commitment.manifest,
+                reason,
+                "the state snapshot failed a check of its contents: marking it as rejected"
+            );
+            if let Err(error) = store.mark_rejected(commitment.manifest) {
+                warn!(?error, "could not mark the state snapshot as rejected");
+            }
+        }
+        Err(error) => {
+            error!(%error, "the state snapshot bootstrap did not finish");
+        }
+    }
+    match result {
+        Ok(staged) => Ok(StagedSnapshot {
+            workspace,
+            staged,
+            store: store.clone(),
+            serve_state_snapshots: config.sync.serve_state_snapshots,
+        }),
+        Err(error) => {
+            discard_workspace(workspace).await;
+            Err(error)
+        }
+    }
 }
 
 /// Deletes a failed attempt's workspace, and releases it.
