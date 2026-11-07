@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added ordered batch UTXO waits with `Request::AwaitUtxos`, including queued and in-flight block outputs ([#11186](https://github.com/ZcashFoundation/zebra/pull/11186)).
+time: 2026-11-07T06:22:16.281196578+01:00
