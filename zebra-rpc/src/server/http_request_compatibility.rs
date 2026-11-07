@@ -241,31 +241,52 @@ fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
 /// Returns true if `params` is an unspaced array of unescaped strings, integers, booleans or nulls.
 /// Re-encoding changes floats, objects and escapes, and `jsonrpsee` rejects `[ ]` but not `[]`.
 fn is_canonical_params(params: &RawValue) -> bool {
-    let Ok(values) = serde_json::from_str::<Vec<&RawValue>>(params.get()) else {
+    // `params` is valid JSON, so splitting it at the top level only needs to find string ends.
+    let Some(mut rest) = params.get().as_bytes().strip_prefix(b"[") else {
         return false;
     };
-    // `[`, `]`, the values and the commas between them, so there is no whitespace.
-    let unspaced_len = 2
-        + values.iter().map(|value| value.get().len()).sum::<usize>()
-        + values.len().saturating_sub(1);
-
-    unspaced_len == params.get().len()
-        && values.iter().all(|value| {
-            let value = value.get();
-            match value.as_bytes()[0] {
-                b'"' => !value.as_bytes().contains(&b'\\'),
-                b't' | b'f' | b'n' => true,
-                // Leading zeros are invalid JSON, but serde_json reads `-0` as a float.
-                b'-' => value != "-0" && value.parse::<i64>().is_ok(),
-                _ => value.parse::<u64>().is_ok(),
+    if rest == b"]" {
+        return true;
+    }
+    loop {
+        let end = if let Some(string) = rest.strip_prefix(b"\"") {
+            match memchr::memchr2(b'"', b'\\', string) {
+                Some(end) if string[end] == b'"' => end + 2,
+                _ => return false,
             }
-        })
+        } else {
+            let end = memchr::memchr2(b',', b']', rest).unwrap_or(rest.len());
+            if !is_canonical_scalar(&rest[..end]) {
+                return false;
+            }
+            end
+        };
+        match rest.get(end..) {
+            Some(b"]") => return true,
+            Some([b',', next @ ..]) => rest = next,
+            _ => return false,
+        }
+    }
+}
+
+/// Returns true if `value` is `true`, `false`, `null` or an integer that re-encodes to itself.
+fn is_canonical_scalar(value: &[u8]) -> bool {
+    let Ok(value) = std::str::from_utf8(value) else {
+        return false;
+    };
+    match value {
+        "true" | "false" | "null" => true,
+        // serde_json reads `-0` as a float.
+        "-0" => false,
+        _ if value.starts_with('-') => value.parse::<i64>().is_ok(),
+        _ => value.parse::<u64>().is_ok(),
+    }
 }
 
 /// Returns true if `value` is a JSON string without escapes.
 fn is_unescaped_string(value: &RawValue) -> bool {
     let value = value.get().as_bytes();
-    value.first() == Some(&b'"') && !value.contains(&b'\\')
+    value.first() == Some(&b'"') && memchr::memchr(b'\\', value).is_none()
 }
 
 /// Implement the Layer for HttpRequestMiddleware to allow injecting the cookie
@@ -513,6 +534,37 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["error"]["code"], 401);
         assert_eq!(body["error"]["message"], "unauthenticated method");
+    }
+
+    #[test]
+    fn canonical_params_are_only_those_re_encoding_keeps() {
+        let canonical = |params: &str| {
+            is_canonical_params(&RawValue::from_string(params.into()).expect("valid json"))
+        };
+        for params in [
+            r#"[]"#,
+            r#"["ab"]"#,
+            r#"["",0,-1,true,false,null]"#,
+            r#"["a,]",1]"#,
+        ] {
+            assert!(canonical(params), "{params}");
+        }
+        for params in [
+            r#"[ ]"#,
+            r#"[1 ]"#,
+            r#"["a", 1]"#,
+            r#"["\n"]"#,
+            r#"[-0]"#,
+            r#"[1.0]"#,
+            r#"[1e2]"#,
+            r#"[18446744073709551616]"#,
+            r#"[[1]]"#,
+            r#"[{"a":1}]"#,
+            r#"{"a":1}"#,
+            r#"null"#,
+        ] {
+            assert!(!canonical(params), "{params}");
+        }
     }
 
     #[tokio::test]

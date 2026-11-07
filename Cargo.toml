@@ -119,6 +119,7 @@ jubjub = "0.11"
 lazy_static = "1.4"
 libzcash_script = "0.2"
 log = "0.4.27"
+memchr = "2.8"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 metrics-util = { version = "0.19", default-features = false }
