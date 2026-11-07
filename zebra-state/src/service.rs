@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::future::FutureExt;
+use futures::{future::FutureExt, stream::FuturesUnordered, StreamExt};
 use tokio::sync::oneshot;
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
@@ -37,6 +37,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
+    transparent,
 };
 
 use crate::{
@@ -1009,6 +1010,55 @@ impl StateService {
             .contains(hash)
             .then_some(KnownBlock::WriteChannel)
     }
+
+    /// Registers a wait before checking queued, in-flight, and committed outputs.
+    fn await_utxo(
+        &mut self,
+        outpoint: transparent::OutPoint,
+    ) -> impl Future<Output = Result<transparent::Utxo, BoxError>> + Send + 'static {
+        let timer = CodeTimer::start();
+        let response_fut = self.pending_utxos.queue(outpoint);
+        let queued = self.non_finalized_state_queued_blocks.utxo(&outpoint);
+        let (known, description) = if queued.is_some() {
+            (queued, "AwaitUtxo/queued-non-finalized")
+        } else {
+            self.drain_finalized_resets();
+            self.drain_non_finalized_rejected_hashes();
+            (
+                self.non_finalized_block_write_sent_hashes.utxo(&outpoint),
+                "AwaitUtxo/sent-non-finalized",
+            )
+        };
+        let read_service = if let Some(utxo) = known {
+            self.pending_utxos.respond(&outpoint, utxo);
+            None
+        } else {
+            Some(self.read_service.clone())
+        };
+
+        async move {
+            if let Some(read_service) = read_service {
+                // Match AwaitUtxo's checkpoint-queue exclusion; see #5126.
+                let response = read_service
+                    .oneshot(ReadRequest::AnyChainUtxo(outpoint))
+                    .await
+                    .map_err(AwaitUtxoError::ReadStateFailed)?;
+                if let ReadResponse::AnyChainUtxo(Some(utxo)) = response {
+                    timer.finish_desc("AwaitUtxo/any-chain");
+                    return Ok(utxo);
+                }
+                timer.finish_desc("AwaitUtxo/waiting");
+            } else {
+                timer.finish_desc(description);
+            }
+
+            let Response::Utxo(utxo) = response_fut.await? else {
+                unreachable!("pending UTXO requests return Utxo responses")
+            };
+            Ok(utxo)
+        }
+        .instrument(Span::current())
+    }
 }
 
 impl ReadStateService {
@@ -1210,88 +1260,36 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            // Uses pending_utxos and non_finalized_state_queued_blocks in the StateService.
-            // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
-            //
-            // The expected error type for this request is `AwaitUtxoError`.
-            Request::AwaitUtxo(outpoint) => {
-                let timer = CodeTimer::start();
-                // Prepare the AwaitUtxo future from PendingUtxos.
-                let response_fut = self.pending_utxos.queue(outpoint);
-                // Only instrument `response_fut`, the ReadStateService already
-                // instruments its requests with the same span.
+            Request::AwaitUtxo(outpoint) => self
+                .await_utxo(outpoint)
+                .map(|result| result.map(Response::Utxo))
+                .boxed(),
 
-                let response_fut = response_fut
-                    .map(|result| result.map_err(BoxError::from))
-                    .instrument(span)
-                    .boxed();
-
-                // Check the non-finalized block queue outside the returned future,
-                // so we can access mutable state fields.
-                if let Some(utxo) = self.non_finalized_state_queued_blocks.utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-
-                    // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish_desc("AwaitUtxo/queued-non-finalized");
-
-                    return response_fut;
-                }
-
-                // Check the sent non-finalized blocks
-                self.drain_finalized_resets();
-                self.drain_non_finalized_rejected_hashes();
-
-                if let Some(utxo) = self.non_finalized_block_write_sent_hashes.utxo(&outpoint) {
-                    self.pending_utxos.respond(&outpoint, utxo);
-
-                    // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish_desc("AwaitUtxo/sent-non-finalized");
-
-                    return response_fut;
-                }
-
-                // We ignore any UTXOs in FinalizedState.finalized_state_queued_blocks,
-                // because it is only used during checkpoint verification.
-                //
-                // This creates a rare race condition, but it doesn't seem to happen much in practice.
-                // See #5126 for details.
-
-                // Manually send a request to the ReadStateService,
-                // to get UTXOs from any non-finalized chain or the finalized chain.
-                let read_service = self.read_service.clone();
-
-                // Run the request in an async block, so we can await the response.
+            Request::AwaitUtxos(outpoints) => {
+                // Ordered polling can hide a later error behind an earlier missing output.
+                // Keep completion unordered and restore input order only after all lookups succeed.
+                let mut lookups: FuturesUnordered<_> = outpoints
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, outpoint)| {
+                        let lookup = self.await_utxo(outpoint);
+                        async move { lookup.await.map(|utxo| (index, utxo)) }
+                    })
+                    .collect();
+                let mut utxos = vec![None; lookups.len()];
                 async move {
-                    let req = ReadRequest::AnyChainUtxo(outpoint);
-
-                    let rsp = read_service
-                        .oneshot(req)
-                        .await
-                        .map_err(AwaitUtxoError::ReadStateFailed)?;
-
-                    // Optional TODO:
-                    //  - make pending_utxos.respond() async using a channel,
-                    //    so we can respond to all waiting requests here
-                    //
-                    // This change is not required for correctness, because:
-                    // - any waiting requests should have returned when the block was sent to the state
-                    // - otherwise, the request returns immediately if:
-                    //   - the block is in the non-finalized queue, or
-                    //   - the block is in any non-finalized chain or the finalized state
-                    //
-                    // And if the block is in the finalized queue,
-                    // that's rare enough that a retry is ok.
-                    if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
-                        // We got a UTXO, so we replace the response future with the result own.
-                        timer.finish_desc("AwaitUtxo/any-chain");
-
-                        return Ok(Response::Utxo(utxo));
+                    while let Some(result) = lookups.next().await {
+                        let (index, utxo) = result?;
+                        utxos[index] = Some(utxo);
                     }
-
-                    // We're finished, but the returned future is waiting on the respond() channel.
-                    timer.finish_desc("AwaitUtxo/waiting");
-
-                    response_fut.await
+                    Ok(Response::Utxos(
+                        utxos
+                            .into_iter()
+                            .map(|utxo| {
+                                utxo.expect("every lookup succeeded before collecting outputs")
+                            })
+                            .collect(),
+                    ))
                 }
                 .boxed()
             }
