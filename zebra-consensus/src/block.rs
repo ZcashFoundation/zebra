@@ -397,6 +397,7 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
+            check::no_duplicate_transparent_spends(&block)?;
 
             // From the NSM reissuance height, the block subsidy depends on the
             // NSM value balance after the parent block, which is not committed yet while
