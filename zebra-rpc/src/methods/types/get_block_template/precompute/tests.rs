@@ -22,6 +22,8 @@ use crate::{
 
 use super::*;
 
+mod rejection;
+
 /// Returns a template with an explicit timestamp boundary.
 fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateResponse {
     let tip_height = NetworkUpgrade::Nu5

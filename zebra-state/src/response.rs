@@ -74,20 +74,22 @@ impl MiningCandidateChanges {
     ///
     /// Check after selecting cached work: a detached chain-info response can outlive its guard.
     pub fn is_current(&self, hash: block::Hash) -> bool {
-        self.0
+        let parent = self
+            .0
             .borrow()
             .as_ref()
-            .is_some_and(|(parent, info, cancelled, deadline)| {
-                info.tip_hash == hash
+            .and_then(|(parent, info, cancelled, deadline)| {
+                (info.tip_hash == hash
                     && cancelled.has_changed().is_ok()
-                    && tokio::time::Instant::now() < *deadline
-                    && self
-                        .1
-                        .as_ref()
-                        .and_then(|state| state.best_tip())
-                        .map(|(_, hash)| hash)
-                        == Some(*parent)
+                    && tokio::time::Instant::now() < *deadline)
+                    .then_some(*parent)
+            });
+        parent.is_some_and(|parent| {
+            self.1.as_ref().is_some_and(|state| {
+                state.mining_candidate_is_allowed(hash)
+                    && state.best_tip().map(|(_, hash)| hash) == Some(parent)
             })
+        })
     }
 
     /// Marks earlier notifications as observed before reading the current candidate.
@@ -112,6 +114,11 @@ pub enum Response {
     /// commitments, or unavailable parent context. Errors preserve contextual failure details.
     /// Keep the guard until commit completes or verification rejects/cancels the block.
     EarlyRelay(Option<crate::EarlyRelayGuard>),
+
+    /// Response to [`Request::RejectBlock`]: whether the body was authenticated and its rejection
+    /// remembered for speculative-use suppression. A full rejection set disables speculative use
+    /// without preventing ordinary validation. Unauthenticated bodies return `false`.
+    Rejected(bool),
 
     /// Response to [`Request::MiningCandidate`], absent if mining is inactive or its worker is busy.
     /// Dropping the guard withdraws early work.
