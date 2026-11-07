@@ -1072,9 +1072,9 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
 
 /// A failed export is a process failure with its diagnostic on stderr, not a successful command
 /// whose stdout only looks like an error log.
-/// A pruned node with no configured bootstrap peers syncs and verifies headers from genesis,
-/// finds the snapshot server among the version 2 peers that connect to it, bootstraps from it,
-/// and keeps every header from genesis, but no body below the snapshot height.
+/// A pruned node with no configured snapshot peers syncs and verifies headers from genesis,
+/// finds the snapshot server among its connected version 2 peers, bootstraps from it over that
+/// connection, and keeps every header from genesis, but no body below the snapshot height.
 #[ignore = "runs two nodes through a multi-minute snapshot bootstrap; run it with \
             --run-ignored=all --ignore-default-filter"]
 #[tokio::test(flavor = "multi_thread")]
@@ -1121,19 +1121,14 @@ async fn pruned_node_discovers_the_snapshot_server_and_keeps_every_header() -> R
         let export = export.wait_with_output()?.assert_success()?;
         let commitment = parse_commitment(&String::from_utf8_lossy(&export.output.stdout))?;
 
-        // A serves the snapshot over version 2, mines above `H`, and dials B over both protocols:
-        // B is told about neither A nor any other bootstrap peer.
+        // A serves the snapshot over version 2, and mines above `H`.
         config_a.state.debug_stop_at_height = None;
         config_a.sync.serve_state_snapshots = true;
         config_a.network.v2_listen_addr = Some(quic_a);
         config_a.network.initial_testnet_peers = [p2p_b.to_string()].into();
         config_a.network.initial_v2_peers = [quic_b.to_string()].into();
         config_a.tracing.filter = Some("info".to_owned());
-        let mut node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
-        let dir_a = node_a
-            .dir
-            .take()
-            .expect("retain the state directory for the restart");
+        let node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
         wait_for_mempool_activation(&a).await?;
         let tip_a = block_count(&a)
             .await
@@ -1149,14 +1144,16 @@ async fn pruned_node_discovers_the_snapshot_server_and_keeps_every_header() -> R
         }
         let network_b = regtest(Some(checkpoints));
 
-        // B: empty and pruned, with the exported commitment, and no bootstrap peers.
+        // B: empty and pruned, with the exported commitment, and no snapshot peers.
         let key_b = TransparentSigningKey::random();
         let mut config_b = node_config(&network_b, rpc_b, p2p_b, RETENTION_B, &key_b)?;
         config_b.sync.full_verify_concurrency_limit = 1;
         config_b.sync.parallel_cpu_threads = 1;
         config_b.network.v2_listen_addr = Some(quic_b);
-        config_b.network.initial_testnet_peers.clear();
-        config_b.network.initial_v2_peers.clear();
+        // B connects to A as an ordinary peer, over both protocols, and finds that A serves state
+        // snapshots on that connection.
+        config_b.network.initial_testnet_peers = [p2p_a.to_string()].into();
+        config_b.network.initial_v2_peers = [quic_a.to_string()].into();
         config_b.sync.state_snapshot_sync = true;
         config_b.sync.state_snapshot = Some(commitment);
         config_b.sync.state_snapshot_peers.clear();
@@ -1167,9 +1164,7 @@ async fn pruned_node_discovers_the_snapshot_server_and_keeps_every_header() -> R
         node_b.expect_stdout_line_matches(
             "syncing and verifying headers from genesis before the state snapshot bootstrap",
         )?;
-        // A dialled B before B listened, so restart A to dial B again.
-        stop_node(node_a)?;
-        let node_a = start_node(dir_a)?;
+
         node_b.expect_stdout_line_matches(
             "the header chain reached the checkpoint after the state snapshot",
         )?;

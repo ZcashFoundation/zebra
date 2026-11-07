@@ -290,21 +290,28 @@ fn chain_preconditions_skip() {
     );
 }
 
-/// Without configured snapshot peers, the version 2 peers are used.
+/// The version 2 peers aren't dialled for the bootstrap: the network connects to them, and the
+/// bootstrap uses those connections.
 #[test]
-fn falls_back_to_initial_v2_peers() {
+fn initial_v2_peers_are_not_dialled() {
     let _init_guard = zebra_test::init();
     let dir = TempDir::new().unwrap();
 
     let mut config = bootstrapping_config(regtest(Some(1), Some(LAST_CHECKPOINT)), dir.path());
     config.sync.state_snapshot_peers.clear();
     config.network.initial_v2_peers = ["seed.example:18233".to_string()].into_iter().collect();
+    assert_eq!(
+        decide(&config, dir.path()),
+        skip(SkipReason::NoPeers),
+        "without version 2, the connections can't serve the snapshot"
+    );
 
+    config.network.v2_listen_addr = Some("127.0.0.1:0".parse().unwrap());
     assert_eq!(
         decide(&config, dir.path()),
         Decision::Bootstrap {
             commitment: commitment(),
-            peers: vec!["seed.example:18233".to_string()],
+            peers: Vec::new(),
         }
     );
 }

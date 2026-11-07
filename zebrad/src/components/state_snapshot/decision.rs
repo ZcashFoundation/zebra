@@ -21,15 +21,15 @@ mod tests;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Decision {
     /// Bootstrap from `commitment`, downloading from `peers`: the configured
-    /// `[sync] state_snapshot_peers`, or `[network] initial_v2_peers` when
-    /// they are empty.
+    /// `[sync] state_snapshot_peers`.
     Bootstrap {
         /// The commitment the snapshot is verified against.
         commitment: StateSnapshotCommitment,
         /// The peers to download from, as `host:port` strings. When there are
-        /// none, the node downloads from the connected version 2 peers that
-        /// advertise `NODE_SYNC_ARTIFACTS`, which it finds through peer
-        /// discovery.
+        /// none, the node downloads from its connected version 2 peers that
+        /// advertise `NODE_SYNC_ARTIFACTS` and hold the snapshot's manifest: its
+        /// `[network] initial_v2_peers`, the peers that dialled it, and the
+        /// peers it discovered.
         peers: Vec<String>,
     },
 
@@ -65,9 +65,9 @@ pub enum SkipReason {
     /// A precondition of the trust model does not hold.
     PreconditionFailed(Precondition),
 
-    /// Neither `[sync] state_snapshot_peers` nor `[network] initial_v2_peers`
-    /// names a peer, and the version 2 protocol is off, so the node can't
-    /// find peers that serve state snapshots.
+    /// `[sync] state_snapshot_peers` names no peer, and the version 2
+    /// protocol is off, so the node has no other peers that could serve state
+    /// snapshots.
     NoPeers,
 
     /// zcashd-compat mode is on, which needs an archive node.
@@ -119,8 +119,8 @@ impl fmt::Display for SkipReason {
                 "the history tree is empty at the snapshot height"
             }
             SkipReason::NoPeers => {
-                "neither sync.state_snapshot_peers nor network.initial_v2_peers names a peer, \
-                 and network.v2_listen_addr is not set, so no peer can be discovered"
+                "sync.state_snapshot_peers names no peer, and network.v2_listen_addr is not \
+                 set, so no connected peer can serve the snapshot"
             }
             SkipReason::ZcashdCompat => "zcashd-compat mode is on",
             SkipReason::Rejected => "the snapshot was rejected by an earlier bootstrap",
@@ -360,12 +360,11 @@ fn check_preconditions(
     Ok(())
 }
 
-/// Returns the bootstrap peers: `[sync] state_snapshot_peers`, or
-/// `[network] initial_v2_peers` when they are empty.
+/// Returns the bootstrap peers: `[sync] state_snapshot_peers`.
+///
+/// The `[network] initial_v2_peers` aren't dialled for the bootstrap: the network connects to
+/// them, and the bootstrap uses those connections, because peers usually allow one connection
+/// per IP address.
 fn bootstrap_peers(config: &ZebradConfig) -> Vec<String> {
-    if !config.sync.state_snapshot_peers.is_empty() {
-        config.sync.state_snapshot_peers.clone()
-    } else {
-        config.network.initial_v2_peers.iter().cloned().collect()
-    }
+    config.sync.state_snapshot_peers.clone()
 }

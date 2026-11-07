@@ -4,11 +4,14 @@ A [pruned node](pruning.md) with an empty state can download a **state snapshot*
 [version 2 protocol](p2p-v2.md) peers instead of syncing the chain from genesis. The snapshot is
 Zebra's finalized state at a height `H`: the UTXO set, the nullifier and anchor sets, the note
 commitment trees, the value pools, the hashes and headers of the 2,304 most recent blocks, and the
-body of block `H`. It ships nothing the node would not keep: no older block bodies, and no index
-the node can rebuild, such as the address balances. The node first syncs and verifies the block
-headers from genesis, like any node. Then it checks the snapshot against a _commitment_ and against
-those headers, installs it as its state, keeps every header, and syncs only the blocks above `H`. On Mainnet that replaces about 278 GB of block history with
-about 2 GB.
+body of block `H`. It ships no older block bodies, and no index the node can rebuild, such as the
+address balances. It does repeat a little the node already has: the headers of its window and the
+genesis block. The node first syncs and verifies the block headers from genesis, like any node.
+Then it checks the snapshot against a _commitment_ and against those headers, installs it as its
+state, keeps every header, and syncs only the blocks above `H`. On Mainnet that replaces about
+278 GB of block history with about 2 GB. While it installs the snapshot, the node copies its synced
+headers into it, so it briefly needs free disk space for a second copy of them, about 5 GB on
+Mainnet, besides the snapshot.
 
 This is not the same as the [published state archives](snapshots.md). Those are tar archives of a
 complete database that you download and extract yourself. Snapshot sync happens inside Zebra, over
@@ -98,9 +101,8 @@ fails is logged once at `info`, and the node syncs normally:
 - a commitment is pinned or configured, and allowed on the network;
 - `[consensus] checkpoint_sync = true`, NU5 is active at `H`, `H + 1` is at or below the last
   checkpoint Zebra knows, and the history tree at `H` is not empty;
-- `[sync] state_snapshot_peers`, or when it is empty `[network] initial_v2_peers`, names a peer,
-  or `[network] v2_listen_addr` is set, so the node can find peers that serve snapshots among the
-  version 2 peers it connects to;
+- `[sync] state_snapshot_peers` names a peer, or `[network] v2_listen_addr` is set, so the node
+  can find peers that serve snapshots among the version 2 peers it connects to;
 - [zcashd-compat mode](zcashd-compat.md) is off, because it needs an archive node;
 - the snapshot was not rejected by an earlier attempt on this `cache_dir`.
 
@@ -134,12 +136,15 @@ state_snapshot_fallback = "auto"
 ```
 
 Without configured snapshot peers, the node downloads from the version 2 peers it is connected to
-that advertise `NODE_SYNC_ARTIFACTS`, whether it dialled them, they dialled it, or it discovered
-them, so a node with `[network] v2_listen_addr` set needs no snapshot peers. The snapshot peers are
-only used for the download, over short-lived version 2 connections next to the node's network.
-They are not added to the node's peers. To keep syncing
-blocks from them over the version 2 protocol afterwards, also set `[network] v2_listen_addr` and
-list them in `[network] initial_v2_peers`. The node syncs the blocks above `H` from its usual
+that advertise `NODE_SYNC_ARTIFACTS` and hold the snapshot's manifest, over those connections. It
+asks each such peer for the manifest's first byte as it connects, and waits up to 2 minutes for one
+that has it. The peers are its `[network] initial_v2_peers`,
+the peers that dialled it, and the peers it discovered. So a node with `[network] v2_listen_addr`
+set needs no snapshot peers, and the usual way to name a snapshot server is
+`[network] initial_v2_peers`. The snapshot peers, if set, are only used for the download, over
+short-lived version 2 connections next to the node's network, and are not added to the node's
+peers. Peers usually allow one connection per IP address, so a snapshot peer that the node is
+also connected to may refuse the download. The node syncs the blocks above `H` from its usual
 peers over either protocol. Because block `H` is recent, the node counts as near the network tip
 and keeps peers that advertise `NODE_NETWORK_LIMITED` instead of `NODE_NETWORK`, such as the
 pruned node that served the snapshot.

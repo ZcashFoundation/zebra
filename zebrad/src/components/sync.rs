@@ -402,8 +402,8 @@ pub struct Config {
     /// On by default, so it only takes effect on pruned nodes. The snapshot is downloaded only when `state.prune_blocks_older_than` is
     /// set, the state is not ephemeral, no state database exists yet, a snapshot commitment is
     /// pinned for the network or configured in `state_snapshot`, `consensus.checkpoint_sync` is
-    /// on, zcashd-compat mode is off, and `state_snapshot_peers` or `network.initial_v2_peers`
-    /// names a peer, or `network.v2_listen_addr` is set. Otherwise Zebra logs why and syncs
+    /// on, zcashd-compat mode is off, and `state_snapshot_peers` names a peer or
+    /// `network.v2_listen_addr` is set. Otherwise Zebra logs why and syncs
     /// normally.
     ///
     /// The node first syncs and verifies headers from genesis, then checks the snapshot against
@@ -432,8 +432,11 @@ pub struct Config {
 
     /// The version 2 peers the snapshot is downloaded from, as `host:port` strings.
     ///
-    /// Empty by default, which uses `network.initial_v2_peers`, or when that is empty too, the
-    /// connected version 2 peers that advertise `NODE_SYNC_ARTIFACTS`, configured or discovered.
+    /// Empty by default, which uses the connected version 2 peers that advertise
+    /// `NODE_SYNC_ARTIFACTS`: `network.initial_v2_peers`, the peers that dialled this node, and
+    /// the peers it discovered. Zebra dials these peers for the download only, so a peer listed
+    /// here and in `network.initial_v2_peers` must allow two connections from this node's IP
+    /// address.
     pub state_snapshot_peers: Vec<String>,
 
     /// What to do when the snapshot cannot be downloaded or is rejected.
