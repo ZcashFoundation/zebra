@@ -79,7 +79,9 @@ type InBlockTxDependenciesDepth = usize;
 /// This is the output of the `getblocktemplate` RPC in the default 'template' mode. See
 /// [`BlockProposalResponse`] for the output in 'proposal' mode.
 #[allow(clippy::too_many_arguments)]
-#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new, schemars::JsonSchema,
+)]
 pub struct BlockTemplateResponse {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
@@ -98,6 +100,7 @@ pub struct BlockTemplateResponse {
     /// The hash of the previous block.
     #[serde(rename = "previousblockhash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) previous_block_hash: block::Hash,
 
@@ -106,6 +109,7 @@ pub struct BlockTemplateResponse {
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
@@ -114,6 +118,7 @@ pub struct BlockTemplateResponse {
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
@@ -122,6 +127,7 @@ pub struct BlockTemplateResponse {
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
@@ -146,6 +152,7 @@ pub struct BlockTemplateResponse {
 
     /// The expected difficulty for the new block displayed in expanded form.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) target: ExpandedDifficulty,
 
@@ -182,6 +189,7 @@ pub struct BlockTemplateResponse {
 
     /// The expected difficulty for the new block displayed in compact form.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) bits: CompactDifficulty,
 
@@ -450,7 +458,9 @@ impl BlockTemplateResponse {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
 pub enum GetBlockTemplateResponse {

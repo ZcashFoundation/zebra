@@ -24,7 +24,18 @@ use proptest_derive::Arbitrary;
 ///
 /// Enum variants must be ordered by activation height.
 #[derive(
-    Copy, Clone, EnumIter, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+    Copy,
+    Clone,
+    EnumIter,
+    Debug,
+    Eq,
+    Hash,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Ord,
+    PartialOrd,
+    schemars::JsonSchema,
 )]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {

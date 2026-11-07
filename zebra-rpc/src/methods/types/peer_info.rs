@@ -5,7 +5,16 @@ use derive_new::new;
 use zebra_network::{types::MetaAddr, PeerSocketAddr};
 
 /// Item of the `getpeerinfo` response
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 #[allow(clippy::too_many_arguments)]
 pub struct PeerInfo {
     /// The IP address and port of the peer

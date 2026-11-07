@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`rpc.discover` gives each method its zcashd RPC category as an OpenRPC tag, and its descriptions no longer contain `method:` or `tags:` lines ([#11860](https://github.com/ZcashFoundation/zebra/issues/11860)).'
+time: 2026-11-03T22:50:37.000000000Z

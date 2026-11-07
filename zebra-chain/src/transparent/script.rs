@@ -9,7 +9,9 @@ use crate::serialization::{
 };
 
 /// An encoding of a Bitcoin script.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
@@ -20,6 +22,7 @@ pub struct Script(
     /// Consensus-critical serialization uses [`ZcashSerialize`].
     /// [`serde`]-based hex serialization must only be used for RPCs and testing.
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     Vec<u8>,
 );
 

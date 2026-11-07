@@ -21,12 +21,23 @@ use crate::client::TransactionTemplate;
 ///
 /// If the transactions in the block template are modified, these roots must be recalculated
 /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct DefaultRoots {
     /// The merkle root of the transaction IDs in the block.
     /// Used in the new block's header.
     #[serde(rename = "merkleroot")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) merkle_root: merkle::Root,
 
@@ -34,12 +45,14 @@ pub struct DefaultRoots {
     /// Unlike the other roots, this not cover any data from this new block, only from previous blocks.
     #[serde(rename = "chainhistoryroot")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) chain_history_root: ChainHistoryMmrRootHash,
 
     /// The merkle root of the authorizing data hashes of the transactions in the new block.
     #[serde(rename = "authdataroot")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) auth_data_root: AuthDataRoot,
 
@@ -49,6 +62,7 @@ pub struct DefaultRoots {
     /// `merkle_root` has its own field in the block header.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
+    #[schemars(with = "String")]
     #[getter(copy)]
     pub(crate) block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
 }

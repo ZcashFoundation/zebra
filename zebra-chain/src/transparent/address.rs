@@ -120,6 +120,17 @@ impl fmt::Debug for Address {
     }
 }
 
+// Serialized with `Display`, as an encoded address string.
+impl schemars::JsonSchema for Address {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TransparentAddress".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
+    }
+}
+
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
