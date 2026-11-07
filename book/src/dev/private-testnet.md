@@ -30,19 +30,21 @@ below uses `Nu7Private` and `[0, 1, 0, 7]`, giving `nu7private-00010007`. Under
 | `state/vN/testnet` | `state/vN/nu7private-00010007` |
 | `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
 
-Use the actual database version `N` supported by the test binary. Current builds
-use `v30`. Prepare an archive snapshot with a v30-compatible writer before forking:
-its registered upgrade moves compatible v29 state into `state/v30` when no v30
-database exists, without a public Testnet resync. Keep pruning disabled while
-preparing the archive. Legacy records remain readable with a zero NSM balance;
-new writes retain the wider NSM layout. Stop Zebra again before copying the
-upgraded snapshot, and keep the snapshot and any copied non-finalized blocks below
+Use the actual database version `N` selected by the test binary. With pruning disabled,
+new archives and existing v29 archives stay in `v29` at format 29.0.0; enabling pruning
+moves compatible v29 state into `state/v30` at format 30.0.0. Existing v30 state takes
+precedence even when pruning is disabled. Never merge the two directories.
+Keep pruning disabled while preparing the archive. Legacy records remain readable with
+a zero NSM balance; new writes retain the wider NSM layout. Stop Zebra again before
+copying the snapshot, and keep the snapshot and any copied non-finalized blocks below
 the private activation.
 
-Retain an untouched v29 archive backup before upgrading if rollback is needed.
-`state.delete_old_database = false` does not preserve the directory that the
-upgrade moves. Manually renaming or symlinking versioned directories is not a
-substitute for the supported upgrade. Upgrade direct database readers, including
+Keep required backups outside the managed cache. An archive that stays in v29 can
+roll back to Zebra 7.0.0 without renaming its directory; remove the unsupported pruning
+field and keep the same `indexer` setting. For v30, follow the
+[checked rollback and recovery procedures](../user/pruning.md#format-30-recovery-and-copies).
+Disabling `state.delete_old_database` does not preserve a moved directory, and pruned
+state must never be renamed into v29. Upgrade direct readers of v30 state, including
 Zallet and Zaino backends, with the writer as described in
 [State Database Upgrades](state-db-upgrades.md#upgrading-the-state-database).
 
