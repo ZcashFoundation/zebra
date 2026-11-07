@@ -651,33 +651,13 @@ impl StartCmd {
             config.sync.v2_spentness_hints,
             config.sync.v2_checkpoint_sync,
         )?;
-        let (state_hints, spentness_hints_receiver) =
-            spentness_hints::StateHints::new(spentness_hints_mode).unzip();
-        let state_checkpoint_verify_concurrency_limit =
-            config.sync.checkpoint_verify_concurrency_limit
-                * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1);
-        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            match spentness_hints_receiver {
-                Some(spentness_hints_receiver) => {
-                    zebra_state::init_with_spentness(
-                        config.state.clone(),
-                        &config.network.network,
-                        max_checkpoint_height,
-                        state_checkpoint_verify_concurrency_limit,
-                        spentness_hints_receiver,
-                    )
-                    .await
-                }
-                None => {
-                    zebra_state::init(
-                        config.state.clone(),
-                        &config.network.network,
-                        max_checkpoint_height,
-                        state_checkpoint_verify_concurrency_limit,
-                    )
-                    .await
-                }
-            };
+        let (
+            state_hints,
+            state_service,
+            read_only_state_service,
+            latest_chain_tip,
+            chain_tip_change,
+        ) = Self::open_state(&config, max_checkpoint_height, spentness_hints_mode).await;
         // The bootstrap checked block `H + 1` against the headers to the next checkpoint and the
         // snapshot's history tree, so commit it before the block verifier and sync start: they
         // then start above it, and nothing downloads it again.
@@ -1594,6 +1574,56 @@ impl StartCmd {
                  timed out: block sync downloads it instead"
             ),
         }
+    }
+
+    /// Opens the state, with a spentness hints receiver for `spentness_hints_mode`.
+    #[allow(clippy::type_complexity)]
+    async fn open_state(
+        config: &ZebradConfig,
+        max_checkpoint_height: Height,
+        spentness_hints_mode: zebra_chain::parameters::spentness_hints::Mode,
+    ) -> (
+        Option<spentness_hints::StateHints>,
+        BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
+        zebra_state::ReadStateService,
+        zebra_state::LatestChainTip,
+        zebra_state::ChainTipChange,
+    ) {
+        let (state_hints, spentness_hints_receiver) =
+            spentness_hints::StateHints::new(spentness_hints_mode).unzip();
+        let state_checkpoint_verify_concurrency_limit =
+            config.sync.checkpoint_verify_concurrency_limit
+                * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1);
+        let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+            match spentness_hints_receiver {
+                Some(spentness_hints_receiver) => {
+                    zebra_state::init_with_spentness(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                        spentness_hints_receiver,
+                    )
+                    .await
+                }
+                None => {
+                    zebra_state::init(
+                        config.state.clone(),
+                        &config.network.network,
+                        max_checkpoint_height,
+                        state_checkpoint_verify_concurrency_limit,
+                    )
+                    .await
+                }
+            };
+
+        (
+            state_hints,
+            state_service,
+            read_only_state_service,
+            latest_chain_tip,
+            chain_tip_change,
+        )
     }
 
     /// Returns the bound for the state service buffer,
