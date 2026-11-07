@@ -28,6 +28,94 @@ use crate::{
     Config,
 };
 
+#[test]
+fn construct_empty() {
+    let _init_guard = zebra_test::init();
+    let _chain = Chain::new(
+        &Network::Mainnet,
+        Height(0),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::zero(),
+    );
+}
+
+#[test]
+fn construct_single() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+
+    let mut chain = Chain::new(
+        &Network::Mainnet,
+        Height(0),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    );
+
+    chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
+
+    assert_eq!(1, chain.blocks.len());
+
+    Ok(())
+}
+
+#[test]
+fn chain_snapshots_share_records_and_outputs_until_finalization() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+    let root_chain = Chain::new(
+        &Network::Mainnet,
+        Height(434_872),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    )
+    .push(block.clone().prepare().test_with_zero_spent_utxos())?;
+    let mut chain = root_chain.clone().push(
+        block
+            .make_fake_child()
+            .prepare()
+            .test_with_zero_spent_utxos(),
+    )?;
+    let snapshot = chain.clone();
+    for (current, retained) in chain.blocks.values().zip(snapshot.blocks.values()) {
+        assert!(Arc::ptr_eq(current, retained));
+    }
+    for (outpoint, utxo) in chain.created_utxos.iter() {
+        assert!(Arc::ptr_eq(
+            utxo,
+            snapshot.created_utxos.get(outpoint).unwrap()
+        ));
+    }
+
+    let outpoint = *root_chain.created_utxos.iter().next().unwrap().0;
+    let mut owned = chain.created_utxo(&outpoint).unwrap();
+    owned.output.lock_script = transparent::Script::new(&[0; 4096]);
+    assert_ne!(owned, snapshot.created_utxo(&outpoint).unwrap());
+    let forked = chain.fork(block.hash()).unwrap();
+    assert!(forked.eq_internal_state(&root_chain));
+    assert!(chain.eq_internal_state(&snapshot));
+    drop(forked);
+    drop(root_chain);
+
+    let root_record = Arc::downgrade(chain.blocks.values().next().unwrap());
+    let output = Arc::downgrade(chain.created_utxos.get(&outpoint).unwrap());
+    let (finalized, _) = chain.pop_root();
+    assert_eq!(finalized.hash, block.hash());
+    assert!(snapshot.created_utxo(&outpoint).is_some());
+    assert!(chain.created_utxo(&outpoint).is_none());
+    assert!(root_record.upgrade().is_some());
+    drop(finalized);
+    assert!(root_record.upgrade().is_some());
+    drop(snapshot);
+    assert!(root_record.upgrade().is_none());
+    assert!(output.upgrade().is_none());
+    Ok(())
+}
+
 /// Build value-conserving transfers with complete spent-output maps, including intra-block spends.
 /// This exercises chain indexing, not proof-of-work, script, or subsidy verification.
 fn large_transfer_chain(
@@ -127,12 +215,7 @@ fn large_transfer_chain(
         })
         .set_work(10);
         assert_eq!(
-            block.transaction_fees(
-                &spent
-                    .iter()
-                    .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
-                    .collect(),
-            )?,
+            block.transaction_fees(&spent)?,
             Amount::<NonNegative>::zero()
         );
         let contextual = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
@@ -246,19 +329,10 @@ fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
         .iter()
         .map(|transaction| transaction.hash())
         .collect();
-    assert_eq!(
-        block.transaction_fees(
-            &blocks[1]
-                .spent_outputs
-                .iter()
-                .map(|(outpoint, output)| (*outpoint, output.utxo.clone()))
-                .collect(),
-        )?,
-        value
-    );
+    assert_eq!(block.transaction_fees(&blocks[1].spent_outputs)?, value);
     let block = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
         Arc::new(block).prepare(),
-        blocks[1].spent_outputs.clone(),
+        blocks[1].spent_outputs.as_ref().clone(),
         DeferredPoolBalanceChange::zero(),
         &Network::Mainnet,
         root.chain_value_pools,
@@ -278,35 +352,103 @@ fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
 }
 
 #[test]
-fn construct_empty() {
-    let _init_guard = zebra_test::init();
-    let _chain = Chain::new(
-        &Network::Mainnet,
-        Height(0),
-        NoteCommitmentTrees::default(),
-        Default::default(),
-        ValueBalance::zero(),
+fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
+    use crate::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock};
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::testnet::ConfiguredActivationHeights,
+        transaction::{LockTime, Transaction},
+    };
+
+    let height = Height(1_000);
+    let output = |value: u64| {
+        transparent::Output::new(
+            value.try_into().unwrap(),
+            transparent::Script::new(&[0; 1024]),
+        )
+    };
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![output(10)],
+        LockTime::unlocked(),
+    ));
+    let mut transactions = vec![coinbase];
+    let mut spent = HashMap::new();
+    for value in [9, 8] {
+        let previous = transactions.last().unwrap();
+        let outpoint = transparent::OutPoint {
+            hash: previous.hash(),
+            index: 0,
+        };
+        spent.insert(
+            outpoint,
+            transparent::OrderedUtxo::new(
+                previous.outputs()[0].clone(),
+                height,
+                transactions.len() - 1,
+            ),
+        );
+        transactions.push(Arc::new(Transaction::test_v1(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![output(value)],
+            LockTime::unlocked(),
+        )));
+    }
+    let block = Arc::new(Block {
+        header: Arc::new(zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?),
+        transactions,
+    });
+    let plain = transparent::utxos_from_ordered_utxos(spent.clone());
+    let nu7 = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
     );
-}
-
-#[test]
-fn construct_single() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-
-    let mut chain = Chain::new(
-        &Network::Mainnet,
-        Height(0),
-        NoteCommitmentTrees::default(),
-        Default::default(),
-        ValueBalance::fake_populated_pool(),
-    );
-
-    chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
-
-    assert_eq!(1, chain.blocks.len());
-
+    for network in [Network::Mainnet, nu7] {
+        let expected = block.chain_value_pool_change_and_fees(
+            &plain,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            block.clone().prepare(),
+            spent.clone(),
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        assert_eq!((contextual.chain_value_pool_change, fees), expected);
+        assert_eq!(contextual.spent_outputs.as_ref(), &spent);
+        assert_eq!(block.transaction_fees(&spent)?.zatoshis(), 2);
+        let cloned = contextual.clone();
+        assert_eq!(cloned, contextual);
+        assert!(Arc::ptr_eq(&contextual.new_outputs, &cloned.new_outputs));
+        assert!(Arc::ptr_eq(
+            &contextual.spent_outputs,
+            &cloned.spent_outputs
+        ));
+        let semantic = SemanticallyVerifiedBlock::from(cloned);
+        assert_eq!(&semantic.new_outputs, contextual.new_outputs.as_ref());
+        let unique = contextual;
+        let expected_outputs = unique.new_outputs.as_ref().clone();
+        assert_eq!(Arc::strong_count(&unique.new_outputs), 1);
+        assert_eq!(
+            SemanticallyVerifiedBlock::from(unique).new_outputs,
+            expected_outputs
+        );
+    }
     Ok(())
 }
 

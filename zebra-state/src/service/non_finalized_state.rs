@@ -33,8 +33,10 @@ use crate::{
     MinedBlockNotifications, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod address_transfers;
 mod backup;
 mod chain;
+mod created_utxos;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -42,7 +44,9 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 #[cfg(test)]
 mod tests;
 
+use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use created_utxos::CreatedUtxos;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -380,7 +384,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizableBlock::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(Arc::unwrap_or_clone(best_chain_root), root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -484,7 +488,11 @@ impl NonFinalizedState {
             }
 
             self.chain_set.remove(&chain);
-            chain.blocks.values().cloned().collect()
+            chain
+                .blocks
+                .values()
+                .map(|block| block.as_ref().clone())
+                .collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
                 .invalidate_block(block_hash)
@@ -492,7 +500,7 @@ impl NonFinalizedState {
 
             // Add the new chain fork or updated chain to the set of recent chains, and
             // remove the chain containing the hash of the block from chain set
-            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+            self.insert_with(Arc::new(new_chain), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
 
@@ -674,7 +682,7 @@ impl NonFinalizedState {
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &new_chain.unspent_utxos(),
+            &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
