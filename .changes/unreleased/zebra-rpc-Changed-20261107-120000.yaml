@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`getblock` with verbosity 0 and `getrawtransaction` with verbosity 0 return the stored bytes of finalized blocks and transactions instead of deserializing and re-serializing them. The responses are unchanged.'
+time: 2026-11-07T12:00:00.000000000Z

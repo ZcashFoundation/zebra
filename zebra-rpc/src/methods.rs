@@ -1584,7 +1584,7 @@ where
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
-            let request = zebra_state::ReadRequest::Block(hash_or_height);
+            let request = zebra_state::ReadRequest::RawBlock(hash_or_height);
             let response = self
                 .read_state
                 .clone()
@@ -1593,10 +1593,10 @@ where
                 .map_misc_error()?;
 
             match response {
-                zebra_state::ReadResponse::Block(Some(block)) => {
-                    Ok(GetBlockResponse::Raw(block.into()))
+                zebra_state::ReadResponse::RawBlock(Some(block)) => {
+                    Ok(GetBlockResponse::Raw(block))
                 }
-                zebra_state::ReadResponse::Block(None) => {
+                zebra_state::ReadResponse::RawBlock(None) => {
                     Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
                 }
                 _ => unreachable!("unmatched response to a block request"),
@@ -2180,6 +2180,26 @@ where
             None
         };
 
+        // Serve raw transactions from the state's stored bytes, without deserializing them.
+        if !verbose {
+            return match self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::AnyChainRawTransaction(txid))
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::RawTransaction(Some(hex)) => {
+                    Ok(GetRawTransactionResponse::Raw(hex))
+                }
+                zebra_state::ReadResponse::RawTransaction(None) => {
+                    Err("Transaction not found in mempool or best chain")
+                        .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                }
+                _ => unreachable!("unmatched response to an `AnyChainRawTransaction` request"),
+            };
+        }
+
         // If the tx wasn't in the mempool, check the state.
         match self
             .read_state
@@ -2188,7 +2208,7 @@ where
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(
                 if let Some((caller_block_hash, in_best_chain)) = caller_block_context {
                     // Use the caller-provided block context to avoid TOCTOU races
                     // between the validation query and the transaction fetch.
@@ -2263,12 +2283,8 @@ where
                             )),
                         ),
                     }
-                }
-            } else {
-                let tx: Arc<Transaction> = tx.into();
-                let hex = tx.into();
-                GetRawTransactionResponse::Raw(hex)
-            }),
+                },
+            ),
 
             zebra_state::ReadResponse::AnyChainTransaction(None) => {
                 Err("Transaction not found in mempool or best chain")
