@@ -291,23 +291,75 @@ fn chain_preconditions_skip() {
     );
 }
 
-/// Without configured snapshot peers, the version 2 peers are used.
+/// The version 2 peers aren't dialled for the bootstrap: the network connects to them, and the
+/// bootstrap uses those connections.
 #[test]
-fn falls_back_to_initial_v2_peers() {
+fn initial_v2_peers_are_not_dialled() {
     let _init_guard = zebra_test::init();
     let dir = TempDir::new().unwrap();
 
     let mut config = bootstrapping_config(regtest(Some(1), Some(LAST_CHECKPOINT)), dir.path());
     config.sync.state_snapshot_peers.clear();
     config.network.initial_v2_peers = ["seed.example:18233".to_string()].into_iter().collect();
+    assert_eq!(
+        decide(&config, dir.path()),
+        skip(SkipReason::NoPeers),
+        "without version 2, the connections can't serve the snapshot"
+    );
+
+    config.network.v2_listen_addr = Some("127.0.0.1:0".parse().unwrap());
+    assert_eq!(
+        decide(&config, dir.path()),
+        Decision::Bootstrap {
+            commitment: commitment(),
+            peers: Vec::new(),
+        }
+    );
+}
+
+/// Without configured peers, a node with version 2 on bootstraps from the peers it discovers.
+#[test]
+fn discovers_peers_without_configured_ones() {
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+
+    let mut config = bootstrapping_config(regtest(Some(1), Some(LAST_CHECKPOINT)), dir.path());
+    config.sync.state_snapshot_peers.clear();
+    config.network.initial_v2_peers.clear();
+    config.network.v2_listen_addr = Some("127.0.0.1:0".parse().unwrap());
 
     assert_eq!(
         decide(&config, dir.path()),
         Decision::Bootstrap {
             commitment: commitment(),
-            peers: vec!["seed.example:18233".to_string()],
+            peers: Vec::new(),
         }
     );
+}
+
+/// A state that holds only the headers an earlier start synced for the bootstrap is bootstrapped
+/// over, but not once the marker is gone.
+#[test]
+fn header_only_state_bootstraps_again() {
+    use crate::components::state_snapshot::decision::header_sync_marker;
+
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+    let network = regtest(Some(1), Some(LAST_CHECKPOINT));
+    let config = bootstrapping_config(network.clone(), dir.path());
+
+    let running_major = zebra_state::state_database_format_version_in_code().major;
+    std::fs::create_dir_all(config.state.db_path("state", running_major, &network)).unwrap();
+    let marker = header_sync_marker(&config.state, &network);
+    std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+    std::fs::write(&marker, []).unwrap();
+    assert!(matches!(
+        decide(&config, dir.path()),
+        Decision::Bootstrap { .. }
+    ));
+
+    std::fs::remove_file(&marker).unwrap();
+    assert_eq!(decide(&config, dir.path()), skip(SkipReason::ExistingState));
 }
 
 /// A manifest marked as rejected in the store is not downloaded again.

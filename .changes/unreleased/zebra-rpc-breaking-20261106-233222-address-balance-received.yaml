@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: Changed `GetAddressBalanceResponse::received` to `Option<u64>`. A node bootstrapped from a state snapshot omits `received` from `getaddressbalance`, because it does not know the outputs the addresses received and spent below the snapshot height.
+time: 2026-11-06T23:32:22.000000000Z

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Changed `ReadResponse::AddressBalance::received` to `Option<u64>`, which is `None` in a database imported from a state snapshot.
+time: 2026-11-06T23:32:22.000000000Z

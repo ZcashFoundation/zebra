@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 use tempfile::TempDir;
 use zebra_chain::{
     amount::Amount,
-    block::{self, Height},
+    block::{self, Block, Height},
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network,
@@ -84,7 +84,7 @@ const L: u32 = H + 1 - NODE_NETWORK_LIMITED_BLOCKS;
 const RETENTION_A: u32 = 4_000;
 
 /// Node B's initial retention, larger than the chain through the spend block, so its floor stays
-/// at the window start through import, initial sync, and the first restart. The ongoing-pruning
+/// at the snapshot height through import, initial sync, and the first restart. The ongoing-pruning
 /// phase lowers it explicitly.
 const RETENTION_B: u32 = 5_000;
 
@@ -116,7 +116,7 @@ const _: () = assert!(
 );
 const _: () = assert!(
     RETENTION_B > H + BLOCKS_ABOVE_H + SEMANTIC_TAIL + 1,
-    "B's floor stays at L through the initial sync and first restart"
+    "B's floor stays at H through the initial sync and first restart"
 );
 const _: () = assert!(
     // u32 to usize is a lossless widening on every target Zebra supports.
@@ -304,6 +304,13 @@ async fn get_block_error(client: &RpcRequestClient, height: u32, verbosity: u8) 
     Ok(response["error"].clone())
 }
 
+/// Submits `block` to `client`'s node, which may already have it from gossip.
+async fn submit_unless_known(client: &RpcRequestClient, block: &Block) {
+    if let Err(error) = client.submit_block(block.clone()).await {
+        tracing::info!(%error, "the node already had the block, or is verifying it");
+    }
+}
+
 /// Checks that a formerly retained body has been deleted by ongoing pruning.
 async fn assert_body_pruned(client: &RpcRequestClient, height: u32) -> Result<()> {
     for verbosity in [0, 2] {
@@ -460,6 +467,51 @@ fn stop_node(mut child: TestChild<TempDir>) -> Result<()> {
         .assert_failure()?
         .assert_was_killed()?;
     Ok(())
+}
+
+/// With the default `"auto"` fallback, an empty pruned node whose snapshot no peer serves still
+/// starts, and syncs normally from genesis.
+///
+/// The node has no peers at all, so it gives up when its header chain stops growing.
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_node_starts_normally_when_no_peer_serves_the_snapshot() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        // A checkpoint above the snapshot height, so the decision rule's preconditions hold.
+        let network = regtest(Some(vec![
+            (Height(0), regtest(None).genesis_hash()),
+            (Height(10), block::Hash([0x33; 32])),
+        ]));
+        let rpc = reserve_tcp_port()?;
+        let p2p = loopback(reserve_tcp_port()?);
+        let key = TransparentSigningKey::random();
+        let mut config = node_config(&network, rpc, p2p, RETENTION_B, &key)?;
+        assert!(
+            config.sync.state_snapshot_sync,
+            "snapshot sync is on by default"
+        );
+        config.sync.state_snapshot = Some(StateSnapshotCommitment {
+            height: Height(5),
+            block_hash: block::Hash([0x44; 32]),
+            manifest: zebra_chain::state_snapshot::ObjectHash([0x55; 32]),
+        });
+        // Nothing listens on this port.
+        config.sync.state_snapshot_peers = vec![loopback(reserve_udp_port()?).to_string()];
+        let mut node = start_node(testdir()?.with_config(&mut config)?)?;
+
+        node.expect_stdout_line_matches(
+            "syncing and verifying headers from genesis before the state snapshot bootstrap",
+        )?;
+        node.expect_stdout_line_matches(
+            "the state snapshot bootstrap failed: syncing normally from the synced headers instead",
+        )?;
+        let client = RpcRequestClient::new_with_timeout(loopback(rpc), TEST_TIMEOUT);
+        wait_for_mempool_activation(&client).await?;
+        let info = blockchain_info(&client).await?;
+        assert_eq!(info["blocks"], 0, "the node started from genesis");
+        stop_node(node)
+    })
+    .await?
 }
 
 /// A snapshot-serving node with block downloads in flight exits successfully on SIGTERM.
@@ -683,7 +735,25 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         // The stage lines appear in order, from the decision to the last checkpoint.
         for stage in EXPECTED_STAGES {
             node_b.expect_stdout_line_matches(regex::escape(&stage.to_string()))?;
+            if stage == Stage::StateRenamed {
+                // The headers from `H + 1` to the next checkpoint, which the bootstrap fetched and
+                // checked, are stored, so headers-first sync continues after them.
+                node_b.expect_stdout_line_matches(
+                    "stored the checked headers above the snapshot height",
+                )?;
+                // The bootstrap's checked copy of `H + 1` is committed before sync starts, so B
+                // does not download it again.
+                node_b.expect_stdout_line_matches(
+                    "committed the block after the snapshot height that the bootstrap checked",
+                )?;
+            }
             if stage == Stage::StateInitialized {
+                // B has no bodies below `H`, so it advertises limited service to version 2 peers
+                // only once the limited-service window above `H` is finalized.
+                node_b.expect_stdout_line_matches(format!(
+                    "advertising limited service to version 2 peers.*height={}",
+                    H + NODE_NETWORK_LIMITED_BLOCKS + MAX_BLOCK_REORG_HEIGHT
+                ))?;
                 // Capture transport counters before A's restart resets them. Bootstrap has finished,
                 // so these counts are stable and exclude ordinary block sync.
                 let (metrics_a, metrics_b) =
@@ -716,24 +786,43 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(info["blocks"], tip_a);
         assert_eq!(info["bestblockhash"], tip_hash_a.to_string());
 
-        // Pruned history: the window `L..=H` and everything above it is complete, the heights
-        // below `L` have no bodies, and the retained floor is the window start.
+        // Pruned history: block `H` and everything above it is complete, the window `L..H` has
+        // hashes and headers but no bodies, and the retained floor is the snapshot height.
         assert_eq!(info["pruned"], true);
-        assert_eq!(info["pruneheight"], L);
-        for height in [L, H, tip_a] {
+        assert_eq!(info["pruneheight"], H);
+        for height in [H, tip_a] {
             let retained = b
                 .get_block(i32::try_from(height)?)
                 .await
                 .map_err(|err| eyre!(err))?
-                .expect("window and synced bodies are retained");
+                .expect("the snapshot block and synced bodies are retained");
             assert_eq!(retained.coinbase_height(), Some(Height(height)));
         }
+        // The snapshot ships no window body below `H`, so B downloaded none it would not keep.
+        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H - 1).await?;
         let header_hex: String = b
             .json_result_from_call("getblockheader", json!([H.to_string(), false]).to_string())
             .await
             .map_err(|err| eyre!(err))?;
         let header = block::Header::zcash_deserialize(hex::decode(header_hex)?.as_slice())?;
         assert_eq!(header.hash(), commitment.block_hash);
+        // The importer rebuilds the address balances from the UTXO set, but cannot know what an
+        // address received and spent below `H`, so `getaddressbalance` omits `received`.
+        let balance: Value = b
+            .json_result_from_call(
+                "getaddressbalance",
+                json!([{ "addresses": [address_a.to_string()] }]).to_string(),
+            )
+            .await
+            .map_err(|err| eyre!(err))?;
+        assert!(balance["balance"]
+            .as_u64()
+            .is_some_and(|balance| balance > 0));
+        assert!(
+            balance.get("received").is_none(),
+            "a snapshot-born node omits the received total: {balance}"
+        );
         for verbosity in [0, 2] {
             let error = get_block_error(&b, L - 1, verbosity).await?;
             // The snapshot ships no body below `L`. Whether the RPC reports it as pruned data
@@ -841,8 +930,10 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .await
             .map_err(|err| eyre!(err))?;
         assert_eq!(spent, Value::Null);
-        // A accepts the block too, by gossip from B. Submitting it to A directly would race A's own
-        // verification of the gossiped block, which `submitblock` reports as a rejection.
+        // A accepts the block too. B does not advertise limited service until its blocks above
+        // `H` cover the limited-service window, so A may not fetch B's gossiped blocks yet, and
+        // the block is submitted to A directly.
+        submit_unless_known(&a, &mined).await;
         wait_for_height(&a, tip, RELAY_TIMEOUT, "node A").await?;
         assert_eq!(block_hash(&a, tip).await?, spend_block_hash);
 
@@ -863,16 +954,16 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         assert_eq!(restarted["blocks"], tip);
         assert_eq!(restarted["bestblockhash"], spend_block_hash.to_string());
         assert_eq!(restarted["pruned"], true);
-        assert_eq!(restarted["pruneheight"], L);
+        assert_eq!(restarted["pruneheight"], H);
 
         // The full semantic tail and the spend finalized one block and left a full non-finalized
-        // window, so the retention change below initially leaves the floor at `L`.
+        // window, so the retention change below initially leaves the floor at `H`.
         stop_node(node_b)?;
 
-        // Lower only B's retention so the current floor stays at `L`, then mine one block on B.
-        // The next finalized tip moves the floor to `L + 1`, proving that a snapshot-born node
+        // Lower only B's retention so the current floor stays at `H`, then mine one block on B.
+        // The next finalized tip moves the floor to `H + 1`, proving that a snapshot-born node
         // continues pruning newly finalized history after the import-specific checks above.
-        let ongoing_retention = tip + 1 - MAX_BLOCK_REORG_HEIGHT - L;
+        let ongoing_retention = tip + 1 - MAX_BLOCK_REORG_HEIGHT - H;
         config_b.state.prune_blocks_older_than = Some(ongoing_retention);
         let mut node_b = start_node(dir_b.replace_config(&mut config_b)?)?.with_failure_regex_set(
             regex::escape(&Stage::BootstrapStarted.to_string()),
@@ -887,16 +978,22 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
         let ongoing_hashes = b.generate(1).await?;
         let ongoing_tip = tip + 1;
         let best_block_hash = *ongoing_hashes.last().expect("one block was generated");
-        let pruned = pruned_info(&b, L + 1).await?;
+        let pruned = pruned_info(&b, H + 1).await?;
         assert_eq!(pruned["blocks"], ongoing_tip);
         assert_eq!(pruned["bestblockhash"], best_block_hash.to_string());
-        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H).await?;
         let retained = b
-            .get_block(i32::try_from(L + 1)?)
+            .get_block(i32::try_from(H + 1)?)
             .await
             .map_err(|err| eyre!(err))?
             .expect("the new retained floor has a body");
-        assert_eq!(retained.coinbase_height(), Some(Height(L + 1)));
+        assert_eq!(retained.coinbase_height(), Some(Height(H + 1)));
+        let ongoing_block = b
+            .get_block(i32::try_from(ongoing_tip)?)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("the generated block is readable");
+        submit_unless_known(&a, &ongoing_block).await;
         wait_for_height(&a, ongoing_tip, RELAY_TIMEOUT, "node A").await?;
         assert_eq!(block_hash(&a, ongoing_tip).await?, best_block_hash);
 
@@ -912,10 +1009,10 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
             .expect("retain the state directory until the end");
         node_b.expect_stdout_line_matches(regex::escape(&SkipReason::ExistingState.to_string()))?;
         wait_for_mempool_activation(&b).await?;
-        let restarted = pruned_info(&b, L + 1).await?;
+        let restarted = pruned_info(&b, H + 1).await?;
         assert_eq!(restarted["blocks"], ongoing_tip);
         assert_eq!(restarted["bestblockhash"], best_block_hash.to_string());
-        assert_body_pruned(&b, L).await?;
+        assert_body_pruned(&b, H).await?;
         stop_node(node_b)?;
         drop(dir_b);
 
@@ -975,6 +1072,144 @@ async fn pruned_node_bootstraps_from_a_state_snapshot() -> Result<()> {
 
 /// A failed export is a process failure with its diagnostic on stderr, not a successful command
 /// whose stdout only looks like an error log.
+/// A pruned node with no configured snapshot peers syncs and verifies headers from genesis,
+/// finds the snapshot server among its connected version 2 peers, bootstraps from it over that
+/// connection, and keeps every header from genesis, but no body below the snapshot height.
+#[ignore = "runs two nodes through a multi-minute snapshot bootstrap; run it with \
+            --run-ignored=all --ignore-default-filter"]
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_node_discovers_the_snapshot_server_and_keeps_every_header() -> Result<()> {
+    /// How far above `H` A mines before B starts.
+    const TIP_ABOVE_H: u32 = 400;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let network = regtest(None);
+        let key_a = TransparentSigningKey::random();
+        let rpc_a = reserve_tcp_port()?;
+        let p2p_a = loopback(reserve_tcp_port()?);
+        let quic_a = loopback(reserve_udp_port()?);
+        let rpc_b = reserve_tcp_port()?;
+        let p2p_b = loopback(reserve_tcp_port()?);
+        let quic_b = loopback(reserve_udp_port()?);
+
+        // A mines until `H` is finalized, stops there, and exports the snapshot at `H`.
+        let mut config_a = node_config(&network, rpc_a, p2p_a, RETENTION_A, &key_a)?;
+        config_a.state.debug_stop_at_height = Some(H);
+        config_a.tracing.filter =
+            Some("warn,zebra_state::service::finalized_state=info".to_owned());
+        let mut node_a = start_node(testdir()?.with_config(&mut config_a)?)?;
+        let dir_a = node_a
+            .dir
+            .take()
+            .expect("retain the state directory for the export");
+        let a = RpcRequestClient::new_with_timeout(loopback(rpc_a), TEST_TIMEOUT);
+        wait_for_mempool_activation(&a).await?;
+        if let Err(error) = mine_to(&a, H + MAX_BLOCK_REORG_HEIGHT).await {
+            tracing::info!(%error, "the last generate call lost the stopping node");
+        }
+        node_a.expect_stdout_line_matches("stopping at configured height")?;
+        node_a.kill(true)?;
+        node_a.wait_with_output()?;
+        let mut export = dir_a
+            .spawn_child(args!["export-state-snapshot", "--height": H.to_string()])?
+            .with_timeout(TEST_TIMEOUT)?;
+        let dir_a = export
+            .dir
+            .take()
+            .expect("retain the state directory for serving");
+        let export = export.wait_with_output()?.assert_success()?;
+        let commitment = parse_commitment(&String::from_utf8_lossy(&export.output.stdout))?;
+
+        // A serves the snapshot over version 2, and mines above `H`.
+        config_a.state.debug_stop_at_height = None;
+        config_a.sync.serve_state_snapshots = true;
+        config_a.network.v2_listen_addr = Some(quic_a);
+        config_a.network.initial_testnet_peers = [p2p_b.to_string()].into();
+        config_a.network.initial_v2_peers = [quic_b.to_string()].into();
+        config_a.tracing.filter = Some("info".to_owned());
+        let node_a = start_node(dir_a.replace_config(&mut config_a)?)?;
+        wait_for_mempool_activation(&a).await?;
+        let tip_a = block_count(&a)
+            .await
+            .ok_or_else(|| eyre!("A restarted without a tip"))?
+            .max(H + TIP_ABOVE_H);
+        mine_to(&a, tip_a).await?;
+
+        // Checkpoints from A's chain at genesis, `H`, `H + 2` and `H + CHECKPOINT_GAP`, so the
+        // header chain from genesis to `H` is one span longer than Mainnet's spans.
+        let mut checkpoints = vec![(Height(0), network.genesis_hash())];
+        for height in [H, H + 2, H + CHECKPOINT_GAP] {
+            checkpoints.push((Height(height), block_hash(&a, height).await?));
+        }
+        let network_b = regtest(Some(checkpoints));
+
+        // B: empty and pruned, with the exported commitment, and no snapshot peers.
+        let key_b = TransparentSigningKey::random();
+        let mut config_b = node_config(&network_b, rpc_b, p2p_b, RETENTION_B, &key_b)?;
+        config_b.sync.full_verify_concurrency_limit = 1;
+        config_b.sync.parallel_cpu_threads = 1;
+        config_b.network.v2_listen_addr = Some(quic_b);
+        // B connects to A as an ordinary peer, over both protocols, and finds that A serves state
+        // snapshots on that connection.
+        config_b.network.initial_testnet_peers = [p2p_a.to_string()].into();
+        config_b.network.initial_v2_peers = [quic_a.to_string()].into();
+        config_b.sync.state_snapshot_sync = true;
+        config_b.sync.state_snapshot = Some(commitment);
+        config_b.sync.state_snapshot_peers.clear();
+        config_b.tracing.filter = Some("info".to_owned());
+        let mut node_b = start_node(testdir()?.with_config(&mut config_b)?)?;
+        let b = RpcRequestClient::new_with_timeout(loopback(rpc_b), TEST_TIMEOUT);
+
+        node_b.expect_stdout_line_matches(
+            "syncing and verifying headers from genesis before the state snapshot bootstrap",
+        )?;
+
+        node_b.expect_stdout_line_matches(
+            "the header chain reached the checkpoint after the state snapshot",
+        )?;
+        node_b.expect_stdout_line_matches(
+            "found connected version 2 peers that serve state snapshots",
+        )?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::BootstrapStarted.to_string()))?;
+        node_b.expect_stdout_line_matches(format!(
+            "carried the synced headers into the state snapshot.*below_window={}",
+            L - 1
+        ))?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::StateRenamed.to_string()))?;
+        node_b.expect_stdout_line_matches(regex::escape(&Stage::StateInitialized.to_string()))?;
+
+        wait_for_mempool_activation(&b).await?;
+        wait_for_height(&b, tip_a, SYNC_TIMEOUT, "node B").await?;
+        assert_eq!(block_hash(&b, tip_a).await?, block_hash(&a, tip_a).await?);
+        let info = blockchain_info(&b).await?;
+        assert_eq!(info["pruned"], true);
+
+        // Every header from genesis is stored, and is A's.
+        for height in 0..=tip_a {
+            let params = format!(r#"["{height}", false]"#);
+            let header_b = b
+                .json_result_from_call::<String>("getblockheader", &params)
+                .await
+                .map_err(|error| eyre!("B has no header at {height}: {error}"))?;
+            let header_a = a
+                .json_result_from_call::<String>("getblockheader", &params)
+                .await
+                .map_err(|error| eyre!(error))?;
+            assert_eq!(header_b, header_a, "the header at {height}");
+        }
+        // But no body below the snapshot height.
+        for height in [1, L - 1, L, H - 1] {
+            get_block_error(&b, height, 0).await?;
+        }
+
+        stop_node(node_b)?;
+        stop_node(node_a)?;
+        Ok(())
+    })
+    .await?
+}
+
 #[test]
 fn export_failure_uses_stderr_and_a_nonzero_exit() -> Result<()> {
     let _init_guard = zebra_test::init();

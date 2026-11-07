@@ -2,8 +2,8 @@
 //! "State changes").
 //!
 //! The exporter opens the state read-only, refuses unless its finalized tip
-//! is the snapshot height, is not pruned below the window start, and has no
-//! spending index, then writes every component's pieces and the manifest to
+//! is the snapshot height, has the block body at that height and the block
+//! hashes from the window start, and has no spending index, then writes every component's pieces and the manifest to
 //! an [`ArtifactStore`], canonicalizing the values the format requires.
 //!
 //! # Rows
@@ -11,20 +11,26 @@
 //! With the snapshot at `H` and the window at `L..=H`, `L = max(1, H - 2303)`
 //! (design, "Snapshot contents"):
 //!
-//! - the window is archive-complete, and genesis is shipped too: the hashes,
-//!   headers and bodies of `{0} ∪ L..=H`, their transaction index rows, and
-//!   the address transaction rows of their transactions;
+//! - the hashes and headers of `{0} ∪ L..=H`, but the bodies of genesis and
+//!   `H` only: an importing node keeps the bodies it commits above `H`, so it
+//!   downloads no window body it would not keep. The location rows of their
+//!   transactions are shipped;
 //! - `block_info` also ships `L - 1`, the parent of the window's first block,
 //!   but no hash or height row for it;
-//! - below the window, the transaction index ships only the transactions that
-//!   still have an unspent output at `H`, which the UTXO set needs;
+//! - for the other blocks, the transaction locations of only the transactions
+//!   that still have an unspent output at `H`, which the UTXO set needs;
 //! - the note commitment tree column families ship genesis, every subtree's
 //!   end height, the last row below the window, and the window, so the subtree
 //!   format checks pass and every window height reads its own tree;
-//! - the UTXO set, the address balances and UTXO index, the nullifier and
-//!   anchor sets, the subtrees, and the tip singletons are shipped whole.
+//! - the UTXO set, the nullifier and anchor sets, the subtrees, and the tip
+//!   singletons are shipped whole.
 //!
-//! The spending index (`tx_loc_by_spent_out_loc`) is never shipped.
+//! The indexes an importer rebuilds are never shipped: the transaction hashes
+//! by location (`hash_by_tx_loc`), which is the inverse of the shipped
+//! locations, and the address balance, UTXO and transaction indexes, which
+//! follow from the UTXO set, except for each address's received total and
+//! history, which a pruned node cannot know. The spending index
+//! (`tx_loc_by_spent_out_loc`) is never shipped either.
 //!
 //! # Reading
 //!
@@ -32,8 +38,8 @@
 //! database as of its last catch-up with the primary, so every component reads
 //! the same state. Each component is read on its own thread with raw
 //! iterators that skip the block cache and read ahead, and the transaction
-//! index rows below the window are selected with a merge join against the
-//! UTXO set's transaction locations.
+//! locations of the blocks without bodies are selected with a binary search
+//! of the UTXO set's transaction locations.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -78,10 +84,6 @@ mod tests;
 /// How far ahead the column family scans read.
 const READAHEAD_BYTES: usize = 4 << 20;
 
-/// The number of parallel scans of the address transaction index, which is
-/// read in full to find the rows of the window's transactions.
-const ADDRESS_TX_SCANS: u64 = 8;
-
 /// The on-disk genesis height.
 const GENESIS: [u8; 1] = [0];
 
@@ -91,7 +93,8 @@ const GENESIS: [u8; 1] = [0];
 ///
 /// The state is opened read-only, so a stopped node's state, or a running
 /// node's whose tip is `height`, can be exported. Refuses a state whose tip is
-/// not `height`, that was pruned above the window start, that needs a format
+/// not `height`, that has no body at `height` or no block hashes from the
+/// window start, that needs a format
 /// migration or is in a newer format, or that has a spending index, and
 /// refuses to run in a build with the `indexer` feature.
 pub fn export_state_snapshot(
@@ -107,7 +110,7 @@ pub fn export_state_snapshot(
     export_with_window(config, network, height, window_start(height), store)
 }
 
-/// Exports the snapshot at `height` with a window of complete blocks from
+/// Exports the snapshot at `height` with a window of hashes and headers from
 /// `window_start`, which is [`window_start`]`(height)` for the snapshots
 /// nodes import; tests use shorter windows.
 ///
@@ -151,7 +154,7 @@ pub(crate) fn export_with_window(
 
     check_format(&db)?;
     let block_hash = check_tip(&db, network, height)?;
-    check_history(&db, window_start)?;
+    check_history(&db, height, window_start)?;
 
     if NetworkUpgrade::Nu5
         .activation_height(network)
@@ -294,13 +297,18 @@ fn check_tip(
     Ok(block_hash)
 }
 
-/// Refuses a state that has no body for the first block of the window.
-fn check_history(db: &ZebraDb, window_start: block::Height) -> Result<(), SnapshotError> {
+/// Refuses a state that has no body for the snapshot block, or no block hashes
+/// from the first block of the window.
+fn check_history(
+    db: &ZebraDb,
+    height: block::Height,
+    window_start: block::Height,
+) -> Result<(), SnapshotError> {
     let history = db
         .history_capabilities()
         .map_err(SnapshotError::HistoryRead)?;
 
-    if !history.has_block_body(window_start) || window_start < history.lowest_known_height {
+    if !history.has_block_body(height) || window_start < history.lowest_known_height {
         return Err(SnapshotError::PrunedBelowWindow {
             window_start,
             lowest_retained_height: history
@@ -359,9 +367,7 @@ fn key_height(key: &[u8]) -> Height {
 fn is_set(component: ComponentId) -> bool {
     matches!(
         component,
-        ComponentId::AddressUtxos
-            | ComponentId::AddressTxs
-            | ComponentId::SproutNullifiers
+        ComponentId::SproutNullifiers
             | ComponentId::SaplingNullifiers
             | ComponentId::OrchardNullifiers
             | ComponentId::IronwoodNullifiers
@@ -489,11 +495,11 @@ impl Exporter<'_> {
     /// manifest entries in [`ComponentId::ALL`] order.
     ///
     /// The transaction index components wait for the UTXO set, whose
-    /// transaction locations below the window select their rows. The first
+    /// transaction locations in blocks without bodies select their rows. The first
     /// component to fail stops the others, and its error is returned.
     fn export_components(&self) -> Result<Vec<ComponentManifest>, SnapshotError> {
         let mut results = BTreeMap::new();
-        let mut below_window = 0;
+        let mut without_body = 0;
 
         thread::scope(|scope| {
             let utxos = scope.spawn(|| self.run(|| self.utxos()));
@@ -509,20 +515,15 @@ impl Exporter<'_> {
             match join(utxos) {
                 Ok((utxos, locations)) => {
                     results.insert(ComponentId::Utxos, Ok(utxos));
-                    below_window = locations.len();
+                    without_body = locations.len();
 
                     // The threads own the locations, because they may outlive this closure's
                     // locals until the scope joins them.
                     let locations = Arc::new(locations);
-                    let hash_by_tx_loc = {
-                        let locations = Arc::clone(&locations);
-                        scope.spawn(move || self.run(|| self.hash_by_tx_loc(&locations)))
-                    };
                     let tx_loc_by_hash = {
                         let locations = Arc::clone(&locations);
                         scope.spawn(move || self.run(|| self.tx_loc_by_hash(&locations)))
                     };
-                    results.insert(ComponentId::HashByTxLoc, join(hash_by_tx_loc));
                     results.insert(ComponentId::TxLocByHash, join(tx_loc_by_hash));
                 }
                 Err(error) => {
@@ -568,7 +569,7 @@ impl Exporter<'_> {
             return Err(error);
         }
 
-        Self::check_transaction_index(&manifests, below_window)?;
+        Self::check_transaction_index(&manifests, without_body)?;
 
         Ok(ComponentId::ALL
             .into_iter()
@@ -582,33 +583,28 @@ impl Exporter<'_> {
 
     /// Whether `component` is exported after the UTXO set.
     fn needs_utxos(component: ComponentId) -> bool {
-        matches!(
-            component,
-            ComponentId::Utxos | ComponentId::HashByTxLoc | ComponentId::TxLocByHash
-        )
+        matches!(component, ComponentId::Utxos | ComponentId::TxLocByHash)
     }
 
-    /// Checks that both directions of the transaction index ship the same
-    /// transactions: those with bodies, and `below_window` more.
+    /// Checks that the transaction locations ship one row for each
+    /// transaction with a body, and `without_body` more.
     fn check_transaction_index(
         manifests: &BTreeMap<ComponentId, ComponentManifest>,
-        below_window: usize,
+        without_body: usize,
     ) -> Result<(), SnapshotError> {
         let entries = |component| manifests[&component].entry_count;
         // A count of locations in memory fits in a `u64`.
-        let expected = entries(ComponentId::Transactions) + below_window as u64;
+        let expected = entries(ComponentId::Transactions) + without_body as u64;
 
-        for component in [ComponentId::HashByTxLoc, ComponentId::TxLocByHash] {
-            if entries(component) != expected {
-                return Err(inconsistent(
-                    component,
-                    format!(
-                        "it has {} rows for the {} shipped transactions",
-                        entries(component),
-                        expected,
-                    ),
-                ));
-            }
+        if entries(ComponentId::TxLocByHash) != expected {
+            return Err(inconsistent(
+                ComponentId::TxLocByHash,
+                format!(
+                    "it has {} rows for the {} shipped transactions",
+                    entries(ComponentId::TxLocByHash),
+                    expected,
+                ),
+            ));
         }
 
         Ok(())
@@ -624,9 +620,7 @@ impl Exporter<'_> {
             ComponentId::HeightByHash => self.height_by_hash(),
             ComponentId::Transactions => self.transactions(),
 
-            ComponentId::AddressBalances
-            | ComponentId::AddressUtxos
-            | ComponentId::SproutNullifiers
+            ComponentId::SproutNullifiers
             | ComponentId::SaplingNullifiers
             | ComponentId::OrchardNullifiers
             | ComponentId::IronwoodNullifiers
@@ -638,8 +632,6 @@ impl Exporter<'_> {
             | ComponentId::OrchardSubtrees
             | ComponentId::IronwoodSubtrees => self.all_rows(component),
 
-            ComponentId::AddressTxs => self.address_txs(),
-
             ComponentId::SaplingTree => self.tree(component, ComponentId::SaplingSubtrees),
             ComponentId::OrchardTree => self.tree(component, ComponentId::OrchardSubtrees),
             ComponentId::IronwoodTree => self.tree(component, ComponentId::IronwoodSubtrees),
@@ -648,7 +640,7 @@ impl Exporter<'_> {
                 self.singleton(component)
             }
 
-            ComponentId::Utxos | ComponentId::HashByTxLoc | ComponentId::TxLocByHash => {
+            ComponentId::Utxos | ComponentId::TxLocByHash => {
                 unreachable!("the UTXO set and the transaction index are exported separately")
             }
         }
@@ -827,8 +819,8 @@ impl Exporter<'_> {
         writer.finish()
     }
 
-    /// Exports the transactions of genesis and of the window, checking that
-    /// every block has its coinbase transaction.
+    /// Exports the transactions of genesis and of the snapshot block, checking
+    /// that each has its coinbase transaction.
     fn transactions(&self) -> Result<ComponentManifest, SnapshotError> {
         let component = ComponentId::Transactions;
         let cf = component.column_family();
@@ -851,24 +843,20 @@ impl Exporter<'_> {
                     ));
                 }
                 current = Some(height);
-                next = self.following(height, self.window_start);
+                next = self.following(height, self.height);
             }
             writer.push_row(key, value)
         };
 
         let tx_loc = |height: Height| TransactionLocation::min_for_height(height).as_bytes();
         let end = [self.end_bytes().as_slice(), &[0, 0]].concat();
-        if self.window_start <= Height(1) {
-            self.scan(cf, Some(&tx_loc(Height(0))), Some(&end), &mut row)?;
-        } else {
-            self.scan(
-                cf,
-                Some(&tx_loc(Height(0))),
-                Some(&tx_loc(Height(1))),
-                &mut row,
-            )?;
-            self.scan(cf, Some(&tx_loc(self.window_start)), Some(&end), &mut row)?;
-        }
+        self.scan(
+            cf,
+            Some(&tx_loc(Height(0))),
+            Some(&tx_loc(Height(1))),
+            &mut row,
+        )?;
+        self.scan(cf, Some(&tx_loc(self.height)), Some(&end), &mut row)?;
 
         if let Some(missing) = next {
             return Err(inconsistent(
@@ -881,88 +869,41 @@ impl Exporter<'_> {
     }
 
     /// Exports the UTXO set, and returns the distinct transaction locations of
-    /// its outputs below the window, in order.
+    /// its outputs in blocks the snapshot ships no body for, in order.
     fn utxos(&self) -> Result<(ComponentManifest, Vec<Vec<u8>>), SnapshotError> {
         let component = ComponentId::Utxos;
         let mut writer = ComponentWriter::new(component, self.store);
-        let mut below_window: Vec<Vec<u8>> = Vec::new();
+        let mut without_body: Vec<Vec<u8>> = Vec::new();
 
         self.scan(component.column_family(), None, None, |key, value| {
-            let (location, _) = OutputLocation::from_bytes_prefix(key)
+            let (_, output_index) = OutputLocation::from_bytes_prefix(key)
                 .filter(|(_, rest)| rest.is_empty())
+                .and_then(|_| TransactionLocation::from_bytes_prefix(key))
                 .ok_or_else(|| inconsistent(component, "a key is not an output location"))?;
-            let (_, output_index) = TransactionLocation::from_bytes_prefix(key)
-                .expect("a validated output location contains a transaction location");
             let tx_loc = &key[..key.len() - output_index.len()];
-            // Genesis and window transactions are shipped whole.
-            if !location.height().is_min()
-                && location.height() < self.window_start
-                && below_window.last().map(Vec::as_slice) != Some(tx_loc)
+            // The transactions of the blocks with bodies are shipped whole.
+            if !self.in_shipped_block(tx_loc)
+                && without_body.last().map(Vec::as_slice) != Some(tx_loc)
             {
-                below_window.push(tx_loc.to_vec());
+                without_body.push(tx_loc.to_vec());
             }
             writer.push_row(key, value)
         })?;
 
-        Ok((writer.finish()?, below_window))
+        Ok((writer.finish()?, without_body))
     }
 
     /// Whether the transaction at the on-disk location `tx_loc` is shipped
-    /// with its block: it is in genesis or in the window.
+    /// with its block: it is in genesis or in the snapshot block.
     fn in_shipped_block(&self, tx_loc: &[u8]) -> bool {
         TransactionLocation::from_bytes_prefix(tx_loc).is_some_and(|(location, rest)| {
-            rest.is_empty() && (location.height.is_min() || location.height >= self.window_start)
+            rest.is_empty() && (location.height.is_min() || location.height == self.height)
         })
-    }
-
-    /// Exports the transaction hashes of the shipped transactions: genesis,
-    /// the window, and the transactions below the window with unspent outputs
-    /// at `below_window`, found by a merge join with the index.
-    fn hash_by_tx_loc(&self, below_window: &[Vec<u8>]) -> Result<ComponentManifest, SnapshotError> {
-        let component = ComponentId::HashByTxLoc;
-        let mut writer = ComponentWriter::new(component, self.store);
-        let mut unspent = below_window.iter().peekable();
-        let mut found = 0;
-        let end = [self.end_bytes().as_slice(), &[0, 0]].concat();
-
-        self.scan(component.column_family(), None, Some(&end), |key, value| {
-            if !TransactionLocation::from_bytes_prefix(key).is_some_and(|(_, rest)| rest.is_empty())
-            {
-                return Err(inconsistent(
-                    component,
-                    "a key is not a transaction location",
-                ));
-            }
-            if self.in_shipped_block(key) {
-                return writer.push_row(key, value);
-            }
-
-            // Both lists are in key order, so the locations below this key have no hash row,
-            // which the count below reports.
-            while unspent.next_if(|tx_loc| tx_loc.as_slice() < key).is_some() {}
-            if unspent.next_if(|tx_loc| tx_loc.as_slice() == key).is_some() {
-                found += 1;
-                return writer.push_row(key, value);
-            }
-            Ok(())
-        })?;
-
-        if found != below_window.len() {
-            return Err(inconsistent(
-                component,
-                format!(
-                    "{} transactions with unspent outputs have no hash row",
-                    below_window.len() - found,
-                ),
-            ));
-        }
-
-        writer.finish()
     }
 
     /// Exports the locations of the shipped transactions by hash: one scan,
     /// whose rows are already in key order.
-    fn tx_loc_by_hash(&self, below_window: &[Vec<u8>]) -> Result<ComponentManifest, SnapshotError> {
+    fn tx_loc_by_hash(&self, without_body: &[Vec<u8>]) -> Result<ComponentManifest, SnapshotError> {
         let component = ComponentId::TxLocByHash;
         let mut writer = ComponentWriter::new(component, self.store);
 
@@ -976,7 +917,7 @@ impl Exporter<'_> {
                 ));
             }
             if self.in_shipped_block(value)
-                || below_window
+                || without_body
                     .binary_search_by(|location| location.as_slice().cmp(value))
                     .is_ok()
             {
@@ -995,72 +936,6 @@ impl Exporter<'_> {
             writer.push_row(key, value)
         })?;
         writer.finish()
-    }
-
-    /// Exports the address transaction rows of the shipped transactions.
-    ///
-    /// The index is keyed by address, so finding them reads it in full: the
-    /// key space is split by the address location's height into ranges that
-    /// are read in parallel, and their rows are then written in key order.
-    fn address_txs(&self) -> Result<ComponentManifest, SnapshotError> {
-        let component = ComponentId::AddressTxs;
-        let tip_end = u64::from(self.height.0) + 1;
-        let bound = |scan: u64| {
-            (scan > 0 && scan < ADDRESS_TX_SCANS).then(|| {
-                // The bound is at most the tip height plus one, so it fits in a `u32`.
-                let height = (tip_end * scan / ADDRESS_TX_SCANS) as u32;
-                height_bytes(Height(height)).to_vec()
-            })
-        };
-
-        let ranges = thread::scope(|scope| {
-            let handles: Vec<_> = (0..ADDRESS_TX_SCANS)
-                .map(|scan| {
-                    let (from, to) = (bound(scan), bound(scan + 1));
-                    scope.spawn(move || self.address_tx_rows(from.as_deref(), to.as_deref()))
-                })
-                .collect();
-            handles.into_iter().map(join).collect::<Vec<_>>()
-        });
-
-        let mut writer = ComponentWriter::new(component, self.store);
-        for rows in ranges {
-            for key in rows? {
-                writer.push_row(&key, &[])?;
-            }
-        }
-        writer.finish()
-    }
-
-    /// Returns the keys of the address transaction rows of shipped
-    /// transactions from `from` (inclusive) to `to` (exclusive).
-    fn address_tx_rows(
-        &self,
-        from: Option<&[u8]>,
-        to: Option<&[u8]>,
-    ) -> Result<Vec<Vec<u8>>, SnapshotError> {
-        let component = ComponentId::AddressTxs;
-        let mut rows = Vec::new();
-
-        self.scan(component.column_family(), from, to, |key, value| {
-            let (_, transaction) = OutputLocation::from_bytes_prefix(key)
-                .ok_or_else(|| inconsistent(component, "a row has no address location"))?;
-            if !TransactionLocation::from_bytes_prefix(transaction)
-                .is_some_and(|(_, rest)| rest.is_empty())
-                || !value.is_empty()
-            {
-                return Err(inconsistent(
-                    component,
-                    "a row is not an address and a transaction location",
-                ));
-            }
-            if self.in_shipped_block(transaction) {
-                rows.push(key.to_vec());
-            }
-            Ok(())
-        })?;
-
-        Ok(rows)
     }
 
     /// Exports the note commitment trees of `component` that the snapshot

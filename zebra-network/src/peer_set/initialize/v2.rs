@@ -103,6 +103,11 @@ pub(super) struct Shared<S, C> {
     connected_peers: ConnectedPeers,
     /// Where completed connections are registered for the checkpoint sync engine, if anywhere.
     sync_peers: Option<SyncPeersSender>,
+    /// The chain tip height from which new connections advertise `NODE_NETWORK_LIMITED`, if
+    /// that can change.
+    limited_service_from: Option<zebra_chain::block::Height>,
+    /// The best chain tip, which decides the services of new connections.
+    latest_chain_tip: C,
 }
 
 impl<S, C> Shared<S, C>
@@ -137,7 +142,10 @@ where
             inbound_interval,
             open_inbound,
             nonces: NonceRegistry::spawn(config.peerset_total_connection_limit()),
-            minimum_peer_version: MinimumPeerVersion::new(latest_chain_tip, &config.network),
+            minimum_peer_version: MinimumPeerVersion::new(
+                latest_chain_tip.clone(),
+                &config.network,
+            ),
             connection_params: ConnectionParams {
                 inbound_service,
                 inv_collector,
@@ -166,6 +174,8 @@ where
             address_book,
             connected_peers,
             sync_peers: config.v2_sync_peers.clone(),
+            limited_service_from: config.v2_limited_service_from,
+            latest_chain_tip,
         };
         (shared, open_inbound_tx)
     }
@@ -1022,6 +1032,15 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    // The services can gain `NODE_NETWORK_LIMITED` after startup: each handshake reads them now,
+    // and the connection serves what it advertised.
+    let services = Config::v2_services_now(
+        shared.limited_service_from,
+        shared.latest_chain_tip.best_tip_height(),
+        shared.identity.services,
+    );
+    shared.identity.services = services;
+    shared.connection_params.local_services = services;
     let completed = handshake(
         &connection,
         connected_addr,

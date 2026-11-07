@@ -173,9 +173,12 @@ starting genesis block download and verify
 initial sync is waiting to download the genesis block
 ```
 
-With existing state, Zebra resumes from its stored chain. It sends block
-locators, which identify known chain ancestors, to peers and requests hashes
-of later blocks. Responses contain at most 500 block hashes. The syncer
+With existing state, Zebra resumes from its stored chain. With
+`headers_first = false`, it sends block locators, which identify known chain
+ancestors, to legacy peers and requests hashes of later blocks. Version 2
+peers don't answer these requests, so this needs legacy peers. Responses
+contain at most 500 block hashes. With headers-first sync, the default, it reads the
+hashes from the stored header chain instead (see below). The syncer
 schedules downloads and verification concurrently within `[sync]` limits,
 then asks for further extensions:
 
@@ -183,6 +186,36 @@ then asks for further extensions:
 starting sync, obtaining new tips
 extending tips
 ```
+
+### Sync headers first
+
+With `[sync] headers_first = true`, the default, Zebra downloads and stores
+the header chain before the block bodies. It asks legacy peers with
+`getheaders` and version 2 peers with `get-headers`, so it works with either
+kind of peer. Before it stores a header, it checks the header's proof of work
+and Equihash solution, its difficulty and time against the previous headers,
+and the checkpoint at its height:
+
+- Below the final checkpoint, it downloads the chain between consecutive
+  checkpoints, up to `header_sync_concurrency` spans at a time, and stores a
+  span only once it ends exactly at its checkpoint.
+- Above the final checkpoint, it extends the header chain from a locator, one
+  response at a time, and then polls peers for new headers.
+
+The syncer then requests block bodies only for stored headers, instead of
+asking peers for block hashes, so it never downloads a block whose header
+failed these checks. The header task logs:
+
+```text
+starting headers-first sync
+headers-first sync reached a peer's header tip
+```
+
+Stored headers that run ahead of the bodies take about 1.5 KB each, in the
+state's `header_by_height` column family, until their blocks commit. The
+[`sync.headers.*` metrics](metrics.md#headers-first-sync-metrics) show the
+header chain's progress. Set `headers_first = false` to keep the previous
+`getblocks` walk, which the peer set sends only to legacy peers.
 
 ### Verify checkpoint ranges
 

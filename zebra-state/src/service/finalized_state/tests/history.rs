@@ -1519,9 +1519,10 @@ fn recent_address_checks_reject_an_unavailable_required_window() {
     assert!(error.contains("require unavailable block history"));
 }
 
-/// A database imported from a state snapshot has no blocks below its window start, and no
-/// height-one transaction index row. Its marker sets the known and retained floors, so it counts
-/// as pruned instead of as an archive, even when its window starts at height one.
+/// A database imported from a state snapshot has no blocks below its window start, no bodies
+/// below its snapshot height, and no height-one transaction index row. Its marker sets the known
+/// and retained floors, so it counts as pruned instead of as an archive, even when its window
+/// starts at height one.
 #[test]
 fn snapshot_base_marker_sets_the_history_floors() {
     use zebra_chain::state_snapshot::ObjectHash;
@@ -1551,26 +1552,29 @@ fn snapshot_base_marker_sets_the_history_floors() {
         state.db.history_capabilities().unwrap()
     };
 
-    // A window above height one, with no height-one index row: an archive without the marker.
+    // A window above height one, with bodies from the snapshot height and no height-one index
+    // row: an archive without the marker.
     let state = populated(&Config::ephemeral());
     let window = base(Height(2), &state);
-    let history = mark(&state, window, Height(2));
+    let history = mark(&state, window, Height(3));
     assert_eq!(
         history,
         HistoryCapabilities {
-            lowest_retained_height: Height(2),
+            lowest_retained_height: Height(3),
             lowest_known_height: Height(2),
+            lowest_header_height: Height(2),
             snapshot_base: Some(window),
         }
     );
     assert!(history.is_pruned());
-    assert!(!history.has_block_body(Height(1)));
-    assert!(history.has_block_body(Height(2)));
+    assert!(!history.has_block_body(Height(2)));
+    assert!(history.has_block_body(Height(3)));
 
-    // Pruning above the window start raises the retained floor, not the known floor.
+    // A stored body below the snapshot height does not lower the retained floor: the marker says
+    // the snapshot ships no body there.
     let state = populated(&Config::ephemeral());
     let window = base(Height(2), &state);
-    let history = mark(&state, window, Height(3));
+    let history = mark(&state, window, Height(2));
     assert_eq!(history.lowest_retained_height, Height(3));
     assert_eq!(history.lowest_known_height, Height(2));
 
@@ -1578,10 +1582,11 @@ fn snapshot_base_marker_sets_the_history_floors() {
     let state = populated(&Config::ephemeral());
     let window = base(Height(1), &state);
     let history = mark(&state, window, Height(1));
-    assert_eq!(history.lowest_retained_height, Height(1));
+    assert_eq!(history.lowest_retained_height, Height(3));
+    assert_eq!(history.lowest_known_height, Height(1));
     assert_eq!(history.snapshot_base, Some(window));
     assert!(history.is_pruned());
-    assert!(history.has_block_body(Height(1)));
+    assert!(!history.has_block_body(Height(1)));
 
     // A marker that is not a snapshot base is an error, not an archive.
     let state = populated(&Config::ephemeral());

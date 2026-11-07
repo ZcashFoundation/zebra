@@ -3,6 +3,8 @@ source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
 expression: empty_column_families
 ---
 [
+  "header_by_height: no entries",
+  "height_by_header_hash: no entries",
   "history_tree: no entries",
   "ironwood_note_commitment_subtree: no entries",
   "ironwood_nullifiers: no entries",

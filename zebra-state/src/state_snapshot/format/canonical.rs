@@ -21,8 +21,7 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::{
-    AddressBalanceLocation, FromDisk, HistoryTreeParts, IntoDisk, LegacyHistoryTreeParts,
-    OutputLocation,
+    FromDisk, HistoryTreeParts, IntoDisk, LegacyHistoryTreeParts,
 };
 
 use super::{ComponentId, FormatError};
@@ -51,7 +50,6 @@ pub fn canonical_value(
         ComponentId::BlockInfo => block_info(value),
         ComponentId::ValuePools => value_pools(value),
         ComponentId::HistoryTree => history_tree(value),
-        ComponentId::AddressBalances => address_balance(value),
         ComponentId::SaplingTree => sapling_tree(value),
         ComponentId::OrchardTree | ComponentId::IronwoodTree => orchard_tree(component, value),
         ComponentId::SproutTipTree => Ok(sprout_tree(component, value)?.0),
@@ -70,11 +68,8 @@ pub fn canonical_value(
         | ComponentId::HeightByHash
         | ComponentId::Headers
         | ComponentId::Transactions
-        | ComponentId::HashByTxLoc
         | ComponentId::TxLocByHash
         | ComponentId::Utxos
-        | ComponentId::AddressUtxos
-        | ComponentId::AddressTxs
         | ComponentId::SproutNullifiers
         | ComponentId::SaplingNullifiers
         | ComponentId::OrchardNullifiers
@@ -130,31 +125,6 @@ fn value_pools(value: &[u8]) -> Result<Vec<u8>, FormatError> {
     })?;
 
     Ok(pools.as_bytes().to_vec())
-}
-
-/// Re-encodes a `balance_by_transparent_addr` value, with or without its `received` total.
-fn address_balance(value: &[u8]) -> Result<Vec<u8>, FormatError> {
-    let component = ComponentId::AddressBalances;
-
-    // Check the fallible fields before `FromDisk`, then let it supply a zero for a missing total.
-    let (balance, rest) = value
-        .split_at_checked(8)
-        .ok_or_else(|| invalid(component, "the value is shorter than a balance"))?;
-    let (_, received) = OutputLocation::from_bytes_prefix(rest)
-        .ok_or_else(|| invalid(component, "the address location is not canonical"))?;
-    if !matches!(received.len(), 0 | 8) {
-        return Err(invalid(component, "the received total is not 8 bytes"));
-    }
-    Amount::<NonNegative>::from_bytes(
-        balance
-            .try_into()
-            .map_err(|_| invalid(component, "the balance is not 8 bytes"))?,
-    )
-    .map_err(|_| invalid(component, "the balance is not a valid amount"))?;
-
-    Ok(AddressBalanceLocation::from_bytes(value)
-        .as_bytes()
-        .to_vec())
 }
 
 /// Re-encodes a `history_tree` value, whose entries were narrower before

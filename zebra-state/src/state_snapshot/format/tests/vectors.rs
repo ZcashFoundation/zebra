@@ -98,9 +98,9 @@ fn component_ids_are_dense_and_name_state_column_families() {
     let _init_guard = zebra_test::init();
 
     assert_eq!(ComponentId::ALL.len(), usize::from(ComponentId::COUNT));
-    assert_eq!(ComponentId::COUNT, 28);
+    assert_eq!(ComponentId::COUNT, 24);
     for (index, id) in ComponentId::ALL.into_iter().enumerate() {
-        let wire_id = u16::try_from(index).expect("28 fits");
+        let wire_id = u16::try_from(index).expect("24 fits");
         assert_eq!(id.to_u16(), wire_id, "{id}");
         assert_eq!(ComponentId::from_u16(wire_id), Some(id));
         assert!(
@@ -137,8 +137,8 @@ fn component_ids_are_dense_and_name_state_column_families() {
         );
         assert!(!names.contains(name), "{name} is not a snapshot component");
     }
-    // Design, "Snapshot contents": the canonicalized values are the chain singletons, the
-    // balances, and every tree.
+    // Design, "Snapshot contents": the canonicalized values are the chain singletons and every
+    // tree.
     let canonical: Vec<ComponentId> = ComponentId::ALL
         .into_iter()
         .filter(|id| id.is_canonicalized())
@@ -147,7 +147,6 @@ fn component_ids_are_dense_and_name_state_column_families() {
         canonical,
         [
             ComponentId::BlockInfo,
-            ComponentId::AddressBalances,
             ComponentId::SproutAnchors,
             ComponentId::SaplingTree,
             ComponentId::OrchardTree,
@@ -171,7 +170,7 @@ fn manifest_round_trips_on_every_network() {
             assert_eq!(decoded, manifest, "{network}");
             assert_eq!(
                 decoded.component(ComponentId::Utxos),
-                &manifest.components[7]
+                &manifest.components[6]
             );
         }
     }
@@ -200,11 +199,11 @@ fn manifest_layout_is_pinned() {
     let manifest = populated_manifest(&Network::Mainnet);
     let bytes = manifest.encode().expect("valid");
 
-    let utxos = &manifest.components[7];
+    let utxos = &manifest.components[6];
     let piece_count = utxos.pieces.len();
     assert_eq!(
         bytes.len(),
-        HEADER_LEN + 28 * EMPTY_COMPONENT_LEN + (piece_count + 1) * PIECE_LEN,
+        HEADER_LEN + 24 * EMPTY_COMPONENT_LEN + (piece_count + 1) * PIECE_LEN,
     );
 
     assert_eq!(&bytes[..20], MAGIC);
@@ -215,7 +214,7 @@ fn manifest_layout_is_pinned() {
     assert_eq!(&bytes[90..94], WINDOW_START.to_le_bytes());
     assert_eq!(&bytes[94..96], 30_u16.to_le_bytes());
     assert_eq!(bytes[96], INDEX_MODE_DEFAULT);
-    assert_eq!(&bytes[97..99], 28_u16.to_le_bytes());
+    assert_eq!(&bytes[97..99], 24_u16.to_le_bytes());
 
     // Component 0 is empty.
     let offset = component_offset(ComponentId::HashByHeight);
@@ -223,9 +222,9 @@ fn manifest_layout_is_pinned() {
     assert_eq!(&bytes[offset + 2..offset + 10], 0_u64.to_le_bytes());
     assert_eq!(&bytes[offset + 10..offset + 14], 0_u32.to_le_bytes());
 
-    // Component 7 has two pieces: size then hash, each.
+    // Component 6 has two pieces: size then hash, each.
     let offset = component_offset(ComponentId::Utxos);
-    assert_eq!(&bytes[offset..offset + 2], 7_u16.to_le_bytes());
+    assert_eq!(&bytes[offset..offset + 2], 6_u16.to_le_bytes());
     assert_eq!(&bytes[offset + 2..offset + 10], 1_000_000_u64.to_le_bytes());
     assert_eq!(&bytes[offset + 10..offset + 14], 2_u32.to_le_bytes());
     let piece = offset + 14;
@@ -247,7 +246,7 @@ fn manifest_layout_is_pinned() {
             (
                 ComponentId::ValuePools,
                 0,
-                manifest.components[27].pieces[0]
+                manifest.components[23].pieces[0]
             ),
         ],
     );
@@ -259,9 +258,9 @@ fn manifest_layout_is_pinned() {
     // A manifest on a network with a parameters hash carries it after the index mode.
     let regtest = Network::new_regtest(Default::default());
     let bytes = empty_manifest(&regtest).encode().expect("valid");
-    assert_eq!(bytes.len(), HEADER_LEN + 32 + 28 * EMPTY_COMPONENT_LEN);
+    assert_eq!(bytes.len(), HEADER_LEN + 32 + 24 * EMPTY_COMPONENT_LEN);
     assert_eq!(&bytes[97..129], [0x55; 32]);
-    assert_eq!(&bytes[129..131], 28_u16.to_le_bytes());
+    assert_eq!(&bytes[129..131], 24_u16.to_le_bytes());
 }
 
 #[test]
@@ -300,8 +299,8 @@ fn manifest_decode_rejects_every_header_violation() {
     );
 
     let mut count = valid.clone();
-    count[97..99].copy_from_slice(&27_u16.to_le_bytes());
-    assert_err!(decode(&count), FormatError::WrongComponentCount(27));
+    count[97..99].copy_from_slice(&23_u16.to_le_bytes());
+    assert_err!(decode(&count), FormatError::WrongComponentCount(23));
 
     let mut trailing = valid.clone();
     trailing.push(0);
@@ -337,8 +336,8 @@ fn manifest_decode_rejects_every_component_violation() {
     let second = component_offset(ComponentId::HeightByHash);
 
     let mut unknown = valid.clone();
-    unknown[first..first + 2].copy_from_slice(&28_u16.to_le_bytes());
-    assert_err!(decode(&unknown), FormatError::UnknownComponent(28));
+    unknown[first..first + 2].copy_from_slice(&24_u16.to_le_bytes());
+    assert_err!(decode(&unknown), FormatError::UnknownComponent(24));
 
     let mut swapped = valid.clone();
     swapped[first..first + 2].copy_from_slice(&1_u16.to_le_bytes());
@@ -392,7 +391,7 @@ fn manifest_decode_rejects_every_component_violation() {
 
     // The piece size bounds, and pieces without entries.
     let mut with_piece = empty_manifest(&network);
-    with_piece.components[27].pieces.push(PieceManifest {
+    with_piece.components[23].pieces.push(PieceManifest {
         size: 1,
         hash: ObjectHash([0xC1; 32]),
     });
@@ -404,7 +403,7 @@ fn manifest_decode_rejects_every_component_violation() {
             piece_count: 1,
         }
     );
-    with_piece.components[27].entry_count = 1;
+    with_piece.components[23].entry_count = 1;
     let bytes = with_piece.encode().expect("valid");
     let piece = last + 14;
     assert_eq!(bytes.len(), valid.len() + PIECE_LEN);
@@ -427,9 +426,9 @@ fn manifest_decode_rejects_every_component_violation() {
             size,
         } if size == MAX_PIECE_BYTES as u32 + 1
     );
-    with_piece.components[27].pieces[0].size = 0;
+    with_piece.components[23].pieces[0].size = 0;
     assert_err!(with_piece.encode(), FormatError::EmptyPiece { .. });
-    with_piece.components[27].pieces[0].size = MAX_PIECE_BYTES as u32 + 1;
+    with_piece.components[23].pieces[0].size = MAX_PIECE_BYTES as u32 + 1;
     assert_err!(with_piece.encode(), FormatError::PieceTooLarge { .. });
 }
 
@@ -441,7 +440,7 @@ fn manifest_encode_checks_the_structure_and_the_limit() {
 
     let mut missing = empty_manifest(&network);
     missing.components.pop();
-    assert_err!(missing.encode(), FormatError::WrongComponentCount(27));
+    assert_err!(missing.encode(), FormatError::WrongComponentCount(23));
 
     let mut unordered = empty_manifest(&network);
     unordered.components.swap(0, 1);
@@ -464,8 +463,8 @@ fn manifest_encode_checks_the_structure_and_the_limit() {
     // Enough pieces to take the manifest over 1 MiB.
     let mut oversized = empty_manifest(&network);
     let pieces = MAX_MANIFEST_BYTES / PIECE_LEN + 1;
-    oversized.components[7].entry_count = 1;
-    oversized.components[7].pieces = vec![
+    oversized.components[6].entry_count = 1;
+    oversized.components[6].pieces = vec![
         PieceManifest {
             size: 1,
             hash: ObjectHash([0; 32]),

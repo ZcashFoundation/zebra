@@ -1150,6 +1150,7 @@ fn family_exists_at(name: &str, version: &Version) -> bool {
     let added = match name {
         "sync_meta_by_height" => Version::new(29, 1, 0),
         "spentness_journal" | "spentness_artifact" => Version::new(30, 0, 0),
+        "header_by_height" | "height_by_header_hash" => Version::new(30, 1, 0),
         "snapshot_base" => Version::new(31, 1, 0),
         _ => Version::new(0, 0, 0),
     };
@@ -1224,7 +1225,7 @@ async fn open_and_wait(config: &Config) -> FinalizedState {
 }
 
 /// Every registered format from 29.0 to 32.0 stores fixed-width heights, and each upgrades to the
-/// running format: 29.0 -> 29.1 -> 30.0 -> 31.0 -> 31.1 -> 32.0 -> 33.0.
+/// running format: 29.0 -> 29.1 -> 30.0 -> 30.1 -> 31.0 -> 31.1 -> 32.0 -> 33.0.
 ///
 /// A database created at each version moves from its own directory to the running directory, and
 /// the height rewrite runs first, so the 29.1 backfill reads the blocks with the current codec. A
@@ -1251,12 +1252,28 @@ async fn every_registered_format_upgrades_through_the_height_rewrite() {
         .collect();
     assert_eq!(
         chain,
-        [(29, 1), (30, 0), (31, 0), (31, 1), (32, 0), (33, 0)]
-            .map(|(major, minor)| Version::new(major, minor, 0)),
+        [
+            (29, 1),
+            (30, 0),
+            (30, 1),
+            (31, 0),
+            (31, 1),
+            (32, 0),
+            (33, 0)
+        ]
+        .map(|(major, minor)| Version::new(major, minor, 0)),
         "the upgrade ladder runs every registered format in order"
     );
 
-    for (major, minor) in [(29, 0), (29, 1), (30, 0), (31, 0), (31, 1), (32, 0)] {
+    for (major, minor) in [
+        (29, 0),
+        (29, 1),
+        (30, 0),
+        (30, 1),
+        (31, 0),
+        (31, 1),
+        (32, 0),
+    ] {
         let cache = tempfile::tempdir().unwrap();
         let config = test_config(&cache);
         let mut source_records = current_records.clone();

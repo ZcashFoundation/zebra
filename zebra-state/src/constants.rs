@@ -72,6 +72,11 @@ const DATABASE_FORMAT_VERSION: u64 = 33;
 ///   binaries must not open a pruned v31 directory: their minor-version downgrade path assumes
 ///   archive bodies remain complete. A never-pruned v31 directory can be renamed back to v30 for
 ///   rollback, because no records are rewritten; a pruned one needs a separate archive backup.
+/// - 30.1.0: adds the `header_by_height` and `height_by_header_hash` column families, which hold
+///   the block headers that headers-first sync has verified ahead of their bodies, and their
+///   reverse index. They are created empty when the database is opened, and rows at or below the
+///   finalized tip are stale duplicates that the header writer deletes. Older 30.0 readers keep
+///   the new column families when they open the database, and ignore them.
 /// - 30.0.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the

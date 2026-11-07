@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added `Request::CommitHeaders`, which stores a batch of verified block headers on the header chain ahead of their bodies, after checking that they connect, their checkpoints, and their difficulty and time against the previous headers, and replaces the stored headers above a fork point with a batch that has more work. Also added `Request::HeaderTip`, `Request::HeaderLocator` and `Request::HeaderChainHashes`, the matching `ReadRequest` variants, `Response::{HeadersCommitted, HeaderTip, HeaderLocator}`, `ReadResponse::{HeaderTip, HeaderLocator}`, `HeadersCommitted`, `CommitHeadersError` and `MAX_COMMIT_HEADERS`. A fork above the last checkpoint and the finalized tip is chosen by its work, however deep it is. The header chain has its own writer thread, which never blocks block commits.'
+time: 2026-11-06T20:35:20Z

@@ -68,6 +68,10 @@ pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
+/// The most header chain hashes one headers-first request queues, the same
+/// as one `FindBlocks` response.
+const HEADER_CHAIN_HASHES_LIMIT: u32 = 500;
+
 /// Match the missing-block errors used by both hedging and sync recovery.
 fn is_not_found(error: &dyn std::error::Error) -> bool {
     // TODO: improve this by checking the type (#2908).
@@ -292,6 +296,23 @@ pub struct Config {
     /// Off by default. It needs `network.v2_listen_addr` and version 2 peers.
     pub v2_checkpoint_sync: bool,
 
+    /// Whether to sync the header chain first, and download block bodies only
+    /// for headers whose proof of work, difficulty and checkpoints are valid.
+    ///
+    /// Headers come from legacy peers with `getheaders` and from version 2
+    /// peers with `get-headers`, so it works with either kind of peer. On by
+    /// default.
+    ///
+    /// With `false`, the syncer finds new blocks with `getblocks`, which only
+    /// legacy peers answer, so it needs legacy peers: with only version 2 peers
+    /// it stops following the chain.
+    pub headers_first: bool,
+
+    /// The number of checkpoint spans of headers that headers-first sync
+    /// downloads at the same time, below the final checkpoint. A value of 0
+    /// is raised to 1.
+    pub header_sync_concurrency: usize,
+
     /// The most block data the checkpoint sync engine requests ahead of the
     /// committed state tip, in bytes.
     ///
@@ -378,11 +399,15 @@ pub struct Config {
     /// Whether an empty pruned node downloads a state snapshot over the version 2 protocol and
     /// syncs only the blocks above it, instead of syncing from genesis.
     ///
-    /// Off by default. The snapshot is downloaded only when `state.prune_blocks_older_than` is
+    /// On by default, so it only takes effect on pruned nodes. The snapshot is downloaded only when `state.prune_blocks_older_than` is
     /// set, the state is not ephemeral, no state database exists yet, a snapshot commitment is
     /// pinned for the network or configured in `state_snapshot`, `consensus.checkpoint_sync` is
-    /// on, zcashd-compat mode is off, and `state_snapshot_peers` or `network.initial_v2_peers`
-    /// names a peer. Otherwise Zebra logs why and syncs normally.
+    /// on, zcashd-compat mode is off, and `state_snapshot_peers` names a peer or
+    /// `network.v2_listen_addr` is set. Otherwise Zebra logs why and syncs
+    /// normally.
+    ///
+    /// The node first syncs and verifies headers from genesis, then checks the snapshot against
+    /// them, and keeps every header.
     ///
     /// The UTXO set, the nullifiers, the Sprout tree, and the value pools of a snapshot are
     /// trusted on its commitment, like the checkpoints are trusted, and the history below the
@@ -407,15 +432,24 @@ pub struct Config {
 
     /// The version 2 peers the snapshot is downloaded from, as `host:port` strings.
     ///
-    /// Empty by default, which uses `network.initial_v2_peers`.
+    /// Empty by default, which uses the connected version 2 peers that advertise
+    /// `NODE_SYNC_ARTIFACTS`: `network.initial_v2_peers`, the peers that dialled this node, and
+    /// the peers it discovered. Zebra dials these peers for the download only, so a peer listed
+    /// here and in `network.initial_v2_peers` must allow two connections from this node's IP
+    /// address.
     pub state_snapshot_peers: Vec<String>,
 
     /// What to do when the snapshot cannot be downloaded or is rejected.
     ///
-    /// `"error"` by default: exit with an actionable message. An aborted download leaves no state
-    /// directory and is retried on the next start; a rejected snapshot stays refused until its
-    /// commitment changes or its rejection marker is removed after investigation. `"genesis"`
-    /// continues with a normal sync from genesis.
+    /// `"auto"` by default: continue with a normal sync from genesis, except when a snapshot
+    /// configured in `state_snapshot` is rejected, which exits. A node that uses the pinned
+    /// snapshot always starts, even when no peer serves it. `"error"` always exits with an
+    /// actionable message, and `"genesis"` always continues with a normal sync. After `"error"`
+    /// exits, an aborted download leaves no state directory and is retried on the next start. A
+    /// normal sync after `"auto"` or `"genesis"` creates the state, so later starts continue it
+    /// and do not bootstrap again: delete the state directory to retry. A rejected snapshot stays
+    /// refused until its commitment changes or its rejection marker is removed after
+    /// investigation.
     pub state_snapshot_fallback: StateSnapshotFallback,
 
     /// Whether to serve the state snapshots this node holds to version 2 peers.
@@ -432,13 +466,40 @@ pub struct Config {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateSnapshotFallback {
+    /// Continue with a normal sync from genesis, except when a configured snapshot is rejected,
+    /// which exits like [`Self::Error`]: a configured snapshot is the operator's choice, and the
+    /// pinned one must never stop a node from starting.
+    #[default]
+    Auto,
+
     /// Exit with an actionable error. An aborted download is retried on the next start; a rejected
     /// snapshot stays refused until its commitment changes or its marker is removed.
-    #[default]
     Error,
 
     /// Continue with a normal sync from genesis.
     Genesis,
+}
+
+impl StateSnapshotFallback {
+    /// Returns the value's name in a config file.
+    pub fn name(self) -> &'static str {
+        match self {
+            StateSnapshotFallback::Auto => "auto",
+            StateSnapshotFallback::Error => "error",
+            StateSnapshotFallback::Genesis => "genesis",
+        }
+    }
+
+    /// Returns whether a snapshot failure exits instead of continuing with a normal sync:
+    /// always for [`Self::Error`], never for [`Self::Genesis`], and for [`Self::Auto`] only when
+    /// a snapshot the operator configured was `rejected`.
+    pub fn exits(self, configured: bool, rejected: bool) -> bool {
+        match self {
+            StateSnapshotFallback::Auto => configured && rejected,
+            StateSnapshotFallback::Error => true,
+            StateSnapshotFallback::Genesis => false,
+        }
+    }
 }
 
 impl Default for Config {
@@ -451,6 +512,9 @@ impl Default for Config {
 
             // The checkpoint sync engine is opt-in.
             v2_checkpoint_sync: false,
+            headers_first: true,
+            header_sync_concurrency:
+                crate::components::header_sync::DEFAULT_HEADER_SYNC_CONCURRENCY,
             v2_lookahead_bytes: engine.lookahead_bytes,
             v2_min_peer_rate: engine.min_peer_rate,
             // Spentness hints are opt-in.
@@ -480,11 +544,11 @@ impl Default for Config {
 
             // Mainnet and the default Testnet use their compiled-in lists.
             v2_known_hash_pins: None,
-            state_snapshot_sync: false,
+            state_snapshot_sync: true,
             state_snapshot: None,
             unsafe_trust_state_snapshot: false,
             state_snapshot_peers: Vec::new(),
-            state_snapshot_fallback: StateSnapshotFallback::Error,
+            state_snapshot_fallback: StateSnapshotFallback::Auto,
             serve_state_snapshots: false,
         }
     }
@@ -628,6 +692,10 @@ where
 
     /// Whether the node is running on regtest. Used to apply a shorter sync restart delay.
     is_regtest: bool,
+
+    /// Whether block hashes come from the verified header chain that
+    /// headers-first sync stores, instead of `FindBlocks` requests to peers.
+    headers_first: bool,
 
     // Services
     //
@@ -851,6 +919,7 @@ where
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             is_regtest: config.network.network.is_regtest(),
+            headers_first: config.sync.headers_first,
             tip_network,
             downloads,
             state,
@@ -1346,6 +1415,24 @@ where
             "got block locator and trying to obtain new chain tips"
         );
 
+        if self.headers_first {
+            let download_set = self.header_chain_download_set(block_locator).await?;
+
+            let new_downloads = download_set.len();
+            debug!(
+                new_downloads,
+                "queueing new downloads from the header chain"
+            );
+            metrics::gauge!("sync.obtain.queued.hash.count").set(new_downloads as f64);
+            self.recent_syncs.push_obtain_tips_length(new_downloads);
+
+            let response = self.request_blocks(download_set).await;
+            metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+                .record(stage_start.elapsed().as_secs_f64());
+
+            return Self::handle_hash_response(response).map_err(Into::into);
+        }
+
         let mut requests = FuturesUnordered::new();
         for attempt in 0..FANOUT {
             if attempt > 0 {
@@ -1489,6 +1576,30 @@ where
 
         let tips = std::mem::take(&mut self.prospective_tips);
 
+        if self.headers_first {
+            let mut download_set = IndexSet::new();
+            for tip in tips {
+                download_set.extend(
+                    self.header_chain_download_set(vec![tip.expected_next])
+                        .await?,
+                );
+            }
+
+            let new_downloads = download_set.len();
+            debug!(
+                new_downloads,
+                "queueing new downloads from the header chain"
+            );
+            metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
+            self.recent_syncs.push_extend_tips_length(new_downloads);
+
+            let response = self.request_blocks(download_set).await;
+            metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
+                .record(stage_start.elapsed().as_secs_f64());
+
+            return Self::handle_hash_response(response).map_err(Into::into);
+        }
+
         let mut download_set = IndexSet::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
@@ -1622,6 +1733,64 @@ where
             .record(stage_start.elapsed().as_secs_f64());
 
         Self::handle_hash_response(response).map_err(Into::into)
+    }
+
+    /// Returns the header chain hashes above the first of `known_blocks` on the
+    /// header chain that the state doesn't have yet, and sets the prospective
+    /// tip to the last of them, so that extending it continues up the header
+    /// chain.
+    ///
+    /// Headers-first sync has verified the proof of work, difficulty and
+    /// checkpoints of every header on the header chain, so this never asks
+    /// for a body before its header is verified. Returns no hashes once the
+    /// state reaches the header tip.
+    async fn header_chain_download_set(
+        &mut self,
+        known_blocks: Vec<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        let hashes = match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::HeaderChainHashes {
+                known_blocks,
+                limit: HEADER_CHAIN_HASHES_LIMIT,
+            })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zebra_state::Response::BlockHashes(hashes) => hashes,
+            _ => unreachable!("HeaderChainHashes request can only result in Response::BlockHashes"),
+        };
+
+        // The hashes are in height order, and blocks commit in height order, so
+        // the state has a prefix of them.
+        let mut first_unknown = None;
+        for (index, &hash) in hashes.iter().enumerate() {
+            if !self.state_contains(hash).await? {
+                first_unknown = Some(index);
+                break;
+            }
+        }
+        let Some(first_unknown) = first_unknown else {
+            return Ok(IndexSet::new());
+        };
+        let unknown_hashes = &hashes[first_unknown..];
+
+        if let Some(&expected_next) = unknown_hashes.last() {
+            let tip = unknown_hashes
+                .len()
+                .checked_sub(2)
+                .map_or(expected_next, |index| unknown_hashes[index]);
+            self.prospective_tips
+                .insert(CheckedTip { tip, expected_next });
+        }
+
+        metrics::histogram!("sync.headers_first.response.hash.count")
+            .record(unknown_hashes.len() as f64);
+
+        Ok(unknown_hashes.iter().copied().collect())
     }
 
     /// Download and verify the genesis block, if it isn't currently known to

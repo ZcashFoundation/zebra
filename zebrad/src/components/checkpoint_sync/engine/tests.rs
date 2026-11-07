@@ -797,6 +797,7 @@ async fn run_engine_on(
             charged: charged.clone(),
             blamed: BTreeSet::new(),
             hashes,
+            header_tip: None,
         }
         .run(),
     )
@@ -1170,6 +1171,7 @@ async fn engine_stops_when_the_state_write_task_is_gone() {
             charged: Charged::default(),
             blamed: BTreeSet::new(),
             hashes: None,
+            header_tip: None,
         }
         .run(),
     )
@@ -1236,6 +1238,7 @@ async fn engine_hands_back_without_peers() {
         charged: charged.clone(),
         blamed: BTreeSet::new(),
         hashes: None,
+        header_tip: None,
     }
     .run()
     .await;
@@ -1285,6 +1288,7 @@ async fn engine_skips_blamed_peers() {
             charged: Charged::default(),
             blamed: [blamed_peer.ip].into_iter().collect(),
             hashes: None,
+            header_tip: None,
         }
         .run(),
     )

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: 'Added headers-first sync, on by default with the new `[sync] headers_first` option: Zebra downloads the header chain from legacy peers with `getheaders` and from version 2 peers with `get-headers`, checks every header''s proof of work, difficulty, time and checkpoint, and stores the verified header chain ahead of the block bodies. Below the final checkpoint it downloads checkpoint spans of headers in parallel, `[sync] header_sync_concurrency` (default 8) at a time, and stores a span only once it ends exactly at its checkpoint. The stored headers use about 1.5 KB each, about 5.2 GB for Mainnet, until their blocks are committed.'
+time: 2026-11-06T20:43:16Z

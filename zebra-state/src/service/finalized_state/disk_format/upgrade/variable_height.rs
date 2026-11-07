@@ -613,6 +613,8 @@ fn legacy_history_capabilities(
         return Ok(HistoryCapabilities {
             lowest_retained_height: height.max(base.window_start),
             lowest_known_height: base.window_start,
+            lowest_header_height: legacy_lowest_header_height(source, &base)
+                .map_err(|error| invalid(error.into()))?,
             snapshot_base: Some(base),
         });
     }
@@ -624,8 +626,30 @@ fn legacy_history_capabilities(
             height
         },
         lowest_known_height: Height::MIN,
+        lowest_header_height: Height::MIN,
         snapshot_base: None,
     })
+}
+
+/// Returns the first non-genesis height whose header the legacy snapshot database `source`
+/// holds, like `DiskDb::lowest_header_height` does for the current format.
+fn legacy_lowest_header_height(source: &DB, base: &SnapshotBase) -> Result<Height, rocksdb::Error> {
+    let Some(below_window) = base.window_start.previous().ok().filter(|h| !h.is_min()) else {
+        return Ok(Height::MIN);
+    };
+    let Some(headers) = source.cf_handle("header_by_height") else {
+        return Ok(base.window_start);
+    };
+    for height in [Height(1), below_window] {
+        if source
+            .get_pinned_cf(&headers, legacy_height_bytes(height))?
+            .is_none()
+        {
+            return Ok(base.window_start);
+        }
+    }
+
+    Ok(Height::MIN)
 }
 
 fn legacy_snapshot_base(source: &DB) -> Result<Option<SnapshotBase>, BoxError> {

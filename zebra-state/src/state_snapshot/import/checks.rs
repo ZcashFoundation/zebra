@@ -9,8 +9,6 @@
 //! place. Every record they read has passed its record check, so the
 //! database's `FromDisk` readers can decode it.
 
-use std::collections::{BTreeMap, HashSet};
-
 use rocksdb::{ColumnFamily, DBRawIteratorWithThreadMode, DB};
 
 use zebra_chain::{
@@ -35,7 +33,8 @@ use crate::{
 };
 
 use super::{
-    column_family, db_error, records, refused, ImportCheck, Singletons, SnapshotBase, SnapshotError,
+    column_family, db_error, rebuild, records, refused, ImportCheck, Singletons, SnapshotBase,
+    SnapshotError,
 };
 
 /// Decodes and checks the history tree at the snapshot height: it is for this
@@ -98,7 +97,7 @@ pub(super) fn check_raw(
     check_window(&raw, base, network)?;
     check_tree_roots(&raw, base, network, singletons)?;
     check_transaction_index(&raw, base)?;
-    let transparent_total = check_address_index(&raw, base, network)?;
+    let transparent_total = check_utxos(&raw, base)?;
     check_value_pools(&raw, base, singletons, transparent_total)
 }
 
@@ -116,8 +115,14 @@ impl<'db> Raw<'db> {
 
     /// Returns the value of `key` in `component`.
     fn get(&self, component: ComponentId, key: &[u8]) -> Result<Option<Vec<u8>>, SnapshotError> {
+        self.get_cf(component.column_family(), key)
+    }
+
+    /// Returns the value of `key` in the column family `cf`, which can be one
+    /// the importer rebuilt.
+    fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, SnapshotError> {
         self.db
-            .get_cf(self.cf(component), key)
+            .get_cf(column_family(self.db, cf), key)
             .map_err(db_error("reading the import database"))
     }
 
@@ -178,9 +183,10 @@ fn block_count(base: &SnapshotBase) -> u64 {
 /// Checks the genesis and window blocks (design, "Trust model and
 /// verification"): hashes and heights
 /// index exactly those blocks, the window headers chain to the snapshot block,
-/// the genesis block is the network's, every body's transactions match their
-/// index rows and their header's merkle root, and the block info covers the
-/// window and its parent.
+/// the genesis block is the network's, the genesis and snapshot block bodies
+/// are the only bodies, and their transactions match their index rows and
+/// their header's merkle root, and the block info covers the window and its
+/// parent.
 fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(), SnapshotError> {
     let fail = |detail: String| refused(ImportCheck::Window, detail);
 
@@ -227,7 +233,6 @@ fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(),
 
     let mut previous_hash = None;
     let mut transactions = 0u64;
-    let mut recipients = HashSet::new();
     for (height, hash) in &hashes {
         if raw.get(ComponentId::HeightByHash, &hash.as_bytes())? != Some(height.as_bytes().to_vec())
         {
@@ -263,7 +268,11 @@ fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(),
             Some(*hash)
         };
 
-        let txids = check_body(raw, *height, network, &mut recipients)?;
+        // Only genesis and the snapshot block have bodies.
+        if !height.is_min() && *height != base.body_start() {
+            continue;
+        }
+        let txids = check_body(raw, *height)?;
         let merkle_root: block::merkle::Root = txids.iter().copied().collect();
         if merkle_root != header.merkle_root {
             return Err(fail(format!(
@@ -281,34 +290,13 @@ fn check_window(raw: &Raw, base: &SnapshotBase, network: &Network) -> Result<(),
         )));
     }
 
-    for address in recipients {
-        let received = raw
-            .get(ComponentId::AddressBalances, &address.as_bytes())?
-            .map(|balance| records::address_balance(&balance))
-            .transpose()
-            .map_err(|detail| refused(ImportCheck::Records, detail))?
-            .map(|balance| balance.received);
-        if received.is_none_or(|received| received == 0) {
-            return Err(refused(
-                ImportCheck::AddressIndex,
-                format!("{address} received an output in the window, but has no balance"),
-            ));
-        }
-    }
-
     check_block_info(raw, base)
 }
 
 /// Checks the body of the block at `height`: its transactions are contiguous
 /// from the coinbase and each has its hash and location index rows, and only
-/// those. Returns the transaction hashes in block order, and adds the
-/// addresses that received a non-zero output to `recipients`.
-fn check_body(
-    raw: &Raw,
-    height: Height,
-    network: &Network,
-    recipients: &mut HashSet<transparent::Address>,
-) -> Result<Vec<transaction::Hash>, SnapshotError> {
+/// those. Returns the transaction hashes in block order.
+fn check_body(raw: &Raw, height: Height) -> Result<Vec<transaction::Hash>, SnapshotError> {
     let fail = |detail: String| refused(ImportCheck::Window, detail);
     let last = TransactionLocation::max_for_height(height).as_bytes();
 
@@ -326,20 +314,8 @@ fn check_body(
                 txids.len()
             )));
         }
-        let transaction = Transaction::from_bytes(value);
-        // The address indexes skip genesis, whose outputs are never spendable, and so does the
-        // database format check this protects.
-        if !height.is_min() {
-            recipients.extend(
-                transaction
-                    .outputs()
-                    .iter()
-                    .filter(|output| output.value != 0)
-                    .filter_map(|output| output.address(network)),
-            );
-        }
-        let txid = transaction.hash();
-        if raw.get(ComponentId::HashByTxLoc, key)? != Some(txid.as_bytes().to_vec()) {
+        let txid = Transaction::from_bytes(value).hash();
+        if raw.get_cf(rebuild::HASH_BY_TX_LOC, key)? != Some(txid.as_bytes().to_vec()) {
             return Err(fail(format!(
                 "transaction {txid} at {location:?} has no hash index row"
             )));
@@ -358,10 +334,10 @@ fn check_body(
     }
 
     let mut index_rows = 0usize;
-    let mut iterator = raw.iter_from(
-        ComponentId::HashByTxLoc,
-        &TransactionLocation::min_for_height(height).as_bytes(),
-    );
+    let mut iterator = raw
+        .db
+        .raw_iterator_cf(column_family(raw.db, rebuild::HASH_BY_TX_LOC));
+    iterator.seek(TransactionLocation::min_for_height(height).as_bytes());
     while iterator.valid() && item(&iterator).0 <= last.as_slice() {
         index_rows = index_rows.saturating_add(1);
         iterator.next();
@@ -533,91 +509,56 @@ fn check_tree_roots(
     )
 }
 
-/// Checks that every transaction location below the window has a location
-/// index row that points back at it, so the two transaction indexes are each
-/// other's inverse, and that every address transaction row is for a
-/// transaction with a hash index row. [`check_window`] checks the rows of the
-/// stored blocks.
+/// Checks that no transaction location is above the snapshot height. The
+/// importer rebuilt the hash index as the inverse of the shipped locations,
+/// and refused locations shared by two transactions, so the two indexes are
+/// each other's inverse. [`check_window`] checks the rows of the stored
+/// bodies.
 fn check_transaction_index(raw: &Raw, base: &SnapshotBase) -> Result<(), SnapshotError> {
-    let fail = |detail: String| refused(ImportCheck::TransactionIndex, detail);
-
-    let mut iterator = raw.iter_from(ComponentId::HashByTxLoc, &[]);
-    while iterator.valid() {
-        let (key, hash) = item(&iterator);
-        let location = records::transaction_location(key);
+    let mut iterator = raw
+        .db
+        .raw_iterator_cf(column_family(raw.db, rebuild::HASH_BY_TX_LOC));
+    iterator.seek_to_last();
+    if iterator.valid() {
+        let location = records::transaction_location(item(&iterator).0);
         if location.height > base.height {
-            return Err(fail(format!(
-                "transaction location {location:?} is above the snapshot height"
-            )));
+            return Err(refused(
+                ImportCheck::TransactionIndex,
+                format!("transaction location {location:?} is above the snapshot height"),
+            ));
         }
-        let stored = location.height.is_min() || location.height >= base.window_start;
-        if !stored && raw.get(ComponentId::TxLocByHash, hash)?.as_deref() != Some(key) {
-            return Err(fail(format!(
-                "the location index of transaction {} does not point at {location:?}",
-                transaction::Hash::from_bytes(hash)
-            )));
-        }
-        iterator.next();
-    }
-    finished(&iterator)?;
-
-    if raw.entries(ComponentId::TxLocByHash) != raw.entries(ComponentId::HashByTxLoc) {
-        return Err(fail(format!(
-            "{} has {} records, but {} has {}",
-            ComponentId::TxLocByHash,
-            raw.entries(ComponentId::TxLocByHash),
-            ComponentId::HashByTxLoc,
-            raw.entries(ComponentId::HashByTxLoc),
-        )));
-    }
-
-    // The address history reads the hash of every transaction an address row names.
-    let mut iterator = raw.iter_from(ComponentId::AddressTxs, &[]);
-    while iterator.valid() {
-        let (key, _) = item(&iterator);
-        let transaction = records::address_transaction_suffix(key).map_err(fail)?;
-        if !raw.contains(ComponentId::HashByTxLoc, transaction)? {
-            return Err(fail(format!(
-                "an address transaction row names {:?}, which has no hash index row",
-                records::transaction_location(transaction)
-            )));
-        }
-        iterator.next();
     }
     finished(&iterator)
 }
 
-/// Checks the UTXO set against the transaction and address indexes (design,
-/// "Trust model and verification"), and returns the total value of the UTXO set.
+/// Checks the UTXO set against the transaction index (design, "Trust model
+/// and verification"), and returns the total value of the UTXO set.
 ///
-/// Every UTXO's transaction has a hash index row; every address UTXO row
-/// points at a UTXO with an address whose balance names the row's first
-/// output, so the rows are exactly those of the UTXOs with an address when
-/// there are as many rows as such UTXOs; each address's balance is the sum of
-/// its UTXOs; and the addresses without UTXOs have no balance.
-fn check_address_index(
-    raw: &Raw,
-    base: &SnapshotBase,
-    network: &Network,
-) -> Result<u64, SnapshotError> {
-    let fail = |detail: String| refused(ImportCheck::AddressIndex, detail);
-    let overflow = || fail("the UTXO values overflow".to_string());
+/// Every UTXO is from a block between genesis and the snapshot height, and
+/// its transaction has a location. The address indexes are rebuilt from the
+/// UTXO set, so they match it.
+fn check_utxos(raw: &Raw, base: &SnapshotBase) -> Result<u64, SnapshotError> {
+    let overflow = || refused(ImportCheck::ValuePools, "the UTXO values overflow");
 
     // The UTXO keys start with their transaction's location, which keys the hash index, so a
     // second iterator walks the index alongside the UTXOs instead of reading it per UTXO.
     let mut total = 0u64;
-    let mut address_total = 0u64;
-    let mut address_utxos = 0u64;
-    let mut transactions = raw.iter_from(ComponentId::HashByTxLoc, &[]);
+    let mut transactions = raw
+        .db
+        .raw_iterator_cf(column_family(raw.db, rebuild::HASH_BY_TX_LOC));
+    transactions.seek_to_first();
     let mut iterator = raw.iter_from(ComponentId::Utxos, &[]);
     while iterator.valid() {
         let (key, value) = item(&iterator);
         let location = records::output_location(key);
         if location.height().is_min() || location.height() > base.height {
-            return Err(fail(format!(
-                "unspent output {location:?} is not from a block between genesis and the \
-                 snapshot height"
-            )));
+            return Err(refused(
+                ImportCheck::TransactionIndex,
+                format!(
+                    "unspent output {location:?} is not from a block between genesis and the \
+                     snapshot height"
+                ),
+            ));
         }
         let transaction_len = key
             .len()
@@ -631,7 +572,7 @@ fn check_address_index(
             finished(&transactions)?;
             return Err(refused(
                 ImportCheck::TransactionIndex,
-                format!("unspent output {location:?} has no transaction hash index row"),
+                format!("unspent output {location:?} has no transaction location"),
             ));
         }
 
@@ -639,110 +580,12 @@ fn check_address_index(
         total = total
             .checked_add(u64::from(output.value))
             .ok_or_else(overflow)?;
-        if output.address(network).is_some() {
-            address_total = address_total
-                .checked_add(u64::from(output.value))
-                .ok_or_else(overflow)?;
-            address_utxos = address_utxos.saturating_add(1);
-        }
         iterator.next();
     }
     finished(&iterator)?;
     finished(&transactions)?;
 
-    // Each address UTXO row is checked below to point at a distinct UTXO with an address, so if
-    // there are as many rows as such UTXOs, the rows are exactly theirs.
-    if raw.entries(ComponentId::AddressUtxos) != address_utxos {
-        return Err(fail(format!(
-            "{} has {} records, but {address_utxos} unspent outputs have an address",
-            ComponentId::AddressUtxos,
-            raw.entries(ComponentId::AddressUtxos)
-        )));
-    }
-
-    // The address UTXO rows are keyed by the address's first output, then the unspent output, so
-    // each address's UTXOs are contiguous. Sum them per address, in case a snapshot gives two
-    // addresses the same first output.
-    let mut group: Option<(Vec<u8>, BTreeMap<[u8; 21], u64>)> = None;
-    let mut iterator = raw.iter_from(ComponentId::AddressUtxos, &[]);
-    while iterator.valid() {
-        let (key, _) = item(&iterator);
-        let (address_location, output_location) = key.split_at(key.len() / 2);
-        if group
-            .as_ref()
-            .is_some_and(|(location, _)| location.as_slice() != address_location)
-        {
-            let (location, sums) = group.take().expect("checked just above");
-            check_balances(raw, &location, sums)?;
-        }
-        let output = raw
-            .get(ComponentId::Utxos, output_location)?
-            .map(transparent::Output::from_bytes)
-            .ok_or_else(|| fail("an address UTXO row points at a spent output".to_string()))?;
-        let address = output.address(network).ok_or_else(|| {
-            fail("an address UTXO row points at an output without an address".to_string())
-        })?;
-        let (_, sums) = group.get_or_insert_with(|| (address_location.to_vec(), BTreeMap::new()));
-        let sum = sums.entry(address.as_bytes()).or_default();
-        *sum = sum
-            .checked_add(u64::from(output.value))
-            .ok_or_else(overflow)?;
-        iterator.next();
-    }
-    finished(&iterator)?;
-    if let Some((location, sums)) = group {
-        check_balances(raw, &location, sums)?;
-    }
-
-    let mut balances = 0u64;
-    let mut iterator = raw.iter_from(ComponentId::AddressBalances, &[]);
-    while iterator.valid() {
-        let balance = records::address_balance(item(&iterator).1)
-            .map_err(|detail| refused(ImportCheck::Records, detail))?;
-        balances = balances
-            .checked_add(u64::from(balance.balance))
-            .ok_or_else(overflow)?;
-        iterator.next();
-    }
-    finished(&iterator)?;
-    // Each address with UTXOs has their sum as its balance, so the others sum to zero, and
-    // balances are never negative.
-    if balances != address_total {
-        return Err(fail(format!(
-            "the address balances sum to {balances}, but the UTXOs with an address to \
-             {address_total}"
-        )));
-    }
-
     Ok(total)
-}
-
-/// Checks that each address in `sums` has a balance, with its sum as the
-/// balance, and `location` as its first output.
-fn check_balances(
-    raw: &Raw,
-    location: &[u8],
-    sums: BTreeMap<[u8; 21], u64>,
-) -> Result<(), SnapshotError> {
-    for (address, sum) in sums {
-        let balance = raw
-            .get(ComponentId::AddressBalances, &address)?
-            .map(|balance| records::address_balance(&balance))
-            .transpose()
-            .map_err(|detail| refused(ImportCheck::Records, detail))?;
-        if balance.is_none_or(|balance| {
-            u64::from(balance.balance) != sum || balance.location.as_bytes() != location
-        }) {
-            return Err(refused(
-                ImportCheck::AddressIndex,
-                format!(
-                    "the balance of address {} is not the sum of its {sum} zatoshis of UTXOs",
-                    hex::encode(address)
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
 
 /// Checks the value pools at the snapshot height: they are the block info's
@@ -811,7 +654,7 @@ pub(super) fn check_open_database(db: &ZebraDb, base: &SnapshotBase) -> Result<(
     let history = db.history_capabilities()?;
     if history.snapshot_base != Some(*base)
         || history.lowest_known_height != base.window_start
-        || history.lowest_retained_height != base.window_start
+        || history.lowest_retained_height != base.body_start()
     {
         return Err(fail(format!(
             "the database's history is {history:?}, not that of the snapshot {base:?}"

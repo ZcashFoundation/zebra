@@ -139,6 +139,11 @@ fn format_upgrades(
             "add spentness hint column families",
             Version::new(30, 0, 0),
         )),
+        // The header chain column families are created empty when the database is opened.
+        Box::new(no_migration::NoMigration::new(
+            "add header chain column families",
+            Version::new(30, 1, 0),
+        )),
         // The major directory isolates body deletion from older archive readers.
         Box::new(no_migration::NoMigration::new(
             "isolate pruned state from archive readers",
@@ -156,7 +161,7 @@ fn format_upgrades(
         )),
         // Rewrites every fixed-width height, including those in snapshot-born v32 databases.
         Box::new(variable_height::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 13])
+    ] as [Box<dyn DiskFormatUpgrade>; 14])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

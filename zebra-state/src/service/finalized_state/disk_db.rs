@@ -45,6 +45,7 @@ use crate::{
 
 use super::zebra_db::{
     chain::SNAPSHOT_BASE,
+    header_chain::HEADER_BY_HEIGHT,
     transparent::{
         fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
         BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
@@ -1377,9 +1378,10 @@ impl DiskDb {
 
     /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
     ///
-    /// A database imported from a state snapshot has no blocks below its window start, so its
-    /// [`SnapshotBase`] marker anchors the suffix instead: the database counts as pruned, and
-    /// its bodies start at the window start or the first retained body above it. The marker must
+    /// A database imported from a state snapshot has no blocks below its window start, and no
+    /// bodies below the snapshot height, so its [`SnapshotBase`] marker anchors the suffix
+    /// instead: the database counts as pruned, its known heights start at the window start, and
+    /// its bodies start at the snapshot height or the first retained body above it. The marker must
     /// agree with the stored hash at its height.
     pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         let invalid = |source: BoxError| StateInitError::HistoryRead {
@@ -1420,8 +1422,11 @@ impl DiskDb {
         }
         if let Some(base) = snapshot_base {
             return Ok(HistoryCapabilities {
-                lowest_retained_height: location.height.max(base.window_start),
+                lowest_retained_height: location.height.max(base.body_start()),
                 lowest_known_height: base.window_start,
+                lowest_header_height: self
+                    .lowest_header_height(&base)
+                    .map_err(|error| invalid(error.into()))?,
                 snapshot_base: Some(base),
             });
         }
@@ -1432,8 +1437,35 @@ impl DiskDb {
                 location.height
             },
             lowest_known_height: Height::MIN,
+            lowest_header_height: Height::MIN,
             snapshot_base: None,
         })
+    }
+
+    /// Returns the first non-genesis height whose header a database imported from the snapshot
+    /// `base` holds: zero when the header chain has a row at height one and just below the
+    /// window, and the window start otherwise.
+    ///
+    /// The headers below the window are carried into the database whole, at import, and never
+    /// deleted, so their first and last rows show that they are all there.
+    fn lowest_header_height(&self, base: &SnapshotBase) -> Result<Height, rocksdb::Error> {
+        let Some(below_window) = base.window_start.previous().ok().filter(|h| !h.is_min()) else {
+            return Ok(Height::MIN);
+        };
+        let Some(headers) = self.cf_handle(HEADER_BY_HEIGHT) else {
+            return Ok(base.window_start);
+        };
+        for height in [Height(1), below_window] {
+            if self
+                .db
+                .get_pinned_cf(&headers, height.as_bytes())?
+                .is_none()
+            {
+                return Ok(base.window_start);
+            }
+        }
+
+        Ok(Height::MIN)
     }
 
     /// Reads the `snapshot_base` marker of a database imported from a state snapshot, checking

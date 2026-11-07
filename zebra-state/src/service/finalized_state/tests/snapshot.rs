@@ -30,7 +30,7 @@ const WINDOW_START: u32 = 21;
 fn snapshot_marker_sets_the_history_capabilities() {
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
-    let (state, base) = snapshot_state(
+    let (mut state, base) = snapshot_state(
         cache.path().to_path_buf(),
         TIP,
         WINDOW_START,
@@ -39,12 +39,14 @@ fn snapshot_marker_sets_the_history_capabilities() {
     );
     assert_eq!(state.db.snapshot_base(), Some(base));
 
+    // The window is known from its start, but only the snapshot block has a body.
     let history = state.db.history_capabilities().unwrap();
     assert_eq!(
         history,
         HistoryCapabilities {
-            lowest_retained_height: Height(WINDOW_START),
+            lowest_retained_height: Height(TIP),
             lowest_known_height: Height(WINDOW_START),
+            lowest_header_height: Height(WINDOW_START),
             snapshot_base: Some(base),
         }
     );
@@ -52,19 +54,22 @@ fn snapshot_marker_sets_the_history_capabilities() {
     assert!(history.knows_block(Height(0)));
     assert!(!history.knows_block(Height(WINDOW_START - 1)));
     assert!(history.knows_block(Height(WINDOW_START)));
-    assert!(history.has_block_body(Height(WINDOW_START)));
-    assert!(!history.has_block_body(Height(WINDOW_START - 1)));
+    assert!(history.has_block_body(Height(TIP)));
+    assert!(!history.has_block_body(Height(TIP - 1)));
+    assert!(!history.has_block_body(Height(WINDOW_START)));
 
-    // Pruning bodies above the window start raises the floor, but the window start stays known.
+    // Pruning the snapshot block's body after a commit above it raises the floor, but the window
+    // start stays known.
+    commit_child(&mut state, Coinbase::Branched, vec![]);
     let mut batch = DiskWriteBatch::new();
     batch.zs_delete_range(
         &state.db.cf_handle("tx_by_loc").unwrap(),
-        TransactionLocation::min_for_height(Height(WINDOW_START)),
-        TransactionLocation::min_for_height(Height(WINDOW_START + 3)),
+        TransactionLocation::min_for_height(Height(TIP)),
+        TransactionLocation::min_for_height(Height(TIP + 1)),
     );
     state.db.write_batch(batch).unwrap();
     let history = state.db.history_capabilities().unwrap();
-    assert_eq!(history.lowest_retained_height, Height(WINDOW_START + 3));
+    assert_eq!(history.lowest_retained_height, Height(TIP + 1));
     assert_eq!(history.lowest_known_height, Height(WINDOW_START));
     assert_eq!(history.snapshot_base, Some(base));
 }
@@ -574,5 +579,231 @@ fn blocks_above_a_snapshot_have_no_sync_metadata() {
     assert_eq!(
         read::sync_hashes(None::<Arc<Chain>>, &state.db, Height::MIN, 10),
         Vec::new()
+    );
+}
+
+/// Returns a snapshot database at `TIP` whose header chain holds the headers of every height
+/// below the window in `below_window`, and the headers that were carved away.
+fn snapshot_state_with_headers(
+    cache_dir: std::path::PathBuf,
+    below_window: std::ops::Range<u32>,
+) -> (FinalizedState, SnapshotBase, Vec<Arc<block::Header>>) {
+    let mut state = open(&config(cache_dir, Some(RETENTION))).expect("a fresh state opens");
+    append(&mut state, TIP, Coinbase::Branched);
+    let carved: Vec<Arc<block::Header>> = (1..WINDOW_START)
+        .map(|height| {
+            state
+                .db
+                .block_header(Height(height).into())
+                .expect("the chain is complete before carving")
+        })
+        .collect();
+    let base = carve(&state, Height(WINDOW_START), 0);
+
+    let stored = &carved[below_window.start as usize - 1..below_window.end as usize - 1];
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(&state.db, Height(below_window.start), stored);
+    state.db.write_batch(batch).unwrap();
+
+    (state, base, carved)
+}
+
+#[test]
+fn headers_below_the_window_answer_locators() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, _base, carved) =
+        snapshot_state_with_headers(cache.path().to_path_buf(), 1..WINDOW_START);
+    let db = &state.db;
+
+    // A locator below the window is an intersection, so the peer gets the headers after it,
+    // up to a stop hash below the window, or into the window.
+    let headers = |known: Vec<block::Hash>, stop: Option<block::Hash>, max_len: u32| {
+        read::find_chain_headers(None::<Arc<Chain>>, db, known, stop, max_len)
+    };
+    assert_eq!(headers(vec![carved[4].hash()], None, 3), carved[5..8]);
+    assert_eq!(
+        headers(vec![carved[0].hash()], Some(carved[2].hash()), 160),
+        carved[1..3]
+    );
+
+    let last_below = carved.last().unwrap().hash();
+    let into_window = headers(vec![last_below], None, 2);
+    assert_eq!(
+        into_window,
+        [
+            db.block_header(Height(WINDOW_START).into()).unwrap(),
+            db.block_header(Height(WINDOW_START + 1).into()).unwrap(),
+        ]
+    );
+
+    // Block hashes below the window still answer nothing, since they have no bodies.
+    assert_eq!(
+        read::find_chain_hashes(None::<Arc<Chain>>, db, vec![carved[4].hash()], None, 3).unwrap(),
+        Vec::<block::Hash>::new()
+    );
+}
+
+#[test]
+fn headers_below_the_window_are_known_and_kept() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, base, carved) =
+        snapshot_state_with_headers(cache.path().to_path_buf(), 1..WINDOW_START);
+    let db = &state.db;
+
+    // Every header is known, but the blocks below the window are still not indexed, and have
+    // no bodies or block info.
+    let history = db.history_capabilities().unwrap();
+    assert_eq!(history.lowest_header_height, Height::MIN);
+    assert_eq!(history.lowest_known_height, Height(WINDOW_START));
+    assert_eq!(history.snapshot_base, Some(base));
+    assert!(history.knows_block(Height(1)));
+    assert!(history.knows_block(Height(WINDOW_START - 1)));
+    assert!(!history.has_block_body(Height(WINDOW_START - 1)));
+
+    for (index, header) in carved.iter().enumerate() {
+        let height = Height(u32::try_from(index).unwrap() + 1);
+        assert_eq!(db.known_header(height.into()).as_ref(), Some(header));
+        assert_eq!(db.known_header(header.hash().into()).as_ref(), Some(header));
+        assert_eq!(
+            read::block_header(None::<Arc<Chain>>, db, height.into()).as_ref(),
+            Some(header)
+        );
+        assert_eq!(db.any_header(height).as_ref(), Some(header));
+        assert_eq!(db.header_chain_hash(height), Some(header.hash()));
+        assert_eq!(db.header_chain_height(header.hash()), Some(height));
+        assert_eq!(db.block_header(height.into()), None);
+        assert_eq!(db.hash(height), None);
+        // The snapshot carries the block info just below its window, for the first block in it.
+        if height < Height(WINDOW_START - 1) {
+            assert_eq!(db.block_info_cf().zs_get(&height), None);
+        }
+    }
+    // The window and the blocks above it are the indexed blocks, as before.
+    assert_eq!(
+        db.known_header(Height(WINDOW_START).into()),
+        db.block_header(Height(WINDOW_START).into())
+    );
+    assert!(db.known_header(Height(TIP + 1).into()).is_none());
+
+    // The headers below the window are not stale, so they are never collected, and they don't
+    // move the header chain tip below the finalized tip.
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(batch.prepare_header_chain_gc(db), 0);
+    assert_eq!(db.stored_header_tip(), None);
+    assert_eq!(db.header_chain_tip(), Some((base.height, base.block_hash)));
+
+    // A stale row in the window is still collected.
+    let window_header = db.block_header(Height(WINDOW_START).into()).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(db, Height(WINDOW_START), &[window_header]);
+    db.write_batch(batch).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(batch.prepare_header_chain_gc(db), 1);
+    db.write_batch(batch).unwrap();
+    assert_eq!(db.header_by_height_cf().zs_get(&Height(WINDOW_START)), None);
+    assert_eq!(
+        db.header_by_height_cf()
+            .zs_get(&Height(1))
+            .map(Arc::new)
+            .as_ref(),
+        carved.first()
+    );
+}
+
+#[test]
+fn partial_headers_below_the_window_are_not_known() {
+    let _init_guard = zebra_test::init();
+
+    // Without the header just below the window, or without the header at height one, the
+    // database doesn't claim to know the blocks below its window.
+    for below_window in [1..WINDOW_START - 1, 2..WINDOW_START] {
+        let cache = tempfile::tempdir().unwrap();
+        let (state, _base, _carved) =
+            snapshot_state_with_headers(cache.path().to_path_buf(), below_window);
+        let history = state.db.history_capabilities().unwrap();
+        assert_eq!(history.lowest_header_height, Height(WINDOW_START));
+        assert!(!history.knows_block(Height(WINDOW_START - 1)));
+    }
+}
+
+/// Returns a closed header-only database under `cache_dir`, with genesis and `headers` from
+/// height one, and its path.
+fn header_only_state(
+    cache_dir: std::path::PathBuf,
+    headers: &[Arc<block::Header>],
+) -> std::path::PathBuf {
+    let mut source = open(&config(cache_dir, Some(RETENTION))).expect("a fresh state opens");
+    append(&mut source, 0, Coinbase::Branched);
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(&source.db, Height(1), headers);
+    source.db.write_batch(batch).unwrap();
+    let path = source.db.path().to_path_buf();
+    drop(source);
+    path
+}
+
+#[test]
+fn synced_headers_are_carried_into_a_snapshot_database() {
+    use crate::state_snapshot::import::{carry_header_chain, CarriedHeaders};
+
+    let _init_guard = zebra_test::init();
+
+    // The chain to the snapshot block, and two headers above it.
+    let staged_cache = tempfile::tempdir().unwrap();
+    let mut chain = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    append(&mut chain, TIP, Coinbase::Branched);
+    let mut headers: Vec<Arc<block::Header>> = (1..=TIP)
+        .map(|height| chain.db.block_header(Height(height).into()).unwrap())
+        .collect();
+    for _ in 0..2 {
+        let parent = headers.last().unwrap().hash();
+        let mut child = **headers.last().unwrap();
+        child.previous_block_hash = parent;
+        headers.push(Arc::new(child));
+    }
+    let base = carve(&chain, Height(WINDOW_START), 0);
+    let staged = chain.db.path().to_path_buf();
+    drop(chain);
+
+    // A header-only state whose headers stop below the window can't be carried, and nothing
+    // is written.
+    let short_cache = tempfile::tempdir().unwrap();
+    let short = header_only_state(
+        short_cache.path().to_path_buf(),
+        &headers[..WINDOW_START as usize - 2],
+    );
+    assert!(carry_header_chain(&short, &staged).is_err());
+    let state = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    assert_eq!(state.db.header_by_height_cf().zs_get(&Height(1)), None);
+    drop(state);
+
+    // A complete one is.
+    let source_cache = tempfile::tempdir().unwrap();
+    let source = header_only_state(source_cache.path().to_path_buf(), &headers);
+    assert_eq!(
+        carry_header_chain(&source, &staged).unwrap(),
+        CarriedHeaders {
+            below_window: WINDOW_START - 1,
+            above_snapshot: 2,
+        }
+    );
+
+    let state = open(&config(staged_cache.path().to_path_buf(), Some(RETENTION))).unwrap();
+    let history = state.db.history_capabilities().unwrap();
+    assert_eq!(history.lowest_header_height, Height::MIN);
+    assert_eq!(history.snapshot_base, Some(base));
+    for (index, header) in headers.iter().enumerate() {
+        let height = Height(u32::try_from(index).unwrap() + 1);
+        assert_eq!(
+            state.db.any_header(height).as_ref(),
+            Some(header),
+            "{height:?}"
+        );
+    }
+    assert_eq!(
+        state.db.header_chain_tip(),
+        Some((Height(TIP + 2), headers.last().unwrap().hash()))
     );
 }

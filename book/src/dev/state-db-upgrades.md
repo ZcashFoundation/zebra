@@ -119,6 +119,17 @@ A never-hinted v30 directory has the same records as v29 state, and can be
 renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
 backup instead.
 
+### The 30.1.0 header chain
+
+Format 30.1.0 adds the `header_by_height` and `height_by_header_hash` column
+families. Headers-first sync stores the headers it has verified ahead of their
+block bodies there, so they never change the block chain that
+`hash_by_height`, `height_by_hash` and `block_header_by_height` describe. A row
+is authoritative only above the finalized tip: once a block commits, its row is
+a stale duplicate that the header writer deletes. The upgrade uses
+`NoMigration`, and a 30.0.0 binary opens a 30.1.0 database and ignores the new
+column families.
+
 ### The v30-to-v31 upgrade
 
 Format 31 isolates state that may have pruned block bodies from older
@@ -438,6 +449,8 @@ this is a table abbreviation, not a Rust type.
 | `tip_chain_value_pool` | `()` | `ValueBalance<NonNegative>` |
 | `block_info` | `block::Height` | `BlockInfo` |
 | `sync_meta_by_height` | `block::Height` | `SyncMetadata` |
+| `header_by_height` | `block::Height` | `block::Header` |
+| `height_by_header_hash` | `block::Hash` | `block::Height` |
 
 ### Indexer-dependent values
 

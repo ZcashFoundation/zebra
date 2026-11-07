@@ -592,6 +592,76 @@ async fn block_adverts_skip_version_2_peers() {
     );
 }
 
+/// `FindBlocks` only goes to legacy peers: version 2 connections answer it with no hashes, so a
+/// ready version 2 peer is skipped, and the request waits when only version 2 peers are ready.
+#[tokio::test]
+async fn find_blocks_skips_version_2_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let legacy_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 1).into();
+    let v2_addr: PeerSocketAddr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2).into();
+    let find_blocks = Request::FindBlocks {
+        known_blocks: vec![network.genesis_hash()],
+        stop: None,
+    };
+
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    // Both peers serve blocks, so neither is skipped for its services.
+    let (legacy_client, mut legacy) = ClientTestHarness::build()
+        .with_version(CURRENT_NETWORK_PROTOCOL_VERSION)
+        .with_services(PeerServices::NODE_NETWORK)
+        .finish();
+    let (minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    let discovery = stream::iter([
+        Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client.into())),
+        Ok(Change::Insert(legacy_addr, legacy_client.into())),
+    ])
+    .chain(stream::pending());
+    let (mut peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+        .build();
+
+    // Find requests rotate across ready peers, so a version 2 peer would get one of these.
+    for _ in 0..3 {
+        let _response = timeout(Duration::from_secs(10), peer_set.ready())
+            .await
+            .expect("peer readiness must not hang")
+            .expect("peer set is ready")
+            .call(find_blocks.clone());
+        let client_request = legacy
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("the legacy peer gets every FindBlocks");
+        assert_eq!(client_request.request, find_blocks);
+        client_request
+            .tx
+            .send(Ok(Response::BlockHashes(vec![])))
+            .expect("the request is still waiting for its response");
+    }
+
+    // Only a version 2 peer: the request waits for a legacy peer.
+    let (v2_client, _v2_connection) = connected_v2_client(&network).await;
+    let (minimum_peer_version, _best_tip) = MinimumPeerVersion::with_mock_chain_tip(&network);
+    let discovery = stream::iter([Ok::<_, BoxError>(Change::Insert(v2_addr, v2_client.into()))])
+        .chain(stream::pending());
+    let (peer_set, _guard) = PeerSetBuilder::new()
+        .with_discover(discovery)
+        .with_minimum_peer_version(minimum_peer_version)
+        .build();
+    let (mut network_service, _poll_task) = peer_set.into_buffer(PEERSET_BUFFER_SIZE);
+    let response = network_service
+        .ready()
+        .await
+        .expect("the peer set is ready")
+        .call(find_blocks);
+    assert!(
+        timeout(Duration::from_secs(2), response).await.is_err(),
+        "a version 2 peer must not answer FindBlocks"
+    );
+}
+
 /// A version 2 [`Client`] connected over loopback QUIC, and the peer's end of the connection,
 /// which must be kept for the client to stay connected.
 async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::Endpoint; 2])) {

@@ -46,13 +46,6 @@ use crate::{
 /// The width of a hash, nullifier or note commitment tree root.
 const HASH_BYTES: usize = 32;
 
-/// The width of a transparent address key: the address kind and its hash.
-const ADDRESS_BYTES: usize = 21;
-
-/// The largest address kind byte: P2PKH, P2SH and TEX for Mainnet and the
-/// test networks.
-const MAX_ADDRESS_KIND: u8 = 5;
-
 /// The width of a note commitment subtree index.
 const SUBTREE_INDEX_BYTES: usize = 2;
 
@@ -94,10 +87,6 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             valid_transaction_location(key, "transaction location")?;
             decode_all::<Transaction>(value, "transaction").map(drop)
         }
-        HashByTxLoc => {
-            valid_transaction_location(key, "transaction location")?;
-            width(value, HASH_BYTES, "transaction hash")
-        }
         TxLocByHash => {
             width(key, HASH_BYTES, "transaction hash")?;
             valid_transaction_location(value, "transaction location")
@@ -109,23 +98,6 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
         Utxos => {
             valid_output_location(key, "output location")?;
             decode_all::<transparent::Output>(value, "transparent output").map(drop)
-        }
-        AddressBalances => {
-            width(key, ADDRESS_BYTES, "transparent address")?;
-            if key[0] > MAX_ADDRESS_KIND {
-                return Err(format!("unknown transparent address kind {}", key[0]));
-            }
-            address_balance(value).map(drop)
-        }
-        AddressUtxos => {
-            let (_, rest) = output_location_prefix(key, "address location")?;
-            let (_, rest) = output_location_prefix(rest, "unspent output location")?;
-            finish(rest, "address unspent output location")?;
-            width(value, 0, "address unspent output value")
-        }
-        AddressTxs => {
-            address_transaction_suffix(key).map(drop)?;
-            width(value, 0, "address transaction value")
         }
         SproutNullifiers | SaplingNullifiers | OrchardNullifiers | IronwoodNullifiers => {
             width(key, HASH_BYTES, "nullifier")?;
@@ -233,13 +205,6 @@ fn subtree_root<'a>(bytes: &'a [u8], what: &str) -> Result<&'a [u8], String> {
     let (_, root) = height_prefix(bytes, what)?;
     width(root, HASH_BYTES, what)?;
     Ok(root)
-}
-
-pub(super) fn address_transaction_suffix(bytes: &[u8]) -> Result<&[u8], String> {
-    let (_, transaction) = output_location_prefix(bytes, "address transaction location")?;
-    let (_, rest) = transaction_location_prefix(transaction, "address transaction location")?;
-    finish(rest, "address transaction location")?;
-    Ok(transaction)
 }
 
 /// Checks that `bytes` is `expected` bytes long.
@@ -467,45 +432,6 @@ pub(super) fn block_info(bytes: &[u8]) -> Result<BlockInfo, String> {
             .map_err(|_| "block info size is not 4 bytes".to_string())?,
     );
     Ok(BlockInfo::new(value_pools, size))
-}
-
-/// An address balance record: the balance and the location of the first
-/// output the address received.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) struct AddressBalance {
-    /// The address's balance.
-    pub(super) balance: Amount<NonNegative>,
-
-    /// The location of the first output the address received, which keys its
-    /// address indexes.
-    pub(super) location: OutputLocation,
-
-    /// The total the address has received.
-    pub(super) received: u64,
-}
-
-/// Decodes an address balance record in the current encoding.
-pub(super) fn address_balance(bytes: &[u8]) -> Result<AddressBalance, String> {
-    let (balance, rest) = bytes
-        .split_at_checked(8)
-        .ok_or_else(|| "address balance is not 8 bytes".to_string())?;
-    let (location, received) = output_location_prefix(rest, "address balance location")?;
-    width(received, 8, "address received total")?;
-    let balance = Amount::<NonNegative>::from_bytes(
-        balance
-            .try_into()
-            .map_err(|_| "address balance is not 8 bytes".to_string())?,
-    )
-    .map_err(|error| format!("invalid address balance: {error}"))?;
-    Ok(AddressBalance {
-        balance,
-        location,
-        received: u64::from_le_bytes(
-            received
-                .try_into()
-                .map_err(|_| "address received total is not 8 bytes".to_string())?,
-        ),
-    })
 }
 
 /// Decodes a height key or value, which `check_record` already validated.

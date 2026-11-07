@@ -27,7 +27,7 @@ use crate::{
     constants::state_database_format_version_in_code,
     service::finalized_state::{
         height_from_bytes_prefix, DiskWriteBatch, FinalizedState, HistoryTreeParts, IntoDisk,
-        OutputLocation, RawBytes, ReadDisk, TransactionLocation, WriteDisk,
+        RawBytes, ReadDisk, TransactionLocation, WriteDisk,
     },
     state_snapshot::{
         export::{
@@ -237,11 +237,6 @@ fn tx_prefix(bytes: &[u8]) -> &[u8] {
     &bytes[..bytes.len() - rest.len()]
 }
 
-/// Returns the transaction location after an address location in an address transaction key.
-fn address_tx_suffix(bytes: &[u8]) -> &[u8] {
-    OutputLocation::from_bytes_prefix(bytes).unwrap().1
-}
-
 /// Reads the snapshot `manifest` back from `store`: checks every piece's hash
 /// and size, reads its records with the strict piece reader, and returns the
 /// manifest and the records of each component.
@@ -296,19 +291,24 @@ fn expected_rows(config: &Config, network: &Network, window_start: Height) -> Ro
     let state = open_state(config, network);
 
     let in_window = |height: u32| height == 0 || (window_start.0..=TIP.0).contains(&height);
+    let has_body = |height: u32| height == 0 || height == TIP.0;
     let unspent: BTreeSet<Vec<u8>> = cf_rows(&state, "utxo_by_out_loc")
         .keys()
         .map(|key| tx_prefix(key).to_vec())
         .collect();
-    let shipped_tx = |tx_loc: &[u8]| in_window(height_of(tx_loc)) || unspent.contains(tx_loc);
+    let shipped_tx = |tx_loc: &[u8]| has_body(height_of(tx_loc)) || unspent.contains(tx_loc);
 
     let mut expected = BTreeMap::new();
     for component in ComponentId::ALL {
         let rows = cf_rows(&state, component.column_family());
         let selected: Vec<(Vec<u8>, Vec<u8>)> = match component {
-            ComponentId::HashByHeight | ComponentId::Headers | ComponentId::Transactions => rows
+            ComponentId::HashByHeight | ComponentId::Headers => rows
                 .into_iter()
                 .filter(|(key, _)| in_window(height_of(key)))
+                .collect(),
+            ComponentId::Transactions => rows
+                .into_iter()
+                .filter(|(key, _)| has_body(height_of(key)))
                 .collect(),
             ComponentId::BlockInfo => rows
                 .into_iter()
@@ -321,17 +321,9 @@ fn expected_rows(config: &Config, network: &Network, window_start: Height) -> Ro
                 .into_iter()
                 .filter(|(_, value)| in_window(height_of(value)))
                 .collect(),
-            ComponentId::HashByTxLoc => rows
-                .into_iter()
-                .filter(|(key, _)| shipped_tx(key))
-                .collect(),
             ComponentId::TxLocByHash => rows
                 .into_iter()
                 .filter(|(_, value)| shipped_tx(value))
-                .collect(),
-            ComponentId::AddressTxs => rows
-                .into_iter()
-                .filter(|(key, _)| in_window(height_of(address_tx_suffix(key))))
                 .collect(),
             ComponentId::SaplingTree | ComponentId::OrchardTree | ComponentId::IronwoodTree => {
                 let subtrees = match component {
@@ -509,22 +501,28 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
     }
     drop(state);
 
-    // The selection is not trivial. Below the window, only transactions with unspent outputs
-    // have index rows: block 1's coinbase was spent in the window, and blocks 2 to 9 were not.
-    let tx_locs: BTreeSet<&Vec<u8>> = exported[&ComponentId::HashByTxLoc]
+    // The selection is not trivial. Outside the shipped bodies, only transactions with unspent
+    // outputs have locations: block 1's coinbase was spent in the window, and blocks 2 to 13
+    // were not.
+    let tx_locs: BTreeSet<&Vec<u8>> = exported[&ComponentId::TxLocByHash]
         .iter()
-        .map(|(key, _)| key)
+        .map(|(_, value)| value)
         .collect();
     assert!(!tx_locs.contains(&tx_loc(1, 0)));
     for height in 2..=9 {
         assert!(tx_locs.contains(&tx_loc(height, 0)), "{height}");
     }
     assert!(tx_locs.contains(&tx_loc(0, 0)), "genesis is shipped");
-    assert!(tx_locs.contains(&tx_loc(12, 1)), "the window's spend");
-    // Genesis, eight unspent coinbases, and six window transactions.
-    assert_eq!(tx_locs.len(), 1 + 8 + 6);
+    assert!(
+        tx_locs.contains(&tx_loc(12, 1)),
+        "the window's unspent spend"
+    );
+    // Genesis, eight unspent coinbases below the window, five unspent window transactions, and
+    // the snapshot block.
+    assert_eq!(tx_locs.len(), 1 + 8 + 5 + 1);
     assert_eq!(exported[&ComponentId::TxLocByHash].len(), tx_locs.len());
-    assert_eq!(exported[&ComponentId::Transactions].len(), 1 + 6);
+    // Only the bodies of genesis and the snapshot block are shipped.
+    assert_eq!(exported[&ComponentId::Transactions].len(), 1 + 1);
 
     // `block_info` ships the window's parent, which has no hash rows.
     let heights = |component: ComponentId| -> Vec<u32> {
@@ -538,14 +536,10 @@ fn export_ships_the_window_genesis_and_the_unspent_transaction_index() {
     assert_eq!(heights(ComponentId::Headers), [0, 10, 11, 12, 13, 14]);
     assert_eq!(exported[&ComponentId::HeightByHash].len(), 6);
 
-    // The address transactions of the window only, while the UTXO and balance indexes are whole.
-    assert!(!exported[&ComponentId::AddressTxs].is_empty());
-    assert!(exported[&ComponentId::AddressTxs]
+    // The UTXO set is whole: the importer rebuilds the address indexes from it.
+    assert!(exported[&ComponentId::Utxos]
         .iter()
-        .all(|(key, _)| height_of(address_tx_suffix(key)) >= WINDOW_START.0));
-    assert!(exported[&ComponentId::AddressUtxos]
-        .iter()
-        .any(|(key, _)| height_of(address_tx_suffix(key)) < WINDOW_START.0));
+        .any(|(key, _)| height_of(key) < WINDOW_START.0));
 
     // The genesis trees are below the window, and the tip tree is the genesis tree.
     for component in [
@@ -641,7 +635,7 @@ fn export_ships_the_trees_the_format_checks_and_the_window_read() {
 }
 
 #[test]
-fn export_state_snapshot_ships_every_block_of_a_short_chain() {
+fn export_state_snapshot_ships_every_header_of_a_short_chain() {
     let _init_guard = zebra_test::init();
 
     let dir = tempfile::tempdir().expect("creates a temporary directory");
@@ -658,8 +652,11 @@ fn export_state_snapshot_ships_every_block_of_a_short_chain() {
     for component in ComponentId::ALL {
         assert_eq!(exported[&component], expected[&component], "{component}");
     }
-    assert_eq!(exported[&ComponentId::Transactions].len(), 16);
-    assert_eq!(exported[&ComponentId::HashByTxLoc].len(), 16);
+    // Every header, but only the bodies of genesis and the snapshot block, and every transaction
+    // except block 1's spent coinbase in the index.
+    assert_eq!(exported[&ComponentId::Headers].len(), 15);
+    assert_eq!(exported[&ComponentId::Transactions].len(), 2);
+    assert_eq!(exported[&ComponentId::TxLocByHash].len(), 15);
 }
 
 #[test]
@@ -814,18 +811,13 @@ fn exports_are_identical_across_databases_with_legacy_encodings() {
         "exports of the same state are identical whatever its encodings",
     );
 
-    // The history tree and the address balances were shipped, so their canonicalization was
-    // exercised.
+    // The history tree was shipped, so its canonicalization was exercised.
     let (_manifest, exported) =
         read_snapshot(&legacy_store, &Network::Mainnet, from_legacy.manifest);
     assert_eq!(
         exported[&ComponentId::HistoryTree],
         [(Vec::new(), HistoryTreeParts::from(&history_tree).as_bytes())],
     );
-    assert!(!exported[&ComponentId::AddressBalances].is_empty());
-    assert!(exported[&ComponentId::AddressBalances]
-        .iter()
-        .all(|(_key, value)| value.len() == 23 && value[15..] == [0; 8]));
 }
 
 /// A Regtest snapshot carries the network's parameters hash, so its manifest
@@ -1059,7 +1051,7 @@ fn export_refuses_the_wrong_height_and_unreadable_formats() {
 }
 
 #[test]
-fn export_refuses_a_state_pruned_above_the_window() {
+fn export_needs_only_the_snapshot_block_body() {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
@@ -1068,26 +1060,26 @@ fn export_refuses_a_state_pruned_above_the_window() {
     let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &blocks);
     let store = ArtifactStore::at(dir.path().join("store"));
 
-    // Prune the bodies of blocks 1 to 10, as the pruning worker does.
+    // Prune every body below the tip, as the pruning worker does: a snapshot ships no window
+    // body below the snapshot block, so the export does not need them.
     change_state(&config, &Network::Mainnet, |state, batch| {
         for (key, _value) in cf_rows(state, "tx_by_loc") {
-            if (1..=10).contains(&height_of(&key)) {
+            if (1..TIP.0).contains(&height_of(&key)) {
                 delete(state, batch, "tx_by_loc", &key);
             }
         }
     });
-
-    assert_err!(
-        export_with_window(&config, &network, TIP, WINDOW_START, &store),
-        SnapshotError::PrunedBelowWindow { window_start, lowest_retained_height }
-            if *window_start == WINDOW_START && *lowest_retained_height == Height(11),
-    );
-
-    // A window that starts at the first retained body exports.
     let commitment =
-        export_with_window(&config, &network, TIP, Height(11), &store).expect("exports");
-    let (manifest, _exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
-    assert_eq!(manifest.window_start, Height(11));
+        export_with_window(&config, &network, TIP, WINDOW_START, &store).expect("exports");
+    let (manifest, exported) = read_snapshot(&store, &Network::Mainnet, commitment.manifest);
+    assert_eq!(manifest.window_start, WINDOW_START);
+    assert_eq!(
+        exported[&ComponentId::Transactions]
+            .iter()
+            .map(|(key, _)| height_of(key))
+            .collect::<Vec<_>>(),
+        [0, TIP.0],
+    );
 }
 
 #[test]
@@ -1107,9 +1099,17 @@ fn export_refuses_missing_and_contradictory_rows() {
             height_key(11),
             ComponentId::Headers,
         ),
-        ("tx_by_loc", tx_loc(13, 0), ComponentId::Transactions),
-        ("hash_by_tx_loc", tx_loc(2, 0), ComponentId::HashByTxLoc),
-        ("hash_by_tx_loc", tx_loc(11, 0), ComponentId::HashByTxLoc),
+        ("tx_by_loc", tx_loc(TIP.0, 0), ComponentId::Transactions),
+        (
+            "tx_loc_by_hash",
+            blocks[2].transactions[0].hash().0.to_vec(),
+            ComponentId::TxLocByHash,
+        ),
+        (
+            "tx_loc_by_hash",
+            blocks[11].transactions[0].hash().0.to_vec(),
+            ComponentId::TxLocByHash,
+        ),
         (
             "height_by_hash",
             blocks[10].hash().0.to_vec(),

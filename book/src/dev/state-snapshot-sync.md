@@ -17,16 +17,19 @@ format, an offline exporter, and an offline verified importer; a bootstrap phase
 before `zebra_state::init`; the state changes for a database whose history starts at a window
 below `H`; config, docs, unit tests, a Regtest end-to-end test, and a Mainnet benchmark.
 
-Out of scope, for follow-ups: live export at pinned heights; backfill below `H`; the drafts'
-`get-block-range`, `get-hashes`, `get-tree-roots`, and hints; pinned Mainnet and Testnet
-commitments; chain-verifying the authorizing data of the window bodies; dynamic service flags.
+Out of scope, for follow-ups: live export at pinned heights; backfill below `H`, including the
+headers below `L`; the drafts' `get-block-range`, `get-hashes`, `get-tree-roots`, and hints; the
+Mainnet manifest hash (the height and block hash are pinned, see below) and a Testnet commitment;
+reusing an existing header-only state.
 
 ## Trust model and verification
 
 The **commitment** is `StateSnapshotCommitment { height: H, block_hash: hash(H), manifest }`
 (`zebra-chain/src/state_snapshot.rs`). It is pinned per network through
-`Network::state_snapshot_commitment()`, which is `None` until a release pins one, or configured in
-`[sync] state_snapshot`. A configured commitment is accepted on Regtest and custom testnets; on
+`Network::state_snapshot_commitment()`, or configured in `[sync] state_snapshot`. Mainnet's is at
+the checkpoint `MAINNET_STATE_SNAPSHOT_HEIGHT` (3,522,060); its `MAINNET_STATE_SNAPSHOT_MANIFEST`
+is a placeholder `None` until the deterministic export of that snapshot is done, so no network pins
+a commitment yet. A configured commitment is accepted on Regtest and custom testnets; on
 Mainnet and the default Testnet only if it equals the pinned one or
 `[sync] unsafe_trust_state_snapshot` is set, which logs a warning at every start. A pinned
 commitment wins otherwise.
@@ -41,7 +44,11 @@ checkpoint minus one, cut together with the checkpoint list.
 
 1. `hash(H)`: when `H` is a checkpoint height it must equal the binary's checkpoint; otherwise the
    bootstrap fetches headers `H+1..=C` (`C` the first checkpoint above `H`) from the bootstrap peers
-   and hash-chains them from `hash(H)` to `C`. If no peer serves them, the check is deferred to the
+   and hash-chains them from `hash(H)` to `C`. The bootstrap checks their proof of work with
+   `zebra_consensus::header::verify_headers`, and the importer checks their difficulty and time
+   against the window headers and stores them in the header chain column families
+   (`header_by_height`, `height_by_header_hash`), so headers-first sync continues after `C`. If no
+   peer serves them, the check is deferred to the
    checkpoint verifier, which anchors `C` back to `hash(H)` and stalls on a mismatch with a specific
    error log. The deferral is recorded in the marker's `deferred_checks`.
 2. The history tree, and through it the frontiers. The importer decodes the shipped history tree and
@@ -58,41 +65,55 @@ checkpoint minus one, cut together with the checkpoint list.
    limit, so they cannot hide a valid body from a later peer. One copy that also matches the
    commitment is enough; mismatching copies blame only their peers. If no peer serves `H+1`, the
    check is deferred to the first commit above `H`, which runs it, and a failure there resets and
-   retries like normal sync, never rejecting automatically.
-4. The window: `L == max(1, H − 2303)`; headers `L..=H` link by `previous_block_hash`; each window
-   body's recomputed txids match its `hash_by_tx_loc` rows and its merkle root; genesis rows hash to
-   `network.genesis_hash()`.
+   retries like normal sync, never rejecting automatically. The matching copy is returned in
+   `Bootstrapped::successor`, and `zebrad start` commits it as a checkpoint-verified block right
+   after the state opens, before the block verifier and sync start, so they start at `H + 2`.
+4. The window: `L == max(1, H − 2303)`; headers `L..=H` link by `previous_block_hash`; the only
+   bodies are genesis and `H`, and each one's recomputed txids match its `hash_by_tx_loc` rows and
+   its merkle root; genesis rows hash to `network.genesis_hash()`.
 
 **Trusted on the manifest only**, never discharged (there is no backfill): the UTXO set and its
-transaction-index rows below `L`; the four nullifier sets; the four anchor sets including the
-Sprout root → tree map; the Sprout tree; the value pools; the address indexes including `received`
-totals; the subtrees and the per-height tree rows in and below the window; `block_info`; the window
-bodies' authorizing data. A node serves the window blocks on the strength of the commitment.
+transaction locations below `H`; the four nullifier sets; the four anchor sets including the
+Sprout root → tree map; the Sprout tree; the value pools; the subtrees and the per-height tree rows
+in and below the window; `block_info`.
 
-**Self-consistency checks**, each refusing the import: every UTXO's transaction location has a
-`hash_by_tx_loc` ↔ `tx_loc_by_hash` pair; every UTXO with an address has a balance row and an
-address-UTXO row; each balance equals the sum of its address's UTXOs and every address-UTXO row
-points at an existing UTXO; Σ UTXO values equals the transparent pool;
+**Rebuilt by the importer**, from the shipped components: `hash_by_tx_loc`, the inverse of
+`tx_loc_by_hash` (two transactions at one location refuse the import); the address balances and the
+address UTXO index, from the UTXO set, with each address's location at its first UTXO and its
+`received` total at zero. The address transaction index is not rebuilt: it starts above `H`. So
+`getaddressbalance` omits `received` on a snapshot-born node, and `getaddresstxids` covers the
+blocks above `H`.
+
+**Self-consistency checks**, each refusing the import: every UTXO's transaction has a location; no
+location is above `H`; Σ UTXO values equals the transparent pool;
 `tip_chain_value_pool == block_info[H].value_pools`; the manifest's network, genesis, `H`, and
 `hash(H)` match the commitment; piece sizes and entry counts match the parsed records.
 
 ## Snapshot contents
 
-The window `L..=H` is archive-complete, so a snapshot-born node serves 2,304 recent blocks and can
-advertise `NODE_NETWORK_LIMITED`. Genesis is shipped too. Blocks below `L` have no bodies and no
-hash rows.
+A snapshot ships nothing the importing node would not keep. The window `L..=H` has its hashes,
+headers and `block_info` (with `L − 1`'s), which give block `H + 1` its difficulty context and
+`getblockheader` its answers, but only block `H` has a body, so the chain tip reads back
+(`SnapshotBase::body_start`). Genesis is shipped too. Blocks below `L` have no bodies and no hash
+rows. On Mainnet this is about 2 GB, against 4.4 GB with the window bodies and address indexes.
+
+A snapshot-born node therefore cannot serve the most recent 2,304 blocks at first. It advertises
+`NODE_NETWORK_LIMITED` to the version 2 peers it connects to only once its tip is
+`NODE_NETWORK_LIMITED_BLOCKS + MAX_BLOCK_REORG_HEIGHT` above `H`
+(`zebra_network::Config::v2_limited_service_from`), so the window it promises is finalized. Until
+then, peers that require a service do not download blocks from it.
 
 Components are column-family rows in the current database format's encoding, in this fixed order
-(`zebra_state::state_snapshot::format::ComponentId`, 28 ids): `hash_by_height`, `height_by_hash`,
-`block_header_by_height`, `tx_by_loc`, `hash_by_tx_loc`, `tx_loc_by_hash`, `block_info`,
-`utxo_by_out_loc`, `balance_by_transparent_addr`, `utxo_loc_by_transparent_addr_loc`,
-`tx_loc_by_transparent_addr_loc`, the four `*_nullifiers`, the four `*_anchors`, the three
-`*_note_commitment_tree`, the three `*_note_commitment_subtree`, `sprout_note_commitment_tree`,
-`history_tree`, `tip_chain_value_pool`. The indexer's `tx_loc_by_spent_out_loc` is never shipped.
+(`zebra_state::state_snapshot::format::ComponentId`, 24 ids): `hash_by_height`, `height_by_hash`,
+`block_header_by_height`, `tx_by_loc`, `tx_loc_by_hash`, `block_info`, `utxo_by_out_loc`, the four
+`*_nullifiers`, the four `*_anchors`, the three `*_note_commitment_tree`, the three
+`*_note_commitment_subtree`, `sprout_note_commitment_tree`, `history_tree`, `tip_chain_value_pool`.
+The indexer's `tx_loc_by_spent_out_loc` is never shipped, and neither are the indexes the importer
+rebuilds.
 
 **Canonical values.** A component whose value has more than one on-disk encoding is decoded with
 `FromDisk` and re-encoded with the current `IntoDisk`, with cached roots always recomputed:
-`block_info`, `tip_chain_value_pool`, `history_tree`, `balance_by_transparent_addr`, and every tree
+`block_info`, `tip_chain_value_pool`, `history_tree`, and every tree
 value (the Sapling, Orchard, and Ironwood trees, the Sprout tip tree, and the Sprout anchor trees).
 Every other component is copied raw. The importer re-encodes the tree values the same way and never
 trusts a cached root. Determinism therefore holds across databases with different upgrade
@@ -115,16 +136,17 @@ The **manifest** (at most 1 MiB) is:
 magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
 genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 [Regtest and custom testnets only: parameters_hash 32, the consensus parameters without checkpoints]
-component_count u16 (28), then per component in ComponentId order:
+component_count u16 (24), then per component in ComponentId order:
   component_id u16 ‖ entry_count u64 ‖ piece_count u32 ‖ pieces[ size u32 ‖ sha256 32 ]
 ```
 
 Decoding is strict: bounds before allocation, no trailing bytes, no unknown ids, every component
 exactly once in order, `entry_count == 0 ⇔ piece_count == 0`. The decoder takes the `Network`,
 because the parameters hash is present only on Regtest and custom testnets. `snapshot_format`
-changes only when shipped encodings change; the importer maps it onto the running database format.
-Format 1 shipped fixed three-byte heights. Format 2 ships the variable-width heights and locations
-of database format 33, and the decoder rejects format 1.
+changes only when the shipped components or encodings change; the importer maps it onto the running
+database format. Format 1 shipped fixed three-byte heights. Format 2 ships the variable-width
+heights and locations of database format 33, drops the window bodies below `H` and the rebuildable
+indexes, and the decoder rejects format 1.
 
 The manifest and the optional version 2 handshake parameters record use the same hash. It binds
 every consensus parameter, including activation heights, funding streams, lockbox disbursements,
@@ -262,9 +284,10 @@ penalty. `SchedulerConfig` carries these values.
   directory: those readers cannot decode the records, and the oldest cannot tell that the history
   below `L` is missing.
 - `HistoryCapabilities` gains `lowest_known_height` and `snapshot_base: Option<SnapshotBase>`. With
-  a marker, the retained floor is `max(L, first body)` and the database counts as pruned.
-- Fixes: `legacy_chain` and `PruningWitness::update` treat reaching the snapshot base as the
-  witness; the `block_info` validity check starts at `max(tip − 1000, L)`; `prune_batch` gets a
+  a marker, the known floor is `L`, the retained floor is `max(H, first body)`, and the database
+  counts as pruned.
+- Fixes: `legacy_chain` and `PruningWitness::update` stop at the snapshot block, the first body,
+  and treat reaching it as the witness; the `block_info` validity check starts at `max(tip − 1000, L)`; `prune_batch` gets a
   no-progress guard; `ZebraDb::transaction` maps a location below `L` to `BlockBodyUnavailable`;
   `spent_outputs_for_block` maps an unknown parent with a marker to `BlockBodyUnavailable`; a
   snapshot database requires pruning. `zebra-consensus` starts its state checkpoint validation at
@@ -274,14 +297,15 @@ penalty. `SchedulerConfig` carries these values.
 - **Importer** (`zebra_state::state_snapshot::import`): temp root
   `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v33/<net>`; a raw RocksDB handle with
   all column families and `DiskDb::options()`; one SST ingest per column family with `move_files`,
-  into empty column families at the bottom level, auto-compactions off while ingesting; singletons
+  into empty column families at the bottom level, auto-compactions off while ingesting; the rebuilt
+  indexes ingested the same way; the headers above `H` checked and written by batch; singletons
   written by batch; the marker, then the version file; close, then reopen as `ZebraDb` with a temp
   `Config` (`cache_dir` the temp root, pruning set, `delete_old_database = false`) so it opens as
   `CheckOpenCurrent`; run the checks; close, fsync, and rename the leaf directory to
   `config.db_path(..)`.
 - **Exporter** (`zebra_state::state_snapshot::export`, run by `zebrad export-state-snapshot`):
   opens the state read-only as a secondary instance and refuses unless `can_read_without_migration`
-  holds; refuses unless the tip is `H`, the database is not pruned below `L`, and there is no
+  holds; refuses unless the tip is `H` with its body, the database has the hashes from `L`, and there is no
   indexer; exports each column family on its own blocking thread with raw iterators and readahead,
   canonicalizing where the contents section says; uses a merge join for the transaction-index
   subset below `L` and targeted gets for the tree rows. The command prints the complete
