@@ -135,7 +135,7 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         block: block.clone(),
         hash: block::Hash([0x00; 32]),
         height,
-        new_outputs,
+        new_outputs: Arc::new(new_outputs),
         transaction_hashes,
         received_time: None,
     };
@@ -291,7 +291,7 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
             hash: block.hash(),
             block,
             height,
-            new_outputs,
+            new_outputs: Arc::new(new_outputs),
             transaction_hashes,
             received_time: None,
         }),

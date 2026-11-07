@@ -458,8 +458,7 @@ impl WriteBlockWorkerTask {
             } else {
                 // Measure only commits here, not proposals or restored backup blocks.
                 let phase_start = Instant::now();
-                let result = if let Some(mut contextual) = contextual {
-                    contextual.new_outputs = Arc::new(queued_child.new_outputs);
+                let result = if let Some(contextual) = contextual {
                     non_finalized_state.commit_prevalidated_contextual(
                         *contextual,
                         &finalized_state.db,
