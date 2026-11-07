@@ -14,16 +14,14 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Header, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
-    serialization::{CompactSizeMessage, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{CompactSizeMessage, ZcashSerialize},
     transaction::{
-        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx,
-        MIN_TRANSPARENT_TX_SIZE,
+        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx, MIN_TRANSPARENT_TX_SIZE,
     },
 };
 use zebra_consensus::{ShieldedActionCounts, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::TransactionDependencies;
 
-use super::CoinbaseCache;
 use crate::methods::types::transaction::TransactionTemplate;
 
 #[cfg(test)]
@@ -42,53 +40,28 @@ type SelectedMempoolTx = (InBlockTxDependenciesDepth, VerifiedUnminedTx);
 #[cfg(not(test))]
 type SelectedMempoolTx = VerifiedUnminedTx;
 
-/// Selects mempool transactions for block production according to [ZIP-317],
-/// using a fake coinbase transaction and the mempool.
+/// Selects mempool transactions for block production according to [ZIP-317].
 ///
-/// The sizing coinbase must have at least the bytes, sigops, and shielded components of the
-/// fee-bearing coinbase. Both use the same subsidy and miner parameters; changing only the
-/// reward amount does not change these costs.
+/// Reserves the fee-independent coinbase resources without constructing a sizing proof.
 ///
 /// Returns selected transactions from `mempool_txs`.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-#[allow(clippy::too_many_arguments)]
 pub fn select_mempool_transactions(
     net: &Network,
     height: Height,
     miner_params: &MinerParams,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    coinbase_cache: Option<&CoinbaseCache>,
     parent_nsm_value_balance: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
-    if let Some(cache) = coinbase_cache {
-        cache.select(height, parent_nsm_value_balance);
-    }
-
-    // Use a fake coinbase transaction to break the dependency between transaction
-    // selection, the miner fee, and the fee payment in the coinbase transaction.
-    //
-    // The fake coinbase only depends on the height, miner parameters, and parent NSM value
-    // balance (its fee is always zero), so it's constant per block. Reuse the same per-block cache
-    // as the real coinbase to avoid re-proving a shielded coinbase on every `getblocktemplate`
-    // call just to read its size.
-    let fake_coinbase_tx = coinbase_cache
-        .and_then(|cache| cache.get(height, Amount::zero(), parent_nsm_value_balance))
-        .unwrap_or_else(|| {
-            let cb = TransactionTemplate::new_coinbase_with_parent_pools(
-                net,
-                height,
-                miner_params,
-                Amount::zero(),
-                parent_nsm_value_balance,
-            )
-            .expect("valid coinbase transaction template");
-            if let Some(cache) = coinbase_cache {
-                cache.store(height, Amount::zero(), parent_nsm_value_balance, cb.clone());
-            }
-            cb
-        });
+    let coinbase = TransactionTemplate::coinbase_resource_usage(
+        net,
+        height,
+        miner_params,
+        parent_nsm_value_balance,
+    )
+    .expect("validated miner parameters and parent context determine a valid coinbase");
 
     let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
@@ -118,19 +91,13 @@ pub fn select_mempool_transactions(
 
     // Reserve every coinbase cost before selecting candidates. Checked subtraction also handles
     // a coinbase that exhausts the byte or sigop budget without wrapping.
-    let Some(block_bytes) = remaining_block_bytes.checked_sub(fake_coinbase_tx.data.as_ref().len())
-    else {
+    let Some(block_bytes) = remaining_block_bytes.checked_sub(coinbase.serialized_size) else {
         return selected_txs;
     };
-    let Some(block_sigops) = remaining_block_sigops.checked_sub(fake_coinbase_tx.sigops) else {
+    let Some(block_sigops) = remaining_block_sigops.checked_sub(coinbase.sigops) else {
         return selected_txs;
     };
-    let coinbase: Transaction = fake_coinbase_tx
-        .data
-        .as_ref()
-        .zcash_deserialize_into()
-        .expect("locally constructed coinbase must deserialize");
-    if !remaining_shielded.try_add(&coinbase) {
+    if !remaining_shielded.try_add(coinbase.shielded_actions) {
         return selected_txs;
     }
     remaining_block_bytes = block_bytes;
@@ -390,16 +357,14 @@ impl ShieldedBudget {
         }
     }
 
-    /// Adds `transaction` to the budget and returns `true`, or returns `false` and leaves the
+    /// Adds `counts` to the budget and returns `true`, or returns `false` and leaves the
     /// budget unchanged if it would exceed a limit.
-    fn try_add(&mut self, transaction: &Transaction) -> bool {
+    fn try_add(&mut self, counts: ShieldedActionCounts) -> bool {
         if !self.applies {
             return true;
         }
 
-        let used = self
-            .used
-            .saturating_add(ShieldedActionCounts::from_transaction(transaction));
+        let used = self.used.saturating_add(counts);
 
         if used.exceeded_limit().is_some() {
             return false;
@@ -448,7 +413,9 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
             && self.unpaid_actions <= *remaining_block_unpaid_actions
             // Checked last, and only committed once the other limits pass, so the shielded
             // budget is not consumed by a transaction that is then rejected for its size.
-            && remaining_shielded.try_add(&self.transaction.transaction)
+            && remaining_shielded.try_add(ShieldedActionCounts::from_transaction(
+                &self.transaction.transaction,
+            ))
         {
             *remaining_block_bytes -= self.transaction.size;
             *remaining_block_sigops -= tx_block_sigops;
