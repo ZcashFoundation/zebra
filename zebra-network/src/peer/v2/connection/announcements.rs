@@ -407,9 +407,9 @@ where
     .await
 }
 
-/// Hands a batch of address announcement records to the connection task's
-/// cache, best effort; a batch with a nonconforming record contributes
-/// nothing to it.
+/// Hands a batch of address announcement records to the connection task,
+/// which applies the peer's address budget, best effort; a batch with a
+/// nonconforming record contributes nothing.
 fn handle_addr_announcements(payloads: &[Bytes], events: &Events) -> Result<(), Handled> {
     let mut addrs = Vec::new();
     for payload in payloads {

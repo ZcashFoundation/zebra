@@ -6,7 +6,11 @@ use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use quinn::{Connection, Endpoint, RecvStream, SendStream};
-use tokio::{sync::broadcast, task::JoinSet, time::Instant};
+use tokio::{
+    sync::{broadcast, mpsc},
+    task::JoinSet,
+    time::Instant,
+};
 use tower::{service_fn, util::BoxCloneService, Service, ServiceExt};
 
 use zebra_chain::{
@@ -21,6 +25,7 @@ use crate::{
     meta_addr::MetaAddr,
     peer::{
         v2::{
+            addr_relay::{AddrRelay, AddrRelayHandle, Timings},
             connection::{
                 announcements::AnnouncementWriter,
                 inbound::{
@@ -42,10 +47,12 @@ use crate::{
     },
     peer_set::{ActiveConnectionCounter, InventoryChange},
     protocol::{
-        external::{types::PeerServices, InventoryHash},
+        external::{canonical_peer_addr, types::PeerServices, InventoryHash},
         internal::{InventoryResponse, Request, Response},
         v2::{
-            announcement::{encode_tx_record, BLOCK_ANNOUNCEMENT_HEADER},
+            announcement::{
+                decode_addr_record, encode_addr_record, encode_tx_record, BLOCK_ANNOUNCEMENT_HEADER,
+            },
             constants::MAX_RECORD_PAYLOAD_LEN,
             handshake::{InitRecord, INIT_RECORD_KIND},
             record::RecordCodec,
@@ -59,7 +66,8 @@ use crate::{
         },
     },
     quic::app_error_code,
-    BoxError, MisbehaviorReport, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
+    v2_address_book::{Message as SegmentMessage, V2BookHandle, Via},
+    BanList, BoxError, MisbehaviorReport, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 /// Every loopback exchange finishes in well under this.
@@ -208,12 +216,43 @@ fn spawn_node_with(
         inbound_rx,
         MisbehaviorScores::spawn(misbehavior_tx, 8),
         misbehavior_rx,
+        Relaying::default(),
     )
+}
+
+/// A node's address relay hub, ban list, and version 2 address segment.
+struct Relaying {
+    addr_relay: Option<AddrRelayHandle>,
+    bans: tokio::sync::watch::Receiver<BanList>,
+    address_book: Option<V2BookHandle>,
+}
+
+impl Default for Relaying {
+    /// No hub, no bans, and no address segment.
+    fn default() -> Self {
+        Relaying {
+            addr_relay: None,
+            bans: tokio::sync::watch::channel(BanList::default()).1,
+            address_book: None,
+        }
+    }
+}
+
+impl Relaying {
+    /// No hub and no bans, with `address_book` as the node's address segment.
+    fn with_address_book(address_book: V2BookHandle) -> Self {
+        Relaying {
+            address_book: Some(address_book),
+            ..Relaying::default()
+        }
+    }
 }
 
 /// Spawns a connection task over `connection` with `inbound_service` and the
 /// `misbehavior` scores, whose reports arrive on `misbehavior_rx` if they
-/// were spawned with its sender.
+/// were spawned with its sender. With `relaying.address_book`, the connection
+/// hands relayed addresses to it, serves `get-addr` from it, and asks the peer for
+/// addresses if it dialled the peer.
 fn spawn_node_scored(
     connection: Connection,
     completed: CompletedHandshake,
@@ -221,6 +260,7 @@ fn spawn_node_scored(
     inbound_rx: tokio::sync::mpsc::UnboundedReceiver<Request>,
     misbehavior: MisbehaviorScores,
     misbehavior_rx: tokio::sync::mpsc::Receiver<MisbehaviorReport>,
+    relaying: Relaying,
 ) -> TestNode {
     let (inv_tx, inv_rx) = broadcast::channel(16);
     let mut counter = ActiveConnectionCounter::new_counter();
@@ -234,6 +274,10 @@ fn spawn_node_scored(
             inv_collector: inv_tx,
             genesis_hash: Network::Mainnet.genesis_hash(),
             misbehavior: misbehavior.clone(),
+            discovery: relaying.address_book.is_some(),
+            address_book: relaying.address_book,
+            bans: relaying.bans,
+            addr_relay: relaying.addr_relay,
         },
         None,
     );
@@ -285,6 +329,58 @@ async fn connected_nodes_with_connections(
     )
 }
 
+/// Two connected nodes, the first dialled the second, each with a stand-in version 2 address
+/// segment whose messages arrive on the returned receivers, and the address each node has for
+/// the other.
+async fn connected_nodes_with_segments(
+    network: &Network,
+) -> (
+    (TestNode, mpsc::Receiver<SegmentMessage>, PeerSocketAddr),
+    (TestNode, mpsc::Receiver<SegmentMessage>),
+    (Endpoint, Endpoint),
+) {
+    let (outbound, inbound, client_ep, server_ep) = connected_pair(network).await;
+    let (a, b) = (identity("/a/"), identity("/b/"));
+    let (a_nonces, b_nonces) = (NonceRegistry::spawn(8), NonceRegistry::spawn(8));
+    let (initiator, responder) = tokio::join!(
+        run_handshake(&outbound, Role::Initiator, network, &a, &a_nonces),
+        run_handshake(&inbound, Role::Responder, network, &b, &b_nonces),
+    );
+    let b_addr: PeerSocketAddr = canonical_peer_addr(server_ep.local_addr().expect("bound"));
+
+    let node = |connection, completed, fixture| {
+        let (inbound_service, inbound_rx) = fixture_service(fixture);
+        let (misbehavior_tx, misbehavior_rx) = mpsc::channel(8);
+        let (segment_tx, segment_rx) = mpsc::channel(8);
+        let node = spawn_node_scored(
+            connection,
+            completed,
+            inbound_service,
+            inbound_rx,
+            MisbehaviorScores::spawn(misbehavior_tx, 8),
+            misbehavior_rx,
+            Relaying::with_address_book(V2BookHandle::new(segment_tx)),
+        );
+        (node, segment_rx)
+    };
+    let fixture = Fixture::new();
+    let (a, a_segment) = node(
+        outbound,
+        initiator.expect("the handshake completes"),
+        fixture.clone(),
+    );
+    let (b, b_segment) = node(
+        inbound,
+        responder.expect("the handshake completes"),
+        fixture,
+    );
+    (
+        (a, a_segment, b_addr),
+        (b, b_segment),
+        (client_ep, server_ep),
+    )
+}
+
 /// A node connected to a raw peer that completed the handshake by hand, with
 /// the raw side's handshake stream and `init` record for driving violations.
 struct RawPeer {
@@ -328,20 +424,37 @@ async fn raw_peer_node_configured(
     relay: bool,
     client_config: Option<quinn::ClientConfig>,
 ) -> RawPeer {
-    raw_peer_node_scored(network, inbound_service, relay, client_config, None).await
+    raw_peer_node_scored(
+        network,
+        inbound_service,
+        relay,
+        client_config,
+        None,
+        Relaying::default(),
+    )
+    .await
+}
+
+/// Connects a raw peer to a node serving the fixture, which relays addresses
+/// through `relaying`, and completes the handshake by hand. The raw peer
+/// dials the node.
+async fn raw_peer_node_with_hub(network: &Network, relaying: Relaying) -> RawPeer {
+    raw_peer_node_scored(network, None, true, None, None, relaying).await
 }
 
 /// Connects a raw peer, which uses `client_config` if given, to a node and
 /// completes the handshake by hand, with `relay` in the raw peer's `init`
 /// record. The node serves `inbound_service`, or the fixture if `None`, and
 /// scores the peer's misbehavior in `misbehavior`, or in scores of its own if
-/// `None`.
+/// `None`. It relays addresses through `relaying`, and hands relayed addresses to its address
+/// book, if it has one.
 async fn raw_peer_node_scored(
     network: &Network,
     inbound_service: Option<TestService>,
     relay: bool,
     client_config: Option<quinn::ClientConfig>,
     misbehavior: Option<MisbehaviorScores>,
+    relaying: Relaying,
 ) -> RawPeer {
     let (connection, inbound, client_ep, server_ep) =
         connected_pair_with(network, client_config).await;
@@ -378,18 +491,23 @@ async fn raw_peer_node_scored(
         Some(service) => (service, tokio::sync::mpsc::unbounded_channel().1),
         None => fixture_service(Fixture::new()),
     };
-    let node = match misbehavior {
+    let (misbehavior, misbehavior_rx) = match misbehavior {
         // The shared scores report on their own node's receiver; this one gets nothing.
-        Some(misbehavior) => spawn_node_scored(
-            inbound,
-            completed,
-            inbound_service,
-            inbound_rx,
-            misbehavior,
-            tokio::sync::mpsc::channel(1).1,
-        ),
-        None => spawn_node_with(inbound, completed, inbound_service, inbound_rx),
+        Some(misbehavior) => (misbehavior, tokio::sync::mpsc::channel(1).1),
+        None => {
+            let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(8);
+            (MisbehaviorScores::spawn(misbehavior_tx, 8), misbehavior_rx)
+        }
     };
+    let node = spawn_node_scored(
+        inbound,
+        completed,
+        inbound_service,
+        inbound_rx,
+        misbehavior,
+        misbehavior_rx,
+        relaying,
+    );
 
     RawPeer {
         connection,
@@ -424,16 +542,10 @@ async fn requests_round_trip_between_two_nodes() {
         let block_1 = fixture.blocks[1].clone();
         let block_2 = fixture.blocks[2].clone();
 
-        // Peers: served from B's inbound service.
+        // Peers: version 2 peers' addresses go to the version 2 address segment, so the legacy
+        // request is answered at once, with nothing.
         let response = call(&mut a.client, Request::Peers).await.expect("peers");
-        match response {
-            Response::Peers(addrs) => {
-                assert_eq!(addrs.len(), 1);
-                assert_eq!(addrs[0].addr(), fixture.addrs[0].addr());
-            }
-            other => panic!("unexpected response {other}"),
-        }
-        assert!(matches!(b.inbound_rx.recv().await, Some(Request::Peers)));
+        assert_eq!(response, Response::Peers(Vec::new()));
 
         // Blocks: found and missing, in request order, from the other direction too.
         let missing = block::Hash([0xAB; 32]);
@@ -828,7 +940,7 @@ async fn failed_requests_are_refused() {
         });
         let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(failing))).await;
 
-        let mut recv = raw_request(&raw.connection, &WireRequest::Addr).await;
+        let mut recv = raw_request(&raw.connection, &WireRequest::Mempool).await;
         assert_reset(recv.read_to_end(1024).await, ErrorCode::Refused);
         assert!(
             raw.connection.close_reason().is_none(),
@@ -1942,6 +2054,7 @@ async fn reconnecting_banned_peers_are_closed_on_their_first_violation() {
             true,
             None,
             Some(raw.node.misbehavior.clone()),
+            Relaying::default(),
         )
         .await;
         reply_with_misbehavior(&mut again, &non_contiguous).await;
@@ -2201,35 +2314,93 @@ async fn stalled_requests_end_at_the_request_timeout() {
     .expect("the test completes well within the timeout");
 }
 
-/// `get-addr` is only sent on a connection this node dialled, and only
-/// once: later `Request::Peers` are answered from the cache, even when it
-/// is empty, as they are on a connection the peer dialled.
+/// With discovery on, a node sends `get-addr` once, right after the handshake, and only on a
+/// connection it dialled. The peer answers from its version 2 address segment, never from its
+/// inbound service, and the whole answer goes to the dialler's segment, with the peer as its
+/// source.
 #[tokio::test]
-async fn get_addr_is_only_sent_once_on_dialled_connections() {
+async fn get_addr_is_sent_once_and_feeds_the_segment() {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let (mut a, mut b, _e1, _e2) = connected_nodes(&network).await;
+        let ((mut a, mut a_segment, b_addr), (mut b, mut b_segment), _endpoints) =
+            connected_nodes_with_segments(&network).await;
         let fixture = Fixture::new();
 
-        // B accepted the connection: its empty cache answers.
-        let response = call(&mut b.client, Request::Peers).await.expect("peers");
-        assert_eq!(response, Response::Peers(Vec::new()));
+        // B, which A dialled, answers from its segment.
+        match b_segment
+            .recv()
+            .await
+            .expect("B's connection asks its segment")
+        {
+            SegmentMessage::GetAddrSample { reply } => reply
+                .send(fixture.addrs.clone())
+                .expect("B waits for the sample"),
+            other => panic!("unexpected segment message {other:?}"),
+        }
 
-        // A dialled it: the first request asks B, the second is answered from the cache.
-        let response = call(&mut a.client, Request::Peers).await.expect("peers");
+        // A hands the whole answer to its segment, as relayed by B.
+        match a_segment
+            .recv()
+            .await
+            .expect("A's connection hands over the answer")
+        {
+            SegmentMessage::Intake { source, addrs, via } => {
+                assert_eq!(source, b_addr);
+                assert_eq!(via, Via::GetAddr);
+                assert_eq!(
+                    addrs.iter().map(MetaAddr::addr).collect::<Vec<_>>(),
+                    fixture.addrs.iter().map(MetaAddr::addr).collect::<Vec<_>>(),
+                );
+            }
+            other => panic!("unexpected segment message {other:?}"),
+        }
+
+        // Nothing else: B, which accepted the connection, does not ask A, and A asks once.
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(a_segment.try_recv().is_err(), "A's segment got one message");
+        assert!(b_segment.try_recv().is_err(), "B's segment got one message");
+
+        // The legacy address request never reaches a version 2 peer or an inbound service.
+        for client in [&mut a.client, &mut b.client] {
+            let response = call(client, Request::Peers).await.expect("peers");
+            assert_eq!(response, Response::Peers(Vec::new()));
+        }
+        while let Ok(request) = a.inbound_rx.try_recv() {
+            assert!(
+                !matches!(request, Request::Peers),
+                "A's inbound service was asked"
+            );
+        }
+        while let Ok(request) = b.inbound_rx.try_recv() {
+            assert!(
+                !matches!(request, Request::Peers),
+                "B's inbound service was asked"
+            );
+        }
         assert!(
-            matches!(&response, Response::Peers(addrs) if addrs.len() == 1
-                && addrs[0].addr() == fixture.addrs[0].addr()),
-            "got {response}"
+            b_segment.try_recv().is_err(),
+            "no second get-addr reached B"
         );
-        assert!(matches!(b.inbound_rx.recv().await, Some(Request::Peers)));
-        let response = call(&mut a.client, Request::Peers).await.expect("peers");
-        assert_eq!(response, Response::Peers(Vec::new()));
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
 
-        assert!(b.inbound_rx.try_recv().is_err(), "one get-addr reached B");
-        assert!(a.inbound_rx.try_recv().is_err(), "no get-addr reached A");
+/// The peer set never routes the legacy address book's address request to a version 2 peer.
+#[tokio::test]
+async fn v2_clients_do_not_support_legacy_address_requests() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (a, _b, _e1, _e2) = connected_nodes(&network).await;
+        let client = crate::peer::LoadTrackedClient::from(a.client);
+
+        assert!(!client.supports(&Request::Peers));
+        assert!(!client.supports(&Request::MempoolTransactionIds));
+        assert!(client.supports(&Request::BlocksByHash(HashSet::new())));
     })
     .await
     .expect("the test completes well within the timeout");
@@ -2251,11 +2422,11 @@ async fn get_addr_is_refused_unless_first_and_inbound() {
         let mut recv = raw_request(&b_connection, &WireRequest::Addr).await;
         assert_reset(recv.read_to_end(1 << 20).await, ErrorCode::Refused);
 
-        // From A to B: answered once.
+        // From A to B: answered once, with nothing, since B has no version 2 address segment.
         let mut recv = raw_request(&a_connection, &WireRequest::Addr).await;
         let body = recv.read_to_end(1 << 20).await.expect("answered");
         let addrs = decode_addr_response(&body).expect("a well-formed response");
-        assert_eq!(addrs.len(), 1);
+        assert!(addrs.is_empty());
         let mut recv = raw_request(&a_connection, &WireRequest::Addr).await;
         assert_reset(recv.read_to_end(1 << 20).await, ErrorCode::Refused);
 
@@ -2266,18 +2437,30 @@ async fn get_addr_is_refused_unless_first_and_inbound() {
     .expect("the test completes well within the timeout");
 }
 
-/// The peer's address announcements fill the cache that answers
-/// `Request::Peers`, without the inbound service; its block announcements
-/// reach the inventory registry and the inbound service.
+/// The peer's address announcements go to the version 2 address segment, with the peer as their
+/// source, without the inbound service; its block announcements reach the inventory registry and
+/// the inbound service.
 #[tokio::test]
 async fn inbound_announcements_reach_the_node() {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let mut raw = raw_peer_node(&network).await;
+        let (segment_tx, mut segment_rx) = mpsc::channel(8);
+        let mut raw = raw_peer_node_scored(
+            &network,
+            None,
+            true,
+            None,
+            None,
+            Relaying::with_address_book(V2BookHandle::new(segment_tx)),
+        )
+        .await;
+        let raw_addr: PeerSocketAddr =
+            canonical_peer_addr(raw._endpoints.0.local_addr().expect("bound"));
 
-        let addrs: Vec<MetaAddr> = ["203.0.113.7:8233", "203.0.113.8:8233"]
+        // A new connection's address budget is one record.
+        let addrs: Vec<MetaAddr> = ["203.0.113.7:8233"]
             .into_iter()
             .map(|addr| {
                 MetaAddr::new_gossiped_meta_addr(
@@ -2298,15 +2481,18 @@ async fn inbound_announcements_reach_the_node() {
             send.write_all(&record).await.expect("writes");
         }
 
-        // The raw peer dialled, so `Request::Peers` is answered from the cache, which the
-        // announcements fill once their reader has handed them over.
+        // The announcements reach the segment once their reader has handed them over, in one
+        // or more batches.
         let mut received = Vec::new();
         while received.len() < addrs.len() {
-            match call(&mut raw.node.client, Request::Peers).await {
-                Ok(Response::Peers(peers)) => received.extend(peers),
-                other => panic!("unexpected response {other:?}"),
+            match segment_rx.recv().await.expect("the node hands them over") {
+                SegmentMessage::Intake { source, addrs, via } => {
+                    assert_eq!(source, raw_addr);
+                    assert_eq!(via, Via::Announcement);
+                    received.extend(addrs);
+                }
+                other => panic!("unexpected segment message {other:?}"),
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         let received: HashSet<_> = received.iter().map(|addr| addr.addr()).collect();
         let expected: HashSet<_> = addrs.iter().map(|addr| addr.addr()).collect();
@@ -2705,6 +2891,7 @@ async fn interrupted_responses_are_cancelled_when_the_inbound_service_shuts_down
             Arc::new(tokio::sync::Semaphore::new(INBOUND_REQUEST_CONCURRENCY)),
             Arc::new(Overloads::new()),
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            None,
             events,
         ));
 
@@ -3450,6 +3637,243 @@ async fn response_violations_are_never_crowded_out() {
                 "{code:?}: the address events are untouched"
             );
         }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// One address announcement record for `addr`.
+fn addr_record(addr: &MetaAddr) -> Bytes {
+    RecordCodec::encode_record(encode_addr_record(addr).expect("encodes")).expect("valid")
+}
+
+/// A gossiped address with a fresh time.
+fn fresh_addr(addr: &str) -> MetaAddr {
+    MetaAddr::new_gossiped_meta_addr(
+        addr.parse::<SocketAddr>().unwrap().into(),
+        PeerServices::NODE_NETWORK,
+        DateTime32::now(),
+    )
+}
+
+/// Opens an address announcement stream from `connection` and writes
+/// `addrs` on it, one record each, returning the stream to keep it open.
+async fn announce_addrs(connection: &Connection, addrs: &[MetaAddr]) -> SendStream {
+    let mut send = connection.open_uni().await.expect("opens");
+    send.write_all(&[StreamType::AddressAnnouncements.code()])
+        .await
+        .expect("writes");
+    for addr in addrs {
+        send.write_all(&addr_record(addr)).await.expect("writes");
+    }
+    send
+}
+
+/// Accepts the address announcement stream the node opens to `connection`,
+/// and returns its records as they arrive.
+async fn accept_addr_stream(
+    connection: &Connection,
+) -> tokio_util::codec::FramedRead<RecvStream, RecordCodec> {
+    let mut recv = connection
+        .accept_uni()
+        .await
+        .expect("the node opens a stream");
+    let mut type_byte = [0u8; 1];
+    recv.read_exact(&mut type_byte).await.expect("reads");
+    assert_eq!(type_byte[0], StreamType::AddressAnnouncements.code());
+    tokio_util::codec::FramedRead::new(recv, RecordCodec)
+}
+
+/// A hub that trickles relayed addresses out at once, and advertises
+/// nothing.
+fn fast_hub() -> AddrRelayHandle {
+    AddrRelay::spawn_with(
+        None,
+        Network::Mainnet,
+        [3; 32],
+        Timings {
+            trickle_mean: Duration::from_millis(10),
+            ..Timings::default()
+        },
+    )
+}
+
+/// Announced addresses beyond the peer's budget are dropped silently: the
+/// connection stays open, and only the first record is relayed.
+#[tokio::test]
+async fn announced_addresses_over_budget_are_dropped_without_an_error() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        let mut raw = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addrs: Vec<MetaAddr> = (1..=5)
+            .map(|index| fresh_addr(&format!("203.0.113.{index}:8233")))
+            .collect();
+        let _send = announce_addrs(&raw.connection, &addrs).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let mut received = Vec::new();
+        while let Ok(Some(payload)) = tokio::time::timeout(SHORT_WAIT, records.next()).await {
+            let payload = payload.expect("a valid record");
+            received.extend(decode_addr_record(&payload).expect("decodes"));
+        }
+        assert_eq!(
+            received.iter().map(MetaAddr::addr).collect::<Vec<_>>(),
+            vec![addrs[0].addr()],
+            "only the first record is within the budget"
+        );
+
+        assert!(
+            call(&mut raw.node.client, Request::Ping(Default::default()))
+                .await
+                .is_ok(),
+            "the connection is still open"
+        );
+        assert!(raw.connection.close_reason().is_none());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// An address one peer announces is relayed to another peer on the node's
+/// address announcement stream, in a record `decode_addr_record` reads.
+#[tokio::test]
+async fn announced_addresses_are_relayed_to_other_peers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        // Both connections register before anything is offered.
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addr = fresh_addr("203.0.113.9:8233");
+        let _send = announce_addrs(&source.connection, std::slice::from_ref(&addr)).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(decode_addr_record(&payload).expect("decodes"), Some(addr));
+
+        // Nothing comes back to the source.
+        assert!(
+            tokio::time::timeout(SHORT_WAIT, source.connection.accept_uni())
+                .await
+                .is_err(),
+            "the source is not sent its own address"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A node relays what it accepts from a burst of more than ten address
+/// records written back to back, as another node's hub flush writes them:
+/// how many arrive together is network timing, not news, so it doesn't stop
+/// the next hop. A new connection's budget keeps only the first record.
+#[tokio::test]
+async fn back_to_back_address_records_are_still_relayed() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            ..Relaying::default()
+        };
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let addrs: Vec<MetaAddr> = (1..=11)
+            .map(|index| fresh_addr(&format!("203.0.113.{index}:8233")))
+            .collect();
+        let mut send = source.connection.open_uni().await.expect("opens");
+        let mut burst = vec![StreamType::AddressAnnouncements.code()];
+        for addr in &addrs {
+            burst.extend_from_slice(&addr_record(addr));
+        }
+        send.write_all(&burst).await.expect("writes");
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(
+            decode_addr_record(&payload).expect("decodes"),
+            Some(addrs[0].clone()),
+            "the record within the budget is relayed"
+        );
+        assert!(
+            tokio::time::timeout(SHORT_WAIT, records.next())
+                .await
+                .is_err(),
+            "the records over the budget are not"
+        );
+        drop(send);
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Banned addresses a peer announces are not relayed.
+#[tokio::test]
+async fn banned_addresses_are_never_relayed() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let banned = fresh_addr("203.0.113.66:8233");
+        let mut ban_list = BanList::default();
+        ban_list.ban(banned.addr().ip());
+        let (_bans_tx, bans) = tokio::sync::watch::channel(ban_list);
+
+        let hub = fast_hub();
+        let relaying = || Relaying {
+            addr_relay: Some(hub.clone()),
+            bans: bans.clone(),
+            address_book: None,
+        };
+        let banned_source = raw_peer_node_with_hub(&network, relaying()).await;
+        let destination = raw_peer_node_with_hub(&network, relaying()).await;
+        // Each connection has its own budget, so the allowed address comes from another peer.
+        let source = raw_peer_node_with_hub(&network, relaying()).await;
+
+        let _banned_send =
+            announce_addrs(&banned_source.connection, std::slice::from_ref(&banned)).await;
+        tokio::time::sleep(SHORT_WAIT).await;
+        let allowed = fresh_addr("203.0.113.67:8233");
+        let _send = announce_addrs(&source.connection, std::slice::from_ref(&allowed)).await;
+
+        let mut records = accept_addr_stream(&destination.connection).await;
+        let payload = records
+            .next()
+            .await
+            .expect("a record")
+            .expect("a valid record");
+        assert_eq!(
+            decode_addr_record(&payload).expect("decodes"),
+            Some(allowed),
+            "the first relayed record is the allowed address, not the banned one"
+        );
     })
     .await
     .expect("the test completes well within the timeout");

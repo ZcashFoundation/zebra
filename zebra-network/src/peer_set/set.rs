@@ -395,6 +395,12 @@ where
     /// Channels used to cancel the request that an unready service is doing.
     cancel_handles: HashMap<D::Key, oneshot::Sender<CancelClientWork>>,
 
+    /// The keys of every connected peer, ready or busy: the keys of `ready_services` and
+    /// `cancel_handles`. The dialers check it, so they dial fewer connections this peer set
+    /// would drop. Pending handshakes aren't in it, so this peer set still drops a racing
+    /// duplicate itself.
+    connected_peers: watch::Sender<Arc<HashSet<D::Key>>>,
+
     // Peer Validation
     //
     /// An endpoint to see the minimum peer protocol version in real time.
@@ -534,6 +540,7 @@ where
             // Busy peers
             unready_services: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            connected_peers: watch::channel(Arc::new(HashSet::new())).0,
 
             // Peer validation
             minimum_peer_version,
@@ -551,6 +558,12 @@ where
 
             network: config.network.clone(),
         }
+    }
+
+    /// Returns the keys of the connected peers, kept up to date as peers connect and
+    /// disconnect.
+    pub(crate) fn connected_peers(&self) -> watch::Receiver<Arc<HashSet<PeerSocketAddr>>> {
+        self.connected_peers.subscribe()
     }
 
     /// Return the independently bounded block advertiser for this peer set.
@@ -659,6 +672,7 @@ where
         for (_peer_key, handle) in self.cancel_handles.drain() {
             let _ = handle.send(CancelClientWork);
         }
+        self.publish_connected_peers();
         self.unready_services = FuturesUnordered::new();
 
         // Refuse queued requests, because there are no peers left to route them to.
@@ -702,6 +716,9 @@ where
             }
             connected
         });
+        // Publish the peers `poll_discover` added, and drop the ones that disconnected or were
+        // dropped since the last poll.
+        self.publish_connected_peers();
         ready_peers.map(Ok)
     }
 
@@ -909,6 +926,39 @@ where
     /// Returns `true` if Zebra is already connected to the IP and port in `addr`.
     fn has_peer_with_addr(&self, addr: PeerSocketAddr) -> bool {
         self.ready_services.contains_key(&addr) || self.cancel_handles.contains_key(&addr)
+    }
+
+    /// Publishes the keys of the connected peers, if they changed since they were last
+    /// published.
+    ///
+    /// Peers move between `ready_services` and `cancel_handles` on every request, and leave
+    /// either from many places, so this compares the published keys to both maps, rather than
+    /// following each change. A request does not change the keys, so it doesn't wake the
+    /// dialers.
+    ///
+    /// # Performance
+    ///
+    /// This method is `O(connected peers)`.
+    fn publish_connected_peers(&self) {
+        let ready_services = &self.ready_services;
+        let cancel_handles = &self.cancel_handles;
+        self.connected_peers.send_if_modified(|published| {
+            let unchanged = published.len() == ready_services.len() + cancel_handles.len()
+                && ready_services
+                    .keys()
+                    .chain(cancel_handles.keys())
+                    .all(|key| published.contains(key));
+            if !unchanged {
+                *published = Arc::new(
+                    ready_services
+                        .keys()
+                        .chain(cancel_handles.keys())
+                        .copied()
+                        .collect(),
+                );
+            }
+            !unchanged
+        });
     }
 
     /// Processes the entire list of newly inserted or removed services.

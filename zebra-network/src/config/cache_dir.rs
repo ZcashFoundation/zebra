@@ -65,6 +65,18 @@ impl CacheDir {
         )
     }
 
+    /// Returns the version 2 peer cache file path for `network`, if enabled.
+    ///
+    /// It holds the addresses of version 2 (QUIC) peers, in the same format as the legacy peer
+    /// cache, so an older Zebra that does not know it never dials them over TCP.
+    pub fn v2_peer_cache_file_path(&self, network: &Network) -> Option<PathBuf> {
+        Some(
+            self.cache_dir()?
+                .join("network")
+                .join(format!("{}.v2-peers", network.directory_name())),
+        )
+    }
+
     /// Returns the `zebra-network` base cache directory, if enabled.
     pub fn cache_dir(&self) -> Option<PathBuf> {
         match self {

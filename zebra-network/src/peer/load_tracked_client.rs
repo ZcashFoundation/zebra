@@ -83,9 +83,13 @@ impl LoadTrackedClient {
     ///
     /// Version 2 connections cannot answer a mempool snapshot request yet:
     /// the draft's `get-mempool` is an open-ended subscription with no
-    /// snapshot delimiter. Every other request is served on both protocols.
+    /// snapshot delimiter. They do not answer the legacy address book's
+    /// address requests either: version 2 address records are QUIC
+    /// endpoints, which the version 2 connection hands to the version 2
+    /// address segment instead. Every other request is served on both
+    /// protocols.
     pub fn supports(&self, request: &Request) -> bool {
-        !(matches!(request, Request::MempoolTransactionIds)
+        !(matches!(request, Request::MempoolTransactionIds | Request::Peers)
             && self.connection_info.remote.as_init_record().is_some())
     }
 

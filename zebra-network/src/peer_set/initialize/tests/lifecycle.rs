@@ -20,7 +20,7 @@ use crate::{
         crawler_services,
         initialize::crawl_and_dial,
         set::{tests::PeerSetBuilder, MorePeers},
-        ActiveConnectionCounter,
+        ActiveConnectionCounter, ConnectedPeers,
     },
     BoxError, Config, NetworkService, PeerSocketAddr, Request, Response,
 };
@@ -199,6 +199,7 @@ async fn check_background_owner(crawler_only: bool) {
             peerset_tx,
             ActiveConnectionCounter::new_counter(),
             address_updater,
+            ConnectedPeers::unconnected(),
         ));
         let crawler_observer = crawler.abort_handle();
 

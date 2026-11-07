@@ -48,7 +48,8 @@ use crate::{
     peer_cache_updater::peer_cache_updater,
     peer_set::{
         crawl_once, crawler_services, next_reconnect_peer, ready_peer_count, set::MorePeers,
-        ActiveConnectionCounter, ConnectionTracker, CrawlService, NextPeerService, PeerSet,
+        ActiveConnectionCounter, ConnectedPeers, ConnectionTracker, CrawlService, NextPeerService,
+        PeerSet,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     AddressBook, BanList, BoxError, Config, MisbehaviorReport, NetworkService, PeerSocketAddr,
@@ -266,6 +267,10 @@ where
     );
     // Also route queued peer set requests as soon as a peer that might serve them is ready.
     let block_advertiser = peer_set.block_advertiser();
+    // Both dialers skip addresses the peer set would drop: one connection per address across
+    // both protocols, and the same per-IP limit as the peer set.
+    let connected_peers =
+        ConnectedPeers::new(peer_set.connected_peers(), config.max_connections_per_ip);
     let (mut peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
     peer_set.extend_tasks([
         address_book_updater_guard.abort_handle(),
@@ -310,6 +315,7 @@ where
         bans_receiver,
         misbehavior_tx.clone(),
         peerset_tx.clone(),
+        connected_peers.clone(),
     );
     peer_set.extend_tasks(v2_task.iter().map(JoinHandle::abort_handle));
 
@@ -358,6 +364,7 @@ where
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
+        connected_peers,
     );
     let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
     peer_set.extend_tasks([crawl_guard.abort_handle()]);
@@ -1046,6 +1053,7 @@ enum CrawlerAction {
         peerset_tx,
         active_outbound_connections,
         address_book_updater,
+        connected_peers,
     ),
     fields(
         new_peer_interval = ?config.crawl_new_peer_interval,
@@ -1062,6 +1070,7 @@ async fn crawl_and_dial<C, S>(
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
     mut active_outbound_connections: ActiveConnectionCounter,
     address_book_updater: AddressBookChangeSender,
+    connected_peers: ConnectedPeers,
 ) -> Result<(), BoxError>
 where
     C: Service<
@@ -1163,8 +1172,9 @@ where
                 let outbound_connector = outbound_connector.clone();
                 let peerset_tx = peerset_tx.clone();
                 let address_book_updater = address_book_updater.clone();
-                let demand_tx = demand_tx.clone();
+                let mut demand_tx = demand_tx.clone();
                 let network = config.network.clone();
+                let connected_peers = connected_peers.clone();
 
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
@@ -1187,6 +1197,36 @@ where
                         let candidate = next_reconnect_peer(&mut next_peer_service).await;
 
                         if let Some(candidate) = candidate {
+                            // # Correctness
+                            //
+                            // The peer set would drop this connection, because the address is
+                            // connected over the other protocol, or its IP is at the per-IP
+                            // limit, so it's skipped. That isn't a failure of the peer, so the
+                            // address book isn't told: a failed entry without a recent last-seen
+                            // time, like an initial peer, would never be a candidate again. It
+                            // stays attempt pending, so the crawler only offers it again after
+                            // the reconnection delay, not while it is connected.
+                            if let Some(reason) = connected_peers.blocks_dial(candidate.addr) {
+                                debug!(?candidate.addr, reason, "skipping outbound connection");
+                                metrics::counter!(
+                                    "zcash.net.peers.dial.skipped",
+                                    "reason" => reason,
+                                    "network" => network_kind_label(&network),
+                                )
+                                .increment(1);
+                                std::mem::drop(outbound_connection_tracker);
+
+                                // Like a failed dial, the demand didn't become a connection.
+                                if let Err(send_error) = demand_tx.try_send(MorePeers) {
+                                    if send_error.is_disconnected() {
+                                        // Zebra is shutting down
+                                        return Err(send_error.into());
+                                    }
+                                }
+
+                                return Ok(HandshakeFinished);
+                            }
+
                             // we don't need to spawn here, because there's nothing running concurrently
                             dial(
                                 network,
