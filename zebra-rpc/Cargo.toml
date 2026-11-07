@@ -122,6 +122,7 @@ which = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
 http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
 anyhow = { workspace = true }
@@ -145,6 +146,14 @@ zebra-state = { path = "../zebra-state", features = [
 ] }
 
 zebra-test = { path = "../zebra-test" }
+
+[[bench]]
+name = "getblock"
+harness = false
+
+[[bench]]
+name = "http_compat"
+harness = false
 
 [lints]
 workspace = true
