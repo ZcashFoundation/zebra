@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_in_result)]
 
+mod sigops;
+
 use hex::FromHex;
 use std::sync::Arc;
 use zebra_chain::{
