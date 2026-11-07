@@ -92,8 +92,8 @@ pub struct Config {
     /// Increasing retention affects future pruning only and never restores deleted bodies.
     ///
     /// Pruning is irreversible. To disable it after deletion, restore an archive snapshot or
-    /// fully resync in a separate cache directory. Normal RocksDB compaction reclaims space
-    /// eventually; deletion does not guarantee an immediate reduction in disk usage.
+    /// fully resync in a separate cache directory. Catch-up pruning compacts deleted bodies after
+    /// clearing the backlog; normal RocksDB compaction handles ongoing deletion.
     ///
     /// Enabling pruning stops advertising archive service and is incompatible with zcashd sidecars.
     pub prune_blocks_older_than: Option<u32>,

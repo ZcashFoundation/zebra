@@ -210,7 +210,14 @@ fn pruning_without_a_restart_witness_waits_without_mutation() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(2),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         None
     );
@@ -261,7 +268,14 @@ fn pruning_stages_at_most_one_hundred_contiguous_heights() {
         let mut batch = DiskWriteBatch::new();
         assert_eq!(
             batch
-                .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+                .prepare_history_pruning(
+                    &state.db,
+                    Height(351),
+                    state.db.history_capabilities().unwrap(),
+                    state.db.ready_for_pruning(),
+                    state.db.finalized_tip_height(),
+                    &mut Default::default()
+                )
                 .unwrap(),
             Some(expected)
         );
@@ -296,7 +310,14 @@ fn pruning_stages_at_most_one_hundred_contiguous_heights() {
     let mut waiting = DiskWriteBatch::new();
     assert_eq!(
         waiting
-            .prepare_history_pruning(&state.db, Height(351), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(351),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         None
     );
@@ -317,7 +338,14 @@ fn pruning_restart_check_errors_leave_the_batch_unchanged() {
 
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default()
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     assert_eq!(
@@ -345,7 +373,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(2),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         Some(Height(2))
     );
@@ -394,7 +429,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     for invalid_floor in [Height(0), Height(1), Height(2), Height(5), Height::MAX] {
         let mut invalid = DiskWriteBatch::new();
         assert!(invalid
-            .prepare_history_pruning(&state.db, invalid_floor, &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                invalid_floor,
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .is_err());
         assert_eq!(invalid, DiskWriteBatch::new());
     }
@@ -417,7 +459,14 @@ fn history_floor_and_deleted_bodies_share_a_snapshot_and_survive_reopen() {
     let mut batch = DiskWriteBatch::new();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(3), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(3),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         Some(Height(3))
     );
@@ -704,7 +753,14 @@ async fn read_only_capability_requests_do_not_mutate_history() {
         let mut batch = DiskWriteBatch::new();
         assert!(!secondary.ready_for_pruning());
         assert!(batch
-            .prepare_history_pruning(&secondary, Height(3), &mut Default::default())
+            .prepare_history_pruning(
+                &secondary,
+                Height(3),
+                secondary.history_capabilities().unwrap(),
+                secondary.ready_for_pruning(),
+                secondary.finalized_tip_height(),
+                &mut Default::default()
+            )
             .is_err());
         assert_eq!(batch, DiskWriteBatch::new());
         delete_body_prefix(&mut batch, &secondary, Height(3));
@@ -945,7 +1001,14 @@ fn shutdown_checks_cannot_enable_pruning_after_cancelled_index_conversion() {
     assert!(!state.db.ready_for_pruning());
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(2), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default()
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     assert!(state.db.block(Height(1).into()).unwrap().is_some());
@@ -1085,7 +1148,14 @@ fn pruning_waits_after_a_long_branchless_suffix() {
         let mut batch = DiskWriteBatch::new();
         assert_eq!(
             batch
-                .prepare_history_pruning(&state.db, Height(101), &mut witness)
+                .prepare_history_pruning(
+                    &state.db,
+                    Height(101),
+                    state.db.history_capabilities().unwrap(),
+                    state.db.ready_for_pruning(),
+                    state.db.finalized_tip_height(),
+                    &mut witness
+                )
                 .unwrap(),
             None
         );
@@ -1116,13 +1186,27 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
     // The fixture writes block indexes directly; readiness is tested separately above.
     let mut batch = DiskWriteBatch::new();
     assert!(batch
-        .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+        .prepare_history_pruning(
+            &state.db,
+            Height(5_004),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default()
+        )
         .is_err());
     assert_eq!(batch, DiskWriteBatch::new());
     state.db.mark_ready_for_pruning();
     assert_eq!(
         batch
-            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(5_004),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         Some(witness_height)
     );
@@ -1138,7 +1222,14 @@ fn pruning_retains_a_restart_witness_fifteen_thousand_blocks_back() {
     let mut waiting = DiskWriteBatch::new();
     assert_eq!(
         waiting
-            .prepare_history_pruning(&state.db, Height(5_004), &mut Default::default())
+            .prepare_history_pruning(
+                &state.db,
+                Height(5_004),
+                state.db.history_capabilities().unwrap(),
+                state.db.ready_for_pruning(),
+                state.db.finalized_tip_height(),
+                &mut Default::default()
+            )
             .unwrap(),
         None
     );
@@ -1227,6 +1318,266 @@ fn pruned_subtree_checks_still_reject_missing_or_incorrect_roots() {
     assert!(subtree_format_calculation_pre_checks(&state.db)
         .unwrap_err()
         .contains("orchard: Err"));
+}
+
+/// Reset never removes a completion committed after its captured migration tip.
+#[test]
+fn subtree_reset_preserves_concurrent_completions() {
+    use super::super::disk_format::upgrade::add_subtrees::reset;
+    use zebra_chain::{
+        orchard, sapling,
+        sapling::tree::legacy::{
+            LegacyFrontier, LegacyLeaf, LegacyNonEmptyFrontier, LegacyPosition,
+        },
+        subtree::{NoteCommitmentSubtree, TRACKED_SUBTREE_HEIGHT},
+    };
+
+    let _init_guard = zebra_test::init();
+    let bytes = |position, leaf, ommers| {
+        let frontier = LegacyFrontier::<[u8; 32], 32> {
+            frontier: Some(LegacyNonEmptyFrontier {
+                position: LegacyPosition(position),
+                leaf,
+                ommers,
+            }),
+        };
+        bincode::serialize(&(frontier, None::<[u8; 32]>)).unwrap()
+    };
+    for completed in [0u16, 1] {
+        let state = populated(&Config::ephemeral());
+        let captured = Height(3);
+        let mut batch = DiskWriteBatch::new();
+        let sapling = NoteCommitmentSubtree {
+            index: completed.into(),
+            end_height: Height(4),
+            root: sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
+        };
+        let orchard: NoteCommitmentSubtree<orchard::tree::Node> = NoteCommitmentSubtree {
+            index: completed.into(),
+            end_height: Height(4),
+            root: [0; 32].as_slice().try_into().unwrap(),
+        };
+        if completed == 1 {
+            // Exactly one completed subtree must be reset, including its final index.
+            let encoded = bytes(
+                (1 << TRACKED_SUBTREE_HEIGHT) - 1,
+                LegacyLeaf::Right([0; 32], [0; 32]),
+                vec![[0; 32]; usize::from(TRACKED_SUBTREE_HEIGHT) - 1],
+            );
+            let sapling_tree: sapling::tree::NoteCommitmentTree =
+                bincode::deserialize(&encoded).unwrap();
+            let orchard_tree: orchard::tree::NoteCommitmentTree =
+                bincode::deserialize(&encoded).unwrap();
+            assert!(sapling_tree.is_complete_subtree());
+            assert!(orchard_tree.is_complete_subtree());
+            batch.create_sapling_tree(&state.db, &captured, &sapling_tree);
+            batch.create_orchard_tree(&state.db, &captured, &orchard_tree);
+            batch.insert_sapling_subtree(
+                &state.db,
+                &NoteCommitmentSubtree {
+                    index: 0.into(),
+                    end_height: captured,
+                    ..sapling
+                },
+            );
+            batch.insert_orchard_subtree(
+                &state.db,
+                &NoteCommitmentSubtree {
+                    index: 0.into(),
+                    end_height: captured,
+                    ..orchard
+                },
+            );
+        }
+        let encoded = bytes(
+            (usize::from(completed) + 1) << TRACKED_SUBTREE_HEIGHT,
+            LegacyLeaf::Left([0; 32]),
+            vec![[0; 32]],
+        );
+        let sapling_tree: sapling::tree::NoteCommitmentTree =
+            bincode::deserialize(&encoded).unwrap();
+        let orchard_tree: orchard::tree::NoteCommitmentTree =
+            bincode::deserialize(&encoded).unwrap();
+        batch.create_sapling_tree(&state.db, &Height(4), &sapling_tree);
+        batch.create_orchard_tree(&state.db, &Height(4), &orchard_tree);
+        batch.insert_sapling_subtree(&state.db, &sapling);
+        batch.insert_orchard_subtree(&state.db, &orchard);
+        state.db.write_batch(batch).unwrap();
+
+        let (_cancel, receiver) = crossbeam_channel::bounded(1);
+        reset(captured, &state.db, &receiver).unwrap();
+        assert_eq!(state.db.sapling_subtree_by_index(completed), Some(sapling));
+        assert_eq!(state.db.orchard_subtree_by_index(completed), Some(orchard));
+        if completed == 1 {
+            assert!(state.db.sapling_subtree_by_index(0).is_none());
+            assert!(state.db.orchard_subtree_by_index(0).is_none());
+        }
+    }
+}
+
+/// Once pruning may run, it can delete the completing block's body between the availability check
+/// and the body read, so the subtree checks must use the stored subtree even when bodies are retained.
+#[test]
+fn subtree_checks_use_stored_subtrees_once_pruning_may_run() {
+    use super::super::disk_format::upgrade::add_subtrees::subtree_format_calculation_pre_checks;
+    use hex_literal::hex;
+    use zebra_chain::subtree::NoteCommitmentSubtree;
+
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    assert!(state
+        .db
+        .history_capabilities()
+        .unwrap()
+        .has_block_body(Height(1_707_429)));
+
+    let mut sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
+    };
+    let mut orchard = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: [0; 32].as_slice().try_into().unwrap(),
+    };
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+
+    // Before startup checks finish, pruning cannot run, so the early-chain calculation is used.
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    state.db.mark_ready_for_pruning();
+    let error = subtree_format_calculation_pre_checks(&state.db).unwrap_err();
+    assert!(error.contains("sapling: Err"));
+    assert!(error.contains("orchard: Err"));
+
+    sapling.root = sapling_crypto::Node::from_bytes(hex!(
+        "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+    ))
+    .unwrap();
+    orchard.root = hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+        .as_slice()
+        .try_into()
+        .unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.insert_sapling_subtree(&state.db, &sapling);
+    batch.insert_orchard_subtree(&state.db, &orchard);
+    state.db.write(batch).unwrap();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+
+    // Before the first subtrees complete, nothing is stored and the check still passes.
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    state.db.mark_ready_for_pruning();
+    assert!(subtree_format_calculation_pre_checks(&state.db).is_ok());
+}
+
+/// Finalization can complete the first subtree between its initial lookup and the tip-tree read.
+#[test]
+fn subtree_checks_allow_completion_after_missing_subtree_lookup() {
+    use super::super::disk_format::upgrade::add_subtrees::{
+        subtree_format_calculation_pre_checks, AFTER_MISSING_ORCHARD_SUBTREE,
+        AFTER_MISSING_SAPLING_SUBTREE,
+    };
+    use hex_literal::hex;
+    use zebra_chain::{
+        orchard, sapling,
+        sapling::tree::legacy::{
+            LegacyFrontier, LegacyLeaf, LegacyNonEmptyFrontier, LegacyPosition,
+        },
+        subtree::{NoteCommitmentSubtree, TRACKED_SUBTREE_HEIGHT},
+    };
+
+    let _init_guard = zebra_test::init();
+    let config = Config {
+        prune_blocks_older_than: Some(10_000),
+        ..Config::ephemeral()
+    };
+    let state = populated(&config);
+    state.db.mark_ready_for_pruning();
+    assert!(state.db.sapling_subtree_by_index(0).is_none());
+    assert!(state.db.orchard_subtree_by_index(0).is_none());
+    assert!(state.db.sapling_tree_for_tip().subtree_index().is_none());
+    assert!(state.db.orchard_tree_for_tip().subtree_index().is_none());
+
+    let sapling = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(558_822),
+        root: sapling_crypto::Node::from_bytes(hex!(
+            "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+        ))
+        .unwrap(),
+    };
+    let orchard: NoteCommitmentSubtree<orchard::tree::Node> = NoteCommitmentSubtree {
+        index: 0.into(),
+        end_height: Height(1_707_429),
+        root: hex!("d4e323b3ae0cabfb6be4087fec8c66d9a9bbfc354bf1d9588b6620448182063b")
+            .as_slice()
+            .try_into()
+            .unwrap(),
+    };
+    // Both tree types use this legacy encoding. One completed subtree followed by a note
+    // needs only the known subtree root as its ommer, not all of the preceding commitments.
+    let tree_bytes = |root| {
+        let frontier = LegacyFrontier::<[u8; 32], 32> {
+            frontier: Some(LegacyNonEmptyFrontier {
+                position: LegacyPosition(1 << TRACKED_SUBTREE_HEIGHT),
+                leaf: LegacyLeaf::Left([0; 32]),
+                ommers: vec![root],
+            }),
+        };
+        bincode::serialize(&(frontier, None::<[u8; 32]>)).unwrap()
+    };
+    let sapling_tree: sapling::tree::NoteCommitmentTree =
+        bincode::deserialize(&tree_bytes(sapling.root.to_bytes())).unwrap();
+    let orchard_tree: orchard::tree::NoteCommitmentTree =
+        bincode::deserialize(&tree_bytes(orchard.root.to_repr())).unwrap();
+    assert_eq!(sapling_tree.subtree_index(), Some(1.into()));
+    assert_eq!(orchard_tree.subtree_index(), Some(1.into()));
+
+    let writer = state.db.clone();
+    AFTER_MISSING_SAPLING_SUBTREE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let mut batch = DiskWriteBatch::new();
+            batch.create_sapling_tree(&writer, &sapling.end_height, &sapling_tree);
+            batch.insert_sapling_subtree(&writer, &sapling);
+            batch.zs_insert(
+                &writer.cf_handle("hash_by_height").unwrap(),
+                sapling.end_height,
+                writer.hash(Height(3)).unwrap(),
+            );
+            writer.write_batch(batch).unwrap();
+        }));
+    });
+    let writer = state.db.clone();
+    AFTER_MISSING_ORCHARD_SUBTREE.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let mut batch = DiskWriteBatch::new();
+            batch.create_orchard_tree(&writer, &orchard.end_height, &orchard_tree);
+            batch.insert_orchard_subtree(&writer, &orchard);
+            batch.zs_insert(
+                &writer.cf_handle("hash_by_height").unwrap(),
+                orchard.end_height,
+                writer.hash(Height(3)).unwrap(),
+            );
+            writer.write_batch(batch).unwrap();
+        }));
+    });
+
+    let result = subtree_format_calculation_pre_checks(&state.db);
+    assert!(AFTER_MISSING_SAPLING_SUBTREE.with(|hook| hook.borrow_mut().take().is_none()));
+    assert!(AFTER_MISSING_ORCHARD_SUBTREE.with(|hook| hook.borrow_mut().take().is_none()));
+    assert_eq!(result, Ok(()));
 }
 
 #[test]

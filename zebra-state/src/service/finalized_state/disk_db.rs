@@ -1254,6 +1254,26 @@ impl DiskDb {
         self.db.write(batch.batch)
     }
 
+    /// Compacts transaction bodies below `below`, where the pruning worker deleted them.
+    ///
+    /// The range starts at the beginning of the column family, so it also covers bodies deleted
+    /// before a restart. Runs on the pruning worker, without taking the state writer's locks or
+    /// stalling writes for a flush.
+    pub(crate) fn compact_pruned_bodies(&self, below: Height) {
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .expect("transaction column family was created when opening state");
+        let mut options = rocksdb::CompactOptions::default();
+        options.set_exclusive_manual_compaction(false);
+        options.set_bottommost_level_compaction(rocksdb::BottommostLevelCompaction::ForceOptimized);
+        self.db.compact_range_cf_opt(
+            &transactions,
+            None::<&[u8]>,
+            Some(TransactionLocation::min_for_height(below).as_bytes()),
+            &options,
+        );
+    }
+
     // Private methods
 
     /// Tries to reuse an existing db after a major upgrade.
