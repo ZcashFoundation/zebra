@@ -115,6 +115,9 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
+    /// Response to [`Request::KnownBlocks`], in the same order as the requested hashes.
+    KnownBlocks(Vec<Option<KnownBlock>>),
+
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }

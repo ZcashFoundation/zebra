@@ -131,11 +131,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State is checked once for the whole peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -152,15 +152,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the merged download set in response order with one batch.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -360,9 +356,9 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 
     // Find the first unknown hash in this peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -379,9 +375,9 @@ async fn sync_singleton_obtain_tips_ok() -> Result<(), crate::BoxError> {
 
     // Recheck every hash in the merged download set.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
 
     peer_set
         .expect_request(zn::Request::BlockDownload {
@@ -443,9 +439,9 @@ async fn sync_obtain_tips_skips_blocks_committed_during_fanout() -> Result<(), c
         .await
         .respond(zn::Response::BlockHashes(vec![h1]));
     state_service
-        .expect_request(zs::Request::KnownBlock(h1))
+        .expect_request(zs::Request::KnownBlocks(vec![h1]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
 
     // Hold another fanout response until the singleton has entered the download set.
     peer_set
@@ -453,9 +449,9 @@ async fn sync_obtain_tips_skips_blocks_committed_during_fanout() -> Result<(), c
         .await
         .respond(zn::Response::BlockHashes(vec![h2]));
     state_service
-        .expect_request(zs::Request::KnownBlock(h2))
+        .expect_request(zs::Request::KnownBlocks(vec![h2]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None]));
     for _ in 2..sync::FANOUT {
         peer_set
             .expect_request(discovery.clone())
@@ -465,13 +461,12 @@ async fn sync_obtain_tips_skips_blocks_committed_during_fanout() -> Result<(), c
 
     // Inbound gossip has now committed H1; only H2 still needs downloading.
     state_service
-        .expect_request(zs::Request::KnownBlock(h1))
+        .expect_request(zs::Request::KnownBlocks(vec![h1, h2]))
         .await
-        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
-    state_service
-        .expect_request(zs::Request::KnownBlock(h2))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![
+            Some(zs::KnownBlock::BestChain),
+            None,
+        ]));
     peer_set
         .expect_request(zn::Request::BlockDownload {
             hash: h2,
@@ -546,9 +541,12 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 
     // Block 1 is missing, because its download was cancelled by a sync restart.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![
+            None,
+            Some(zs::KnownBlock::Queue),
+        ]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -565,13 +563,12 @@ async fn sync_obtain_tips_downloads_queued_blocks() -> Result<(), crate::BoxErro
 
     // Recheck every hash in the merged download set: block 2 is queued, waiting for block 1.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::Queue)));
+        .respond(zs::Response::KnownBlocks(vec![
+            None,
+            Some(zs::KnownBlock::Queue),
+        ]));
 
     // Both blocks are downloaded, so the missing parent reaches the state.
     peer_set
@@ -697,9 +694,9 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // Find the first unknown hash in this peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     for _ in 1..sync::FANOUT {
         peer_set
@@ -716,13 +713,9 @@ async fn sync_singleton_extend_tips_ok() -> Result<(), crate::BoxError> {
 
     // Recheck every hash in the merged download set.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     peer_set
         .expect_request(zn::Request::BlockDownload {
@@ -914,11 +907,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State checks every hash, including duplicates, in peer response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block1_hash,
+            block1_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 4]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -935,15 +933,11 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the deduplicated download set in response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -1226,11 +1220,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 982k)
+    // State checks the whole peer response, including the high block.
     state_service
-        .expect_request(zs::Request::KnownBlock(block982k_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block982k_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 3]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -1247,19 +1245,15 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 982k, 1, 2) in response order
+    // State rechecks all hashes in response order with one batch.
     state_service
-        .expect_request(zs::Request::KnownBlock(block982k_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![
+            block982k_hash,
+            block1_hash,
+            block2_hash,
+        ]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None; 3]));
 
     // Blocks 982k, 1, 2 are fetched in order, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
@@ -1404,11 +1398,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             block2_hash, // expected_next
         ]));
 
-    // State is checked for the first unknown block (block 1)
+    // State checks the whole peer response.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -1425,15 +1419,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
+    // State rechecks the merged download set in response order.
     state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .expect_request(zs::Request::KnownBlocks(vec![block1_hash, block2_hash]))
         .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+        .respond(zs::Response::KnownBlocks(vec![None, None]));
 
     // Blocks 1 & 2 are fetched in order, then verified concurrently
     peer_set
@@ -3492,6 +3482,14 @@ async fn singleton_tip_rounds_reap_completed_downloads() {
                     zs::Request::KnownBlock(requested) => zs::Response::KnownBlock(
                         (requested == known_hash).then_some(zs::KnownBlock::BestChain),
                     ),
+                    zs::Request::KnownBlocks(requested) => zs::Response::KnownBlocks(
+                        requested
+                            .into_iter()
+                            .map(|requested| {
+                                (requested == known_hash).then_some(zs::KnownBlock::BestChain)
+                            })
+                            .collect(),
+                    ),
                     _ => unreachable!("the syncer only checks known blocks and the locator"),
                 })
             });
@@ -3647,6 +3645,9 @@ async fn inter_round_ancestor_failure_is_retried() {
             futures::future::ok::<_, crate::BoxError>(match request {
                 zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent_hash]),
                 zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                zs::Request::KnownBlocks(requested) => {
+                    zs::Response::KnownBlocks(vec![None; requested.len()])
+                }
                 _ => unreachable!("only known blocks and the locator are queried"),
             })
         });
@@ -3743,6 +3744,9 @@ async fn sync_tip_responses_share_batch_capacity() {
                         zs::Response::BlockLocator(vec![block::Hash::from([0; 32])])
                     }
                     zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                    zs::Request::KnownBlocks(requested) => {
+                        zs::Response::KnownBlocks(vec![None; requested.len()])
+                    }
                     _ => unreachable!("the syncer only checks known blocks and the locator"),
                 };
                 futures::future::ok::<_, crate::BoxError>(response)
@@ -4229,6 +4233,10 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
                 zs::Request::KnownBlock(requested) => {
                     assert_eq!(requested, hash);
                     zs::Response::KnownBlock(None)
+                }
+                zs::Request::KnownBlocks(requested) => {
+                    assert_eq!(requested, vec![hash]);
+                    zs::Response::KnownBlocks(vec![None])
                 }
                 request => panic!("unexpected state request: {request:?}"),
             };
