@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Report submitted transactions removed as dependents during mempool eviction as rejected, without persistently rejecting collateral children that can be resubmitted after their parent is mined ([#12370](https://github.com/ZcashFoundation/zebra/pull/12370)).
+time: 2026-11-07T21:50:26.746233146+01:00
