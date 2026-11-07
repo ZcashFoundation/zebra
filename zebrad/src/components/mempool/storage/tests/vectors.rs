@@ -417,6 +417,36 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn mempool_remove_exact_requires_matching_witnessed_id() {
+    let _init_guard = zebra_test::init();
+    let mut storage = Storage::new(&config::Config::default());
+    let tx = Network::Mainnet
+        .unmined_transactions_in_blocks(..)
+        .find(|tx| tx.transaction.id.auth_digest().is_some())
+        .expect("mainnet fixtures contain v5 transactions");
+    let id = tx.transaction.id;
+    storage
+        .insert(tx, vec![], None, &mut HashSet::new())
+        .expect("a fresh pool has no conflicts");
+    let mut different_witness = id;
+    different_witness
+        .auth_digest_mut()
+        .expect("v5 IDs contain an authorizing data digest")
+        .0[0] ^= 1;
+    assert_eq!(
+        storage.remove_exact(&HashSet::from([
+            different_witness,
+            UnminedTxId::Legacy(id.mined_id()),
+            UnminedTxId::Legacy(transaction::Hash([0xfe; 32])),
+        ])),
+        0
+    );
+    assert_eq!(storage.transaction_count(), 1);
+    assert_eq!(storage.remove_exact(&HashSet::from([id])), 1);
+    assert_eq!(storage.remove_exact(&HashSet::from([id])), 0);
+    assert!(storage.rejection_error(&id).is_none());
+}
 // ---- Policy function unit tests ----
 
 use super::super::policy::{p2pk_lock_script, p2pkh_lock_script, p2sh_lock_script};

@@ -178,7 +178,7 @@ fn verified_set_metrics_randomized_mutations() {
                 }
             }
             11..=12 => {
-                set.remove_all_that(|tx| tx.transaction.id.mined_id().0[0] % 2 == 0);
+                set.remove_all(ids.into_iter().filter(|id| id.0[0] % 2 == 0));
                 operation_counts[2] += 1;
             }
             13..=14 => {
@@ -251,7 +251,11 @@ fn verified_set_metrics_dependent_removals() {
     assert_metrics_match_rescan(&set);
 
     // Matching both an ancestor and its descendants must subtract each contribution only once.
-    assert_eq!(set.remove_all_that(|_| true).len(), chain.len());
+    assert_eq!(
+        set.remove_all(chain.iter().map(|(tx, _)| tx.transaction.id.mined_id()))
+            .len(),
+        chain.len()
+    );
     assert_metrics_match_rescan(&set);
     assert_eq!(
         set.insert(chain[1].0.clone(), chain[1].1.clone(), &mut pending, None),
@@ -310,7 +314,7 @@ fn verified_set_mined_v5_removes_all_output_indexes() {
     let mined_ids = HashSet::from([mined.transaction.id.mined_id()]);
     set.clear_mined_dependencies(&mined_ids);
     assert_eq!(
-        set.remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id())),
+        set.remove_all(mined_ids),
         HashSet::from([mined.transaction.id])
     );
     assert_eq!(set.transaction_count(), 1);
@@ -326,6 +330,76 @@ fn verified_set_mined_v5_removes_all_output_indexes() {
             assert_eq!(set.has_spent_outpoint(&outpoint), present);
         }
     }
+}
+
+#[test]
+fn known_ids_ignore_unknown_duplicates_and_removed_descendants() {
+    let template = template();
+    let parent = transaction(&template, 0, None);
+    let parent_id = parent.transaction.id;
+    let child = transaction(&template, 1, Some(parent_id.mined_id()));
+    let child_id = child.transaction.id;
+    let survivor = transaction(&template, 2, None);
+    let survivor_id = survivor.transaction.id;
+    let survivor_size = survivor.transaction.size;
+    let survivor_cost = survivor.cost();
+    let output = transparent::OutPoint::from_usize(parent_id.mined_id(), 0);
+    let mut pending = PendingOutputs::default();
+    let mut set = VerifiedSet::default();
+    for (tx, spent) in [(parent, vec![]), (child, vec![output]), (survivor, vec![])] {
+        set.insert(tx, spent, &mut pending, None)
+            .expect("the transactions spend distinct available outputs");
+    }
+    let missing = transaction::Hash([0xfe; 32]);
+    assert_eq!(
+        set.remove_all([
+            missing,
+            parent_id.mined_id(),
+            parent_id.mined_id(),
+            child_id.mined_id(),
+            missing,
+        ]),
+        HashSet::from([parent_id, child_id])
+    );
+    assert_eq!(set.transaction_count(), 1);
+    assert!(set.contains(&survivor_id.mined_id()));
+    assert!(set.created_output(&output).is_none());
+    assert!(set.transaction_dependencies().dependencies().is_empty());
+    assert!(set.transaction_dependencies().dependents().is_empty());
+    assert_eq!(set.total_serialized_size(), survivor_size);
+    assert_eq!(set.total_cost(), survivor_cost);
+    assert!(set
+        .remove_all([parent_id.mined_id(), child_id.mined_id(), missing])
+        .is_empty());
+    assert_eq!(set.total_serialized_size(), survivor_size);
+    assert_eq!(set.total_cost(), survivor_cost);
+}
+
+#[test]
+fn mined_parent_preserves_unmined_child() {
+    let template = template();
+    let parent = transaction(&template, 0, None);
+    let parent_id = parent.transaction.id;
+    let child = transaction(&template, 1, Some(parent_id.mined_id()));
+    let child_id = child.transaction.id;
+    let child_size = child.transaction.size;
+    let child_cost = child.cost();
+    let output = transparent::OutPoint::from_usize(parent_id.mined_id(), 0);
+    let mut pending = PendingOutputs::default();
+    let mut set = VerifiedSet::default();
+    set.insert(parent, vec![], &mut pending, None)
+        .expect("a fresh set has no spend conflicts");
+    set.insert(child, vec![output], &mut pending, None)
+        .expect("the parent output is available");
+    let mined_ids = HashSet::from([parent_id.mined_id()]);
+    set.clear_mined_dependencies(&mined_ids);
+    assert_eq!(set.remove_all(mined_ids), HashSet::from([parent_id]));
+    assert_eq!(set.transaction_count(), 1);
+    assert!(set.contains(&child_id.mined_id()));
+    assert!(set.created_output(&output).is_none());
+    assert!(set.transaction_dependencies().dependencies().is_empty());
+    assert_eq!(set.total_serialized_size(), child_size);
+    assert_eq!(set.total_cost(), child_cost);
 }
 
 /// Storage reports every removal, including dependents evicted with their parent.
