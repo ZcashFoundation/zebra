@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'RPC batches using a single version now accept versionless and JSON-RPC 1.0 calls and return responses in the same format, allowing mining pools such as s-nomp to run their startup checks. Converted requests and responses respect the existing body size limits; response conversion overflow returns a legacy-formatted oversized-response error rather than disconnecting, retaining the upstream error-envelope exception.'
+time: 2026-10-11T00:00:00Z
