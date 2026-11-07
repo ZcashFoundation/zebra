@@ -979,6 +979,9 @@ pub enum Request {
     /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
@@ -991,6 +994,9 @@ pub enum Request {
     ///   if the block height is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     AnyChainBlock(HashOrHeight),
@@ -1001,6 +1007,9 @@ pub enum Request {
     ///
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
     BlockAndSize(HashOrHeight),
 
     /// Looks up a block header by hash or height in the current best chain.
@@ -1212,6 +1221,9 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
@@ -1225,6 +1237,9 @@ pub enum ReadRequest {
     ///   followed by side chains in order from most to least work.
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
+    ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     AnyChainBlock(HashOrHeight),
@@ -1235,6 +1250,9 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
     BlockAndSize(HashOrHeight),
 
     /// Looks up a block header by hash or height in the current best chain.
@@ -1261,6 +1279,9 @@ pub enum ReadRequest {
     /// map, so callers must treat a missing outpoint as "prevout unknown", not an error.
     ///
     /// Used by the `getblock` RPC at verbosity 3.
+    ///
+    /// Returns [`crate::BlockReadError`] for incomplete primary data.
+    /// Returns `None` for incomplete secondary views.
     SpentOutputs(HashOrHeight),
 
     /// Looks up a transaction by hash in the current best chain.

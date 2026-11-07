@@ -31,7 +31,7 @@ use crate::{
         non_finalized_state::{Chain, NonFinalizedState},
         read::tip,
     },
-    HashOrHeight,
+    BlockReadError, HashOrHeight,
 };
 
 #[cfg(feature = "indexer")]
@@ -39,11 +39,13 @@ use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chains` or finalized `db`.
+///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
 pub fn any_block<'a, C: AsRef<Chain> + 'a>(
     mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<Arc<Block>> {
+) -> Result<Option<Arc<Block>>, BlockReadError> {
     // # Correctness
     //
     // Since blocks are the same in the finalized and non-finalized state, we
@@ -52,12 +54,18 @@ pub fn any_block<'a, C: AsRef<Chain> + 'a>(
     chains
         .find_map(|c| c.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.clone())
-        .or_else(|| db.block(hash_or_height))
+        .map_or_else(|| db.block(hash_or_height), |block| Ok(Some(block)))
 }
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
-pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
+///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+pub fn block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Result<Option<Arc<Block>>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -66,11 +74,13 @@ where
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
 pub fn block_and_size<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<(Arc<Block>, usize)>
+) -> Result<Option<(Arc<Block>, usize)>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -86,7 +96,10 @@ where
             let size = contextual.block.zcash_serialize_to_vec().unwrap().len();
             (contextual.block.clone(), size)
         })
-        .or_else(|| db.block_and_size(hash_or_height))
+        .map_or_else(
+            || db.block_and_size(hash_or_height),
+            |block| Ok(Some(block)),
+        )
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or
@@ -166,6 +179,8 @@ where
 /// Used by the `getblock` RPC at verbosity 3 to fill in each input's prevout and the
 /// transaction fee.
 ///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+///
 /// # Correctness
 ///
 /// The block and all of its spent outputs are read from the same `chain`/`db` snapshot, so the
@@ -192,12 +207,14 @@ pub fn spent_outputs_for_block<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<HashMap<transparent::OutPoint, Utxo>>
+) -> Result<Option<HashMap<transparent::OutPoint, Utxo>>, BlockReadError>
 where
     C: AsRef<Chain>,
 {
     let chain = chain.as_ref();
-    let block = block(chain, db, hash_or_height)?;
+    let Some(block) = block(chain, db, hash_or_height)? else {
+        return Ok(None);
+    };
 
     // The finalized tip can only advance between these reads, which can only turn a UTXO hit
     // into a parent read, never the reverse.
@@ -240,7 +257,7 @@ where
         }
     }
 
-    Some(spent_outputs)
+    Ok(Some(spent_outputs))
 }
 
 /// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],
