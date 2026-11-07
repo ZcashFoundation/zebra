@@ -34,9 +34,9 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
 #[allow(unused_imports)]
@@ -262,6 +262,40 @@ impl fmt::Debug for BlockTemplateResponse {
 }
 
 impl BlockTemplateResponse {
+    /// Returns the current and maximum times narrowed to the local-clock bound, or `None` if
+    /// no valid time remains. The minimum stays fixed to preserve Testnet's difficulty boundary.
+    ///
+    /// Keep the original long-poll ID: narrowing unchanged work must not cancel miners' work
+    /// each time the local-clock bound advances.
+    pub(crate) fn clamped_time_range(&self, now: DateTime32) -> Option<(DateTime32, DateTime32)> {
+        let max_time = self
+            .max_time
+            .min(now.saturating_add(Duration32::from_hours(2)));
+        (self.min_time <= max_time)
+            .then(|| (self.cur_time.clamp(self.min_time, max_time), max_time))
+    }
+
+    /// Whether elapsed wall time requires fresh Testnet difficulty context.
+    ///
+    /// Historical timestamps remain usable on Mainnet, Regtest, at minimum difficulty, and
+    /// when the full median-time cap prevents a newly built template from becoming easier.
+    pub(crate) fn needs_difficulty_refresh(&self, network: &Network, now: DateTime32) -> bool {
+        now > self.max_time
+            && !network.is_regtest()
+            && zebra_chain::parameters::NetworkUpgrade::minimum_difficulty_spacing_for_height(
+                network,
+                block::Height(self.height),
+            )
+            .is_some()
+            && self.bits != network.target_difficulty_limit().to_compact()
+            && (!network.is_max_block_time_enforced(block::Height(self.height))
+                || self
+                    .max_time
+                    .saturating_duration_since(self.min_time)
+                    .seconds()
+                    < Duration32::from_minutes(90).seconds() - 1)
+    }
+
     /// Performs the CPU-bound selection and construction shared by updater and fallback builds.
     pub(crate) fn from_mempool(
         network: &Network,
