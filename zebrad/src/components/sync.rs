@@ -301,6 +301,10 @@ pub struct Config {
     /// Headers come from legacy peers with `getheaders` and from version 2
     /// peers with `get-headers`, so it works with either kind of peer. On by
     /// default.
+    ///
+    /// With `false`, the syncer finds new blocks with `getblocks`, which only
+    /// legacy peers answer, so it needs legacy peers: with only version 2 peers
+    /// it stops following the chain.
     pub headers_first: bool,
 
     /// The number of checkpoint spans of headers that headers-first sync

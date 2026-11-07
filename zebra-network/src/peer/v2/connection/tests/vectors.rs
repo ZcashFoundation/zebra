@@ -624,6 +624,7 @@ async fn requests_round_trip_between_two_nodes() {
             }
             other => panic!("unexpected response {other}"),
         }
+        // Version 2 sync is headers-first, so `FindBlocks` gets no hashes here.
         let response = call(
             &mut a.client,
             Request::FindBlocks {
@@ -632,11 +633,8 @@ async fn requests_round_trip_between_two_nodes() {
             },
         )
         .await
-        .expect("hashes");
-        assert_eq!(
-            response,
-            Response::BlockHashes(vec![block_1.hash(), block_2.hash()])
-        );
+        .expect("an empty answer");
+        assert_eq!(response, Response::BlockHashes(Vec::new()));
 
         // Ping is answered from the transport's round-trip time.
         let response = call(&mut a.client, Request::Ping(Default::default()))
@@ -1688,127 +1686,71 @@ async fn header_responses_are_bound_to_the_request() {
         let block_2 = fixture.blocks[2].clone();
         let unknown = block::Hash([0xAB; 32]);
 
-        // The locator, the stop hash, whether to ask for hashes rather than headers, the headers
-        // the raw peer answers with, and what the client gets.
+        // The locator, the stop hash, the headers the raw peer answers with, and what the
+        // client gets. `FindBlocks` no longer fetches headers on version 2 connections, so every
+        // case is a `FindHeaders` request.
         let cases: [(
             Vec<block::Hash>,
             Option<block::Hash>,
-            bool,
             Vec<&Arc<Block>>,
             Outcome,
-        ); 15] = [
-            (
-                vec![genesis],
-                None,
-                false,
-                vec![&block_1, &block_2],
-                Accepted,
-            ),
+        ); 12] = [
+            (vec![genesis], None, vec![&block_1, &block_2], Accepted),
             (
                 vec![block_1.hash(), genesis],
                 None,
-                false,
                 vec![&block_2],
                 Accepted,
             ),
             (
                 vec![unknown, genesis],
                 None,
-                false,
                 vec![&block_1, &block_2],
                 Accepted,
             ),
             // A peer that knows none of the locator hashes answers after the genesis block, which
             // a locator without the genesis block does not connect to.
-            (
-                vec![unknown],
-                None,
-                false,
-                vec![&block_1, &block_2],
-                Discarded,
-            ),
-            (
-                vec![unknown],
-                None,
-                true,
-                vec![&block_1, &block_2],
-                Discarded,
-            ),
+            (vec![unknown], None, vec![&block_1, &block_2], Discarded),
             // Being discarded does not excuse a response that is misbehavior.
             (
                 vec![unknown],
                 Some(block_1.hash()),
-                true,
                 vec![&block_1, &block_2],
                 Rejected("past hash_stop"),
             ),
             (
                 vec![genesis],
                 None,
-                false,
-                vec![&block_2],
-                Rejected("not a locator hash"),
-            ),
-            (
-                vec![genesis],
-                None,
-                true,
                 vec![&block_2],
                 Rejected("not a locator hash"),
             ),
             (
                 vec![genesis],
                 Some(block_1.hash()),
-                false,
                 vec![&block_1],
                 Accepted,
             ),
             (
                 vec![genesis],
                 Some(block_1.hash()),
-                false,
                 vec![&block_1, &block_2],
                 Rejected("past hash_stop"),
             ),
-            (
-                vec![genesis],
-                Some(block_1.hash()),
-                true,
-                vec![&block_1, &block_2],
-                Rejected("past hash_stop"),
-            ),
+            (Vec::new(), Some(block_1.hash()), vec![&block_1], Accepted),
             (
                 Vec::new(),
                 Some(block_1.hash()),
-                false,
-                vec![&block_1],
-                Accepted,
-            ),
-            (
-                Vec::new(),
-                Some(block_1.hash()),
-                false,
                 vec![&block_1, &block_2],
                 Rejected("empty locator"),
             ),
-            (
-                Vec::new(),
-                None,
-                false,
-                vec![&block_1],
-                Rejected("empty locator"),
-            ),
-            (Vec::new(), None, false, Vec::new(), Accepted),
+            (Vec::new(), None, vec![&block_1], Rejected("empty locator")),
+            (Vec::new(), None, Vec::new(), Accepted),
         ];
 
-        for (case, (known_blocks, stop, hashes, reply, outcome)) in cases.into_iter().enumerate() {
+        for (case, (known_blocks, stop, reply, outcome)) in cases.into_iter().enumerate() {
             let mut raw = raw_peer_node(&network).await;
             let reply_headers: Vec<_> = reply.iter().map(|block| block.header.clone()).collect();
-            let request = if hashes {
-                Request::FindBlocks { known_blocks, stop }
-            } else {
-                Request::FindHeaders { known_blocks, stop }
-            };
+            let request = Request::FindHeaders { known_blocks, stop };
 
             let (result, ()) = tokio::join!(call(&mut raw.node.client, request), async {
                 let (_, mut send, _recv) = accept_request(&raw.connection).await;
@@ -1840,7 +1782,6 @@ async fn header_responses_are_bound_to_the_request() {
                     .iter()
                     .map(|counted| counted.header.hash())
                     .collect(),
-                Response::BlockHashes(hashes) => hashes,
                 response => panic!("case {case}: unexpected response {response:?}"),
             };
             assert_eq!(got, expected, "case {case}: {outcome:?}");
@@ -1875,7 +1816,7 @@ async fn discarded_header_responses_are_not_penalized() {
         let penalties_to_ban = crate::constants::MAX_PEER_MISBEHAVIOR_SCORE
             .div_ceil(crate::protocol::v2::constants::RESPONSE_MISBEHAVIOR_PENALTY);
         for index in 0..penalties_to_ban {
-            let request = Request::FindBlocks {
+            let request = Request::FindHeaders {
                 known_blocks: vec![block::Hash([0xAB; 32])],
                 stop: None,
             };
@@ -1887,7 +1828,7 @@ async fn discarded_header_responses_are_not_penalized() {
             let response =
                 result.unwrap_or_else(|error| panic!("reply {index}: the client fails: {error}"));
             assert!(
-                matches!(&response, Response::BlockHashes(hashes) if hashes.is_empty()),
+                matches!(&response, Response::BlockHeaders(headers) if headers.is_empty()),
                 "reply {index}: the headers are discarded, got {response:?}"
             );
         }

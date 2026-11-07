@@ -86,7 +86,9 @@ impl LoadTrackedClient {
     ///
     /// Version 2 connections cannot answer a mempool snapshot request yet:
     /// the draft's `get-mempool` is an open-ended subscription with no
-    /// snapshot delimiter. They do not answer the legacy address book's
+    /// snapshot delimiter. They do not answer `FindBlocks` either: version 2
+    /// sync is headers-first, and block hashes without their headers would
+    /// skip the proof of work checks. They do not answer the legacy address book's
     /// address requests either: version 2 address records are QUIC
     /// endpoints, which the version 2 connection hands to the version 2
     /// address segment instead. Object requests need a version 2 connection
@@ -96,7 +98,7 @@ impl LoadTrackedClient {
     pub fn supports(&self, request: &Request) -> bool {
         let v2 = self.connection_info.remote.as_init_record().is_some();
         match request {
-            Request::MempoolTransactionIds | Request::Peers => !v2,
+            Request::MempoolTransactionIds | Request::Peers | Request::FindBlocks { .. } => !v2,
             Request::Object { .. } => {
                 v2 && self
                     .remote_services()
