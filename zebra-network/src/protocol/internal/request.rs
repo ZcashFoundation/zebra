@@ -121,9 +121,10 @@ pub enum Request {
     /// Callers must bound the entire readiness and response operation with a deadline.
     /// The peer's response timeout starts only when the request is dispatched.
     ///
-    /// A known advertiser is preferred even if its advertisement was lost from the inventory
-    /// registry. Missing-inventory reports, prior failures, and connection eligibility still apply.
-    /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
+    /// Inventory advertisers take priority over the carried source, which remains preferred when
+    /// its advertisement was lost or when recovering the parent of a block it supplied.
+    /// Missing-inventory reports, prior failures, and connection eligibility still apply.
+    /// Without an eligible source, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
     /// Inbound `getdata` messages decode as [`Request::BlocksByHash`] or, on negotiated connections,
@@ -137,7 +138,7 @@ pub enum Request {
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
-        /// A connected peer known to have advertised this block, if any.
+        /// A connected block source, or the child's source for a parent recovery, if known.
         advertiser: Option<PeerSocketAddr>,
     },
 

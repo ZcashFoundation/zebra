@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Prefer block inventory advertisers over the carried source when routing parent recovery downloads.
+time: 2026-11-04T02:30:37.710855427+01:00

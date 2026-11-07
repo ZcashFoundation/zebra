@@ -3294,6 +3294,9 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
         let state = tower::service_fn(move |request| {
             let response = match request {
                 zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent]),
+                zs::Request::KnownBlock(requested) if requested == parent => {
+                    zs::Response::KnownBlock(Some(zs::KnownBlock::Finalized))
+                }
                 zs::Request::KnownBlock(requested) => {
                     assert_eq!(requested, hash);
                     zs::Response::KnownBlock(None)
@@ -3320,7 +3323,15 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
             tip.clone(),
             misbehavior,
         );
-        let mut inbound = Downloads::new(1, network, verifier.clone(), state, tip);
+        let mut inbound = Downloads::new(
+            1,
+            network,
+            verifier.clone(),
+            state,
+            tip,
+            config.network.network.clone(),
+        )
+        .with_sync_downloads(sync.in_flight_downloads());
 
         let (_setup_tx, setup_rx) = tokio::sync::oneshot::channel();
         let mut pending_inbound = Inbound::new(1, setup_rx);

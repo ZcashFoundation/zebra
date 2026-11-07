@@ -75,6 +75,7 @@ fn mock_downloads(
         verifier.clone(),
         state.clone(),
         latest_chain_tip,
+        zebra_chain::parameters::Network::Mainnet,
     );
 
     (downloads, network, verifier, state)
@@ -109,6 +110,10 @@ async fn early_relay_download_preserves_validation_and_source() {
             } else {
                 zn::Response::Blocks(blocks)
             });
+        state
+            .expect_request(zs::Request::KnownBlock(block.header.previous_block_hash))
+            .await
+            .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
         let request = if early {
             zebra_consensus::Request::CommitEarlyRelay(block)
         } else {
@@ -484,7 +489,7 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
 ///
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `min_accepted_height` is the boundary, and the behind-tip comparison is strict, so a block
-/// exactly on it is a normal download and the parent is never consulted.
+/// exactly on it is a normal download.
 #[tokio::test(start_paused = true)]
 async fn block_at_reorg_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
@@ -521,6 +526,10 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
             Some(advertiser),
         ))]));
 
+    state
+        .expect_request(zs::Request::KnownBlock(block.header.previous_block_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
     verifier
         .expect_request(zebra_consensus::Request::Commit(block))
         .await
@@ -536,8 +545,7 @@ async fn block_at_reorg_boundary_is_verified_not_dropped() {
         "a block at min_accepted_height must be verified, not dropped as behind the tip"
     );
 
-    // The parent lookup only runs on the behind-tip drop path, so a boundary block must not trigger
-    // one.
+    // The parent is known, so no recovery or height-contradiction lookup is needed.
     state.expect_no_requests().await;
 }
 
@@ -710,7 +718,7 @@ async fn genuinely_far_ahead_block_is_dropped_without_attribution() {
 ///
 /// This is the guard against dropping and attributing honest near-boundary blocks:
 /// `max_lookahead_height` is the boundary, and the far-ahead comparison is strict, so a block exactly
-/// on it is a normal download and the parent is never consulted.
+/// on it is a normal download.
 #[tokio::test(start_paused = true)]
 async fn block_at_lookahead_boundary_is_verified_not_dropped() {
     let _init_guard = zebra_test::init();
@@ -746,6 +754,10 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
             Some(advertiser),
         ))]));
 
+    state
+        .expect_request(zs::Request::KnownBlock(block.header.previous_block_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
     verifier
         .expect_request(zebra_consensus::Request::Commit(block))
         .await
@@ -761,11 +773,11 @@ async fn block_at_lookahead_boundary_is_verified_not_dropped() {
         "a block at max_lookahead_height must be verified, not dropped as far ahead"
     );
 
-    // The parent lookup only runs on the height limit drop paths, so a boundary block must not
-    // trigger one.
+    // The parent is known, so no recovery or height-contradiction lookup is needed.
     state.expect_no_requests().await;
 }
 
+mod missing_parent;
 mod network_checkpoint;
 
 /// A gossip download cannot wait indefinitely for readiness or reset its budget at dispatch.
@@ -784,7 +796,14 @@ async fn download_deadline_includes_readiness_and_response() {
         let verifier: MockVerifier = MockService::build().for_unit_tests();
         let mut state: MockState = MockService::build().for_unit_tests();
         let (tip, _sender) = MockChainTip::new();
-        let mut downloads = Downloads::new(2, limited, verifier, state.clone(), tip);
+        let mut downloads = Downloads::new(
+            2,
+            limited,
+            verifier,
+            state.clone(),
+            tip,
+            zebra_chain::parameters::Network::Mainnet,
+        );
         let hash = block_1().hash();
         assert!(matches!(
             downloads.download_and_verify(hash, None),

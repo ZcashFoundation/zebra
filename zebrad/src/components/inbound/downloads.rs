@@ -7,24 +7,30 @@ use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
     pin::Pin,
+    sync::{Arc, Mutex, MutexGuard},
     task::{Context, Poll},
     time::Duration,
 };
 
 use futures::{
-    future::TryFutureExt,
+    future::{BoxFuture, FutureExt, TryFutureExt},
     ready,
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+    time::timeout,
+};
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
     block::{self, HeightDiff},
     chain_tip::ChainTip,
+    parameters::Network,
 };
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
@@ -33,11 +39,9 @@ use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, MIN_CONCURRENCY_LIMIT};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// How long to wait for the parent-height lookup that decides whether a behind-tip gossiped block
-/// was forged.
+/// How long to wait for parent lookups used by height attribution and missing-parent recovery.
 ///
-/// Bounds a drop path that also fires for honest old blocks. Timing out is treated as "no proof",
-/// so a slow state read costs the supplying peer nothing.
+/// A failed or slow lookup neither scores the supplying peer nor starts a recovery.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A gossiped block was dropped before verification because its coinbase height was outside the
@@ -140,10 +144,8 @@ where
 /// The maximum block size is 2 million bytes. A deserialized malicious
 /// block with ~225_000 transparent outputs can take up 9MB of RAM.
 /// The total queue bound is `MAX_INBOUND_CONCURRENCY * 9 MB`. Each peer IP
-/// is limited to one in-flight download (9 MB) by the per-IP cap enforced
-/// in [`Downloads::download_and_verify`], so a sybil or IPv6-range attacker
-/// still needs many distinct source IPs to approach the total bound.
-/// (See #1880 for more details.)
+/// is limited to one advertised download and one parent recovery (18 MB) by
+/// [`Downloads::download_and_verify`] and [`TaskSpawner::recover_parent`].
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
@@ -162,7 +164,7 @@ pub enum DownloadAction {
     /// The queue is at capacity, so this request was ignored.
     ///
     /// The sync service should discover this block later, when we are closer
-    /// to the tip. The queue's capacity is [`Downloads::full_verify_concurrency_limit`].
+    /// to the tip. The queue's capacity is [`TaskSpawner::full_verify_concurrency_limit`].
     FullQueue,
 
     /// The advertising peer's IP already has an in-flight download, so
@@ -173,64 +175,70 @@ pub enum DownloadAction {
     TooManyFromPeer,
 }
 
-/// Manages download and verification of blocks gossiped to this peer.
-#[pin_project]
-#[derive(Debug)]
-pub struct Downloads<ZN, ZV, ZS, ZSTip>
-where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-    ZV::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    ZS::Future: Send,
-    ZSTip: ChainTip + Clone + Send + 'static,
-{
-    // Configuration
-    //
-    /// The configured full verification concurrency limit, after applying the minimum limit.
-    full_verify_concurrency_limit: usize,
+/// Maximum concurrent single-hop parent recoveries, also charged to the inbound queue limit.
+const MAX_PARENT_RECOVERIES: usize = 4;
 
-    // Services
-    //
-    /// A service that forwards requests to connected peers, and returns their
-    /// responses.
-    network: ZN,
+type DownloadHandle = JoinHandle<Result<block::Hash, (BoxError, Option<PeerSocketAddr>)>>;
 
-    /// A service that verifies downloaded blocks.
-    verifier: ZV,
-
-    /// A service that manages cached blockchain state.
-    state: ZS,
-
-    /// Allows efficient access to the best tip of the blockchain.
-    latest_chain_tip: ZSTip,
-
-    // Internal downloads state
-    //
-    /// A list of pending block download and verify tasks.
-    #[pin]
-    pending: FuturesUnordered<
-        JoinHandle<Result<block::Hash, (BoxError, block::Hash, Option<PeerSocketAddr>)>>,
-    >,
-
-    /// Cancellation handles for tasks in [`Self::pending`], keyed by block
-    /// hash. The `Option<IpAddr>` is the advertiser IP recorded in
-    /// [`Self::in_flight_ips`], so completion can remove it by hash lookup.
+/// Admission shared with tasks, since only a downloaded child reveals its missing parent.
+#[derive(Debug, Default)]
+struct Admission {
+    closed: bool,
     cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, Option<IpAddr>)>,
-
-    /// Advertiser IPs with an in-flight download and verify task.
-    ///
-    /// Invariant: an IP is present iff some entry in [`Self::cancel_handles`]
-    /// has value `(_, Some(ip))`. Enforces the one-download-per-IP cap.
-    ///
-    /// Size-bounded by `full_verify_concurrency_limit` (≤ [`MAX_INBOUND_CONCURRENCY`]),
-    /// inherited from the [`DownloadAction::FullQueue`] check on
-    /// [`Self::pending`].
     in_flight_ips: HashSet<IpAddr>,
+    /// Recoveries bypass the waiting child's ordinary per-IP slot, but have their own per-IP cap.
+    parent_recoveries: HashMap<block::Hash, Option<IpAddr>>,
+}
+
+impl Admission {
+    /// Release admission on completion, without waiting for another inbound request to poll us.
+    fn release(&mut self, hash: &block::Hash) {
+        self.parent_recoveries.remove(hash);
+        if let Some((_, Some(ip))) = self.cancel_handles.remove(hash) {
+            assert!(
+                self.in_flight_ips.remove(&ip),
+                "every tracked IP was inserted when its download was queued",
+            );
+        }
+    }
+}
+
+/// Uses the same admission and verification path for advertised blocks and missing parents.
+#[derive(Clone, Debug)]
+struct TaskSpawner<ZN, ZV, ZS, ZSTip> {
+    full_verify_concurrency_limit: usize,
+    network: ZN,
+    verifier: ZV,
+    state: ZS,
+    latest_chain_tip: ZSTip,
+    chain_network: Network,
+    sync_downloads: crate::components::sync::InFlightDownloads,
+    admission: Arc<Mutex<Admission>>,
+    spawned_sender: mpsc::UnboundedSender<DownloadHandle>,
+}
+
+/// Manages download and verification of blocks gossiped to this peer.
+#[pin_project(PinnedDrop)]
+#[derive(Debug)]
+pub struct Downloads<ZN, ZV, ZS, ZSTip> {
+    spawner: TaskSpawner<ZN, ZV, ZS, ZSTip>,
+    #[pin]
+    pending: FuturesUnordered<DownloadHandle>,
+    /// Recovery handles are bounded by admitted children; each child can spawn at most one.
+    spawned_receiver: mpsc::UnboundedReceiver<DownloadHandle>,
+}
+
+#[pin_project::pinned_drop]
+impl<ZN, ZV, ZS, ZSTip> PinnedDrop for Downloads<ZN, ZV, ZS, ZSTip> {
+    fn drop(self: Pin<&mut Self>) {
+        let mut admission = self
+            .spawner
+            .admission
+            .lock()
+            .expect("admission lock is not poisoned");
+        admission.closed = true;
+        admission.cancel_handles.clear();
+    }
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -250,6 +258,9 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
+        while let Poll::Ready(Some(task)) = this.spawned_receiver.poll_recv(cx) {
+            this.pending.push(task);
+        }
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
@@ -260,17 +271,7 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let (result, hash) =
-                match join_result.expect("block download and verify tasks must not panic") {
-                    Ok(hash) => (Ok(hash), hash),
-                    Err((e, hash, advertiser_addr)) => (Err((e, advertiser_addr)), hash),
-                };
-            if let Some((_, Some(ip))) = this.cancel_handles.remove(&hash) {
-                assert!(
-                    this.in_flight_ips.remove(&ip),
-                    "every tracked IP was inserted when its download was queued",
-                );
-            }
+            let result = join_result.expect("block download and verify tasks must not panic");
             Poll::Ready(Some(result))
         } else {
             Poll::Ready(None)
@@ -278,7 +279,8 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.pending.size_hint()
+        let len = self.pending.len() + self.spawned_receiver.len();
+        (len, (len == 0).then_some(0))
     }
 }
 
@@ -306,87 +308,187 @@ where
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
+        chain_network: Network,
     ) -> Self {
         // The syncer already warns about the minimum.
         let full_verify_concurrency_limit =
             full_verify_concurrency_limit.clamp(MIN_CONCURRENCY_LIMIT, MAX_INBOUND_CONCURRENCY);
 
+        let (spawned_sender, spawned_receiver) = mpsc::unbounded_channel();
         Self {
-            full_verify_concurrency_limit,
-            network,
-            verifier,
-            state,
-            latest_chain_tip,
+            spawner: TaskSpawner {
+                full_verify_concurrency_limit,
+                network,
+                verifier,
+                state,
+                latest_chain_tip,
+                chain_network,
+                sync_downloads: Default::default(),
+                admission: Arc::default(),
+                spawned_sender,
+            },
             pending: FuturesUnordered::new(),
-            cancel_handles: HashMap::new(),
-            in_flight_ips: HashSet::new(),
+            spawned_receiver,
         }
+    }
+
+    /// Reuse parent downloads already owned by the chain syncer.
+    pub(crate) fn with_sync_downloads(
+        mut self,
+        sync_downloads: crate::components::sync::InFlightDownloads,
+    ) -> Self {
+        self.spawner.sync_downloads = sync_downloads;
+        self
     }
 
     /// Queue a block for download and verification.
     ///
-    /// When `advertiser` is `Some`, it is passed to the network as a known block source,
-    /// and its IP is tracked in [`Self::in_flight_ips`] to enforce the one-download-per-IP cap.
-    /// `None` bypasses per-IP accounting (for example when Zebra triggers the download internally).
+    /// The advertiser is passed to the network as a source and charged one per-IP slot.
+    /// Internally triggered downloads without an advertiser bypass per-IP accounting.
+    /// After height screening, an unknown parent can use one recovery slot, which first checks the
+    /// child's proof of work.
     #[instrument(skip(self, hash), fields(hash = %hash))]
     pub fn download_and_verify(
         &mut self,
         hash: block::Hash,
         advertiser: Option<PeerSocketAddr>,
     ) -> DownloadAction {
-        if self.cancel_handles.contains_key(&hash) {
+        let mut admission = self.spawner.admission();
+        let queue_len = admission.cancel_handles.len();
+        // Queue lengths are at most MAX_INBOUND_CONCURRENCY and are exact when converted to f64.
+        if admission.cancel_handles.contains_key(&hash) {
             debug!(
                 ?hash,
-                queue_len = self.pending.len(),
-                concurrency_limit = self.full_verify_concurrency_limit,
+                queue_len,
+                concurrency_limit = self.spawner.full_verify_concurrency_limit,
                 "block hash already queued for inbound download: ignored block",
             );
-
-            metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
+            metrics::gauge!("gossip.queued.block.count").set(queue_len as f64);
             metrics::counter!("gossip.already.queued.dropped.block.hash.count").increment(1);
-
             return DownloadAction::AlreadyQueued;
         }
-
-        if self.pending.len() >= self.full_verify_concurrency_limit {
+        if queue_len >= self.spawner.full_verify_concurrency_limit {
             debug!(
                 ?hash,
-                queue_len = self.pending.len(),
-                concurrency_limit = self.full_verify_concurrency_limit,
+                queue_len,
+                concurrency_limit = self.spawner.full_verify_concurrency_limit,
                 "too many blocks queued for inbound download: ignored block",
             );
-
-            metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
+            metrics::gauge!("gossip.queued.block.count").set(queue_len as f64);
             metrics::counter!("gossip.full.queue.dropped.block.hash.count").increment(1);
-
             return DownloadAction::FullQueue;
         }
-
-        let advertiser_ip = advertiser.map(|addr| addr.ip());
-        if let Some(ip) = advertiser_ip {
-            if self.in_flight_ips.contains(&ip) {
-                debug!(
-                    ?hash,
-                    ?advertiser,
-                    "already have an in-flight inbound download from peer IP: ignored block",
-                );
-
-                metrics::counter!("gossip.peer.limit.dropped.block.hash.count").increment(1);
-
-                return DownloadAction::TooManyFromPeer;
-            }
+        if advertiser.is_some_and(|addr| admission.in_flight_ips.contains(&addr.ip())) {
+            debug!(
+                ?hash,
+                ?advertiser,
+                "already have an in-flight inbound download from peer IP: ignored block",
+            );
+            metrics::counter!("gossip.peer.limit.dropped.block.hash.count").increment(1);
+            return DownloadAction::TooManyFromPeer;
         }
+        let task = self
+            .spawner
+            .spawn_download(&mut admission, hash, advertiser, None);
+        self.pending.push(task);
+        debug!(
+            ?hash,
+            queue_len = queue_len + 1,
+            concurrency_limit = self.spawner.full_verify_concurrency_limit,
+            "queued hash for download",
+        );
+        metrics::gauge!("gossip.queued.block.count").set((queue_len + 1) as f64);
+        DownloadAction::AddedToQueue
+    }
+}
 
-        // This oneshot is used to signal cancellation to the download task.
+impl<ZN, ZV, ZS, ZSTip> TaskSpawner<ZN, ZV, ZS, ZSTip>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
+    ZN::Future: Send,
+    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ZV::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
+{
+    fn admission(&self) -> MutexGuard<'_, Admission> {
+        self.admission
+            .lock()
+            .expect("admission lock is not poisoned")
+    }
+
+    /// Reuse an in-flight parent or admit one recovery, without charging the child's ordinary slot.
+    /// The verifier's existing queued-block handling waits for the parent to commit.
+    ///
+    /// The recovery runs `child_work` before any request, so the recovery limits also bound that
+    /// blocking work.
+    fn recover_parent(
+        &self,
+        hash: block::Hash,
+        advertiser: Option<PeerSocketAddr>,
+        child_work: impl FnOnce() -> bool + Send + 'static,
+    ) {
+        let mut admission = self.admission();
+        let ip = advertiser.map(|addr| addr.ip());
+        if admission.closed
+            || admission.cancel_handles.contains_key(&hash)
+            || self.sync_downloads.contains(&hash)
+            || admission.cancel_handles.len() >= self.full_verify_concurrency_limit
+            || admission.parent_recoveries.len() >= MAX_PARENT_RECOVERIES
+            || admission
+                .parent_recoveries
+                .values()
+                .any(|source| *source == ip)
+        {
+            return;
+        }
+        let task =
+            self.spawn_download(&mut admission, hash, advertiser, Some(Box::new(child_work)));
+        admission.parent_recoveries.insert(hash, ip);
+        // Dropping the stream closes admission and cancels every task.
+        let _ = self.spawned_sender.send(task);
+    }
+
+    fn spawn_download(
+        &self,
+        admission: &mut Admission,
+        hash: block::Hash,
+        advertiser: Option<PeerSocketAddr>,
+        child_work: Option<Box<dyn FnOnce() -> bool + Send>>,
+    ) -> DownloadHandle {
+        let parent_recovery = child_work.is_some();
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
-
+        let advertiser_ip = advertiser
+            .filter(|_| !parent_recovery)
+            .map(|addr| addr.ip());
+        let spawner = self.clone();
         let state = self.state.clone();
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
+        let chain_network = self.chain_network.clone();
         let full_verify_concurrency_limit = self.full_verify_concurrency_limit;
 
-        let fut = async move {
+        // The explicit boxed future breaks the recursive task-spawning type dependency.
+        let fut: BoxFuture<'static, _> = async move {
+            // Only children with valid header work fetch their parent. Invalid children are left to
+            // the verifier, which retains its error attribution and scoring.
+            if let Some(child_work) = child_work {
+                let valid_work = tokio::task::spawn_blocking(child_work)
+                    .await
+                    .expect("proof-of-work checks must not panic");
+                if !valid_work {
+                    return Err((
+                        "child of missing parent has invalid proof of work".into(),
+                        None,
+                    ));
+                }
+            }
+
             // Check if the block is already in the state.
             match state.clone().oneshot(zs::Request::KnownBlock(hash)).await {
                 Ok(zs::Response::KnownBlock(None)) => Ok(()),
@@ -537,6 +639,42 @@ where
                 ));
             }
 
+            if !parent_recovery && block_height != block::Height(0) {
+                let parent = block.header.previous_block_hash;
+                let parent_missing = matches!(
+                    timeout(
+                        PARENT_LOOKUP_TIMEOUT,
+                        state.oneshot(zs::Request::KnownBlock(parent)),
+                    )
+                    .await,
+                    Ok(Ok(zs::Response::KnownBlock(None)))
+                );
+                if parent_missing {
+                    let header = block.header.clone();
+                    let child_work = move || {
+                        if chain_network.disable_pow() {
+                            zebra_consensus::difficulty_threshold_is_valid(
+                                &header,
+                                &chain_network,
+                                &block_height,
+                                &hash,
+                            )
+                            .is_ok()
+                        } else {
+                            zebra_consensus::difficulty_is_valid(
+                                &header,
+                                &chain_network,
+                                &block_height,
+                                &hash,
+                            )
+                            .is_ok()
+                                && zebra_consensus::equihash_solution_is_valid(&header).is_ok()
+                        }
+                    };
+                    spawner.recover_parent(parent, advertiser_addr.or(advertiser), child_work);
+                }
+            }
+
             let request = if early_relay {
                 zebra_consensus::Request::CommitEarlyRelay(block)
             } else {
@@ -553,46 +691,42 @@ where
             metrics::counter!("gossip.verified.block.count").increment(1);
             hash
         })
-        // Tack the hash onto the error so poll_next can look up the cancel
-        // handle and advertising IP on failure as well as success.
-        .map_err(move |(e, advertiser_addr)| (e, hash, advertiser_addr))
-        .in_current_span();
+        .in_current_span()
+        .boxed();
 
+        let task_admission = self.admission.clone();
         let task = tokio::spawn(async move {
             // Prefer the cancel handle if both are ready.
-            tokio::select! {
+            let result = tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count").increment(1);
-                    Err(("canceled".into(), hash, None))
+                    Err(("canceled".into(), None))
                 }
                 verification = fut => verification,
-            }
+            };
+            task_admission
+                .lock()
+                .expect("admission lock is not poisoned")
+                .release(&hash);
+            result
         });
 
-        self.pending.push(task);
         assert!(
-            self.cancel_handles
+            admission
+                .cancel_handles
                 .insert(hash, (cancel_tx, advertiser_ip))
                 .is_none(),
             "blocks are only queued once"
         );
         if let Some(ip) = advertiser_ip {
             assert!(
-                self.in_flight_ips.insert(ip),
+                admission.in_flight_ips.insert(ip),
                 "the per-IP cap check above rejects any IP already in flight",
             );
         }
 
-        debug!(
-            ?hash,
-            queue_len = self.pending.len(),
-            concurrency_limit = self.full_verify_concurrency_limit,
-            "queued hash for download",
-        );
-        metrics::gauge!("gossip.queued.block.count").set(self.pending.len() as f64);
-
-        DownloadAction::AddedToQueue
+        task
     }
 }
