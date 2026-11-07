@@ -47,7 +47,9 @@ the pool forwards updated work to miners even when `previousblockhash` is unchan
 transaction selection changed. After a timeout or connection failure, reconnect with bounded retry
 backoff, fetch a fresh template without an ID, and restart the long-poll loop.
 
-## Use block notifications with s-nomp
+## Use block notifications
+
+### s-nomp commands
 
 For a pool that supports a block-notification command but not long polling, add this to Zebra's
 configuration and restart the node:
@@ -71,6 +73,23 @@ Keep periodic polling enabled as a backstop for missed notifications or a restar
 notifications only signal tip changes, so retain the pool's periodic job refresh for transaction-only
 updates too. See the [s-nomp testnet guide](mining-testnet-s-nomp.md#important) for its compatibility and
 payment limitations; this command does not make an unsupported pool version production-ready.
+
+### ZMQ subscribers
+
+Pools that subscribe to zcashd's ZMQ `hashblock` topic, such as Miningcore, can use Zebra's ZMQ
+publisher. Build Zebra with `--features zmq`, then configure:
+
+```toml
+[notify]
+zmqpubhashblock = "tcp://127.0.0.1:28332"
+```
+
+Notifications start when Zebra is close to the network tip. Delivery is best-effort: use the
+sequence numbers to detect gaps and reconcile through RPC after gaps or reconnects. Keep periodic
+polling as a backstop; coalesced intermediate tips do not necessarily create sequence gaps.
+
+The endpoint has no authentication; expose it only to trusted clients. See
+[ZMQ block notifications](mining.md#zmq-block-notifications) for framing and resource limits.
 
 ## Keep mining and payouts separate
 
