@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Expose advertised peer start heights through address-book metadata and its `start_height()` getters.
+time: 2026-11-05T06:29:25.98734407+01:00
