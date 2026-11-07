@@ -187,7 +187,7 @@ impl DecodedBlock {
     /// checks still run. Call from a blocking worker.
     pub fn deserialize(mut bytes: &[u8]) -> Result<Self, SerializationError> {
         let input_size = bytes.len();
-        let block = Arc::new(block::Block::zcash_deserialize(&mut bytes)?);
+        let block = Arc::new(block::Block::zcash_deserialize_parallel(&mut bytes)?);
         Ok(Self {
             block,
             consumed_size: Some(input_size - bytes.len()),

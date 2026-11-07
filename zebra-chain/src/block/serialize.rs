@@ -1,17 +1,20 @@
 //! Serialization and deserialization for Zcash blocks.
 
-use std::{borrow::Borrow, io};
+use std::{borrow::Borrow, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
 use hex::{FromHex, FromHexError};
+use rayon::prelude::*;
+use zcash_primitives::transaction::TxVersion;
 
 use crate::{
     block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
     serialization::{
-        CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
+        CompactSizeMessage, ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
+    transaction::Transaction,
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -165,6 +168,222 @@ impl ZcashDeserialize for Block {
             transactions: limited_reader.zcash_deserialize_into()?,
         })
     }
+}
+
+impl Block {
+    /// Decodes a byte slice, parsing and hashing large blocks' transactions on Rayon.
+    ///
+    /// Small blocks use the serial decoder. Large blocks use a layout-only boundary scan,
+    /// then the canonical transaction decoder in bounded batches. Errors and consumed bytes,
+    /// including trailing bytes and the block-size limit, match the serial decoder.
+    pub fn zcash_deserialize_parallel(bytes: &mut &[u8]) -> Result<Self, SerializationError> {
+        if let Some((block, consumed)) = parallel_block(bytes) {
+            *bytes = &bytes[consumed..];
+            block
+        } else {
+            Self::zcash_deserialize(bytes)
+        }
+    }
+}
+
+/// Limits speculative parsing after an invalid transaction to 64 KiB. Larger transactions
+/// occupy a batch alone, so an early error cannot trigger decoding the rest of the block.
+pub(super) const PARALLEL_DECODE_BATCH_BYTES: usize = 64 * 1024;
+
+/// Decodes a serial prefix before bounded speculative work; no canonical parse is replayed.
+pub(super) fn parallel_block(bytes: &[u8]) -> Option<(Result<Block, SerializationError>, usize)> {
+    // Below 64 transactions, Rayon scheduling can outweigh parallel parsing and hashing.
+    const PARALLEL_DECODE_THRESHOLD: usize = 64;
+
+    let limit = usize::try_from(MAX_BLOCK_BYTES).expect("block limit fits in usize");
+    let bounded = &bytes[..bytes.len().min(limit)];
+    // Probe past the fixed header prefix, nonce and variable Equihash solution without
+    // allocating a header. Small blocks go straight to the ordinary serial decoder.
+    let mut remaining = bounded.get(equihash::Solution::INPUT_LENGTH + 32..)?;
+    scan_fixed_vector(&mut remaining, 1)?;
+    let count = scan_count(&mut remaining)?;
+    if count < PARALLEL_DECODE_THRESHOLD
+        || u64::try_from(count).ok()? > Transaction::max_allocation()
+    {
+        return None;
+    }
+    let header = bounded.zcash_deserialize_into().ok()?;
+
+    let body_start = bounded.len() - remaining.len();
+    let mut consumed = body_start;
+    let block = (|| {
+        let mut transactions = Vec::new();
+        let mut ranges = Vec::new();
+        let mut parsed = Vec::new();
+        let mut serial = false;
+        while transactions.len() < count {
+            // Keep early failures as cheap as serial decoding. Later speculation never
+            // exceeds the already accepted wire bytes or the fixed batch limit.
+            if transactions.len() < PARALLEL_DECODE_THRESHOLD || serial {
+                let mut reader = &bounded[consumed..];
+                let transaction = Transaction::zcash_deserialize(&mut reader);
+                consumed = bounded.len() - reader.len();
+                transactions.push(Arc::new(transaction?));
+                continue;
+            }
+            let start = consumed;
+            let budget = (consumed - body_start).min(PARALLEL_DECODE_BATCH_BYTES);
+            if scan_batch(
+                &bounded[start..],
+                count - transactions.len(),
+                budget,
+                &mut ranges,
+            )
+            .is_none()
+            {
+                // The scan did not parse anything. Resume once from the accepted prefix.
+                serial = true;
+                continue;
+            }
+            ranges
+                .par_iter()
+                .map(|range| {
+                    // Canonical errors and consumption require the full bounded suffix,
+                    // even if a future wire layout makes the scan's boundary stale.
+                    let mut reader = &bounded[start + range.start..];
+                    let transaction = Transaction::zcash_deserialize(&mut reader).map(Arc::new);
+                    (transaction, bounded.len() - reader.len())
+                })
+                .collect_into_vec(&mut parsed);
+            for ((transaction, end), range) in parsed.drain(..).zip(&ranges) {
+                consumed = end;
+                transactions.push(transaction?);
+                if end != start + range.end {
+                    // Do not use stale boundaries or repeat already accepted parsing.
+                    serial = true;
+                    break;
+                }
+            }
+        }
+        Ok(Block {
+            header,
+            transactions,
+        })
+    })();
+    Some((block, consumed))
+}
+
+/// Scan one bounded batch, keeping an oversized first transaction alone and bounding later scans.
+pub(super) fn scan_batch(
+    bytes: &[u8],
+    count: usize,
+    budget: usize,
+    ranges: &mut Vec<std::ops::Range<usize>>,
+) -> Option<()> {
+    ranges.clear();
+    let mut remaining = bytes;
+    for _ in 0..count {
+        let start = bytes.len() - remaining.len();
+        let mut reader = remaining;
+        if !ranges.is_empty() {
+            reader = &reader[..reader.len().min(budget - start)];
+        }
+        let available = reader.len();
+        if scan_transaction(&mut reader).is_none() {
+            return if ranges.is_empty() { None } else { Some(()) };
+        }
+        let end = start + available - reader.len();
+        remaining = &bytes[end..];
+        ranges.push(start..end);
+        if end >= budget {
+            break;
+        }
+    }
+    Some(())
+}
+
+/// Skips a bounded number of bytes without copying or allocating.
+fn skip(bytes: &mut &[u8], count: usize) -> Option<()> {
+    *bytes = bytes.get(count..)?;
+    Some(())
+}
+
+/// Counts use the same canonical CompactSize encoding and message bound as the decoder.
+fn scan_count(bytes: &mut &[u8]) -> Option<usize> {
+    CompactSizeMessage::zcash_deserialize(bytes)
+        .ok()
+        .map(usize::from)
+}
+
+fn scan_fixed_vector(bytes: &mut &[u8], item_size: usize) -> Option<usize> {
+    let count = scan_count(bytes)?;
+    skip(bytes, count.checked_mul(item_size)?)?;
+    Some(count)
+}
+
+/// Wire-layout-only scan of the formats accepted by the pinned native parser.
+///
+/// Fixed lengths follow the transaction encoding tables in §7.1 of the protocol spec.
+/// Field encodings, amounts, branch IDs, proofs, and consensus checks belong exclusively
+/// to `Transaction::zcash_deserialize`, never this scanner.
+pub(super) fn scan_transaction(bytes: &mut &[u8]) -> Option<()> {
+    let version = TxVersion::read(&mut *bytes).ok()?;
+    if version.has_orchard() {
+        // nConsensusBranchId, nLockTime, nExpiryHeight (V5 and V6).
+        skip(bytes, 12)?;
+    }
+    for _ in 0..scan_count(bytes)? {
+        skip(bytes, 36)?; // prevout
+        let script_len = scan_count(bytes)?;
+        skip(bytes, script_len)?;
+        skip(bytes, 4)?; // nSequence
+    }
+    for _ in 0..scan_count(bytes)? {
+        skip(bytes, 8)?; // value
+        let script_len = scan_count(bytes)?;
+        skip(bytes, script_len)?;
+    }
+    if !version.has_orchard() {
+        skip(bytes, 4)?; // nLockTime
+        if version.has_overwinter() {
+            skip(bytes, 4)?; // nExpiryHeight
+        }
+        let mut has_sapling = false;
+        if version.has_sapling() {
+            skip(bytes, 8)?; // valueBalanceSapling
+            let spends = scan_fixed_vector(bytes, 384)?;
+            let outputs = scan_fixed_vector(bytes, 948)?;
+            has_sapling = spends != 0 || outputs != 0;
+        }
+        if version.has_sprout() {
+            // PHGR13 proofs before V4; Groth16 proofs in V4.
+            let size = if version.has_sapling() { 1698 } else { 1802 };
+            if scan_fixed_vector(bytes, size)? != 0 {
+                skip(bytes, 96)?; // joinSplitPubKey, joinSplitSig
+            }
+        }
+        if has_sapling {
+            skip(bytes, 64)?; // bindingSigSapling
+        }
+    } else {
+        let spends = scan_fixed_vector(bytes, 96)?;
+        let outputs = scan_fixed_vector(bytes, 756)?;
+        if spends != 0 || outputs != 0 {
+            skip(bytes, 8)?; // valueBalanceSapling
+            if spends != 0 {
+                skip(bytes, 32)?; // anchorSapling
+            }
+            skip(bytes, spends.checked_mul(192 + 64)?)?;
+            skip(bytes, outputs.checked_mul(192)?)?;
+            skip(bytes, 64)?; // bindingSigSapling
+        }
+        for _ in 0..if version.has_ironwood() { 2 } else { 1 } {
+            let actions = scan_fixed_vector(bytes, 820)?;
+            if actions != 0 {
+                skip(bytes, 1 + 8 + 32)?; // flags, valueBalance, anchor
+                let proof_len = scan_count(bytes)?;
+                skip(bytes, proof_len)?;
+                skip(bytes, actions.checked_mul(64)?)?;
+                skip(bytes, 64)?; // bindingSig
+            }
+        }
+    }
+    Some(())
 }
 
 /// A serialized block.
