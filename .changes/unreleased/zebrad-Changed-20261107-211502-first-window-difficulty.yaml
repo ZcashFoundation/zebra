@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed the expected difficulty of blocks at heights 1 to 17 to the minimum difficulty, as in zcashd. Custom Testnets whose first 17 blocks were mined by earlier Zebra versions are now invalid: restart them from genesis. Mainnet, Testnet and Regtest are not affected.'
+time: 2026-11-07T21:15:02Z

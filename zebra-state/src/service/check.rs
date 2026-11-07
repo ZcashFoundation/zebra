@@ -133,6 +133,45 @@ pub(crate) fn block_is_valid_for_recent_chain(
     Ok(())
 }
 
+/// Checks the difficulty threshold and time of `header`, at `height`, against
+/// the previous headers of its chain.
+///
+/// `context` holds the previous headers in reverse height order, starting with
+/// the parent at `height - 1`. Only the first `PoWAveragingWindow(height) +
+/// PoWMedianBlockSpan` headers are used, and fewer are enough near genesis.
+/// The caller checks that `header` links to `context[0]`.
+///
+/// This is the same rule [`block_is_valid_for_recent_chain`] applies to a
+/// block, for headers that arrive before their bodies.
+pub fn check_header_context(
+    context: &[Arc<block::Header>],
+    header: &block::Header,
+    height: block::Height,
+    network: &Network,
+) -> Result<(), ValidateContextError> {
+    let previous_height = height
+        .previous()
+        .map_err(|_| ValidateContextError::NotReadyToBeCommitted)?;
+
+    if context.is_empty() {
+        return Err(ValidateContextError::NotReadyToBeCommitted);
+    }
+
+    let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
+        header.time,
+        previous_height,
+        network,
+        context
+            .iter()
+            .map(|header| (header.difficulty_threshold, header.time)),
+    );
+
+    check::difficulty_threshold_and_time_are_valid(
+        header.difficulty_threshold,
+        difficulty_adjustment,
+    )
+}
+
 /// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
 ///
@@ -406,16 +445,21 @@ where
         if has_network_upgrade {
             return Ok(block.coinbase_height());
         }
+
+        // A snapshot-imported database has no bodies below the snapshot height, so the walk stops
+        // there, before it reads an ancestor without a body.
+        if snapshot_base.is_some_and(|base| last_height == Some(base.body_start())) {
+            break;
+        }
     }
 
-    // A snapshot-imported database knows no blocks below its window, so the iterator ends at the
-    // window start. The snapshot commitment pins the chain there, which the branch check would
-    // otherwise have to prove (DESIGN §7).
-    if let Some(window_start) = snapshot_base
-        .map(|base| base.window_start)
-        .filter(|window_start| last_height == Some(*window_start))
+    // The walk reached the first body of a snapshot-imported database. The snapshot commitment
+    // pins the chain there, which the branch check would otherwise have to prove (DESIGN §7).
+    if let Some(body_start) = snapshot_base
+        .map(|base| base.body_start())
+        .filter(|body_start| last_height == Some(*body_start))
     {
-        return Ok(Some(window_start));
+        return Ok(Some(body_start));
     }
 
     Err(

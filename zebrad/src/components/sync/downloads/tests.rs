@@ -228,6 +228,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             state: state_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            read_state: None,
         })
         .map_err(|_| "inbound setup receiver remains open")?;
     inbound.ready().await?;

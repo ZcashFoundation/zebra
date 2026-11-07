@@ -252,8 +252,8 @@ impl DiskFormatUpgrade for Upgrade {
             }
         });
 
-        // A database imported from a state snapshot has block info and bodies from its window
-        // start, so the window checked here cannot start below it (DESIGN §7).
+        // A database imported from a state snapshot has block info from its window start, so the
+        // window checked here cannot start below it (DESIGN §7).
         let start_height = (tip_height - 1_000)
             .unwrap_or(Height::MIN)
             .max(history.lowest_known_height);
@@ -272,7 +272,13 @@ impl DiskFormatUpgrade for Upgrade {
             }
         }
 
-        if tip_height != Height::MIN && retained_floor > start_height.max(Height(1)) {
+        // Its received totals start at zero at the import, because the outputs spent below the
+        // snapshot height are gone, so the address checks start above the snapshot height.
+        let address_start = match history.snapshot_base {
+            Some(base) => start_height.max(base.height.next().unwrap_or(base.height)),
+            None => start_height,
+        };
+        if tip_height != Height::MIN && retained_floor > address_start.max(Height(1)) {
             return Ok(Err(
                 "recent address-balance checks require unavailable block history; \
                  restore an archive snapshot or resync"
@@ -282,7 +288,7 @@ impl DiskFormatUpgrade for Upgrade {
 
         // The captured window must be available above, but the transaction iterator's consistent
         // view may skip bodies pruned since capture. Their received balances are permanent.
-        self.validate_addresses(db, cancel_receiver, start_height)
+        self.validate_addresses(db, cancel_receiver, address_start)
     }
 }
 

@@ -332,6 +332,18 @@ pub struct Config {
     /// Runtime-only: `zebrad` sets it on version 2 nodes, and config files never contain it.
     #[serde(skip)]
     pub object_source: Option<ObjectSource>,
+
+    /// The best chain tip height from which this node advertises `NODE_NETWORK_LIMITED` to
+    /// version 2 peers, or `None` to advertise only the services it started with.
+    ///
+    /// A node bootstrapped from a state snapshot starts with no block bodies below the snapshot
+    /// height, so it cannot serve the recent blocks `NODE_NETWORK_LIMITED` promises until it has
+    /// committed them. Each version 2 handshake compares the chain tip with this height, so only
+    /// connections made after the tip reaches it see the new services.
+    ///
+    /// Runtime-only: `zebrad` sets it on snapshot-born nodes, and config files never contain it.
+    #[serde(skip)]
+    pub v2_limited_service_from: Option<zebra_chain::block::Height>,
 }
 
 impl Config {
@@ -361,6 +373,20 @@ impl Config {
         let mut services = services - PeerServices::NODE_EARLY_BLOCK_RELAY;
         if self.object_source.is_some() {
             services.insert(PeerServices::NODE_SYNC_ARTIFACTS);
+        }
+        services
+    }
+
+    /// Returns the services for a version 2 handshake that starts at the chain tip `tip`:
+    /// `services`, with `NODE_NETWORK_LIMITED` once `tip` reaches `limited_service_from`, the
+    /// [`v2_limited_service_from`](Self::v2_limited_service_from) height.
+    pub(crate) fn v2_services_now(
+        limited_service_from: Option<zebra_chain::block::Height>,
+        tip: Option<zebra_chain::block::Height>,
+        mut services: PeerServices,
+    ) -> PeerServices {
+        if limited_service_from.is_some_and(|from| tip.is_some_and(|tip| tip >= from)) {
+            services.insert(PeerServices::NODE_NETWORK_LIMITED);
         }
         services
     }
@@ -890,6 +916,7 @@ impl Default for Config {
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
             v2_sync_peers: None,
             object_source: None,
+            v2_limited_service_from: None,
         }
     }
 }
@@ -1066,6 +1093,7 @@ impl From<Config> for DConfig {
             max_connections_per_ip,
             v2_sync_peers: _,
             object_source: _,
+            v2_limited_service_from: _,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -1221,6 +1249,7 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
             v2_sync_peers: None,
             object_source: None,
+            v2_limited_service_from: None,
         })
     }
 }

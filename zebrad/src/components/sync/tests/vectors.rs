@@ -2425,6 +2425,11 @@ async fn reobtain_keeps_blocks_when_network_readiness_times_out() {
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (mock_chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
@@ -3030,6 +3035,11 @@ where
     let config = ZebradConfig {
         consensus: ConsensusConfig::default(),
         state: StateConfig::ephemeral(),
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -3078,6 +3088,11 @@ fn setup() -> (
     let config = ZebradConfig {
         consensus: consensus_config,
         state: state_config,
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -3181,6 +3196,11 @@ async fn obtain_tips_tolerates_commits_during_fanout() {
     });
     let config = ZebradConfig {
         state: StateConfig::ephemeral(),
+        // These tests cover the legacy `FindBlocks` walk.
+        sync: crate::components::sync::Config {
+            headers_first: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (tip, _tip_sender) = MockChainTip::new();
@@ -3214,6 +3234,121 @@ async fn obtain_tips_tolerates_commits_during_fanout() {
     );
 }
 
+/// With headers-first sync, block hashes come only from the stored header
+/// chain: no `FindBlocks` goes to peers, no body above the header tip is
+/// requested, and extending a tip continues up the header chain.
+#[tokio::test]
+async fn headers_first_downloads_only_stored_header_chain_hashes() {
+    use std::sync::Arc as StdArc;
+
+    let _init_guard = zebra_test::init();
+    let tip = block::Hash([0; 32]);
+    // The header chain above the body tip: the first batch, then one more.
+    let first: Vec<block::Hash> = (1..=3).map(|byte| block::Hash([byte; 32])).collect();
+    let second = block::Hash([4; 32]);
+    let above_header_tip = block::Hash([5; 32]);
+
+    let header_requests = StdArc::new(std::sync::atomic::AtomicUsize::new(0));
+    let state = {
+        let first = first.clone();
+        let header_requests = header_requests.clone();
+        tower::service_fn(move |request| {
+            let response = match request {
+                zs::Request::BlockLocator => zs::Response::BlockLocator(vec![tip]),
+                zs::Request::HeaderChainHashes {
+                    known_blocks,
+                    limit,
+                } => {
+                    header_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    assert!(limit > 0);
+                    let hashes = if known_blocks == vec![tip] {
+                        first.clone()
+                    } else if known_blocks == vec![first[2]] {
+                        vec![second]
+                    } else {
+                        // The header tip: nothing above it.
+                        Vec::new()
+                    };
+                    zs::Response::BlockHashes(hashes)
+                }
+                zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                request => panic!("unexpected state request: {request:?}"),
+            };
+            std::future::ready(Ok::<_, zs::BoxError>(response))
+        })
+    };
+
+    let (downloads, mut requested) = tokio::sync::mpsc::channel(8);
+    let network = tower::service_fn(move |request| {
+        let downloads = downloads.clone();
+        async move {
+            match request {
+                zn::Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                } => {
+                    downloads.send(hash).await.unwrap();
+                    std::future::pending().await
+                }
+                request => panic!("headers-first sync sends no {request:?}"),
+            }
+        }
+    });
+
+    let config = ZebradConfig {
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    assert!(
+        config.sync.headers_first,
+        "headers-first sync is the default"
+    );
+
+    let (chain_tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior, _reports) = tokio::sync::mpsc::channel(1);
+    let (mut sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        chain_tip,
+        misbehavior,
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), sync.obtain_tips())
+        .await
+        .expect("obtaining tips is bounded")
+        .expect("the header chain has hashes");
+    tokio::time::timeout(Duration::from_secs(5), sync.extend_tips())
+        .await
+        .expect("extending tips is bounded")
+        .expect("the header chain has one more hash");
+    tokio::time::timeout(Duration::from_secs(5), sync.extend_tips())
+        .await
+        .expect("extending tips is bounded")
+        .expect("the header tip has no more hashes");
+
+    let mut downloaded = Vec::new();
+    while let Ok(hash) = requested.try_recv() {
+        downloaded.push(hash);
+    }
+    let mut expected = first.clone();
+    expected.push(second);
+    assert_eq!(downloaded, expected, "only header chain hashes, in order");
+    assert!(!downloaded.contains(&above_header_tip));
+    assert_eq!(
+        header_requests.load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "obtain, then extend twice"
+    );
+    assert!(
+        sync.prospective_tips.is_empty(),
+        "the header tip ends the round"
+    );
+}
+
 /// A singleton racing discovery starts only one download and one verification.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sync_singleton_race_downloads_once() {
@@ -3241,6 +3376,11 @@ async fn singleton_discovery_downloads_once(ignore_first_round: bool) {
     tokio::time::timeout(Duration::from_secs(10), async {
         let config = ZebradConfig {
             state: StateConfig::ephemeral(),
+            // These tests cover the legacy `FindBlocks` walk.
+            sync: crate::components::sync::Config {
+                headers_first: false,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES

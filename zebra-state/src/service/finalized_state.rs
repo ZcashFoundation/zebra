@@ -75,6 +75,9 @@ pub(crate) use disk_format::{
 };
 #[allow(unused_imports)]
 pub(crate) use zebra_db::chain::SNAPSHOT_BASE;
+// The state snapshot importer stores the headers above the snapshot height.
+#[allow(unused_imports)]
+pub(crate) use zebra_db::header_chain::{HEADER_BY_HEIGHT, HEIGHT_BY_HEADER_HASH};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;

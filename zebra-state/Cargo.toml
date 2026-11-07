@@ -56,6 +56,7 @@ semver = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 tempfile = { workspace = true }
+thiserror = { workspace = true }
 
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }

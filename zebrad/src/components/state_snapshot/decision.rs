@@ -1,5 +1,5 @@
 //! The decision rule: whether `zebrad start` bootstraps from a
-//! state snapshot before it initializes the state.
+//! state snapshot, after it syncs headers from genesis.
 //!
 //! Every condition must hold, and the first that fails is logged once at
 //! info, so an operator who enabled snapshot sync can see why it did not run.
@@ -21,12 +21,15 @@ mod tests;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Decision {
     /// Bootstrap from `commitment`, downloading from `peers`: the configured
-    /// `[sync] state_snapshot_peers`, or `[network] initial_v2_peers` when
-    /// they are empty.
+    /// `[sync] state_snapshot_peers`.
     Bootstrap {
         /// The commitment the snapshot is verified against.
         commitment: StateSnapshotCommitment,
-        /// The peers to download from, as `host:port` strings.
+        /// The peers to download from, as `host:port` strings. When there are
+        /// none, the node downloads from its connected version 2 peers that
+        /// advertise `NODE_SYNC_ARTIFACTS` and hold the snapshot's manifest: its
+        /// `[network] initial_v2_peers`, the peers that dialled it, and the
+        /// peers it discovered.
         peers: Vec<String>,
     },
 
@@ -62,8 +65,9 @@ pub enum SkipReason {
     /// A precondition of the trust model does not hold.
     PreconditionFailed(Precondition),
 
-    /// Neither `[sync] state_snapshot_peers` nor `[network] initial_v2_peers`
-    /// names a peer.
+    /// `[sync] state_snapshot_peers` names no peer, and the version 2
+    /// protocol is off, so the node has no other peers that could serve state
+    /// snapshots.
     NoPeers,
 
     /// zcashd-compat mode is on, which needs an archive node.
@@ -115,7 +119,8 @@ impl fmt::Display for SkipReason {
                 "the history tree is empty at the snapshot height"
             }
             SkipReason::NoPeers => {
-                "neither sync.state_snapshot_peers nor network.initial_v2_peers names a peer"
+                "sync.state_snapshot_peers names no peer, and network.v2_listen_addr is not \
+                 set, so no connected peer can serve the snapshot"
             }
             SkipReason::ZcashdCompat => "zcashd-compat mode is on",
             SkipReason::Rejected => "the snapshot was rejected by an earlier bootstrap",
@@ -172,12 +177,20 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     if let Some(existing) = existing_state_database(&config.state, network) {
-        info!(
-            path = %existing.display(),
-            "a state database exists, so the state snapshot bootstrap does not run; \
-             delete it to bootstrap from a snapshot"
-        );
-        return Decision::Skip(SkipReason::ExistingState);
+        if header_sync_marker(&config.state, network).exists() {
+            info!(
+                path = %existing.display(),
+                "the state database holds only the headers an earlier start synced for the state \
+                 snapshot bootstrap, so the bootstrap runs again"
+            );
+        } else {
+            info!(
+                path = %existing.display(),
+                "a state database exists, so the state snapshot bootstrap does not run; \
+                 delete it to bootstrap from a snapshot"
+            );
+            return Decision::Skip(SkipReason::ExistingState);
+        }
     }
 
     let commitment = match select_commitment(&config.sync, network) {
@@ -191,7 +204,7 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     let peers = bootstrap_peers(config);
-    if peers.is_empty() {
+    if peers.is_empty() && config.network.v2_listen_addr.is_none() {
         return Decision::Skip(SkipReason::NoPeers);
     }
 
@@ -204,6 +217,19 @@ fn decide(config: &ZebradConfig, store: &ArtifactStore) -> Decision {
     }
 
     Decision::Bootstrap { commitment, peers }
+}
+
+/// Returns the path of the marker that says the node's state database holds only the headers it
+/// synced for a state snapshot bootstrap, which the bootstrap replaces.
+///
+/// The node creates it before it opens a new state to sync headers for a bootstrap, and deletes
+/// it before it commits any block above genesis, or once the snapshot is installed. A state with
+/// the marker is still a header-only state, which a later start can bootstrap over.
+pub fn header_sync_marker(config: &zebra_state::Config, network: &Network) -> std::path::PathBuf {
+    zebra_state::state_snapshot::import::import_dir(config).join(format!(
+        "{}-headers-before-snapshot",
+        network.lowercase_name()
+    ))
 }
 
 /// Returns the path of a state database the bootstrap must not overwrite: the
@@ -334,12 +360,11 @@ fn check_preconditions(
     Ok(())
 }
 
-/// Returns the bootstrap peers: `[sync] state_snapshot_peers`, or
-/// `[network] initial_v2_peers` when they are empty.
+/// Returns the bootstrap peers: `[sync] state_snapshot_peers`.
+///
+/// The `[network] initial_v2_peers` aren't dialled for the bootstrap: the network connects to
+/// them, and the bootstrap uses those connections, because peers usually allow one connection
+/// per IP address.
 fn bootstrap_peers(config: &ZebradConfig) -> Vec<String> {
-    if !config.sync.state_snapshot_peers.is_empty() {
-        config.sync.state_snapshot_peers.clone()
-    } else {
-        config.network.initial_v2_peers.iter().cloned().collect()
-    }
+    config.sync.state_snapshot_peers.clone()
 }

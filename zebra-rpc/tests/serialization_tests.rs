@@ -203,9 +203,15 @@ fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
 }
 "#;
     let obj: GetAddressBalanceResponse = serde_json::from_str(json)?;
-    let new_obj = GetAddressBalanceResponse::new(obj.balance(), obj.received());
+    let new_obj = GetAddressBalanceResponse::new(obj.balance(), *obj.received());
 
     assert_eq!(obj, new_obj);
+
+    // A node bootstrapped from a state snapshot omits `received`.
+    let json = r#"{"balance":11290259389}"#;
+    let obj: GetAddressBalanceResponse = serde_json::from_str(json)?;
+    assert_eq!(obj, GetAddressBalanceResponse::new(11290259389, None));
+    assert_eq!(serde_json::to_string(&obj)?, json);
 
     Ok(())
 }

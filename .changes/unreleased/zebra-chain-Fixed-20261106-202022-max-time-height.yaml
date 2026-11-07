@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: 'Fixed `Network::is_max_block_time_enforced` to return `false` for Mainnet block 1: the protocol specification applies the maximum block time rule from height 2 on Mainnet.'
+time: 2026-11-06T20:20:22Z

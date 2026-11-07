@@ -7845,6 +7845,7 @@ dependencies = [
  "sha2 0.10.9",
  "spandoc",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tower 0.4.13",
  "tracing",

@@ -590,7 +590,8 @@ impl Scenario {
             .iter()
             .zip(0u32..)
             .map(|(object, index)| PieceDescriptor {
-                component: ComponentId::ALL[usize::try_from(index).expect("small") % 28],
+                component: ComponentId::ALL
+                    [usize::try_from(index).expect("small") % ComponentId::ALL.len()],
                 index,
                 size: u32::try_from(object.len()).expect("test objects are small"),
                 hash: ObjectHash::of(object),

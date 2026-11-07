@@ -104,6 +104,9 @@ where
 
 /// Returns the [`block::Header`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+///
+/// A database imported from a state snapshot also returns the headers it holds
+/// below its window, whose blocks it has no bodies for.
 pub fn block_header<C>(
     chain: Option<C>,
     db: &ZebraDb,
@@ -121,7 +124,7 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.header.clone())
-        .or_else(|| db.block_header(hash_or_height))
+        .or_else(|| db.known_header(hash_or_height))
 }
 
 /// Returns the [`Transaction`] with [`transaction::Hash`], if it exists in the

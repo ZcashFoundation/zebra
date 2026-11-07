@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_in_result)]
 
 mod anchors;
+mod header_context;
 mod nullifier;
 mod utxo;
 mod vectors;

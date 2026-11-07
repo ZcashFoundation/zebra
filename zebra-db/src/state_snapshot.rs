@@ -26,13 +26,15 @@ pub mod store;
 /// Where a snapshot-imported database's history starts, and what it was
 /// imported from: the value of the `snapshot_base` column family.
 ///
-/// Blocks below `window_start` have no bodies and no hash rows; blocks from
-/// `window_start` to `height` are complete; `height` is the snapshot height
-/// `H`. The checks the importer could not run against the chain are recorded
-/// in `deferred_checks`, so the node runs them when it can.
+/// Blocks below `window_start` have no hash rows and no headers; blocks from
+/// `window_start` to `height` have their hashes, headers and block info, but
+/// only block `height`, the snapshot height `H`, has its body (see
+/// [`SnapshotBase::body_start`]). The checks the importer could not run against
+/// the chain are recorded in `deferred_checks`, so the node runs them when it
+/// can.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SnapshotBase {
-    /// The first height with a complete block: `L = max(1, H - 2303)`.
+    /// The first height with a hash, header and block info: `L = max(1, H - 2303)`.
     pub window_start: block::Height,
 
     /// The snapshot height `H`.
@@ -60,6 +62,13 @@ impl SnapshotBase {
     /// snapshot's history tree and tree roots: no bootstrap peer served the
     /// block, so the first commit above `H` checks them.
     pub const DEFERRED_SUCCESSOR_COMMITMENTS: u8 = 1 << 1;
+
+    /// Returns the first height above genesis with a block body: the snapshot
+    /// height `H`. A snapshot ships the bodies of genesis and `H` only, so the
+    /// chain tip always reads back; the bodies above `H` are committed by sync.
+    pub fn body_start(&self) -> block::Height {
+        self.height
+    }
 
     /// Returns whether every check in `checks` is still pending.
     pub fn has_deferred(&self, checks: u8) -> bool {

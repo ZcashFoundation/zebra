@@ -55,6 +55,7 @@ const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
 
 pub mod block;
 pub mod chain;
+pub mod header_chain;
 pub mod history;
 pub mod metrics;
 pub mod shielded;

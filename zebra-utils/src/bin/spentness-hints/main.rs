@@ -168,6 +168,7 @@ struct CanonicalBlock {
 fn canonical_block(db: &ZebraDb, height: Height) -> Result<CanonicalBlock> {
     let block = db
         .block(height.into())
+        .map_err(|error| eyre!("could not read block {}: {error}", height.0))?
         .ok_or_else(|| eyre!("archive lacks block {}", height.0))?;
     ensure!(
         db.hash(height) == Some(block.hash()),

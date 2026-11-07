@@ -163,7 +163,8 @@ pub enum StateInitError {
     /// A database imported from a state snapshot was opened for writing with pruning disabled.
     #[error(
         "cannot open state at {path:?} with pruning disabled: it was imported from a state \
-         snapshot at height {height:?} and only has the blocks from height {window_start:?}. \
+         snapshot at height {height:?}, and has no block hashes below height {window_start:?} \
+         and no block bodies below the snapshot height. \
          Enable state.prune_blocks_older_than, or fully resync in a separate cache directory"
     )]
     SnapshotDatabase {

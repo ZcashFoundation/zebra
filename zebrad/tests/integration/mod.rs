@@ -1,4 +1,5 @@
 pub mod database;
+pub mod headers_first_sync;
 pub mod network;
 pub mod regtest;
 pub mod rpc;

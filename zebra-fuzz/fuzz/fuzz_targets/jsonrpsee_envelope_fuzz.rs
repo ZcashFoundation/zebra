@@ -242,7 +242,7 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
             R::FindBlockHeaders { .. } => Ok(Resp::BlockHeaders(Vec::new())),
             R::AddressBalance(_) => Ok(Resp::AddressBalance {
                 balance: Amount::zero(),
-                received: 0,
+                received: Some(0),
             }),
             R::TransactionIdsByAddresses { .. } => {
                 Ok(Resp::AddressesTransactionIds(Default::default()))

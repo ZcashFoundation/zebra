@@ -28,7 +28,7 @@ pub use disk_format::{
         check_history_tree_peaks, HistoryTreeParts, LegacyHistoryTreeParts, RawHistoryTree,
         SNAPSHOT_BASE,
     },
-    transparent::{AddressBalanceLocation, OUTPUT_LOCATION_DISK_BYTES},
+    transparent::{AddressBalanceLocation, AddressUnspentOutput, OUTPUT_LOCATION_DISK_BYTES},
     upgrade::{
         can_read_without_migration, restorable_db_versions, CancelFormatChange, DbFormatChange,
         FormatCheckError,
@@ -94,6 +94,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Spentness hints
     zebra_db::spentness::SPENTNESS_JOURNAL,
     zebra_db::spentness::SPENTNESS_ARTIFACT,
+    // Headers stored ahead of their block bodies by headers-first sync
+    zebra_db::header_chain::HEADER_BY_HEIGHT,
+    zebra_db::header_chain::HEIGHT_BY_HEADER_HASH,
     // Snapshot sync. Always registered, and empty unless the database was imported from a
     // state snapshot.
     SNAPSHOT_BASE,

@@ -153,11 +153,12 @@ fn retention_uses_the_durable_tip_and_excludes_genesis() {
 
 #[test]
 fn snapshot_base_is_the_restart_witness_of_a_branchless_window() {
-    use crate::tests::snapshot_db::{snapshot_state, Coinbase};
+    use crate::tests::snapshot_db::{append, snapshot_state, Coinbase};
 
     const SNAPSHOT_TIP: u32 = 60;
     const WINDOW_START: u32 = 21;
-    const SHORT_RETENTION: u32 = 10;
+    const BRANCHLESS_TIP: u32 = 70;
+    const SHORT_RETENTION: u32 = 5;
 
     let _init_guard = zebra_test::init();
     let cache = tempfile::tempdir().unwrap();
@@ -169,25 +170,24 @@ fn snapshot_base_is_the_restart_witness_of_a_branchless_window() {
         0,
     );
     state.db.mark_ready_for_pruning();
+    // Branchless bodies above the snapshot block, which a short retention would prune.
+    append(&mut state, BRANCHLESS_TIP, Coinbase::Legacy);
 
-    // Without a marker, a window without branch IDs has no witness.
-    assert_eq!(
-        PruningWitness::default().update(&state.db, None).unwrap(),
-        None
-    );
+    // Without a marker, a walk without branch IDs cannot pass the first missing body.
+    assert!(PruningWitness::default().update(&state.db, None).is_err());
 
-    // With the marker, reaching the window start is the witness: the restart check accepts it,
-    // and it keeps every window body until a branch ID block arrives.
+    // With the marker, reaching the snapshot block, the first body, is the witness: the restart
+    // check accepts it, and it keeps that body until a branch ID block arrives.
     let mut witness = PruningWitness::default();
     assert_eq!(
         witness.update(&state.db, Some(base)).unwrap(),
-        Some(base.window_start)
+        Some(base.body_start())
     );
     assert_eq!(
         prune_batch(&state.db, SHORT_RETENTION, &mut witness).unwrap(),
         None
     );
-    assert_eq!(floor(&state.db), base.window_start);
+    assert_eq!(floor(&state.db), base.body_start());
 
     let branched = crate::tests::snapshot_db::commit_child(&mut state, Coinbase::Branched, vec![]);
     let branched_height = branched.coinbase_height().unwrap();
@@ -198,7 +198,7 @@ fn snapshot_base_is_the_restart_witness_of_a_branchless_window() {
     let target = retention_floor(branched_height, SHORT_RETENTION);
     assert_eq!(
         prune_batch(&state.db, SHORT_RETENTION, &mut witness).unwrap(),
-        Some(base.window_start..target)
+        Some(base.body_start()..target)
     );
     assert_eq!(floor(&state.db), target);
 }

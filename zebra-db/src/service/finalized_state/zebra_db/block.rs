@@ -454,7 +454,7 @@ impl ZebraDb {
             return Ok(None);
         };
         let height = location.height;
-        let Some(header) = self.block_header(height.into()) else {
+        let Some(header) = self.known_header(height.into()) else {
             return self.missing_header_error(height).map_or(Ok(None), Err);
         };
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();

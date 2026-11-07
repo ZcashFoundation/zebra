@@ -3,7 +3,8 @@
 //!
 //! Each verified piece becomes one SST file for its component, built as the
 //! pieces arrive. The importer then ingests the SST files into a database
-//! under a temporary root, writes the singletons, the [`SnapshotBase`] marker
+//! under a temporary root, rebuilds the indexes the snapshot does not ship,
+//! writes the singletons, the [`SnapshotBase`] marker
 //! and the version file, reopens the database to run the self-consistency and
 //! chain checks, and renames it into place only if every check passes.
 //!
@@ -22,6 +23,7 @@ use std::{
     fs::{self, File},
     io::{self, BufReader, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use rayon::prelude::*;
@@ -43,7 +45,7 @@ use crate::{
     service::finalized_state::{
         DiskDb, HistoryTreeParts, SNAPSHOT_BASE, STATE_COLUMN_FAMILIES_IN_CODE,
     },
-    Config, IntoDisk,
+    Config, IntoDisk, ValidateContextError,
 };
 
 use super::{
@@ -52,16 +54,33 @@ use super::{
 };
 
 pub mod checks;
+pub mod headers;
+
+pub use headers::{carry_header_chain, CarriedHeaders};
+mod rebuild;
 pub mod records;
 
 /// The directory under the state cache directory that holds import temporary
 /// roots, one per bootstrap: `<cache_dir>/state-snapshot-import/<nonce>/`.
 pub const IMPORT_DIR: &str = "state-snapshot-import";
 
-/// The number of blocks below the snapshot height that a snapshot carries in
-/// full, with the block at the snapshot height: its window is `L..=H` with
-/// `L = max(1, H - 2303)` (design, "Snapshot contents").
+/// The number of block hashes and headers a snapshot carries, ending at the
+/// snapshot height: its window is `L..=H` with `L = max(1, H - 2303)` (design,
+/// "Snapshot contents").
 pub const WINDOW_BLOCKS: u32 = 2_304;
+
+/// Checks the difficulty threshold and time of a header at a height against
+/// the previous headers of its chain, newest first, on a network.
+///
+/// The importer checks the headers above the snapshot height with it. The
+/// contextual check lives in `zebra-state`, which passes its
+/// `check_header_context`.
+pub type HeaderContextCheck = fn(
+    &[Arc<block::Header>],
+    &block::Header,
+    block::Height,
+    &Network,
+) -> Result<(), ValidateContextError>;
 
 /// The largest SST metadata file: two keys of at most a piece each, the piece
 /// hash and the counts.
@@ -84,7 +103,7 @@ pub fn sst_path(temp_root: &Path, component: ComponentId, index: u32) -> PathBuf
 }
 
 /// Returns the window start `L` of a snapshot at `height`: the first height
-/// whose block the snapshot carries in full, `max(1, H - 2303)`.
+/// whose hash and header the snapshot carries, `max(1, H - 2303)`.
 pub fn window_start(height: block::Height) -> block::Height {
     block::Height(height.0.saturating_sub(WINDOW_BLOCKS - 1).max(1))
 }
@@ -152,19 +171,24 @@ pub enum ImportCheck {
     /// history tree commits to, and those roots are anchors.
     TreeRoots,
 
-    /// The window and genesis blocks are complete and chain to the snapshot
-    /// block.
+    /// The window headers chain to the snapshot block, and the genesis and
+    /// snapshot block bodies are complete.
     Window,
 
-    /// Every stored transaction location has its hash and location index rows.
+    /// Every stored transaction and every UTXO's transaction has a location,
+    /// and no two transactions share one.
     TransactionIndex,
 
-    /// The address indexes match the UTXO set.
+    /// The address balances rebuilt from the UTXO set fit in an amount.
     AddressIndex,
 
     /// The value pools match the UTXO set and the block info at the snapshot
     /// height.
     ValuePools,
+
+    /// The headers above the snapshot height that the bootstrap fetched follow
+    /// the snapshot block and have a valid difficulty and time.
+    Headers,
 
     /// The database opens as the current format, describes the snapshot, and
     /// passes the database format checks.
@@ -198,6 +222,7 @@ impl fmt::Display for ImportCheck {
             ImportCheck::TransactionIndex => "transaction index",
             ImportCheck::AddressIndex => "address index",
             ImportCheck::ValuePools => "value pool",
+            ImportCheck::Headers => "header chain",
             ImportCheck::DatabaseFormat => "database format",
         })
     }
@@ -483,15 +508,23 @@ pub fn decode_history_tree(
 /// itself when the snapshot height has a checkpoint, and records the others
 /// in the marker.
 ///
+/// `headers_above` are the headers from `H + 1` on that the caller fetched and
+/// checked the proof of work of, or none. The importer checks their difficulty
+/// and time against the window headers, and stores them in the database's
+/// header chain, so headers-first sync continues after them.
+///
 /// SST files the caller did not build are built here, from `pieces`. Every
 /// check of the design's trust model runs before the database is renamed into
 /// place, and any failure refuses the import: [`SnapshotError::Refused`] names
 /// the check. The caller deletes `temp_root` afterwards, whatever the result.
+#[allow(clippy::too_many_arguments)]
 pub fn import_state_snapshot(
     temp_root: &Path,
     manifest: &Manifest,
     commitment: StateSnapshotCommitment,
     deferred_checks: u8,
+    headers_above: &[Arc<block::Header>],
+    check_header_context: HeaderContextCheck,
     network: &Network,
     config: &Config,
     pieces: &HashMap<ObjectHash, PathBuf>,
@@ -519,8 +552,10 @@ pub fn import_state_snapshot(
         for (component, paths) in &ssts {
             ingest(&db, *component, paths)?;
         }
+        rebuild::rebuild_indexes(&db, temp_root, network)?;
         let singletons = write_singletons(&db, manifest, base, network, pieces)?;
         checks::check_raw(&db, manifest, &base, network, &singletons)?;
+        headers::store_headers_above(&db, &base, network, headers_above, check_header_context)?;
         let version_path = import_path.join(DATABASE_FORMAT_VERSION_FILE_NAME);
         write_database_format_version_at_path(version_path.clone(), &running_version).map_err(
             |error| SnapshotError::Io {
@@ -756,7 +791,7 @@ fn prepare_ssts(
 
 /// Opens a new database at `path` with every column family and the database's
 /// options, with automatic compactions off while the SST files are ingested.
-fn open_raw(path: &Path) -> Result<DB, SnapshotError> {
+pub fn open_raw(path: &Path) -> Result<DB, SnapshotError> {
     let mut options = DiskDb::options();
     options.set_disable_auto_compactions(true);
     let column_families = DiskDb::construct_column_families(
@@ -779,19 +814,21 @@ fn column_family<'db>(db: &'db DB, name: &str) -> &'db rocksdb::ColumnFamily {
 
 /// Ingests the SST files of `component` into its empty column family, moving
 /// them into the database.
+fn ingest(db: &DB, component: ComponentId, paths: &[PathBuf]) -> Result<(), SnapshotError> {
+    ingest_paths(db, component.column_family(), paths)
+}
+
+/// Ingests the SST files at `paths` into the empty column family `cf`, moving
+/// them into the database.
 ///
 /// Global sequence numbers are disabled, so the files land at the bottom level
 /// and ingestion fails if the column family is not empty or the files overlap.
-fn ingest(db: &DB, component: ComponentId, paths: &[PathBuf]) -> Result<(), SnapshotError> {
+fn ingest_paths(db: &DB, cf: &str, paths: &[PathBuf]) -> Result<(), SnapshotError> {
     let mut options = IngestExternalFileOptions::default();
     options.set_move_files(true);
     options.set_allow_global_seqno(false);
-    db.ingest_external_file_cf_opts(
-        column_family(db, component.column_family()),
-        &options,
-        paths.to_vec(),
-    )
-    .map_err(db_error("ingesting snapshot SST files"))
+    db.ingest_external_file_cf_opts(column_family(db, cf), &options, paths.to_vec())
+        .map_err(db_error("ingesting snapshot SST files"))
 }
 
 /// The decoded singletons of a snapshot.
