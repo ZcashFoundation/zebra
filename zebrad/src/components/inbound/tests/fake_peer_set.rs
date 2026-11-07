@@ -2196,6 +2196,58 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn compact_header_screening_rejects_stale_parents_before_proof_of_work() {
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(30), async {
+        let (mut state, read, _tip, _changes) =
+            zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height(0), 0).await;
+        let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        state
+            .ready()
+            .await
+            .unwrap()
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                genesis.into(),
+            ))
+            .await
+            .unwrap();
+        let block: Block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        let mut compact = zebra_network::compact::CompactBlock::from_block(&block, 0).unwrap();
+        // Invalid proof of work must not mask the cheaper stale-parent rejection.
+        Arc::make_mut(&mut compact.header).solution =
+            zebra_chain::work::equihash::Solution::Regtest([0; 36]);
+        let compact = Arc::new(compact);
+        let mut mempool: MockService<_, _, PanicAssertion, BoxError> =
+            MockService::build().for_unit_tests();
+        for request in [
+            Request::CheckCompactHeader(compact.clone()),
+            Request::CompactBlockTransactions(compact),
+        ] {
+            let error = super::super::compact_request(
+                request,
+                Mainnet,
+                read.clone(),
+                Buffer::new(BoxService::new(mempool.clone()), 1),
+                Arc::new(tokio::sync::Semaphore::new(3)),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "compact header does not extend the committed best tip"
+            );
+        }
+        mempool.expect_no_requests().await;
+    })
+    .await
+    .expect("stale compact headers are rejected without checking proof of work");
+}
+
 #[test]
 fn compact_header_screening_checks_proof_of_work_and_shape() {
     let block = zebra_test::vectors::BLOCK_MAINNET_1687107_BYTES
