@@ -103,6 +103,19 @@ This change is required for zebra to behave as an RPC endpoint. The standard por
 listen_addr = "127.0.0.1:8232"
 ```
 
+Submitted blocks are advertised early only when they exactly match a successful local proposal
+verdict, except for the nonce and Equihash solution. Solved proof of work, size, current time, live
+parent eligibility and local invalidation are checked before the body becomes available to peers.
+Changed or uncached proposals undergo normal full validation; checkpoint-era blocks wait for commit.
+Early advertisements use ordinary block gossip; all-peer advertisements are reserved for committed
+submissions. The RPC response still waits for verification and commit.
+
+Committed notifications belong to the state writer, so cancelling an RPC does not discard a later
+successful commit notification. The default notification channel holds at most 10,000 messages.
+A full or closed channel produces an operational error before committing a mined block, without
+blocking ordinary state writes. Notification insertion does not guarantee delivery to peers.
+Restrict RPC access to trusted miners.
+
 ## Running zebra
 
 [#running-zebra]: #running-zebra
