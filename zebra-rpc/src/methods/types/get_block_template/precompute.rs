@@ -85,11 +85,14 @@ pub(crate) const RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Bounds state/mempool snapshot reads, without cancelling a started coinbase proof.
 pub(crate) const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Minimum pause after event-driven builds. An arrival after a quiet interval still starts a build
-/// immediately, while a steady flow of transactions coalesces into at most one build per pause,
-/// which bounds the work each build and its later validation cost. Slow builds wait at least
-/// their own duration.
+/// Maximum pause for coalescing a burst; slow builds still wait at least their own duration.
 pub(crate) const MEMPOOL_THROTTLE: Duration = Duration::from_secs(1);
+
+/// Pause for coalescing steady arrivals, unless the previous build took longer.
+const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(50);
+
+/// Additions in the pending window that extend the short pause to the burst deadline.
+const MEMPOOL_BURST_ADDITIONS: usize = 50;
 
 /// Reading inputs owns no proof or mutex permit.
 const BUILD_FETCHING: u8 = 0;
@@ -669,7 +672,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                 ),
             ) => {}
             _ = wait_for_mempool_change(
-                &mut mempool_changes, mempool.clone(), &mempool_tx_ids, next_mempool_build,
+                &mut mempool_changes, mempool.clone(), &mempool_tx_ids,
+                build_finished + MEMPOOL_SHORT_PAUSE.max(build_duration), next_mempool_build,
             ) => {}
         }
     }
@@ -681,13 +685,22 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
     mempool: Mempool,
     template_ids: &HashSet<UnminedTxId>,
     next_build: Instant,
+    burst_build: Instant,
 ) {
     let mut next_check = next_build;
+    let mut additions = 0usize;
     loop {
         let change = changes.recv().await;
         if matches!(&change, Err(broadcast::error::RecvError::Closed)) {
             std::future::pending::<()>().await;
         }
+
+        additions = additions.saturating_add(match &change {
+            Ok(change) if change.is_added() => change.tx_ids().len(),
+            // Lost messages can contain entire batches or no additions. Coalesce conservatively.
+            Err(broadcast::error::RecvError::Lagged(_)) => MEMPOOL_BURST_ADDITIONS,
+            _ => 0,
+        });
 
         // Rejection-only reads are bounded separately; an addition bypasses that deadline.
         if !change.is_ok_and(|change| change.is_added()) {
@@ -697,7 +710,13 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
                 _ = async {
                     loop {
                         match changes.recv().await {
-                            Ok(change) if change.is_added() => break,
+                            Ok(change) if change.is_added() => {
+                                additions = additions.saturating_add(change.tx_ids().len());
+                                break;
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                additions = MEMPOOL_BURST_ADDITIONS;
+                            }
                             Err(broadcast::error::RecvError::Closed) =>
                                 std::future::pending::<()>().await,
                             _ => {}
@@ -707,14 +726,64 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
             }
         }
 
-        // The deadline includes the previous build's duration, so expensive work gets an equal
-        // idle interval even when verified additions arrive continuously.
-        sleep_until(next_build).await;
+        // Count additions in the pending window rather than estimating a moving rate. Bursts
+        // extend the short pause to the throttle deadline. Both deadlines include the previous
+        // build's duration, and neither slides with arrivals.
+        loop {
+            let deadline = if additions >= MEMPOOL_BURST_ADDITIONS {
+                burst_build
+            } else {
+                next_build
+            };
+            tokio::select! {
+                biased;
+                _ = sleep_until(deadline) => {
+                    if additions >= MEMPOOL_BURST_ADDITIONS {
+                        break;
+                    }
+
+                    // A delayed poll can make the timer and buffered arrivals ready together.
+                    // Bound the drain by the backlog, plus one receive for a lag notification.
+                    for _ in 0..=changes.len() {
+                        match changes.try_recv() {
+                            Ok(change) if change.is_added() => {
+                                additions = additions.saturating_add(change.tx_ids().len());
+                            }
+                            Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                                additions = MEMPOOL_BURST_ADDITIONS;
+                            }
+                            Err(
+                                broadcast::error::TryRecvError::Empty
+                                | broadcast::error::TryRecvError::Closed,
+                            ) => break,
+                            _ => {}
+                        }
+                        if additions >= MEMPOOL_BURST_ADDITIONS {
+                            break;
+                        }
+                    }
+                    if additions < MEMPOOL_BURST_ADDITIONS {
+                        break;
+                    }
+                },
+                change = changes.recv() => match change {
+                    Ok(change) if change.is_added() => {
+                        additions = additions.saturating_add(change.tx_ids().len());
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        additions = MEMPOOL_BURST_ADDITIONS;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => sleep_until(deadline).await,
+                    _ => {}
+                }
+            }
+        }
 
         // Discard the whole burst, including lagged notifications, before taking the snapshot.
         // Comparing all IDs also detects collateral evictions absent from the notification.
         *changes = changes.resubscribe();
         next_check = Instant::now() + MEMPOOL_THROTTLE;
+        additions = 0;
         match mempool
             .clone()
             .oneshot(mempool::Request::TransactionIds)

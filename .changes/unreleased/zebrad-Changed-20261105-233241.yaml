@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mining templates reflect new mempool transactions after a roughly 50 ms pause instead of up to 1 s under steady load, while bursts retain the 1 s coalescing pause and slow builds remain paced by their duration.
+time: 2026-11-05T23:32:41.410820579+01:00
