@@ -137,6 +137,7 @@ fn import_round_trip() {
         HistoryCapabilities {
             lowest_retained_height: HEIGHT,
             lowest_known_height: window_start(HEIGHT),
+            lowest_header_height: window_start(HEIGHT),
             snapshot_base: Some(base),
         }
     );

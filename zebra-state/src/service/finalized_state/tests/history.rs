@@ -1563,6 +1563,7 @@ fn snapshot_base_marker_sets_the_history_floors() {
         HistoryCapabilities {
             lowest_retained_height: Height(3),
             lowest_known_height: Height(2),
+            lowest_header_height: Height(2),
             snapshot_base: Some(window),
         }
     );

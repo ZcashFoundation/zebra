@@ -386,8 +386,23 @@ where
 
     known_blocks
         .iter()
-        .find(|&&hash| chain_contains_hash(chain, db, hash))
+        .find(|&&hash| {
+            chain_contains_hash(chain, db, hash)
+                || db.header_below_snapshot_window(hash.into()).is_some()
+        })
         .cloned()
+}
+
+/// Returns the height of `hash` in `chain` or `db`, including the headers below
+/// the window of a snapshot database, which are not indexed by block hash.
+fn height_by_header_hash<C>(chain: Option<C>, db: &ZebraDb, hash: block::Hash) -> Option<Height>
+where
+    C: AsRef<Chain>,
+{
+    height_by_hash(chain, db, hash).or_else(|| {
+        db.header_below_snapshot_window(hash.into())
+            .map(|(height, _)| height)
+    })
 }
 
 /// Returns a range of [`Height`]s in the chain,
@@ -425,7 +440,7 @@ where
 
     // Find the intersection height
     let intersection_height = match intersection {
-        Some(intersection_hash) => match height_by_hash(chain, db, intersection_hash) {
+        Some(intersection_hash) => match height_by_header_hash(chain, db, intersection_hash) {
             Some(intersection_height) => Some(intersection_height),
 
             // A recently committed block dropped the intersection we previously found
@@ -454,7 +469,7 @@ where
         None => (Height(0), Height(max_len - 1)),
     };
 
-    let stop_height = stop.and_then(|hash| height_by_hash(chain, db, hash));
+    let stop_height = stop.and_then(|hash| height_by_header_hash(chain, db, hash));
 
     // Compute the final height, making sure it is:
     //   * at or below our chain tip, and

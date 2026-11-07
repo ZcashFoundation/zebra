@@ -46,6 +46,7 @@ fn snapshot_marker_sets_the_history_capabilities() {
         HistoryCapabilities {
             lowest_retained_height: Height(TIP),
             lowest_known_height: Height(WINDOW_START),
+            lowest_header_height: Height(WINDOW_START),
             snapshot_base: Some(base),
         }
     );
@@ -574,4 +575,150 @@ fn blocks_above_a_snapshot_have_no_sync_metadata() {
         read::sync_hashes(None::<Arc<Chain>>, &state.db, Height::MIN, 10),
         Vec::new()
     );
+}
+
+/// Returns a snapshot database at `TIP` whose header chain holds the headers of every height
+/// below the window in `below_window`, and the headers that were carved away.
+fn snapshot_state_with_headers(
+    cache_dir: std::path::PathBuf,
+    below_window: std::ops::Range<u32>,
+) -> (FinalizedState, SnapshotBase, Vec<Arc<block::Header>>) {
+    let mut state = open(&config(cache_dir, Some(RETENTION))).expect("a fresh state opens");
+    append(&mut state, TIP, Coinbase::Branched);
+    let carved: Vec<Arc<block::Header>> = (1..WINDOW_START)
+        .map(|height| {
+            state
+                .db
+                .block_header(Height(height).into())
+                .expect("the chain is complete before carving")
+        })
+        .collect();
+    let base = carve(&state, Height(WINDOW_START), 0);
+
+    let stored = &carved[below_window.start as usize - 1..below_window.end as usize - 1];
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(&state.db, Height(below_window.start), stored);
+    state.db.write_batch(batch).unwrap();
+
+    (state, base, carved)
+}
+
+#[test]
+fn headers_below_the_window_answer_locators() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, _base, carved) =
+        snapshot_state_with_headers(cache.path().to_path_buf(), 1..WINDOW_START);
+    let db = &state.db;
+
+    // A locator below the window is an intersection, so the peer gets the headers after it,
+    // up to a stop hash below the window, or into the window.
+    let headers = |known: Vec<block::Hash>, stop: Option<block::Hash>, max_len: u32| {
+        read::find_chain_headers(None::<Arc<Chain>>, db, known, stop, max_len)
+    };
+    assert_eq!(headers(vec![carved[4].hash()], None, 3), carved[5..8]);
+    assert_eq!(
+        headers(vec![carved[0].hash()], Some(carved[2].hash()), 160),
+        carved[1..3]
+    );
+
+    let last_below = carved.last().unwrap().hash();
+    let into_window = headers(vec![last_below], None, 2);
+    assert_eq!(
+        into_window,
+        [
+            db.block_header(Height(WINDOW_START).into()).unwrap(),
+            db.block_header(Height(WINDOW_START + 1).into()).unwrap(),
+        ]
+    );
+
+    // Block hashes below the window still answer nothing, since they have no bodies.
+    assert_eq!(
+        read::find_chain_hashes(None::<Arc<Chain>>, db, vec![carved[4].hash()], None, 3).unwrap(),
+        Vec::<block::Hash>::new()
+    );
+}
+
+#[test]
+fn headers_below_the_window_are_known_and_kept() {
+    let _init_guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let (state, base, carved) =
+        snapshot_state_with_headers(cache.path().to_path_buf(), 1..WINDOW_START);
+    let db = &state.db;
+
+    // Every header is known, but the blocks below the window are still not indexed, and have
+    // no bodies or block info.
+    let history = db.history_capabilities().unwrap();
+    assert_eq!(history.lowest_header_height, Height::MIN);
+    assert_eq!(history.lowest_known_height, Height(WINDOW_START));
+    assert_eq!(history.snapshot_base, Some(base));
+    assert!(history.knows_block(Height(1)));
+    assert!(history.knows_block(Height(WINDOW_START - 1)));
+    assert!(!history.has_block_body(Height(WINDOW_START - 1)));
+
+    for (index, header) in carved.iter().enumerate() {
+        let height = Height(u32::try_from(index).unwrap() + 1);
+        assert_eq!(db.known_header(height.into()).as_ref(), Some(header));
+        assert_eq!(db.known_header(header.hash().into()).as_ref(), Some(header));
+        assert_eq!(
+            read::block_header(None::<Arc<Chain>>, db, height.into()).as_ref(),
+            Some(header)
+        );
+        assert_eq!(db.any_header(height).as_ref(), Some(header));
+        assert_eq!(db.header_chain_hash(height), Some(header.hash()));
+        assert_eq!(db.header_chain_height(header.hash()), Some(height));
+        assert_eq!(db.block_header(height.into()), None);
+        assert_eq!(db.hash(height), None);
+        // The snapshot carries the block info just below its window, for the first block in it.
+        if height < Height(WINDOW_START - 1) {
+            assert_eq!(db.block_info_cf().zs_get(&height), None);
+        }
+    }
+    // The window and the blocks above it are the indexed blocks, as before.
+    assert_eq!(
+        db.known_header(Height(WINDOW_START).into()),
+        db.block_header(Height(WINDOW_START).into())
+    );
+    assert!(db.known_header(Height(TIP + 1).into()).is_none());
+
+    // The headers below the window are not stale, so they are never collected, and they don't
+    // move the header chain tip below the finalized tip.
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(batch.prepare_header_chain_gc(db), 0);
+    assert_eq!(db.stored_header_tip(), None);
+    assert_eq!(db.header_chain_tip(), Some((base.height, base.block_hash)));
+
+    // A stale row in the window is still collected.
+    let window_header = db.block_header(Height(WINDOW_START).into()).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_append(db, Height(WINDOW_START), &[window_header]);
+    db.write_batch(batch).unwrap();
+    let mut batch = DiskWriteBatch::new();
+    assert_eq!(batch.prepare_header_chain_gc(db), 1);
+    db.write_batch(batch).unwrap();
+    assert_eq!(db.header_by_height_cf().zs_get(&Height(WINDOW_START)), None);
+    assert_eq!(
+        db.header_by_height_cf()
+            .zs_get(&Height(1))
+            .map(Arc::new)
+            .as_ref(),
+        carved.first()
+    );
+}
+
+#[test]
+fn partial_headers_below_the_window_are_not_known() {
+    let _init_guard = zebra_test::init();
+
+    // Without the header just below the window, or without the header at height one, the
+    // database doesn't claim to know the blocks below its window.
+    for below_window in [1..WINDOW_START - 1, 2..WINDOW_START] {
+        let cache = tempfile::tempdir().unwrap();
+        let (state, _base, _carved) =
+            snapshot_state_with_headers(cache.path().to_path_buf(), below_window);
+        let history = state.db.history_capabilities().unwrap();
+        assert_eq!(history.lowest_header_height, Height(WINDOW_START));
+        assert!(!history.knows_block(Height(WINDOW_START - 1)));
+    }
 }

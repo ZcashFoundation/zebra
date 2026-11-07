@@ -234,6 +234,7 @@ fn snapshot_nodes_advertise_limited_service_above_the_snapshot_window() {
     let snapshot = HistoryCapabilities {
         lowest_retained_height: base.height,
         lowest_known_height: base.window_start,
+        lowest_header_height: base.window_start,
         snapshot_base: Some(base),
     };
 

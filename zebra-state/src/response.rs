@@ -44,12 +44,21 @@ pub struct HistoryCapabilities {
     /// made available by this boundary, and missing bodies within the suffix indicate corruption.
     pub lowest_retained_height: block::Height,
 
-    /// The first non-genesis height whose block the database knows at all, by hash and header:
-    /// the snapshot window start of a database imported from a state snapshot, or zero.
+    /// The first non-genesis height of the blocks the database indexes by hash, with their
+    /// block info: the snapshot window start of a database imported from a state snapshot, or
+    /// zero.
     ///
-    /// Genesis is always known. Below this height there are no blocks, only the validation
-    /// state the snapshot carried.
+    /// Genesis is always indexed. Below this height the database indexes no blocks, only the
+    /// validation state the snapshot carried, and the headers of
+    /// [`Self::lowest_header_height`].
     pub lowest_known_height: block::Height,
+
+    /// The first non-genesis height whose block header the database holds: zero, unless the
+    /// database was imported from a state snapshot without the headers below its window, when
+    /// it is [`Self::lowest_known_height`].
+    ///
+    /// A node that synced headers before it imported a snapshot keeps every header from genesis.
+    pub lowest_header_height: block::Height,
 
     /// The state snapshot the database was imported from, if any.
     pub snapshot_base: Option<SnapshotBase>,
@@ -60,6 +69,7 @@ impl Default for HistoryCapabilities {
         Self {
             lowest_retained_height: block::Height::MIN,
             lowest_known_height: block::Height::MIN,
+            lowest_header_height: block::Height::MIN,
             snapshot_base: None,
         }
     }
@@ -80,13 +90,14 @@ impl HistoryCapabilities {
         height == block::Height::MIN || height >= self.lowest_retained_height
     }
 
-    /// Returns whether a best-chain block at `height` is known by hash and header, including
-    /// the genesis exception.
+    /// Returns whether a best-chain block at `height` is known by its header, including the
+    /// genesis exception.
     ///
-    /// A database imported from a state snapshot knows no blocks between genesis and its window
-    /// start; below that start, only indexes carried by the snapshot can refer to a height.
+    /// A database imported from a state snapshot without the headers below its window knows no
+    /// blocks between genesis and its window start; there, only indexes carried by the snapshot
+    /// can refer to a height.
     pub fn knows_block(self, height: block::Height) -> bool {
-        height == block::Height::MIN || height >= self.lowest_known_height
+        height == block::Height::MIN || height >= self.lowest_header_height
     }
 }
 

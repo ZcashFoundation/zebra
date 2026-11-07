@@ -2212,8 +2212,30 @@ where
                 panic!("unexpected response to SaplingTree request")
             };
 
-            // This could be `None` if there's a chain reorg between state queries.
-            let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
+            // This could be `None` if there's a chain reorg between state queries, or if the block
+            // is below the window of a state snapshot, where the state keeps only its header.
+            let sapling_tree = match sapling_tree {
+                Some(sapling_tree) => sapling_tree,
+                None => {
+                    let zebra_state::ReadResponse::HistoryCapabilities(history) = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::HistoryCapabilities)
+                        .await
+                        .map_misc_error()?
+                    else {
+                        panic!("unexpected response to HistoryCapabilities request")
+                    };
+                    if height < history.lowest_known_height {
+                        return Err(ErrorObject::owned(
+                            ErrorCode::InternalError.code(),
+                            "Block not available (pruned data)",
+                            None::<()>,
+                        ));
+                    }
+                    return Err("missing Sapling tree").map_misc_error();
+                }
+            };
 
             let zebra_state::ReadResponse::Depth(depth) = self
                 .read_state

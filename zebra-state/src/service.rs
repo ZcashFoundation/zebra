@@ -2144,6 +2144,25 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
+                // A snapshot database has the headers below its window, but no other block data.
+                if let Some((height, header)) =
+                    state.db.header_below_snapshot_window(hash_or_height)
+                {
+                    let hash = header.hash();
+                    let next_block_hash = state
+                        .db
+                        .known_header(height.next()?.into())
+                        .filter(|next| next.previous_block_hash == hash)
+                        .map(|next| next.hash());
+
+                    return Ok(ReadResponse::BlockHeader(Some(crate::BlockHeader {
+                        header,
+                        hash,
+                        height,
+                        next_block_hash,
+                    })));
+                }
+
                 let best_chain = state.latest_best_chain();
 
                 let Some(height) = hash_or_height.height_or_else(|hash| {

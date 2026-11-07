@@ -541,6 +541,7 @@ async fn state_checkpoint_validation_starts_at_the_snapshot_window() {
                     zs::HistoryCapabilities {
                         lowest_retained_height: window_start,
                         lowest_known_height: window_start,
+                        lowest_header_height: window_start,
                         snapshot_base: None,
                     },
                 ));
@@ -601,6 +602,7 @@ fn snapshot_history_capabilities() -> zs::HistoryCapabilities {
     zs::HistoryCapabilities {
         lowest_retained_height: Height(41),
         lowest_known_height: Height(41),
+        lowest_header_height: Height(41),
         snapshot_base: Some(base),
     }
 }
