@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Re-inserting a transaction into the mempool eviction list no longer panics; a still-present entry has its timestamp refreshed in place instead of tripping an assertion ([#10690](https://github.com/ZcashFoundation/zebra/issues/10690)).'
+time: 2026-10-06T00:00:00.000000000Z
