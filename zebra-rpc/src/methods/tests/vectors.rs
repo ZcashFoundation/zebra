@@ -3100,13 +3100,19 @@ async fn getblocktemplate() {
         [0x7e; 20],
     );
 
-    gbt_with(net, addr).await;
+    tokio::time::timeout(Duration::from_secs(10), gbt_with(net, addr))
+        .await
+        .expect("template requests finish within the test deadline");
 }
 
 async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // The committed-tip recheck follows blocking template construction. The caller bounds
+    // the complete RPC sequence instead of imposing a separate mock request deadline.
+    let read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(Duration::MAX)
+        .for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -3140,7 +3146,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
-    let (rpc, _) = RpcImpl::new(
+    let (mut rpc, _) = RpcImpl::new(
         net.clone(),
         mining_conf,
         Default::default(),
@@ -3156,6 +3162,9 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         rx,
         None,
     );
+    // Exercise the isolated on-demand path; shared publication is covered by updater tests.
+    let miner_params = rpc.gbt.miner_params().unwrap().clone();
+    rpc.gbt.set_miner_params(miner_params);
 
     // Fake the ChainInfo response
     let make_mock_read_state_request_handler = || {
@@ -3175,6 +3184,10 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
                     chain_value_pools: Default::default(),
                 }));
+            read_state
+                .expect_request(ReadRequest::Tip)
+                .await
+                .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
         }
     };
 
@@ -3422,6 +3435,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                         .saturating_add(zebra_chain::serialization::Duration32::from_hours(3)),
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
                 }));
+            // The fallback checks the committed tip before rejecting the clock range.
+            rollback_state
+                .expect_request(ReadRequest::Tip)
+                .await
+                .respond(ReadResponse::Tip(Some((fake_tip_height, fake_tip_hash))));
         },
     );
     assert_eq!(
@@ -3549,7 +3567,9 @@ async fn getblocktemplate_precomputed() {
     let (read_state_responder, mempool_responder) = spawn_responders(tip_height, tip_hash);
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     // Wait for the updater task to precompute a template for the mock chain tip.
@@ -3788,7 +3808,9 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     });
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     let template_cache = rpc
@@ -3863,6 +3885,1057 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     read_state_responder.abort();
     mempool_responder.abort();
     updater.abort();
+}
+
+/// Rejections do not delay idle arrivals; a burst yields one throttled follow-up for parked miners.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_long_poll_returns_on_mempool_change() {
+    let _init_guard = zebra_test::init();
+    let net = Network::Mainnet;
+    let tip_height = NetworkUpgrade::Nu5.activation_height(&net).unwrap();
+    let tip_hash = Hash([1; 32]);
+    let now = DateTime32::now();
+    let chain_info = GetBlockTemplateChainInfo {
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        tip_height,
+        tip_hash,
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&net).hash(),
+        chain_value_pools: Default::default(),
+    };
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+            ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info.clone()),
+            other => panic!("unexpected state request: {other:?}"),
+        }))
+    });
+    let transactions: Vec<_> = (0..22)
+        .map(|height| {
+            VerifiedUnminedTx::new(
+                Arc::new(Transaction::test_v1(
+                    vec![],
+                    vec![],
+                    transaction::LockTime::Height(Height(height)),
+                ))
+                .into(),
+                10_000.try_into().unwrap(),
+                0,
+                0,
+                Arc::new(vec![]),
+            )
+            .unwrap()
+        })
+        .collect();
+    let added_id = transactions[1].transaction.id;
+    let (pool_tx, pool_rx) = tokio::sync::watch::channel(vec![transactions[0].clone()]);
+    let full_reads = Arc::new(AtomicUsize::new(0));
+    let id_reads = Arc::new(AtomicUsize::new(0));
+    let ids_read = Arc::new(tokio::sync::Notify::new());
+    let mempool = tower::service_fn({
+        let full_reads = full_reads.clone();
+        let id_reads = id_reads.clone();
+        let ids_read = ids_read.clone();
+        move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                mempool::Request::TransactionIds => {
+                    id_reads.fetch_add(1, Ordering::SeqCst);
+                    ids_read.notify_one();
+                    mempool::Response::TransactionIds(
+                        pool_rx
+                            .borrow()
+                            .iter()
+                            .map(|tx| tx.transaction.id)
+                            .collect(),
+                    )
+                }
+                mempool::Request::FullTransactions => {
+                    full_reads.fetch_add(1, Ordering::SeqCst);
+                    mempool::Response::FullTransactions {
+                        transactions: pool_rx.borrow().clone(),
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: tip_hash,
+                    }
+                }
+                other => panic!("unexpected mempool request: {other:?}"),
+            }))
+        }
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(tip_height);
+    tip_sender.send_best_tip_hash(tip_hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        net.clone(),
+        mining::Config {
+            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                NetworkType::Main,
+                [0x7e; 20],
+            )),
+            ..Default::default()
+        },
+        false,
+        "0.0.1",
+        "RPC test",
+        mempool,
+        MockService::build().for_unit_tests(),
+        read_state,
+        MockService::build().for_unit_tests(),
+        sync,
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    queue.abort();
+    let (events, _) = tokio::sync::broadcast::channel(1);
+    let updater = rpc
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(events.clone()))
+        .unwrap();
+    let cache = rpc.gbt.template_cache().unwrap();
+    let mut publications = cache.subscribe();
+    let initial = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(template) = cache.template_for_tip(tip_hash, &net, now) {
+                if template.transactions.len() == 1 {
+                    break template;
+                }
+            }
+            publications.changed().await;
+        }
+    })
+    .await
+    .expect("initial full template is published");
+    tokio::time::advance(precompute::MEMPOOL_THROTTLE).await;
+    let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+        long_poll_id: Some(initial.long_poll_id),
+        ..Default::default()
+    }));
+    tokio::pin!(waiting);
+    assert!(
+        futures::poll!(&mut waiting).is_pending(),
+        "long poll is parked"
+    );
+    let reads_before = full_reads.load(Ordering::SeqCst);
+    events
+        .send(mempool::MempoolChange::invalidated(
+            [added_id].into_iter().collect(),
+        ))
+        .unwrap();
+    tokio::time::timeout(Duration::from_millis(1), ids_read.notified())
+        .await
+        .expect("the unchanged verified set is checked");
+    for _ in 0..20 {
+        events
+            .send(mempool::MempoolChange::invalidated(
+                [added_id].into_iter().collect(),
+            ))
+            .unwrap();
+        tokio::task::yield_now().await;
+    }
+    tokio::time::advance(precompute::MEMPOOL_THROTTLE / 2).await;
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before);
+    assert_eq!(
+        id_reads.load(Ordering::SeqCst),
+        1,
+        "rejection reads are throttled"
+    );
+
+    let start = tokio::time::Instant::now();
+    pool_tx.send_replace(transactions[..2].to_vec());
+    events
+        .send(mempool::MempoolChange::added(
+            [added_id].into_iter().collect(),
+        ))
+        .unwrap();
+    let updated = tokio::time::timeout(Duration::from_millis(1), waiting)
+        .await
+        .expect("an isolated insertion must publish without waiting for a timer")
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(start.elapsed(), Duration::ZERO);
+    assert!(updated
+        .transactions
+        .iter()
+        .any(|tx| tx.hash == added_id.mined_id()));
+    assert_ne!(updated.long_poll_id, initial.long_poll_id);
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
+
+    let follow_up = rpc.get_block_template(Some(GetBlockTemplateParameters {
+        long_poll_id: Some(updated.long_poll_id),
+        ..Default::default()
+    }));
+    tokio::pin!(follow_up);
+    assert!(futures::poll!(&mut follow_up).is_pending());
+    for transaction in &transactions[2..] {
+        pool_tx.send_modify(|pool| pool.push(transaction.clone()));
+        events
+            .send(mempool::MempoolChange::added(
+                [transaction.transaction.id].into_iter().collect(),
+            ))
+            .unwrap();
+    }
+    tokio::task::yield_now().await;
+    tokio::time::advance(precompute::MEMPOOL_THROTTLE - Duration::from_millis(1)).await;
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 1);
+    assert!(futures::poll!(&mut follow_up).is_pending());
+    events
+        .send(mempool::MempoolChange::added(
+            [added_id].into_iter().collect(),
+        ))
+        .unwrap();
+    tokio::time::advance(Duration::from_millis(1)).await;
+    let coalesced = tokio::time::timeout(Duration::from_millis(1), follow_up)
+        .await
+        .expect("the burst must publish at the original throttle deadline")
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(start.elapsed(), precompute::MEMPOOL_THROTTLE);
+    assert_eq!(coalesced.transactions.len(), transactions.len());
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
+    tokio::time::advance(precompute::MEMPOOL_THROTTLE).await;
+    assert_eq!(full_reads.load(Ordering::SeqCst), reads_before + 2);
+    updater.abort();
+}
+
+/// Creates a configured RPC without starting background template work.
+fn template_regression_rpc<Mempool, ReadState>(
+    network: Network,
+    mempool: Mempool,
+    read_state: ReadState,
+    tip: MockChainTip,
+    sync: MockSyncStatus,
+) -> RpcImpl<
+    Mempool,
+    impl StateService,
+    ReadState,
+    MockChainTip,
+    MockAddressBookPeers,
+    impl BlockVerifierService,
+    MockSyncStatus,
+>
+where
+    Mempool: MempoolService,
+    ReadState: zebra_state::ReadState,
+{
+    let (_logs, logs) = watch::channel(None);
+    let (rpc, queue) = RpcImpl::new(
+        network.clone(),
+        mining::Config {
+            miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+                network.kind().into(),
+                [0x7e; 20],
+            )),
+            ..Default::default()
+        },
+        false,
+        "0.0.1",
+        "RPC test",
+        mempool,
+        MockService::build().for_unit_tests(),
+        read_state,
+        MockService::build().for_unit_tests(),
+        sync,
+        tip,
+        MockAddressBookPeers::default(),
+        logs,
+        None,
+    );
+    queue.abort();
+    rpc
+}
+
+/// A fallback must discard its snapshot if the committed parent changes during construction.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fallback_rechecks_committed_tip() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let old_parent = Hash([1; 32]);
+    let new_parent = Hash([2; 32]);
+    let now = DateTime32::now();
+    let (context, context_rx) = watch::channel(GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: old_parent,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    });
+    let read_state = tower::service_fn({
+        let context_rx = context_rx.clone();
+        move |request| {
+            let context = context_rx.borrow().clone();
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::Tip => ReadResponse::Tip(Some((context.tip_height, context.tip_hash))),
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        }
+    });
+    let (release, released) = watch::channel(false);
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mempool = tower::service_fn({
+        let reads = reads.clone();
+        move |request| {
+            assert!(matches!(request, mempool::Request::FullTransactions));
+            reads.fetch_add(1, Ordering::SeqCst);
+            let tip_hash = context_rx.borrow().tip_hash;
+            let mut released = released.clone();
+            async move {
+                while !*released.borrow_and_update() {
+                    released.changed().await.unwrap();
+                }
+                Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                })
+            }
+        }
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(old_parent);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let rpc = template_regression_rpc(network, mempool, read_state, tip, sync);
+    let waiting = rpc.get_block_template(None);
+    tokio::pin!(waiting);
+    assert!(futures::poll!(&mut waiting).is_pending());
+    assert_eq!(reads.load(Ordering::SeqCst), 1, "the old snapshot is held");
+
+    context.send_modify(|context| {
+        context.tip_height = height.next().unwrap();
+        context.tip_hash = new_parent;
+    });
+    // Deliberately leave the chain-tip channel behind the committed state.
+    release.send_replace(true);
+    let template = tokio::time::timeout(Duration::from_secs(1), waiting)
+        .await
+        .expect("the replacement build must complete")
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(template.previous_block_hash, new_parent);
+    assert_eq!(template.height, height.0 + 2);
+}
+
+/// Runs the real fallback constructor with a one-shot wall-clock change at construction entry.
+async fn fallback_completion(
+    network: Network,
+    advance_clock: bool,
+) -> (
+    BlockTemplateResponse,
+    GetBlockTemplateChainInfo,
+    std::thread::ThreadId,
+) {
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let now = DateTime32::from(1_700_000_000);
+    let context = GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: hash,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_seconds(10)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+    let after_boundary = context.max_time.saturating_add(Duration32::from_seconds(1));
+    let clock = Arc::new(AtomicU32::new(now.timestamp()));
+    let read_state = tower::service_fn({
+        let context = context.clone();
+        let clock = clock.clone();
+        let network = network.clone();
+        move |request| {
+            let mut context = context.clone();
+            if network.is_default_testnet()
+                && clock.load(Ordering::SeqCst) > context.max_time.timestamp()
+            {
+                context.expected_difficulty = network.target_difficulty_limit().to_compact();
+                context.cur_time = after_boundary;
+                context.min_time = after_boundary;
+                context.max_time = after_boundary.saturating_add(Duration32::from_minutes(90));
+            }
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(context),
+                ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        }
+    });
+    let mempool = tower::service_fn(move |request| {
+        assert!(matches!(request, mempool::Request::FullTransactions));
+        std::future::ready(Ok::<_, BoxError>(mempool::Response::FullTransactions {
+            transactions: vec![],
+            transaction_dependencies: Default::default(),
+            last_seen_tip_hash: hash,
+        }))
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let mut rpc = template_regression_rpc(network, mempool, read_state, tip, sync);
+    let build_thread = Arc::new(std::sync::OnceLock::new());
+    rpc.template_clock = Some(clock);
+    rpc.template_build_time =
+        advance_clock.then(|| Arc::new(AtomicU32::new(after_boundary.timestamp())));
+    rpc.template_build_thread = Some(build_thread.clone());
+    // Only mempool contents differ, so the old work is retainable before construction starts.
+    let old_transaction =
+        Transaction::test_v1(vec![], vec![], transaction::LockTime::Height(Height(1)));
+    let id = LongPollInput::new(
+        height,
+        hash,
+        context.max_time,
+        [old_transaction.unmined_id()],
+    )
+    .generate_id();
+    // Give blocking workers time to run under contention; this timeout only guards hangs.
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        rpc.get_block_template(Some(GetBlockTemplateParameters {
+            long_poll_id: Some(id),
+            ..Default::default()
+        })),
+    )
+    .await
+    .expect("fallback construction must complete")
+    .unwrap()
+    .try_into_template()
+    .unwrap();
+    (
+        response,
+        context,
+        *build_thread.get().expect("the real constructor must run"),
+    )
+}
+
+/// CPU-bound construction must not execute on the single async runtime thread.
+#[tokio::test(flavor = "current_thread")]
+async fn getblocktemplate_fallback_builds_off_executor() {
+    let _init_guard = zebra_test::init();
+    let runtime_thread = std::thread::current().id();
+    let (_, _, build_thread) = fallback_completion(Network::Mainnet, false).await;
+    assert_ne!(build_thread, runtime_thread);
+}
+
+/// Requests share a held build with or without an updater, including after the cache wait deadline.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fallback_coalesces_with_updater() {
+    let _init_guard = zebra_test::init();
+    for with_updater in [true, false] {
+        let network = Network::Mainnet;
+        let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+        let hash = Hash([1; 32]);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(tokio::sync::Notify::new());
+        let read_state = tower::service_fn({
+            let reads = reads.clone();
+            let started = started.clone();
+            move |request| {
+                let rebuilding = matches!(request, ReadRequest::ChainInfo);
+                if rebuilding {
+                    reads.fetch_add(1, Ordering::SeqCst);
+                    started.notify_one();
+                }
+                async move {
+                    if rebuilding {
+                        // Bound the fixture by never entering CPU-heavy construction.
+                        return std::future::pending::<std::result::Result<ReadResponse, BoxError>>()
+                            .await;
+                    }
+                    Ok::<_, BoxError>(match request {
+                        ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                        other => panic!("unexpected state request: {other:?}"),
+                    })
+                }
+            }
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_hash(hash);
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let rpc = template_regression_rpc(
+            network,
+            MockService::build().for_unit_tests(),
+            read_state,
+            tip,
+            sync,
+        );
+        let (events, _) = broadcast::channel(1);
+        let updater = with_updater.then(|| {
+            rpc.spawn_block_template_updater(&MempoolTxSubscriber::new(events))
+                .unwrap()
+        });
+        if with_updater {
+            tokio::time::timeout(Duration::from_secs(1), started.notified())
+                .await
+                .expect("the updater must enter its initial build");
+            assert_eq!(reads.load(Ordering::SeqCst), 1, "the updater holds a build");
+        }
+        let first = rpc.get_block_template(None);
+        let second = rpc.get_block_template(None);
+        tokio::pin!(first, second);
+        assert!(futures::poll!(&mut first).is_pending());
+        assert!(futures::poll!(&mut second).is_pending());
+        tokio::time::advance(
+            precompute::new_tip_timeout(rpc.gbt.miner_params().unwrap()) + Duration::from_secs(1),
+        )
+        .await;
+        assert!(futures::poll!(&mut first).is_pending());
+        assert!(futures::poll!(&mut second).is_pending());
+        let builds = reads.load(Ordering::SeqCst);
+        if let Some(updater) = updater {
+            updater.abort();
+        }
+        assert_eq!(
+            builds, 1,
+            "callers must share builds; updater: {with_updater}"
+        );
+    }
+}
+
+/// A mismatched mempool snapshot must yield until a retry deadline instead of polling in a loop.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_fallback_paces_mismatched_snapshots() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let now = DateTime32::now();
+    let context = GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: hash,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+    let id = LongPollInput::new(height, hash, context.max_time, std::iter::empty()).generate_id();
+    let read_state = tower::service_fn(move |request| {
+        std::future::ready(Ok::<_, BoxError>(match request {
+            ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+            ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+            other => panic!("unexpected state request: {other:?}"),
+        }))
+    });
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mempool = tower::service_fn({
+        let reads = reads.clone();
+        move |request| {
+            assert!(matches!(request, mempool::Request::FullTransactions));
+            let read = reads.fetch_add(1, Ordering::SeqCst);
+            async move {
+                // A finite emergency stop keeps the old tight loop from hanging the executor.
+                if read == 8 {
+                    return std::future::pending::<std::result::Result<mempool::Response, BoxError>>()
+                        .await;
+                }
+                Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: Hash([2; 32]),
+                })
+            }
+        }
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let rpc = template_regression_rpc(network, mempool, read_state, tip, sync);
+    let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+        long_poll_id: Some(id),
+        ..Default::default()
+    }));
+    tokio::pin!(waiting);
+    assert!(futures::poll!(&mut waiting).is_pending());
+    tokio::time::advance(Duration::from_millis(999)).await;
+    assert!(futures::poll!(&mut waiting).is_pending());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the mismatch retry must wait at least as long as the updater's one-second retry"
+    );
+}
+
+/// Unowned fallback work expires, including when a previously live updater exits.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit() {
+    let _init_guard = zebra_test::init();
+    for stop_updater in [false, true] {
+        let network = Network::Mainnet;
+        let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+        let hash = Hash([1; 32]);
+        let now = DateTime32::now();
+        let context = GetBlockTemplateChainInfo {
+            tip_height: height,
+            tip_hash: hash,
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            cur_time: now,
+            min_time: now,
+            max_time: now.saturating_add(Duration32::from_minutes(90)),
+            chain_history_root: fake_history_tree(&network).hash(),
+            chain_value_pools: Default::default(),
+        };
+        let read_state = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        });
+        let (pool, pool_rx) = watch::channel(Vec::<VerifiedUnminedTx>::new());
+        let mempool = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, BoxError>(match request {
+                mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                    transactions: pool_rx.borrow().clone(),
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: hash,
+                },
+                mempool::Request::TransactionIds => mempool::Response::TransactionIds(
+                    pool_rx
+                        .borrow()
+                        .iter()
+                        .map(|tx| tx.transaction.id)
+                        .collect(),
+                ),
+                other => panic!("unexpected mempool request: {other:?}"),
+            }))
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_hash(hash);
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let rpc = template_regression_rpc(network.clone(), mempool, read_state, tip, sync);
+        let cache = rpc.gbt.template_cache().unwrap();
+        let updater = if stop_updater {
+            let mut publications = cache.subscribe();
+            let updater = rpc
+                .spawn_block_template_updater(&MempoolTxSubscriber::new(broadcast::channel(1).0))
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(30), async {
+                while cache.template_for_tip(hash, &network, now).is_none() {
+                    publications.changed().await;
+                }
+            })
+            .await
+            .expect("the updater must publish its initial work");
+            Some(updater)
+        } else {
+            None
+        };
+        let initial = rpc
+            .get_block_template(None)
+            .await
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+            long_poll_id: Some(initial.long_poll_id),
+            ..Default::default()
+        }));
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        if let Some(updater) = updater {
+            updater.abort();
+            assert!(updater.await.unwrap_err().is_cancelled());
+            assert!(futures::poll!(&mut waiting).is_pending());
+        }
+        assert!(!cache.updater_is_running());
+        let added = VerifiedUnminedTx::new(
+            Arc::new(Transaction::test_v1(
+                vec![],
+                vec![],
+                transaction::LockTime::Height(Height(1)),
+            ))
+            .into(),
+            10_000.try_into().unwrap(),
+            0,
+            0,
+            Arc::new(vec![]),
+        )
+        .unwrap();
+        let added_id = added.transaction.id.mined_id();
+        pool.send_replace(vec![added]);
+        assert!(rpc
+            .get_block_template(None)
+            .await
+            .unwrap()
+            .try_into_template()
+            .unwrap()
+            .transactions
+            .is_empty());
+        tokio::time::advance(Duration::from_secs(
+            types::get_block_template::constants::MEMPOOL_LONG_POLL_INTERVAL,
+        ))
+        .await;
+        let (long, short) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(&mut waiting, rpc.get_block_template(None))
+        })
+        .await
+        .expect("both polls must refresh without a tip or updater event");
+        let long = long.unwrap().try_into_template().unwrap();
+        let short = short.unwrap().try_into_template().unwrap();
+        for response in [&long, &short] {
+            assert!(response.transactions.iter().any(|tx| tx.hash == added_id));
+            assert_ne!(response.long_poll_id, initial.long_poll_id);
+        }
+        assert_eq!(long.long_poll_id, short.long_poll_id);
+        assert_eq!(long.submit_old, Some(true));
+        assert_eq!(short.submit_old, None);
+    }
+}
+
+/// A cached failure must not leave a caller stuck on its authoritative tip recheck.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_bounds_error_tip_read() {
+    let _init_guard = zebra_test::init();
+    let network = testnet::Parameters::build()
+        .with_disable_pow(true)
+        .to_network()
+        .unwrap();
+    let tip_reads = Arc::new(AtomicUsize::new(0));
+    let read_state = tower::service_fn({
+        let tip_reads = tip_reads.clone();
+        move |request| {
+            let tip_reads = tip_reads.clone();
+            async move {
+                match request {
+                    ReadRequest::Tip => {
+                        tip_reads.fetch_add(1, Ordering::SeqCst);
+                        std::future::pending::<std::result::Result<ReadResponse, BoxError>>().await
+                    }
+                    ReadRequest::ChainInfo => Err("cached snapshot failure".into()),
+                    other => panic!("unexpected state request: {other:?}"),
+                }
+            }
+        }
+    });
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (tip, _tip_sender) = MockChainTip::new();
+    let rpc = template_regression_rpc(network, mempool, read_state, tip, MockSyncStatus::default());
+    let mut publications = rpc.gbt.template_cache().unwrap().subscribe();
+    let updater = rpc
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(broadcast::channel(1).0))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), publications.changed())
+        .await
+        .expect("the updater must publish its initial failure");
+
+    let bound = precompute::NEW_TIP_TIMEOUT + precompute::SNAPSHOT_TIMEOUT;
+    let started = tokio::time::Instant::now();
+    let error = tokio::time::timeout(bound + Duration::from_secs(1), rpc.get_block_template(None))
+        .await
+        .expect("the error-path tip read must time out within the snapshot bound")
+        .expect_err("the held tip read cannot produce a template");
+    assert_eq!(started.elapsed(), bound);
+    assert_eq!(tip_reads.load(Ordering::SeqCst), 2);
+    assert_eq!(error.message(), "deadline has elapsed");
+    updater.abort();
+}
+
+/// An unavailable snapshot must report its real error, not hide it behind endless cache waits.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_reports_updater_failure_and_recovers() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let now = DateTime32::now();
+    let context = GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: hash,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+    let available = Arc::new(AtomicBool::new(false));
+    let failed_snapshot = Arc::new(tokio::sync::Notify::new());
+    let read_state = tower::service_fn({
+        let available = available.clone();
+        let failed_snapshot = failed_snapshot.clone();
+        move |request| {
+            if matches!(request, ReadRequest::ChainInfo) && !available.load(Ordering::SeqCst) {
+                failed_snapshot.notify_one();
+                return std::future::ready(Err::<ReadResponse, BoxError>(
+                    "template context unavailable".into(),
+                ));
+            }
+            std::future::ready(Ok::<_, BoxError>(match request {
+                ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(context.clone()),
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        }
+    });
+    let mempool = tower::service_fn(move |request| {
+        assert!(matches!(request, mempool::Request::FullTransactions));
+        std::future::ready(Ok::<_, BoxError>(mempool::Response::FullTransactions {
+            transactions: vec![],
+            transaction_dependencies: Default::default(),
+            last_seen_tip_hash: hash,
+        }))
+    });
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(height);
+    tip_sender.send_best_tip_hash(hash);
+    tip_sender.send_best_tip_block_time(chrono::Utc::now());
+    let mut sync = MockSyncStatus::default();
+    sync.set_is_close_to_tip(true);
+    let rpc = template_regression_rpc(network.clone(), mempool, read_state, tip, sync);
+    let updater = rpc
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(broadcast::channel(1).0))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(1), failed_snapshot.notified())
+        .await
+        .expect("the updater must attempt its initial snapshot");
+    let error = tokio::time::timeout(Duration::from_secs(2), rpc.get_block_template(None))
+        .await
+        .expect("a live but failing updater must not strand its RPC caller")
+        .expect_err("there is no usable template");
+    assert!(error.message().contains("template context unavailable"));
+    available.store(true, Ordering::SeqCst);
+    let cache = rpc.gbt.template_cache().unwrap();
+    let mut publications = cache.subscribe();
+    tokio::time::advance(precompute::RETRY_DELAY).await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while cache.template_for_tip(hash, &network, now).is_none() {
+            publications.changed().await;
+        }
+    })
+    .await
+    .expect("a recovered updater must replace its failure with work");
+    let template = rpc
+        .get_block_template(None)
+        .await
+        .unwrap()
+        .try_into_template()
+        .unwrap();
+    assert_eq!(template.previous_block_hash, hash);
+    updater.abort();
+}
+
+/// A slow rebuild must not replay a failure from before genesis or from a previous committed tip.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_ignores_previous_tip_error() {
+    let _init_guard = zebra_test::init();
+    let network = testnet::Parameters::build()
+        .with_disable_pow(true)
+        .to_network()
+        .unwrap();
+    let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+    let hash = Hash([1; 32]);
+    let now = DateTime32::now();
+    let context = GetBlockTemplateChainInfo {
+        tip_height: height,
+        tip_hash: hash,
+        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+        cur_time: now,
+        min_time: now,
+        max_time: now.saturating_add(Duration32::from_minutes(90)),
+        chain_history_root: fake_history_tree(&network).hash(),
+        chain_value_pools: Default::default(),
+    };
+
+    for old_tip in [None, Some(Hash([2; 32]))] {
+        let (committed_tip, tip_rx) = watch::channel(old_tip);
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let read_state = tower::service_fn({
+            let context = context.clone();
+            let tip_rx = tip_rx.clone();
+            move |request| {
+                let tip = *tip_rx.borrow();
+                let mut context = context.clone();
+                async move {
+                    match request {
+                        ReadRequest::Tip => Ok(ReadResponse::Tip(tip.map(|hash| (height, hash)))),
+                        ReadRequest::ChainInfo => {
+                            let Some(hash) = tip else {
+                                return Err::<_, BoxError>(
+                                    "previous tip context unavailable".into(),
+                                );
+                            };
+                            context.tip_hash = hash;
+                            Ok(ReadResponse::ChainInfo(context))
+                        }
+                        other => panic!("unexpected state request: {other:?}"),
+                    }
+                }
+            }
+        });
+        let mempool = tower::service_fn({
+            let release = release.clone();
+            move |request| {
+                assert!(matches!(request, mempool::Request::FullTransactions));
+                let tip = *tip_rx.borrow();
+                let release = release.clone();
+                async move {
+                    if tip == old_tip {
+                        return Err::<_, BoxError>("previous tip mempool unavailable".into());
+                    }
+                    let _permit = release.acquire().await.unwrap();
+                    Ok::<_, BoxError>(mempool::Response::FullTransactions {
+                        transactions: vec![],
+                        transaction_dependencies: Default::default(),
+                        last_seen_tip_hash: hash,
+                    })
+                }
+            }
+        });
+        let (tip, _tip_sender) = MockChainTip::new();
+        let rpc = template_regression_rpc(
+            network.clone(),
+            mempool,
+            read_state,
+            tip,
+            MockSyncStatus::default(),
+        );
+        let cache = rpc.gbt.template_cache().unwrap();
+        let mut publications = cache.subscribe();
+        let updater = rpc
+            .spawn_block_template_updater(&MempoolTxSubscriber::new(broadcast::channel(1).0))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), publications.changed())
+            .await
+            .expect("the updater must publish its initial failure");
+
+        // The authoritative state advances while its notification channel still lags behind.
+        committed_tip.send_replace(Some(hash));
+        let waiting = rpc.get_block_template(None);
+        tokio::pin!(waiting);
+        assert!(futures::poll!(&mut waiting).is_pending());
+        tokio::time::advance(precompute::NEW_TIP_TIMEOUT + precompute::RETRY_DELAY).await;
+        assert!(
+            futures::poll!(&mut waiting).is_pending(),
+            "an old failure must not replace work for the new committed tip"
+        );
+        release.add_permits(1);
+        let template = tokio::time::timeout(Duration::from_secs(30), waiting)
+            .await
+            .expect("the released updater must publish work")
+            .unwrap()
+            .try_into_template()
+            .unwrap();
+        assert_eq!(template.previous_block_hash, hash);
+        updater.abort();
+    }
+}
+
+/// Neither publication nor expiry may bypass the sync/fresh-tip check of a parked cached poll.
+#[tokio::test(start_paused = true)]
+async fn getblocktemplate_cached_long_poll_rechecks_sync() {
+    let _init_guard = zebra_test::init();
+    for lose_fresh_tip in [false, true] {
+        for expire in [false, true] {
+            let network = Network::Mainnet;
+            let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let hash = Hash([1; 32]);
+            let now = DateTime32::from(1_700_000_000);
+            let context = GetBlockTemplateChainInfo {
+                tip_height: height,
+                tip_hash: hash,
+                expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+                cur_time: now,
+                min_time: now,
+                max_time: now.saturating_add(Duration32::from_seconds(10)),
+                chain_history_root: fake_history_tree(&network).hash(),
+                chain_value_pools: Default::default(),
+            };
+            let read_state = tower::service_fn(move |request| {
+                assert!(matches!(request, ReadRequest::Tip));
+                std::future::ready(Ok::<_, BoxError>(ReadResponse::Tip(Some((height, hash)))))
+            });
+            let (tip, tip_sender) = MockChainTip::new();
+            tip_sender.send_best_tip_height(height);
+            tip_sender.send_best_tip_hash(hash);
+            tip_sender.send_best_tip_block_time(chrono::Utc::now());
+            let mut sync = MockSyncStatus::default();
+            sync.set_is_close_to_tip(true);
+            let mut rpc = template_regression_rpc(
+                network.clone(),
+                MockService::build().for_unit_tests(),
+                read_state,
+                tip,
+                sync.clone(),
+            );
+            let clock = Arc::new(AtomicU32::new(now.timestamp()));
+            rpc.template_clock = Some(clock.clone());
+            let cache = rpc.gbt.template_cache().unwrap();
+            let mut template = BlockTemplateResponse::new_internal(
+                &network,
+                &rpc.gbt.coinbase_cache(),
+                rpc.gbt.miner_params().unwrap(),
+                &context,
+                LongPollInput::new(height, hash, context.max_time, std::iter::empty())
+                    .generate_id(),
+                vec![],
+                None,
+            );
+            cache.publish(template.clone());
+            let waiting = rpc.get_block_template(Some(GetBlockTemplateParameters {
+                long_poll_id: Some(template.long_poll_id),
+                ..Default::default()
+            }));
+            tokio::pin!(waiting);
+            assert!(futures::poll!(&mut waiting).is_pending());
+            if lose_fresh_tip {
+                tip_sender.send_best_tip_block_time(chrono::Utc::now() - chrono::Duration::days(1));
+            } else {
+                sync.set_is_close_to_tip(false);
+            }
+            if expire {
+                clock.store(context.max_time.timestamp() + 1, Ordering::SeqCst);
+                tokio::time::advance(Duration::from_secs(11)).await;
+            } else {
+                template.long_poll_id = LongPollInput::new(
+                    height,
+                    hash,
+                    context.max_time.saturating_add(Duration32::from_seconds(1)),
+                    std::iter::empty(),
+                )
+                .generate_id();
+                cache.publish(template);
+            }
+            assert!(!cache.is_empty(), "the stale work remains published");
+            let error = tokio::time::timeout(Duration::from_secs(1), waiting)
+                .await
+                .expect("publication or expiry must wake the poll")
+                .expect_err("a cached long poll must reject lost sync or a stale Mainnet tip");
+            assert_eq!(
+                error.code(),
+                types::get_block_template::constants::NOT_SYNCED_ERROR_CODE.code(),
+                "freshness loss: {lose_fresh_tip}, expiry: {expire}",
+            );
+        }
+    }
 }
 
 /// Expiry notifies a waiting miner once, but re-polling expired work waits for a real change.
@@ -3947,7 +5020,11 @@ async fn getblocktemplate_long_poll_expires_once() {
         );
         let clock = Arc::new(AtomicU32::new(now.timestamp()));
         rpc.template_clock = Some(clock.clone());
-        let cache = rpc.gbt.template_cache().unwrap();
+        let cache = rpc.gbt.template_cache().unwrap().clone();
+        if !cached {
+            let miner_params = rpc.gbt.miner_params().unwrap().clone();
+            rpc.gbt.set_miner_params(miner_params);
+        }
         let make_template = |chain_info: &GetBlockTemplateChainInfo| {
             BlockTemplateResponse::new_internal(
                 &net,
@@ -4148,47 +5225,48 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
         None,
     );
 
-    let spawn_responders = |tip_height: Height, tip_hash: Hash| {
+    let (committed_tip, committed_tip_rx) = watch::channel((tip_height, tip_hash));
+    let (read_state_responder, mempool_responder) = {
         let mut read_state = read_state.clone();
         let mut mempool = mempool.clone();
         let chain_history_root = fake_history_tree(&net).hash();
+        let state_tip = committed_tip_rx.clone();
+        let mempool_tip = committed_tip_rx;
 
         let read_state_responder = tokio::spawn(async move {
             loop {
-                read_state
-                    .expect_request_that(|_| true)
-                    .await
-                    .respond_with(move |req| match req {
-                        ReadRequest::ChainInfo => {
-                            ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                                expected_difficulty: CompactDifficulty::from(
-                                    ExpandedDifficulty::from(U256::one()),
-                                ),
-                                tip_height,
-                                tip_hash,
-                                cur_time: DateTime32::from(1654008617),
-                                min_time: DateTime32::from(1654008606),
-                                max_time: DateTime32::from(1654008728),
-                                chain_history_root,
-                                chain_value_pools: Default::default(),
-                            })
-                        }
-                        ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
-                        other => panic!("unexpected read state request: {other:?}"),
-                    });
+                let request = read_state.expect_request_that(|_| true).await;
+                let (tip_height, tip_hash) = *state_tip.borrow();
+                request.respond_with(move |req| match req {
+                    ReadRequest::ChainInfo => ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                        expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(
+                            U256::one(),
+                        )),
+                        tip_height,
+                        tip_hash,
+                        cur_time: DateTime32::from(1654008617),
+                        min_time: DateTime32::from(1654008606),
+                        max_time: DateTime32::from(1654008728),
+                        chain_history_root,
+                        chain_value_pools: Default::default(),
+                    }),
+                    ReadRequest::Tip => ReadResponse::Tip(Some((tip_height, tip_hash))),
+                    other => panic!("unexpected read state request: {other:?}"),
+                });
             }
         });
 
         let mempool_responder = tokio::spawn(async move {
             loop {
-                mempool
+                let request = mempool
                     .expect_request(mempool::Request::FullTransactions)
-                    .await
-                    .respond(mempool::Response::FullTransactions {
-                        transactions: vec![],
-                        transaction_dependencies: Default::default(),
-                        last_seen_tip_hash: tip_hash,
-                    });
+                    .await;
+                let (_, tip_hash) = *mempool_tip.borrow();
+                request.respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: tip_hash,
+                });
             }
         });
 
@@ -4196,10 +5274,11 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     };
 
     // Fill the cache with a template for the tip both the state and the channel agree on.
-    let (read_state_responder, mempool_responder) = spawn_responders(tip_height, tip_hash);
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     let template_cache = rpc
@@ -4220,11 +5299,10 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     .await
     .expect("the updater task should precompute a template for the chain tip");
 
-    // Commit a block in the state without advancing the chain tip channel.
-    read_state_responder.abort();
-    mempool_responder.abort();
-    let (read_state_responder, mempool_responder) =
-        spawn_responders(committed_height, committed_hash);
+    // Commit a block in the state without advancing the chain tip channel. Keep responders alive:
+    // replacing MockService broadcast subscribers would strand already-issued requests, which is
+    // a lost-response failure rather than the state/notification ordering this test exercises.
+    committed_tip.send_replace((committed_height, committed_hash));
 
     let template = tokio::time::timeout(Duration::from_secs(30), rpc.get_block_template(None))
         .await
