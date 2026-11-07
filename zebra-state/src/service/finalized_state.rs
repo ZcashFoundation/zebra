@@ -32,6 +32,7 @@ use zebra_chain::{
 };
 use zebra_db::{
     chain::BLOCK_INFO,
+    header_chain::{HEADER_BY_HEIGHT, HEIGHT_BY_HEADER_HASH},
     spentness::{SPENTNESS_ARTIFACT, SPENTNESS_JOURNAL},
     sync_meta::SYNC_META_BY_HEIGHT,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
@@ -130,6 +131,9 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Spentness hints
     SPENTNESS_JOURNAL,
     SPENTNESS_ARTIFACT,
+    // Headers stored ahead of their block bodies by headers-first sync
+    HEADER_BY_HEIGHT,
+    HEIGHT_BY_HEADER_HASH,
 ];
 
 /// The finalized part of the chain state, stored in the db.

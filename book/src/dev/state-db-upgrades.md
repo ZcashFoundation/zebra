@@ -11,19 +11,19 @@ For deployment, direct-reader compatibility, and rollback, follow
 ## Format versions and paths
 
 The database format version is independent of Zebra and Rust crate versions.
-Zebra implements [format **30.0.0**][constants]:
+Zebra implements [format **30.1.0**][constants]:
 
 | Constant | Current value | Change requiring a bump |
 | --- | --- | --- |
 | `DATABASE_FORMAT_VERSION` | `30` | An incompatible encoding change or column family removal |
-| `DATABASE_FORMAT_MINOR_VERSION` | `0` | A significant compatible change, including a new column family |
+| `DATABASE_FORMAT_MINOR_VERSION` | `1` | A significant compatible change, including a new column family |
 | `DATABASE_FORMAT_PATCH_VERSION` | `0` | A significant format compatibility fix |
 
 A change that would otherwise be incompatible can use a minor bump only when
 all supported Zebra versions already contain the required compatibility code.
 The function `state_database_format_version_in_code()` returns the complete
 semantic version. Builds with the `indexer` feature return
-`30.0.0+indexer`; other builds return `30.0.0`.
+`30.1.0+indexer`; other builds return `30.1.0`.
 
 For persistent databases, the method `Config::db_path()` constructs this path:
 
@@ -114,6 +114,17 @@ starts on an empty state, so a partial hinted state only ever exists in v30.
 A never-hinted v30 directory has the same records as v29 state, and can be
 renamed back to `state/v29` for rollback. A hinted one cannot: restore a v29
 backup instead.
+
+### The 30.1.0 header chain
+
+Format 30.1.0 adds the `header_by_height` and `height_by_header_hash` column
+families. Headers-first sync stores the headers it has verified ahead of their
+block bodies there, so they never change the block chain that
+`hash_by_height`, `height_by_hash` and `block_header_by_height` describe. A row
+is authoritative only above the finalized tip: once a block commits, its row is
+a stale duplicate that the header writer deletes. The upgrade uses
+`NoMigration`, and a 30.0.0 binary opens a 30.1.0 database and ignores the new
+column families.
 
 ### Old-database cleanup
 
@@ -303,6 +314,8 @@ this is a table abbreviation, not a Rust type.
 | `tip_chain_value_pool` | `()` | `ValueBalance<NonNegative>` |
 | `block_info` | `block::Height` | `BlockInfo` |
 | `sync_meta_by_height` | `block::Height` | `SyncMetadata` |
+| `header_by_height` | `block::Height` | `block::Header` |
+| `height_by_header_hash` | `block::Hash` | `block::Height` |
 
 ### Indexer-dependent values
 

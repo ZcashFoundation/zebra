@@ -128,7 +128,12 @@ fn format_upgrades(
             "add spentness hint column families",
             Version::new(30, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 9])
+        // The header chain column families are created empty when the database is opened.
+        Box::new(no_migration::NoMigration::new(
+            "add header chain column families",
+            Version::new(30, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 10])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

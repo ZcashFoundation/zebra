@@ -45,6 +45,11 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 30.1.0: adds the `header_by_height` and `height_by_header_hash` column families, which hold
+///   the block headers that headers-first sync has verified ahead of their bodies, and their
+///   reverse index. They are created empty when the database is opened, and rows at or below the
+///   finalized tip are stale duplicates that the header writer deletes. Older 30.0 readers keep
+///   the new column families when they open the database, and ignore them.
 /// - 30.0.0: spentness hints. Adds the `spentness_journal` and `spentness_artifact` column
 ///   families, which hold the omitted outputs and the construction record of a hinted sync
 ///   below the pinned terminal checkpoint. They are empty in an unhinted database, and the
@@ -73,7 +78,7 @@ const DATABASE_FORMAT_VERSION: u64 = 30;
 ///   New CFs are created and the wider records are read in place when the database is opened.
 ///   The upgrade backfills the empty genesis Ironwood tree and anchor. The previous major database
 ///   format is reusable without a resync.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
