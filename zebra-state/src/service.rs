@@ -965,9 +965,12 @@ impl StateService {
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
-                    let send_result = non_finalized_block_write_sender.send(queued_child.into());
+                    let send_result = non_finalized_block_write_sender.send(
+                        NonFinalizedWriteMessage::Commit(queued_child, Instant::now()),
+                    );
 
-                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued))) = send_result {
+                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued, _))) = send_result
+                    {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Records `zebra.consensus.block.phase.duration_seconds` histograms for block checks, transaction verification and the state commit of non-proposal blocks.
+time: 2026-10-13T02:47:50.527259931+02:00
