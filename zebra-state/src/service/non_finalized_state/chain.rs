@@ -1696,7 +1696,10 @@ impl Chain {
     /// running note commitment tree updates in parallel with other updates.
     ///
     /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_parallel(
         &mut self,
@@ -1781,7 +1784,10 @@ impl Chain {
     /// except for the note commitment and history tree updates.
     ///
     /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_except_trees(
         &mut self,
@@ -1944,7 +1950,10 @@ pub(crate) trait UpdateWith<T> {
 }
 
 impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
@@ -1953,7 +1962,10 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         self.update_chain_tip_with_block_parallel(contextually_valid)
     }
 
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    #[instrument(
+        skip(self, contextually_valid),
+        fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
+    )]
     fn revert_chain_with(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
