@@ -80,12 +80,14 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                     if delivery == 0 {
                         changes.changed().await;
                         assert!(changes.is_current(hash));
+                        assert!(Arc::ptr_eq(&changes.block(hash).unwrap(), &block));
                         assert!(matches!(
                             read.clone().oneshot(zs::ReadRequest::MiningCandidate).await.unwrap(),
                             zs::ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == hash
                         ));
                     } else {
                         assert!(!changes.is_current(hash));
+                        assert!(changes.block(hash).is_none());
                         assert!(matches!(
                             read.clone().oneshot(zs::ReadRequest::MiningCandidate).await.unwrap(),
                             zs::ReadResponse::MiningCandidate(None)
@@ -132,6 +134,7 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                         changes.mark_seen();
                     }
                     assert!(!changes.is_current(hash));
+                    assert!(changes.block(hash).is_none());
                     assert!(matches!(
                         read.clone().oneshot(zs::ReadRequest::MiningCandidate).await.unwrap(),
                         zs::ReadResponse::MiningCandidate(None)
@@ -240,6 +243,7 @@ async fn ordinary_and_mined_forged_bodies_do_not_reject_genuine_mining_work() {
             let pending = transactions.expect_request_that(|_| true).await;
             changes.changed().await;
             assert!(changes.is_current(block.hash()));
+            assert!(Arc::ptr_eq(&changes.block(block.hash()).unwrap(), &block));
             assert!(matches!(
                 read.oneshot(zs::ReadRequest::MiningCandidate).await.unwrap(),
                 zs::ReadResponse::MiningCandidate(Some(info)) if info.tip_hash == block.hash()
