@@ -1253,6 +1253,11 @@ impl Service<Request> for StateService {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
 
+        // The children of the last checkpoint verified block can all be queued before that block
+        // reaches disk. Then no later commit request makes the switch to non-finalized commits,
+        // so make it here, on the next request: the syncer keeps polling the state.
+        self.finish_checkpoint_commits_if_ready();
+
         // Prune outdated UTXO requests
         let now = Instant::now();
 

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Fixed initial sync stalling at the final checkpoint until a new block arrived, when every block just above it was downloaded before the final checkpoint block was written to disk.'
+time: 2026-11-06T22:16:03Z
