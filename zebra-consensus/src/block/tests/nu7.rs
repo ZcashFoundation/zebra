@@ -110,11 +110,11 @@ async fn verify(
     let state = service_fn(|request| async move {
         Ok::<_, BoxError>(match request {
             zebra_state::Request::KnownBlock(_) => zebra_state::Response::KnownBlock(None),
-            zebra_state::Request::AwaitUtxo(requested) => {
-                assert_eq!(requested, outpoint());
-                zebra_state::Response::Utxo(
+            zebra_state::Request::AwaitUtxos(requested) => {
+                assert_eq!(requested, vec![outpoint()]);
+                zebra_state::Response::Utxos(vec![
                     transparent::OrderedUtxo::new(output(10_000), Height(1), 1).utxo,
-                )
+                ])
             }
             zebra_state::Request::CommitSemanticallyVerifiedBlock(block) => {
                 zebra_state::Response::Committed(block.hash)
