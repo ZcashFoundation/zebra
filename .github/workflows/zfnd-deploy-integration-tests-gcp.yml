@@ -482,6 +482,9 @@ jobs:
       # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
+      #
+      # The `failure-issue` job in zfnd-ci-integration-tests-gcp.yml finds this step by its
+      # `Result of ` name prefix to tell a failed test from a failed setup step.
       - name: Result of ${{ inputs.test_id }} test
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
