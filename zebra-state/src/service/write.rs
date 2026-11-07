@@ -15,6 +15,8 @@ use tokio::sync::{
 use tracing::Span;
 use zebra_chain::block::{self, Height};
 
+use trees_ahead::TreesAhead;
+
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
@@ -285,9 +287,30 @@ impl WriteBlockWorkerTask {
         // `None` after a failed commit.
         let mut checkpoint_tip_cache = None;
 
+        // Queued checkpoint blocks, whose note commitment trees are updated ahead of their commits.
+        let mut trees_ahead = TreesAhead::new();
+
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+        loop {
+            // Queue the blocks the state has sent, waiting for one only if none are queued.
+            if trees_ahead.is_empty() {
+                match finalized_block_write_receiver.blocking_recv() {
+                    Some(ordered_block) => trees_ahead.push(ordered_block),
+                    None => break,
+                }
+            }
+            while !trees_ahead.is_full() {
+                match finalized_block_write_receiver.try_recv() {
+                    Ok(ordered_block) => trees_ahead.push(ordered_block),
+                    Err(_) => break,
+                }
+            }
+            let Some(pending) = trees_ahead.pop() else {
+                break;
+            };
+            let (ordered_block, precomputed_trees) = pending.into_parts();
+
             let _context_update = early_relay.updating_context();
             // TODO: split these checks into separate functions
 
@@ -334,6 +357,9 @@ impl WriteBlockWorkerTask {
                 Ok(permit) => permit.flatten(),
                 Err(error) => {
                     drop(_context_update);
+                    // This block isn't committed, so trees computed ahead for its descendants are
+                    // dropped with them.
+                    trees_ahead.discard();
                     // Publish the reset before replying so an immediate retry can make progress.
                     let _ = invalid_block_reset_sender.send((
                         finalized_state.db.finalized_tip_height(),
@@ -344,6 +370,11 @@ impl WriteBlockWorkerTask {
                 }
             };
 
+            // Wait for this block's trees, if they're being computed ahead.
+            let mut wait_timer = Some(Instant::now());
+            let precomputed_trees = precomputed_trees.wait();
+            record_phase!(wait_timer, "checkpoint_trees_wait");
+
             // Try committing the block, but keep notifications until its context is published.
             let (checkpoint_verified, rsp_tx, _) = ordered_block;
             let height = checkpoint_verified.height;
@@ -351,9 +382,16 @@ impl WriteBlockWorkerTask {
                 checkpoint_verified,
                 prev_finalized_note_commitment_trees.take(),
                 checkpoint_tip_cache.take(),
+                precomputed_trees,
             ) {
                 Ok((tip_block, note_commitment_trees, tip_cache)) => {
                     let hash = tip_block.hash;
+
+                    // Format upgrades can rewrite tree data in another thread, so only compute
+                    // trees ahead once they have finished, like the tip cache.
+                    if finalized_state.db.finished_format_upgrades() {
+                        trees_ahead.resume_from(hash, &note_commitment_trees);
+                    }
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     checkpoint_tip_cache = tip_cache;
 
@@ -364,6 +402,9 @@ impl WriteBlockWorkerTask {
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
+
+                    // Trees computed ahead for queued blocks may descend from the failed block.
+                    trees_ahead.discard();
 
                     // The last block in the queue failed, so we can't commit the next block.
                     // Instead, we need to reset the state queue,
@@ -619,6 +660,8 @@ impl WriteBlockWorkerTask {
         std::mem::drop(self.finalized_state);
     }
 }
+
+mod trees_ahead;
 
 #[cfg(test)]
 mod tests;

@@ -941,6 +941,7 @@ fn checkpoint_tip_cache_matches_database_for_mainnet_vectors() {
                 CheckpointVerifiedBlock::from(block),
                 note_commitment_trees.take(),
                 tip_cache.take(),
+                None,
             )
             .expect("test vectors are valid");
         note_commitment_trees = Some(trees);
@@ -954,4 +955,56 @@ fn checkpoint_tip_cache_matches_database_for_mainnet_vectors() {
     let tip_cache = tip_cache.expect("there are continuous test vectors");
     assert!(tip_cache.tip.0 > Height(0));
     assert!(!tip_cache.value_pool.transparent_amount().is_zero());
+}
+
+/// Test that a precomputed note commitment tree error fails the checkpoint commit and leaves the
+/// state unchanged, like an error from updating the trees during the commit.
+#[test]
+fn precomputed_tree_error_fails_checkpoint_commit() {
+    use std::sync::Arc;
+
+    use zebra_chain::{
+        block::Block, parallel::tree::NoteCommitmentTreeError, parameters::Network, sapling,
+        serialization::ZcashDeserializeInto,
+    };
+
+    use crate::{service::finalized_state::FinalizedState, CheckpointVerifiedBlock, Config};
+
+    let _init_guard = zebra_test::init();
+
+    let mut state = FinalizedState::new(&Config::ephemeral(), &Network::Mainnet)
+        .expect("opening an ephemeral database should succeed");
+
+    let mut blocks = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.values();
+    let genesis: Arc<Block> = blocks
+        .next()
+        .expect("vectors have genesis")
+        .zcash_deserialize_into()
+        .expect("valid test vector");
+    let (_, trees, _) = state
+        .commit_checkpoint_verified(
+            CheckpointVerifiedBlock::from(genesis.clone()),
+            None,
+            None,
+            None,
+        )
+        .expect("genesis commits");
+
+    let block_1: Arc<Block> = blocks
+        .next()
+        .expect("vectors have block 1")
+        .zcash_deserialize_into()
+        .expect("valid test vector");
+    state
+        .commit_checkpoint_verified(
+            CheckpointVerifiedBlock::from(block_1),
+            Some(trees),
+            None,
+            Some(Err(NoteCommitmentTreeError::Sapling(
+                sapling::tree::NoteCommitmentTreeError::FullTree,
+            ))),
+        )
+        .expect_err("a precomputed tree error fails the commit");
+
+    assert_eq!(state.db.finalized_tip_hash(), genesis.hash());
 }

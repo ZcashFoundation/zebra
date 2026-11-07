@@ -24,7 +24,7 @@ use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NonNegative},
     block,
     history_tree::HistoryTree,
-    parallel::tree::NoteCommitmentTrees,
+    parallel::tree::{NoteCommitmentTreeError, NoteCommitmentTrees},
     parameters::{
         subsidy::{block_subsidy_with_parent_pools, SubsidyError},
         Network,
@@ -314,7 +314,7 @@ impl FinalizedState {
         checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        self.commit_checkpoint_verified(checkpoint_verified, prev_note_commitment_trees, None)
+        self.commit_checkpoint_verified(checkpoint_verified, prev_note_commitment_trees, None, None)
             .map(|(tip_block, note_commitment_trees, _tip_cache)| {
                 (tip_block, note_commitment_trees)
             })
@@ -325,11 +325,15 @@ impl FinalizedState {
     /// `tip_cache` must be the cache returned by the previous commit, or `None` to read the
     /// finalized tip's data from the database. Returns the committed chain-tip data, the updated
     /// note commitment trees, and, if it can be used for the next commit, the new tip cache.
+    ///
+    /// `precomputed_trees`, if present, must be the result of updating the parent's note commitment
+    /// trees with this block, and is used instead of updating them here.
     pub(crate) fn commit_checkpoint_verified(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         tip_cache: Option<CheckpointTipCache>,
+        precomputed_trees: Option<Result<NoteCommitmentTrees, NoteCommitmentTreeError>>,
     ) -> Result<
         (
             ChainTipBlock,
@@ -350,6 +354,7 @@ impl FinalizedState {
             checkpoint_verified.into(),
             prev_note_commitment_trees,
             tip_cache,
+            precomputed_trees,
             "commit checkpoint-verified request",
         );
 
@@ -396,6 +401,7 @@ impl FinalizedState {
             finalizable_block,
             prev_note_commitment_trees,
             None,
+            None,
             source,
         )
         .map(|(hash, note_commitment_trees, _tip_cache)| (hash, note_commitment_trees))
@@ -407,12 +413,16 @@ impl FinalizedState {
     /// For checkpoint-verified blocks, uses `tip_cache` instead of reading the finalized tip's
     /// data from the database, and returns the new tip cache. See [`CheckpointTipCache`] for when
     /// the cache is used. Blocks finalized by the non-finalized state never use or return it.
+    ///
+    /// For checkpoint-verified blocks, uses `precomputed_trees` instead of updating the note
+    /// commitment trees, if present. It must be the parent's trees updated with this block.
     #[allow(clippy::unwrap_in_result)]
     fn commit_finalized_direct_with_cache(
         &mut self,
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         tip_cache: Option<CheckpointTipCache>,
+        precomputed_trees: Option<Result<NoteCommitmentTrees, NoteCommitmentTreeError>>,
         source: &str,
     ) -> Result<
         (block::Hash, NoteCommitmentTrees, Option<CheckpointTipCache>),
@@ -482,16 +492,31 @@ impl FinalizedState {
                 let shielded_commitments = block.sapling_note_commitments().count()
                     + block.orchard_note_commitments().count()
                     + block.ironwood_note_commitments().count();
-                let (tree_result, commitment_result) =
-                    if shielded_commitments >= OVERLAP_COMMITMENT_THRESHOLD {
-                        rayon::join(
-                            || note_commitment_trees.update_trees_parallel(&block),
-                            check_commitment,
-                        )
-                    } else {
-                        let tree_result = note_commitment_trees.update_trees_parallel(&block);
-                        (tree_result, check_commitment())
-                    };
+                let (tree_result, commitment_result) = if let Some(precomputed) = precomputed_trees
+                {
+                    #[cfg(debug_assertions)]
+                    if let Ok(precomputed) = &precomputed {
+                        let mut expected = prev_note_commitment_trees.clone();
+                        expected
+                            .update_trees_parallel(&block)
+                            .expect("the precomputed update succeeded");
+                        assert_eq!(
+                            &expected, precomputed,
+                            "precomputed note commitment trees must match the parent's trees \
+                             updated with this block",
+                        );
+                    }
+                    let tree_result = precomputed.map(|trees| note_commitment_trees = trees);
+                    (tree_result, check_commitment())
+                } else if shielded_commitments >= OVERLAP_COMMITMENT_THRESHOLD {
+                    rayon::join(
+                        || note_commitment_trees.update_trees_parallel(&block),
+                        check_commitment,
+                    )
+                } else {
+                    let tree_result = note_commitment_trees.update_trees_parallel(&block);
+                    (tree_result, check_commitment())
+                };
                 // Keep tree errors ahead of commitment errors, regardless of completion order.
                 tree_result.map_err(ValidateContextError::from)?;
                 commitment_result?;

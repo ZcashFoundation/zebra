@@ -226,6 +226,7 @@ fn checkpoint_tip_cache_matches_database() -> Result<()> {
                         CheckpointVerifiedBlock::from(block),
                         note_commitment_trees.clone(),
                         tip_cache.take(),
+                        None,
                     ).expect_err("Must fail commitment check");
                 }
 
@@ -233,6 +234,7 @@ fn checkpoint_tip_cache_matches_database() -> Result<()> {
                     CheckpointVerifiedBlock::from(block.block.clone()),
                     note_commitment_trees.take(),
                     tip_cache.take(),
+                    None,
                 ).unwrap();
                 note_commitment_trees = Some(trees);
                 prop_assert_eq!(tip.hash, block.hash);
@@ -252,6 +254,58 @@ fn checkpoint_tip_cache_matches_database() -> Result<()> {
             let tip_cache = tip_cache.expect("the chain has blocks after genesis");
             prop_assert!(tip_cache.history_tree.is_some(), "the chain must reach Heartwood");
             prop_assert!(!tip_cache.value_pool.transparent_amount().is_zero());
+    });
+
+    Ok(())
+}
+
+/// Test that checkpoint commits with precomputed note commitment trees leave the same trees in
+/// the database as commits that update the trees themselves, across every network upgrade.
+#[test]
+fn precomputed_trees_commit_like_sequential_trees() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (network, _) = fake_activation_heights_network();
+    let ledger_strategy =
+        LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, None, false);
+
+    proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
+        |((chain, _count, network, _history_tree) in PreparedChain::default().with_ledger_strategy(ledger_strategy).with_valid_commitments().no_shrink())| {
+            let mut sequential = FinalizedState::new(&Config::ephemeral(), &network)
+                .expect("opening an ephemeral database should succeed");
+            let mut precomputed = FinalizedState::new(&Config::ephemeral(), &network)
+                .expect("opening an ephemeral database should succeed");
+            let mut sequential_trees = None;
+            let mut precomputed_trees: Option<zebra_chain::parallel::tree::NoteCommitmentTrees> = None;
+
+            for block in chain.iter() {
+                let (_, trees, _) = sequential.commit_checkpoint_verified(
+                    CheckpointVerifiedBlock::from(block.block.clone()),
+                    sequential_trees.take(),
+                    None,
+                    None,
+                ).unwrap();
+                sequential_trees = Some(trees);
+
+                let mut next = precomputed_trees.clone().unwrap_or_default();
+                let update = next.update_trees_parallel(&block.block).map(|()| next);
+                let (_, trees, _) = precomputed.commit_checkpoint_verified(
+                    CheckpointVerifiedBlock::from(block.block.clone()),
+                    precomputed_trees.take(),
+                    None,
+                    Some(update),
+                ).unwrap();
+                precomputed_trees = Some(trees);
+
+                prop_assert_eq!(&precomputed_trees, &sequential_trees);
+                prop_assert_eq!(
+                    precomputed.db.note_commitment_trees_for_tip(),
+                    sequential.db.note_commitment_trees_for_tip()
+                );
+            }
     });
 
     Ok(())
