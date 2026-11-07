@@ -6,8 +6,9 @@ use std::future::Future;
 
 use std::pin::Pin;
 
+use bytes::Bytes;
 use futures::{future, FutureExt};
-use http_body_util::{BodyExt, Limited};
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::header;
 use jsonrpsee::{
     core::BoxError,
@@ -15,6 +16,7 @@ use jsonrpsee::{
 };
 use jsonrpsee_types::ErrorObject;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use tower::Service;
 
 use super::cookie::Cookie;
@@ -31,6 +33,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 /// because the "jsonrpc" field was only added in JSON-RPC 2.0.
 ///
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
+///
+/// Requests that are already canonical JSON-RPC 2.0, and their responses, are forwarded unchanged.
 ///
 /// ### Add missing `content-type` HTTP header
 ///
@@ -159,6 +163,15 @@ impl<S> HttpRequestMiddleware<S> {
             .collect()
             .await?
             .to_bytes();
+
+        // Re-encoding these requests would produce the same JSON-RPC 2.0 call, so skip it.
+        if is_canonical_json_rpc_2_request(&bytes) {
+            return Ok((
+                JsonRpcVersion::TwoPointZero,
+                HttpRequest::from_parts(parts, bytes_body(bytes)),
+            ));
+        }
+
         let (version, bytes) =
             if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
                 let version = request.version();
@@ -173,32 +186,86 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 (JsonRpcVersion::Unknown, bytes)
             };
-        Ok((
-            version,
-            // `Vec::from` reuses the buffer without copying when it is uniquely owned.
-            HttpRequest::from_parts(parts, HttpBody::from(Vec::from(bytes))),
-        ))
+        Ok((version, HttpRequest::from_parts(parts, bytes_body(bytes))))
     }
+
     /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
     async fn response_from_json_rpc_2(
         version: JsonRpcVersion,
         response: HttpResponse<HttpBody>,
     ) -> Result<HttpResponse<HttpBody>, BoxError> {
+        // 2.0 clients get the server's response as is, and unparsed requests have nothing to map.
+        if matches!(
+            version,
+            JsonRpcVersion::TwoPointZero | JsonRpcVersion::Unknown
+        ) {
+            return Ok(response);
+        }
+
         let (parts, body) = response.into_parts();
         let bytes = body.collect().await?.to_bytes();
-        let bytes =
+        let body =
             if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
-                serde_json::to_vec(&response.into_version(version))
-                    .expect("valid")
-                    .into()
+                HttpBody::from(serde_json::to_vec(&response.into_version(version)).expect("valid"))
             } else {
-                bytes
+                bytes_body(bytes)
             };
-        Ok(HttpResponse::from_parts(
-            parts,
-            HttpBody::from(bytes.as_ref().to_vec()),
-        ))
+        Ok(HttpResponse::from_parts(parts, body))
     }
+}
+
+/// Wraps `bytes` in a body without copying them.
+fn bytes_body(bytes: Bytes) -> HttpBody {
+    HttpBody::new(Full::new(bytes))
+}
+
+/// Returns true if `body` is a single JSON-RPC 2.0 call that `jsonrpsee` reads the same way
+/// before and after re-encoding: only known fields, no escapes, canonical positional params.
+fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
+    // `jsonrpsee` only skips 128 bytes of leading whitespace, and re-encoding removes it.
+    if body.first() != Some(&b'{') {
+        return false;
+    }
+    let Ok(request) = serde_json::from_slice::<RawJsonRpcRequest>(body) else {
+        return false;
+    };
+
+    request.jsonrpc.get() == r#""2.0""#
+        && is_unescaped_string(request.method)
+        && request
+            .id
+            .is_none_or(|id| is_unescaped_string(id) || id.get().parse::<u64>().is_ok())
+        && request.params.is_none_or(is_canonical_params)
+}
+
+/// Returns true if `params` is an unspaced array of unescaped strings, integers, booleans or nulls.
+/// Re-encoding changes floats, objects and escapes, and `jsonrpsee` rejects `[ ]` but not `[]`.
+fn is_canonical_params(params: &RawValue) -> bool {
+    let Ok(values) = serde_json::from_str::<Vec<&RawValue>>(params.get()) else {
+        return false;
+    };
+    // `[`, `]`, the values and the commas between them, so there is no whitespace.
+    let unspaced_len = 2
+        + values.iter().map(|value| value.get().len()).sum::<usize>()
+        + values.len().saturating_sub(1);
+
+    unspaced_len == params.get().len()
+        && values.iter().all(|value| {
+            let value = value.get();
+            match value.as_bytes()[0] {
+                b'"' => !value.as_bytes().contains(&b'\\'),
+                b't' | b'f' | b'n' => true,
+                // Leading zeros are invalid JSON, but serde_json reads `-0` as a float.
+                b'-' => value != "-0" && value.parse::<i64>().is_ok(),
+                _ => value.parse::<u64>().is_ok(),
+            }
+        })
+}
+
+/// Returns true if `value` is a JSON string without escapes.
+fn is_unescaped_string(value: &RawValue) -> bool {
+    let value = value.get().as_bytes();
+    value.first() == Some(&b'"') && !value.contains(&b'\\')
 }
 
 /// Implement the Layer for HttpRequestMiddleware to allow injecting the cookie
@@ -295,6 +362,20 @@ pub(super) struct JsonRpcRequest {
     id: Option<serde_json::Value>,
 }
 
+/// A JSON-RPC request borrowed from the body, with its values left undecoded.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawJsonRpcRequest<'a> {
+    #[serde(borrow)]
+    jsonrpc: &'a RawValue,
+    #[serde(borrow)]
+    method: &'a RawValue,
+    #[serde(default, borrow)]
+    params: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    id: Option<&'a RawValue>,
+}
+
 fn deserialize_present_id<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<serde_json::Value>, D::Error> {
@@ -332,7 +413,7 @@ struct JsonRpcResponse {
     jsonrpc: Option<String>,
     id: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Box<serde_json::value::RawValue>>,
+    result: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<serde_json::Value>,
 }
