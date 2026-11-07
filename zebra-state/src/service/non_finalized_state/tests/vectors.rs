@@ -3353,3 +3353,33 @@ fn transparent_address_queries_are_limited_to_max_entries() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn sent_hashes_from_forks_prune_finalized_heights() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let left = root.make_fake_child().set_work(10);
+    let high = left.make_fake_child().set_work(10);
+    let right = root.make_fake_child().set_work(11);
+    let bound = right.coinbase_height().unwrap();
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(root.prepare(), &finalized_state)
+        .unwrap();
+    for block in [left, high.clone(), right.clone()] {
+        state
+            .commit_block(block.prepare(), &finalized_state)
+            .unwrap();
+    }
+    let mut sent = crate::service::queued_blocks::SentHashes::new(&state);
+    state.finalize();
+    state.finalize();
+    assert!(!state.any_chain_contains(&right.hash()));
+
+    sent.prune_by_height(bound);
+    assert!(sent.contains(&high.hash()));
+    assert!(!sent.contains(&right.hash()));
+    assert!(!sent.can_fork_chain_at(&right.hash()));
+}

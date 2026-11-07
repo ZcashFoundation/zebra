@@ -357,8 +357,7 @@ impl SentHashes {
     /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
     /// is available in the state.
     ///
-    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
-    /// for efficient pruning.
+    /// Blocks may be added in any height order.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
         self.add_outputs(block.hash, block.height, block.new_outputs.iter());
     }
@@ -381,8 +380,7 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((hash, height));
-        self.insert_sent(hash, outpoints);
+        self.insert_sent(hash, height, outpoints);
 
         self.update_metrics_for_block(height);
     }
@@ -393,8 +391,7 @@ impl SentHashes {
     /// Used for checkpoint verified blocks close to the final checkpoint, so the semantic block verifier can look up
     /// their UTXOs.
     ///
-    /// Assumes that blocks are added in the order of their height between `finish_batch` calls
-    /// for efficient pruning.
+    /// Blocks may be added in any height order.
     ///
     /// For more details see `add()`.
     pub fn add_finalized(&mut self, block: &CheckpointVerifiedBlock) {
@@ -410,14 +407,27 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((block.hash, block.height));
-        self.insert_sent(block.hash, outpoints);
+        self.insert_sent(block.hash, block.height, outpoints);
 
         self.update_metrics_for_block(block.height);
     }
 
-    /// Records `hash` as sent, releasing the outpoints of any earlier entry for the same hash.
-    fn insert_sent(&mut self, hash: block::Hash, outpoints: Vec<transparent::OutPoint>) {
+    /// Records `hash` in a height-ordered batch, releasing its earlier outpoint ownership.
+    fn insert_sent(
+        &mut self,
+        hash: block::Hash,
+        height: block::Height,
+        outpoints: Vec<transparent::OutPoint>,
+    ) {
+        if self
+            .curr_buf
+            .back()
+            .is_some_and(|&(_, last_height)| last_height > height)
+        {
+            self.finish_batch();
+        }
+        self.curr_buf.push_back((hash, height));
+
         if let Some(old_outpoints) = self.sent.insert(hash, outpoints) {
             for outpoint in &old_outpoints {
                 self.known_utxos.remove(outpoint);
@@ -455,9 +465,6 @@ impl SentHashes {
     /// Prunes sent blocks at or below `height_bound`.
     ///
     /// Finishes the batch if `finish_batch()` hasn't been called already.
-    ///
-    /// Assumes that blocks will be added in order of their heights between each `finish_batch()` call,
-    /// so that blocks can be efficiently and reliably removed by height.
     pub fn prune_by_height(&mut self, height_bound: block::Height) {
         self.finish_batch();
 
