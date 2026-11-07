@@ -62,7 +62,7 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
-    block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
+    block::{self, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
@@ -72,9 +72,7 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade,
     },
-    serialization::{
-        BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
-    },
+    serialization::{BytesInDisplayOrder, DateTime32, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
@@ -3243,9 +3241,7 @@ where
         let prepared_blocks = self.prepared_blocks.clone();
         let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
             Some(cache) => cache.deserialize(&block_bytes),
-            None => block_bytes
-                .zcash_deserialize_into::<Arc<Block>>()
-                .map(zebra_consensus::DecodedBlock::from),
+            None => zebra_consensus::DecodedBlock::deserialize(&block_bytes),
         })
         .await
         .expect("block deserialization reports malformed input as an error rather than panicking");
