@@ -6,3 +6,5 @@ pub mod external;
 pub mod internal;
 /// Newtype wrappers giving semantic meaning to primitive datatypes.
 pub mod types;
+/// The version 2 stream-based protocol.
+pub(crate) mod v2;

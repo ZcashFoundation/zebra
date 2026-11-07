@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: 'Added the `v2_listen_addr` and `initial_v2_peers` config fields, which enable the experimental version 2 protocol over QUIC; both default to off. Added `close_v2_endpoint`, which closes the version 2 endpoint at shutdown so peers learn at once that the node is going away.'
+time: 2026-10-17T11:00:00.000000000+02:00

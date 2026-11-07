@@ -16,7 +16,7 @@ use zebra_test::mock_service::MockService;
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
-    peer::{ClientRequest, ConnectedAddr, Connection, ConnectionInfo, ErrorSlot},
+    peer::{ClientRequest, ConnectedAddr, Connection, ConnectionInfo, ErrorSlot, RemoteHandshake},
     peer_set::ActiveConnectionCounter,
     protocol::{
         external::{AddrInVersion, Message},
@@ -92,7 +92,7 @@ where
 
     let connection_info = ConnectionInfo {
         connected_addr: ConnectedAddr::Isolated,
-        remote,
+        remote: RemoteHandshake::Version(remote),
         negotiated_version: fake_version,
         early_block_relay: false,
     };

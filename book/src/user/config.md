@@ -153,6 +153,8 @@ and [`CacheDir`](https://docs.rs/zebra-network/latest/zebra_network/config/enum.
 | `crawl_new_peer_interval` | Duration string | `"1m 1s"` | Interval between routine peer-address crawls. Zebra also crawls when all peers are busy and no connection candidates remain. The old key `new_peer_interval` is an accepted alias. |
 | `max_connections_per_ip` | `usize` | `1` | Concurrent peer-connection limit per IPv4 address or IPv6 `/64` subnet. Also affects inbound reconnection rate limiting. Zero produces a warning and becomes `1`; increasing it reduces peer diversity protections. |
 | `testnet_parameters` | Optional table | Absent | Compatibility layout for Testnet or Regtest parameters, used with a string-valued network selector. Ignored for Mainnet and when `network` itself contains parameters. |
+| `v2_listen_addr` | Optional socket-address string | Absent | Beta, opt-in: open a QUIC (UDP) endpoint for the draft version 2 peer-to-peer protocol at this address, also used for connections to `initial_v2_peers`. The legacy TCP protocol keeps running on `listen_addr`, and both can use the same port number. See [Version 2 peer-to-peer protocol (beta)](p2p-v2.md). |
+| `initial_v2_peers` | Array of address strings | `[]` | Peers to connect to over the version 2 protocol at startup; each IP address or DNS name must include the peer's QUIC (UDP) port. Only used when `v2_listen_addr` is set; version 2 peers are not discovered from the network yet. |
 
 The exact default Mainnet seed list is:
 
