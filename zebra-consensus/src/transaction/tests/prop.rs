@@ -633,12 +633,17 @@ fn mock_state_service(
                 ),
                 // The block verifier only reaches the state for outputs that are not in the
                 // request's `known_utxos`.
-                zs::Request::AwaitUtxo(outpoint) => zs::Response::Utxo(
-                    known_utxos
-                        .get(&outpoint)
-                        .expect("mock state contains every spent UTXO")
-                        .utxo
-                        .clone(),
+                zs::Request::AwaitUtxos(outpoints) => zs::Response::Utxos(
+                    outpoints
+                        .into_iter()
+                        .map(|outpoint| {
+                            known_utxos
+                                .get(&outpoint)
+                                .expect("mock state contains every spent UTXO")
+                                .utxo
+                                .clone()
+                        })
+                        .collect(),
                 ),
                 zs::Request::BestChainNextMedianTimePast => {
                     zs::Response::BestChainNextMedianTimePast(next_median_time_past)
