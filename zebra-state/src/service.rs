@@ -926,6 +926,36 @@ impl StateService {
             rsp_rx
         };
 
+        if self.finish_checkpoint_commits_if_ready() {
+            // The queued non-finalized blocks were sent.
+        } else if self.block_write_sender.finalized.is_none()
+            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
+        {
+            self.send_ready_non_finalized(parent_hash, ready);
+
+            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
+                "Finalized state must have at least one block before committing non-finalized state",
+            );
+
+            self.non_finalized_state_queued_blocks
+                .prune_by_height(finalized_tip_height);
+
+            self.non_finalized_block_write_sent_hashes
+                .prune_by_height(finalized_tip_height);
+        } else {
+            tracing::trace!("unready to verify, returning early");
+        }
+
+        // Ready parents and descendants take priority over retained orphans. There is no await
+        // between insertion, dispatch, and trimming, so only the incoming block is transiently extra.
+        self.non_finalized_state_queued_blocks.prune_overflow();
+
+        rsp_rx
+    }
+
+    /// Stops committing checkpoint verified blocks and sends the queued non-finalized blocks, if
+    /// the last checkpoint verified block is on disk. Returns `true` if it did.
+    fn finish_checkpoint_commits_if_ready(&mut self) -> bool {
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
@@ -956,29 +986,10 @@ impl StateService {
                 None,
                 KnownBlock::Finalized,
             ));
-        } else if self.block_write_sender.finalized.is_none()
-            && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
-        {
-            self.send_ready_non_finalized(parent_hash, ready);
-
-            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
-
-            self.non_finalized_state_queued_blocks
-                .prune_by_height(finalized_tip_height);
-
-            self.non_finalized_block_write_sent_hashes
-                .prune_by_height(finalized_tip_height);
+            true
         } else {
-            tracing::trace!("unready to verify, returning early");
+            false
         }
-
-        // Ready parents and descendants take priority over retained orphans. There is no await
-        // between insertion, dispatch, and trimming, so only the incoming block is transiently extra.
-        self.non_finalized_state_queued_blocks.prune_overflow();
-
-        rsp_rx
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
