@@ -80,6 +80,65 @@ fn mock_downloads(
     (downloads, network, verifier, state)
 }
 
+/// Negotiated downloads preserve both the verification contract and the actual serving address.
+#[tokio::test]
+async fn early_relay_download_preserves_validation_and_source() {
+    let _init_guard = zebra_test::init();
+    for (early, admitted) in [(false, false), (true, false), (true, true)] {
+        let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let block = block_1();
+        let hash = block.hash();
+        let peer: PeerSocketAddr = ADVERTISER.parse().unwrap();
+        assert!(matches!(
+            downloads.download_and_verify(hash, Some(peer)),
+            DownloadAction::AddedToQueue
+        ));
+        state
+            .expect_request(zs::Request::KnownBlock(hash))
+            .await
+            .respond(zs::Response::KnownBlock(None));
+        let blocks = vec![Available((block.clone(), Some(peer)))];
+        network
+            .expect_request(zn::Request::BlockDownload {
+                hash,
+                advertiser: Some(peer),
+            })
+            .await
+            .respond(if early {
+                zn::Response::EarlyBlocks(blocks)
+            } else {
+                zn::Response::Blocks(blocks)
+            });
+        let request = if early {
+            zebra_consensus::Request::CommitEarlyRelay(block)
+        } else {
+            zebra_consensus::Request::Commit(block)
+        };
+        let error = zebra_consensus::VerifyBlockError::Transaction(
+            zebra_consensus::error::TransactionError::Groth16("invalid proof".into()),
+        );
+        let error = if admitted {
+            zebra_consensus::VerifyBlockError::EarlyRelay(Box::new(error))
+        } else {
+            error
+        };
+        verifier
+            .expect_request(request)
+            .await
+            .respond_error(zebra_consensus::RouterError::from(error).into());
+        let (error, source) = downloads.next().await.unwrap().unwrap_err();
+        assert_eq!(source, Some(peer));
+        assert_eq!(
+            error
+                .downcast_ref::<zebra_consensus::RouterError>()
+                .unwrap()
+                .misbehavior_score(),
+            if admitted { 0 } else { 100 },
+            "only authenticated early-relay transaction failures are non-punitive",
+        );
+    }
+}
+
 /// Load the mainnet block 1 vector, which these tests use as a low-height block body.
 fn block_1() -> Arc<Block> {
     zebra_test::vectors::BLOCK_MAINNET_1_BYTES
