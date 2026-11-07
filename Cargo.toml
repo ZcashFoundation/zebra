@@ -407,3 +407,7 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "a150add2ee2cd01ae18266a6fb5d6b210f63f72b" }
+pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "2bd4911d05383ec349f96b80db321a3b77569e8f" }

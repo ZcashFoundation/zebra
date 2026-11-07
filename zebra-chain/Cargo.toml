@@ -118,7 +118,7 @@ strum = { workspace = true, features = ["derive"] }
 # ZF deps
 ed25519-zebra = { workspace = true }
 redjubjub = { workspace = true }
-reddsa = { workspace = true }
+reddsa = { workspace = true, features = ["multicore"] }
 
 # Production feature json-conversion
 serde_json = { workspace = true, optional = true }

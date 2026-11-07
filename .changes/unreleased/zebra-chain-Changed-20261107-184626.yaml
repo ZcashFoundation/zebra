@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Enabled parallel decoding of public RedPallas points during batch signature verification.
+time: 2026-11-07T18:46:26.92298122+01:00
