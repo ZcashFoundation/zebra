@@ -256,22 +256,17 @@ impl VerifiedSet {
             .clear_mined_dependencies(mined_ids);
     }
 
-    /// Removes all transactions in the set that match the `predicate`.
+    /// Removes the listed transactions and their descendants.
     ///
-    /// Returns the amount of transactions removed.
-    pub fn remove_all_that(
+    /// Returns all removed unmined IDs. Missing IDs, duplicate IDs, and IDs already
+    /// removed as descendants are ignored.
+    pub fn remove_all(
         &mut self,
-        predicate: impl Fn(&VerifiedUnminedTx) -> bool,
+        tx_ids: impl IntoIterator<Item = transaction::Hash>,
     ) -> HashSet<UnminedTxId> {
-        let keys_to_remove: Vec<_> = self
-            .transactions
-            .iter()
-            .filter_map(|(&tx_id, tx)| predicate(tx).then_some(tx_id))
-            .collect();
-
         let mut removed_transactions = HashSet::new();
 
-        for key_to_remove in keys_to_remove {
+        for key_to_remove in tx_ids {
             if !self.transactions.contains_key(&key_to_remove) {
                 // Skip any keys that may have already been removed as their dependencies were removed.
                 continue;

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce mempool cleanup work when removing transactions and their dependents, without changing rejection tracking ([#12341](https://github.com/ZcashFoundation/zebra/pull/12341)).
+time: 2026-11-07T12:00:00Z
