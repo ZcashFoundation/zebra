@@ -82,7 +82,12 @@ fn commitment_serializes_as_height_and_hex_hashes() {
     assert!(serde_json::from_value::<StateSnapshotCommitment>(unknown).is_err());
 }
 
-/// Only Mainnet pins a commitment, once its manifest is filled in.
+/// The manifest hash of the Mainnet snapshot at 3,522,060, as the export
+/// printed it.
+const MAINNET_MANIFEST_HEX: &str =
+    "08e3821f8e4e39a75b347590d94513d4bbe27e704e908e0a2e306c798b9f3eed";
+
+/// Only Mainnet pins a commitment: the pinned height, block hash and manifest.
 #[test]
 fn only_mainnet_pins_a_commitment() {
     let _init_guard = zebra_test::init();
@@ -90,14 +95,13 @@ fn only_mainnet_pins_a_commitment() {
     for network in Network::iter().chain([Network::new_regtest(Default::default())]) {
         let pinned = network.state_snapshot_commitment();
         if network == Network::Mainnet {
-            assert_eq!(pinned.is_some(), MAINNET_STATE_SNAPSHOT_MANIFEST.is_some());
-            if let Some(pinned) = pinned {
-                assert_eq!(pinned.height, MAINNET_STATE_SNAPSHOT_HEIGHT);
-                assert_eq!(
-                    pinned.block_hash.to_string(),
-                    MAINNET_STATE_SNAPSHOT_BLOCK_HASH
-                );
-            }
+            let pinned = pinned.expect("Mainnet pins a state snapshot commitment");
+            assert_eq!(pinned.height, MAINNET_STATE_SNAPSHOT_HEIGHT);
+            assert_eq!(
+                pinned.block_hash.to_string(),
+                MAINNET_STATE_SNAPSHOT_BLOCK_HASH
+            );
+            assert_eq!(Some(pinned.manifest), MAINNET_STATE_SNAPSHOT_MANIFEST);
         } else {
             assert_eq!(pinned, None, "{network}");
         }
@@ -124,6 +128,17 @@ fn the_pinned_mainnet_snapshot_block_is_a_checkpoint() {
             .is_some_and(|nu5| nu5 <= MAINNET_STATE_SNAPSHOT_HEIGHT),
         "NU5 is active at the pinned snapshot height"
     );
+}
+
+/// The pinned Mainnet manifest is the hash the export printed, in the byte
+/// order commitments display and parse it in.
+#[test]
+fn the_pinned_mainnet_manifest_is_the_exported_one() {
+    let _init_guard = zebra_test::init();
+
+    let manifest = MAINNET_STATE_SNAPSHOT_MANIFEST.expect("the Mainnet manifest is pinned");
+    assert_eq!(manifest.to_string(), MAINNET_MANIFEST_HEX);
+    assert_eq!(MAINNET_MANIFEST_HEX.parse::<ObjectHash>(), Ok(manifest));
 }
 
 /// Bytes `0, 1, ..., 31`, which read differently in each byte order.

@@ -110,19 +110,25 @@ pub const MAINNET_STATE_SNAPSHOT_HEIGHT: block::Height = block::Height(3_522_060
 pub const MAINNET_STATE_SNAPSHOT_BLOCK_HASH: &str =
     "00000000000705964fc4c75da9cce97978197b666c9dcdfc1bcf8d44cd776e4d";
 
-/// PLACEHOLDER: the manifest hash of the Mainnet state snapshot at
-/// [`MAINNET_STATE_SNAPSHOT_HEIGHT`], which the snapshot's deterministic export
-/// gives. `None` until that export is done and checked, so this build pins no
-/// Mainnet commitment yet, and Mainnet nodes sync normally.
-pub const MAINNET_STATE_SNAPSHOT_MANIFEST: Option<ObjectHash> = None;
+/// The manifest hash of the Mainnet state snapshot at
+/// [`MAINNET_STATE_SNAPSHOT_HEIGHT`]:
+/// `08e3821f8e4e39a75b347590d94513d4bbe27e704e908e0a2e306c798b9f3eed`.
+///
+/// The deterministic export of the Mainnet state at that height, in snapshot
+/// format 2, gave this manifest byte for byte from two independent copies of
+/// the state. It names 220 pieces, 3,354,202,153 bytes in all.
+pub const MAINNET_STATE_SNAPSHOT_MANIFEST: Option<ObjectHash> = Some(ObjectHash([
+    0x08, 0xe3, 0x82, 0x1f, 0x8e, 0x4e, 0x39, 0xa7, 0x5b, 0x34, 0x75, 0x90, 0xd9, 0x45, 0x13, 0xd4,
+    0xbb, 0xe2, 0x7e, 0x70, 0x4e, 0x90, 0x8e, 0x0a, 0x2e, 0x30, 0x6c, 0x79, 0x8b, 0x9f, 0x3e, 0xed,
+]));
 
 impl Network {
     /// Returns the state snapshot commitment this build pins for the network,
     /// if any.
     ///
     /// A commitment is pinned per release, together with the checkpoint list
-    /// it was cut with. Only Mainnet has one, at a checkpoint, once its
-    /// [`MAINNET_STATE_SNAPSHOT_MANIFEST`] is filled in.
+    /// it was cut with. Only Mainnet has one, at a checkpoint, with the
+    /// manifest [`MAINNET_STATE_SNAPSHOT_MANIFEST`].
     pub fn state_snapshot_commitment(&self) -> Option<StateSnapshotCommitment> {
         if !matches!(self, Network::Mainnet) {
             return None;
