@@ -5876,6 +5876,91 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     updater.abort();
 }
 
+#[test]
+fn rpc_submitblock_inline_decode_boundary() {
+    let _init_guard = zebra_test::init();
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                let block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+                    .zcash_deserialize_into()
+                    .unwrap();
+                let expected_hash = block.hash();
+                let state = tower::service_fn(move |request| {
+                    assert!(matches!(
+                        request,
+                        zebra_state::Request::KnownBlock(hash) if hash == expected_hash
+                    ));
+                    std::future::ready(Ok::<_, BoxError>(zebra_state::Response::KnownBlock(None)))
+                });
+                let mut verifier: MockService<_, _, _, BoxError> =
+                    MockService::build().for_unit_tests();
+                let (_logs, logs) = watch::channel(None);
+                let (rpc, queue) = RpcImpl::new(
+                    Mainnet,
+                    Default::default(),
+                    false,
+                    "0.0.1",
+                    "RPC decoding boundary test",
+                    MockService::build().for_unit_tests(),
+                    state,
+                    MockService::build().for_unit_tests(),
+                    verifier.clone(),
+                    MockSyncStatus::default(),
+                    NoChainTip,
+                    MockAddressBookPeers::default(),
+                    logs,
+                    None,
+                );
+                queue.abort();
+                for size in [4096, 4097] {
+                    let (started, started_rx) = tokio::sync::oneshot::channel();
+                    let (release, held) = std::sync::mpsc::channel::<()>();
+                    let worker = tokio::task::spawn_blocking(move || {
+                        started.send(()).unwrap();
+                        let _ = held.recv_timeout(Duration::from_secs(5));
+                    });
+                    started_rx.await.unwrap();
+                    // Trailing bytes are accepted, but still count toward the inline input bound.
+                    let mut bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+                    bytes.resize(size, 0);
+                    let operation = async {
+                        let (reply, ()) =
+                            tokio::join!(rpc.submit_block(HexData(bytes), None), async {
+                                verifier.expect_request_that(|_| true).await.respond(Ok::<
+                                    _,
+                                    BoxError,
+                                >(
+                                    block.hash(),
+                                ));
+                            });
+                        reply.unwrap()
+                    };
+                    tokio::pin!(operation);
+                    let early =
+                        tokio::time::timeout(Duration::from_millis(100), &mut operation).await;
+                    drop(release);
+                    worker.await.unwrap();
+                    if size == 4096 {
+                        assert_eq!(early.unwrap(), SubmitBlockResponse::Accepted);
+                    } else {
+                        assert!(
+                            early.is_err(),
+                            "4097 input bytes must wait for a blocking worker"
+                        );
+                        assert_eq!(operation.await, SubmitBlockResponse::Accepted);
+                    }
+                }
+            })
+            .await
+            .expect("decoding boundary checks must finish");
+        });
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
     let _init_guard = zebra_test::init();

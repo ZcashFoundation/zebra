@@ -3238,13 +3238,20 @@ where
     ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
+        // The input byte bound keeps ordinary small-block parsing cheaper than a worker hop.
+        let inline = block_bytes.len() <= 4 * 1024;
         let prepared_blocks = self.prepared_blocks.clone();
-        let decoded = tokio::task::spawn_blocking(move || match prepared_blocks {
+        let decode = move || match prepared_blocks {
             Some(cache) => cache.deserialize(&block_bytes),
             None => block_bytes.zcash_deserialize_into::<Arc<Block>>(),
-        })
-        .await
-        .expect("block deserialization reports malformed input as an error rather than panicking");
+        };
+        let decoded = if inline {
+            decode()
+        } else {
+            tokio::task::spawn_blocking(decode).await.expect(
+                "block deserialization reports malformed input as an error rather than panicking",
+            )
+        };
         let block = match decoded {
             Ok(block) => block,
             Err(error) => {
