@@ -142,13 +142,27 @@ pub fn verify_headers_blocking(
     let checkpoints = network.checkpoint_list();
     let skip_pow = network.disable_pow();
 
-    let hashes: Vec<block::Hash> = headers
+    // Check that the batch links together before checking any proof of work,
+    // so a batch that doesn't costs only its hashes.
+    let hashes: Vec<block::Hash> = headers.par_iter().map(|header| header.hash()).collect();
+    for (offset, (header, previous_hash)) in headers.iter().skip(1).zip(&hashes).enumerate() {
+        if header.previous_block_hash != *previous_hash {
+            // The offset is below `last_offset`, which fits in a u32.
+            let height = Height(first_height.0 + offset as u32 + 1);
+            return Err(HeaderError::NotContiguous {
+                height,
+                hash: hashes[offset + 1],
+            });
+        }
+    }
+
+    headers
         .par_iter()
+        .zip(hashes.par_iter())
         .enumerate()
-        .map(|(offset, header)| {
+        .try_for_each(|(offset, (header, &hash))| {
             // The offset is at most `last_offset`, which fits in a u32.
             let height = Height(first_height.0 + offset as u32);
-            let hash = header.hash();
 
             verify_header(network, header, height, hash, now, skip_pow)?;
 
@@ -162,20 +176,8 @@ pub fn verify_headers_blocking(
                 }
             }
 
-            Ok(hash)
-        })
-        .collect::<Result<_, _>>()?;
-
-    for (offset, (header, previous_hash)) in headers.iter().skip(1).zip(&hashes).enumerate() {
-        if header.previous_block_hash != *previous_hash {
-            // The offset is below `last_offset`, which fits in a u32.
-            let height = Height(first_height.0 + offset as u32 + 1);
-            return Err(HeaderError::NotContiguous {
-                height,
-                hash: hashes[offset + 1],
-            });
-        }
-    }
+            Ok(())
+        })?;
 
     Ok(hashes)
 }

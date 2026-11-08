@@ -202,3 +202,28 @@ async fn future_time_is_rejected_without_blame() {
     assert!(matches!(error, HeaderError::Time { .. }), "{error:?}");
     assert!(!error.is_misbehavior());
 }
+
+/// A batch that doesn't link together is rejected before any proof of work is
+/// checked, so a peer can't make Zebra verify Equihash solutions of a batch it
+/// then rejects.
+#[tokio::test]
+async fn non_contiguous_batch_is_rejected_before_equihash() {
+    let _init_guard = zebra_test::init();
+
+    let headers = mainnet_headers();
+    // Header 1 with a broken solution: it links to genesis, not to header 1.
+    let batch = vec![headers[1].clone(), Arc::new(header_with_bad_solution())];
+    let error = verify_headers(&Network::Mainnet, Height(1), batch, Utc::now())
+        .await
+        .expect_err("the batch is not contiguous");
+    assert!(
+        matches!(
+            error,
+            HeaderError::NotContiguous {
+                height: Height(2),
+                ..
+            }
+        ),
+        "contiguity must be checked before the proof of work: {error:?}"
+    );
+}
