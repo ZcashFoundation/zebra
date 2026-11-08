@@ -245,6 +245,158 @@ async fn coinbase_only_block_does_not_query_mempool() {
 }
 
 #[tokio::test]
+async fn only_small_decoded_blocks_bypass_blocking_check_admission() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    for size in [4096, 4097] {
+        let mut block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+        let block_mut = Arc::make_mut(&mut block);
+        let mut outputs = block_mut.transactions[0].outputs();
+        // Keep the script's CompactSize prefix three bytes long when adjusting its payload.
+        outputs[0].lock_script = transparent::Script::new(&vec![0; 1024]);
+        block_mut.transactions[0] = Arc::new(
+            block_mut.transactions[0]
+                .as_ref()
+                .clone()
+                .with_transparent_outputs(outputs),
+        );
+        let script_size = size - block_mut.zcash_serialized_size() + 1024;
+        let mut outputs = block_mut.transactions[0].outputs();
+        outputs[0].lock_script = transparent::Script::new(&vec![0; script_size]);
+        block_mut.transactions[0] = Arc::new(
+            block_mut.transactions[0]
+                .as_ref()
+                .clone()
+                .with_transparent_outputs(outputs),
+        );
+        Arc::make_mut(&mut block_mut.header).merkle_root =
+            block_mut.transactions.iter().map(|tx| tx.hash()).collect();
+        let bytes = block.zcash_serialize_to_vec().unwrap();
+        assert_eq!(bytes.len(), size);
+        let decoded = super::super::DecodedBlock::deserialize(&bytes).unwrap();
+        let state = mock_state();
+        let transactions = Buffer::new(
+            transaction::BlockTxVerifier::new(&network, state.clone()),
+            1,
+        );
+        let verifier = SemanticBlockVerifier::new(&network, state, transactions);
+        let slots = u32::try_from(verifier.blocking_checks.available_permits())
+            .expect("the test verifier's blocking admission count fits u32");
+        let _slots = verifier
+            .blocking_checks
+            .clone()
+            .acquire_many_owned(slots)
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            verifier.oneshot(Request::CommitDecoded(decoded, None)),
+        )
+        .await;
+        if size == 4096 {
+            assert_eq!(result.unwrap().unwrap(), block.hash());
+        } else {
+            assert!(
+                result.is_err(),
+                "large-body checks must wait for blocking admission"
+            );
+        }
+    }
+}
+
+#[test]
+fn inline_decoding_and_body_checks_do_not_wait_for_rayon() {
+    const CHILD: &str = "ZEBRA_SMALL_BLOCK_RAYON_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Isolate saturation from the other tests using the process-global Rayon pool.
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "block::tests::mempool_reuse::inline_decoding_and_body_checks_do_not_wait_for_rayon",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("RAYON_NUM_THREADS", "2")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    let _init_guard = zebra_test::init();
+    let (started, started_rx) = std::sync::mpsc::channel();
+    let mut releases = Vec::new();
+    for _ in 0..rayon::current_num_threads() {
+        let (release, held) = std::sync::mpsc::channel();
+        releases.push(release);
+        let started = started.clone();
+        rayon::spawn(move || {
+            started.send(()).unwrap();
+            let _ = held.recv_timeout(Duration::from_secs(5));
+        });
+    }
+    for _ in 0..releases.len() {
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_release = released.clone();
+    let (release_now, release_request) = std::sync::mpsc::channel();
+    let unblock = std::thread::spawn(move || {
+        let _ = release_request.recv_timeout(Duration::from_secs(1));
+        observed_release.store(true, Ordering::SeqCst);
+        for release in releases {
+            let _ = release.send(());
+        }
+    });
+    let responsive = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let heartbeat = tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            });
+            tokio::task::yield_now().await;
+            let mut many = (*block::genesis::regtest_genesis_block()).clone();
+            let repeated_transaction = Arc::new(Transaction::test_v4(
+                Vec::new(),
+                Vec::new(),
+                LockTime::unlocked(),
+                Height(0),
+            ));
+            many.transactions = vec![repeated_transaction; 66];
+            let bytes = many.zcash_serialize_to_vec().unwrap();
+            assert!(bytes.len() <= 4096);
+            let decoded = super::super::DecodedBlock::deserialize(&bytes).unwrap();
+            assert_eq!(decoded.block().transactions.len(), 66);
+            let network = network();
+            let block = candidate(&network, Height(3), spend(LockTime::unlocked(), Height(0)));
+            let decoded =
+                super::super::DecodedBlock::deserialize(&block.zcash_serialize_to_vec().unwrap())
+                    .unwrap();
+            let transactions = service_fn(|_: tx::BlockRequest| {
+                ready(Err::<tx::BlockResponse, BoxError>(
+                    TransactionError::BadBalance.into(),
+                ))
+            });
+            let result = SemanticBlockVerifier::new(&network, mock_state(), transactions)
+                .oneshot(Request::CommitDecoded(decoded, None))
+                .await;
+            assert!(matches!(
+                result,
+                Err(VerifyBlockError::Transaction(TransactionError::BadBalance))
+            ));
+            heartbeat.await.unwrap();
+            !released.load(Ordering::SeqCst)
+        });
+    let _ = release_now.send(());
+    unblock.join().unwrap();
+    assert!(
+        responsive,
+        "small decoding, body checks and Tokio timers must progress with Rayon full"
+    );
+}
+
+#[tokio::test]
 async fn resident_hit_skips_transaction_dispatch_and_utxo_lookup() {
     let _init_guard = zebra_test::init();
     let network = network();

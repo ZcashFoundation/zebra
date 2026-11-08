@@ -184,7 +184,7 @@ impl DecodedBlock {
     /// Decodes a block with the consensus byte limit, retaining its consumed wire size.
     ///
     /// Trailing bytes are accepted but excluded from the size. All other semantic and contextual
-    /// checks still run. Call from a blocking worker.
+    /// checks still run. Small inputs decode serially; run large inputs on a blocking worker.
     pub fn deserialize(mut bytes: &[u8]) -> Result<Self, SerializationError> {
         let input_size = bytes.len();
         let block = Arc::new(block::Block::zcash_deserialize(&mut bytes)?);
