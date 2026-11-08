@@ -777,6 +777,9 @@ pub trait Rpc {
     #[method(name = "invalidateblock")]
     async fn invalidate_block(&self, block_hash: String) -> Result<()>;
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     /// Prefers a non-finalized chain tip over competing tips with equal cumulative work.
     ///
     /// Higher-work chains always take precedence. The last call for competing equal-work tips
@@ -3517,6 +3520,7 @@ where
             .map_misc_error()
     }
 
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     async fn precious_block(&self, block_hash: String) -> Result<()> {
         let block_hash = block_hash
             .parse()
