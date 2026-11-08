@@ -1470,12 +1470,28 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         if self.headers_first {
+            let block_locator = match self
+                .state
+                .ready()
+                .await
+                .map_err(|e| eyre!(e))?
+                .call(zebra_state::Request::BlockLocator)
+                .await
+                .map_err(|e| eyre!(e))?
+            {
+                zebra_state::Response::BlockLocator(block_locator) => block_locator,
+                _ => unreachable!("BlockLocator request can only result in Response::BlockLocator"),
+            };
+
             let mut download_set = IndexSet::new();
             for tip in tips {
-                download_set.extend(
-                    self.header_chain_download_set(vec![tip.expected_next])
-                        .await?,
-                );
+                // A header reorg can replace `expected_next` on the header
+                // chain: then continue from the block chain's locator, on the
+                // header chain's new branch, instead of ending the round.
+                let known_blocks = std::iter::once(tip.expected_next)
+                    .chain(block_locator.iter().copied())
+                    .collect();
+                download_set.extend(self.header_chain_download_set(known_blocks).await?);
             }
 
             let new_downloads = download_set.len();

@@ -3261,9 +3261,10 @@ async fn headers_first_downloads_only_stored_header_chain_hashes() {
                 } => {
                     header_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     assert!(limit > 0);
-                    let hashes = if known_blocks == vec![tip] {
+                    // The first known hash is on the header chain.
+                    let hashes = if known_blocks.first() == Some(&tip) {
                         first.clone()
-                    } else if known_blocks == vec![first[2]] {
+                    } else if known_blocks.first() == Some(&first[2]) {
                         vec![second]
                     } else {
                         // The header tip: nothing above it.
@@ -3506,4 +3507,110 @@ async fn singleton_discovery_downloads_once(ignore_first_round: bool) {
     })
     .await
     .expect("singleton discovery and recovery must complete promptly");
+}
+
+/// A header reorg above the body tip that displaces a prospective tip's next
+/// hash doesn't end the round: extending the tip continues from the body
+/// chain's locator, on the header chain's new branch.
+#[tokio::test]
+async fn headers_first_extend_tips_follows_header_reorg() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc as StdArc,
+    };
+
+    let _init_guard = zebra_test::init();
+    let tip = block::Hash([0; 32]);
+    let first: Vec<block::Hash> = (1..=3).map(|byte| block::Hash([byte; 32])).collect();
+    let replacement: Vec<block::Hash> = (11..=13).map(|byte| block::Hash([byte; 32])).collect();
+
+    let reorged = StdArc::new(AtomicBool::new(false));
+    let state = {
+        let first = first.clone();
+        let replacement = replacement.clone();
+        let reorged = reorged.clone();
+        tower::service_fn(move |request| {
+            let response = match request {
+                zs::Request::BlockLocator => zs::Response::BlockLocator(vec![tip]),
+                zs::Request::HeaderChainHashes { known_blocks, .. } => {
+                    // The header chain above the body tip, before or after a reorg.
+                    let mut chain = vec![tip];
+                    if reorged.load(Ordering::SeqCst) {
+                        chain.extend(replacement.iter().copied());
+                    } else {
+                        chain.extend(first.iter().copied());
+                    }
+                    let hashes = known_blocks
+                        .iter()
+                        .find_map(|known| chain.iter().position(|hash| hash == known))
+                        .map_or_else(Vec::new, |position| chain[position + 1..].to_vec());
+                    zs::Response::BlockHashes(hashes)
+                }
+                zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                request => panic!("unexpected state request: {request:?}"),
+            };
+            std::future::ready(Ok::<_, zs::BoxError>(response))
+        })
+    };
+
+    let (downloads, mut requested) = tokio::sync::mpsc::channel(8);
+    let network = tower::service_fn(move |request| {
+        let downloads = downloads.clone();
+        async move {
+            match request {
+                zn::Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                } => {
+                    downloads.send(hash).await.unwrap();
+                    std::future::pending().await
+                }
+                request => panic!("headers-first sync sends no {request:?}"),
+            }
+        }
+    });
+
+    let config = ZebradConfig {
+        state: StateConfig::ephemeral(),
+        ..Default::default()
+    };
+    let (chain_tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior, _reports) = tokio::sync::mpsc::channel(1);
+    let (mut sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        chain_tip,
+        misbehavior,
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), sync.obtain_tips())
+        .await
+        .expect("obtaining tips is bounded")
+        .expect("the header chain has hashes");
+
+    // A header batch with more work replaces the stored headers above the body tip.
+    reorged.store(true, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(5), sync.extend_tips())
+        .await
+        .expect("extending tips is bounded")
+        .expect("the header chain has a new branch");
+
+    let mut downloaded = Vec::new();
+    while let Ok(hash) = requested.try_recv() {
+        downloaded.push(hash);
+    }
+    let mut expected = first.clone();
+    expected.extend(replacement.iter().copied());
+    assert_eq!(downloaded, expected, "the new branch is downloaded");
+    assert!(
+        sync.prospective_tips
+            .iter()
+            .any(|tip| tip.expected_next == replacement[2]),
+        "the round continues on the new branch: {:?}",
+        sync.prospective_tips
+    );
 }
