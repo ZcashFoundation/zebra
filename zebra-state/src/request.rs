@@ -343,6 +343,8 @@ pub struct ContextuallyVerifiedBlock {
     /// The height of the block.
     pub(crate) height: block::Height,
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// New transparent outputs created in this block, indexed by
     /// [`OutPoint`](transparent::OutPoint).
     ///
@@ -355,6 +357,8 @@ pub struct ContextuallyVerifiedBlock {
     /// The non-finalized chain indexes share these outputs, instead of copying them.
     pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
     /// [`OutPoint`](transparent::OutPoint).
     ///
@@ -613,6 +617,8 @@ impl ContextuallyVerifiedBlock {
         .map(|(contextually_verified, _transaction_fees)| contextually_verified)
     }
 
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
     /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's gross transaction
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
@@ -837,6 +843,8 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
         Self {
