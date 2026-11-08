@@ -5,6 +5,9 @@ use zebra_chain::serialization::{DateTime32, ZcashDeserializeInto};
 
 use super::*;
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1094 (https://github.com/zakura-core/zakura/pull/1094).
 #[tokio::test(start_paused = true)]
 async fn idle_solver_wakes_when_template_arrives() {
     let block = zebra_chain::block::genesis::regtest_genesis_block();
