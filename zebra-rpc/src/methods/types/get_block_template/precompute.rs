@@ -23,7 +23,7 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
     time::Duration,
@@ -129,11 +129,29 @@ pub(crate) struct TemplateCache {
     queued: Arc<Notify>,
     /// Whether [`run()`] owns template construction.
     updater: Arc<AtomicBool>,
+    /// Assigns unique build generations across updater restarts and fallback publications.
+    generation: Arc<AtomicU64>,
+}
+
+/// A cached response and its exact internal membership-snapshot generation.
+#[derive(Clone)]
+pub(crate) struct CachedTemplate {
+    /// The RPC-visible response, without internal cache metadata.
+    pub(crate) response: BlockTemplateResponse,
+    generation: u64,
+}
+
+impl std::ops::Deref for CachedTemplate {
+    type Target = BlockTemplateResponse;
+
+    fn deref(&self) -> &Self::Target {
+        &self.response
+    }
 }
 
 struct TemplateState {
     /// The work `getblocktemplate` serves.
-    template: Option<Arc<BlockTemplateResponse>>,
+    template: Option<Arc<CachedTemplate>>,
     /// The newest transaction-bearing work for the served template's parent, queued for
     /// [`validate_templates()`]: the served template itself when it was served ahead of its
     /// check, or a later build that replaces it once accepted. The worker remembers the last
@@ -141,18 +159,18 @@ struct TemplateState {
     ///
     /// Both slots change under the same lock, so a validated build can be served only if the
     /// work it was checked against is still served.
-    next: Option<Arc<BlockTemplateResponse>>,
+    next: Option<Arc<CachedTemplate>>,
     /// The newest work for the served template's parent that is known to be valid: coinbase-only
     /// work, or a build that passed its check. Served again if the served template fails its
     /// check, so miners don't keep work whose solved block would be rejected.
-    last_valid: Option<Arc<BlockTemplateResponse>>,
+    last_valid: Option<Arc<CachedTemplate>>,
     published_at: Instant,
     error: Option<(Option<block::Hash>, ErrorObjectOwned)>,
 }
 
 impl TemplateState {
     /// Returns a state serving `template`, published now.
-    fn new(template: Option<Arc<BlockTemplateResponse>>) -> Self {
+    fn new(template: Option<Arc<CachedTemplate>>) -> Self {
         Self {
             template,
             next: None,
@@ -169,6 +187,7 @@ impl Default for TemplateCache {
             served: Arc::new(watch::Sender::new(None)),
             queued: Arc::default(),
             updater: Arc::default(),
+            generation: Arc::default(),
         }
     }
 }
@@ -216,7 +235,6 @@ impl TemplateCache {
     pub(crate) fn updater_is_running(&self) -> bool {
         self.updater.load(Ordering::Acquire)
     }
-
     fn claim_updater(&self) -> Option<UpdaterGuard> {
         self.updater
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -303,26 +321,31 @@ impl TemplateCache {
     /// reusing its verdict until its replacement can too. Other work is served at once:
     /// coinbase-only work needs no validation, and the first transaction-bearing build for a
     /// parent is better than coinbase-only work while its check runs.
-    fn update(&self, template: BlockTemplateResponse) {
+    ///
+    /// Returns the build's exact generation, including for staged work.
+    fn update(&self, template: BlockTemplateResponse) -> u64 {
         if !template.transactions.is_empty() && self.holds_full_tip(template.previous_block_hash) {
-            self.stage(template);
+            self.stage(template)
         } else {
-            self.publish(template);
+            self.publish(template)
         }
     }
 
     /// Queues a transaction-bearing build as the next work for the served template, replacing
     /// any older build that is still waiting.
-    fn stage(&self, template: BlockTemplateResponse) {
+    fn stage(&self, template: BlockTemplateResponse) -> u64 {
         debug_assert!(
             !template.transactions.is_empty(),
             "coinbase-only work needs no validation and is published directly"
         );
+        let template = self.cached_template(template);
+        let generation = template.generation;
         self.served.send_if_modified(|state| {
-            state.get_or_insert_with(|| TemplateState::new(None)).next = Some(Arc::new(template));
+            state.get_or_insert_with(|| TemplateState::new(None)).next = Some(template);
             false
         });
         self.queued.notify_one();
+        generation
     }
 
     /// Serves `validated` if the work it was checked against, `base`, is still served.
@@ -331,11 +354,7 @@ impl TemplateCache {
     /// would move back to older work. It is kept as the work to serve again if that newer work
     /// fails its check. Returns whether `validated` is served, including when it was served ahead
     /// of its validation.
-    fn promote(
-        &self,
-        validated: &Arc<BlockTemplateResponse>,
-        base: Option<&Arc<BlockTemplateResponse>>,
-    ) -> bool {
+    fn promote(&self, validated: &Arc<CachedTemplate>, base: Option<&Arc<CachedTemplate>>) -> bool {
         let mut served = false;
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
@@ -368,7 +387,10 @@ impl TemplateCache {
                 current.and_then(|current| preserved_max_timestamp(current, &template))
             {
                 if max_timestamp != template.long_poll_id.max_timestamp {
-                    Arc::make_mut(&mut template).long_poll_id.max_timestamp = max_timestamp;
+                    Arc::make_mut(&mut template)
+                        .response
+                        .long_poll_id
+                        .max_timestamp = max_timestamp;
                 }
             }
             *state = TemplateState {
@@ -387,7 +409,7 @@ impl TemplateCache {
     /// Only the first transaction-bearing build for a parent is served ahead of its check, so the
     /// last valid work is usually that parent's coinbase-only work. Returns whether the served
     /// work changed.
-    fn reject(&self, failed: &Arc<BlockTemplateResponse>) -> bool {
+    fn reject(&self, failed: &Arc<CachedTemplate>) -> bool {
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
                 return false;
@@ -428,9 +450,12 @@ impl TemplateCache {
     /// it can reuse the verdict. Publishing drops any older build that was waiting to replace the
     /// served work. Without a running updater nothing reads the queue: the RPC validates the
     /// work it builds itself.
-    pub(crate) fn publish(&self, mut template: BlockTemplateResponse) {
+    ///
+    /// Returns the published build's exact internal generation.
+    pub(crate) fn publish(&self, mut template: BlockTemplateResponse) -> u64 {
         self.preserve_work_identity(&mut template);
-        let template = Arc::new(template);
+        let template = self.cached_template(template);
+        let generation = template.generation;
         let unchecked = !template.transactions.is_empty();
         self.served.send_modify(|state| {
             let last_valid = if unchecked {
@@ -448,6 +473,20 @@ impl TemplateCache {
             });
         });
         self.queued.notify_one();
+        generation
+    }
+
+    fn cached_template(&self, response: BlockTemplateResponse) -> Arc<CachedTemplate> {
+        let generation = self
+            .generation
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .expect("2^64 builds cannot occur during a template cache's lifetime");
+        Arc::new(CachedTemplate {
+            response,
+            generation,
+        })
     }
 
     /// Withdraws cached work and wakes long polls.
@@ -462,7 +501,7 @@ impl TemplateCache {
         tip_hash: block::Hash,
         network: &Network,
         now: DateTime32,
-    ) -> Option<Arc<BlockTemplateResponse>> {
+    ) -> Option<Arc<CachedTemplate>> {
         let cached = self.served.borrow();
         let template = cached.as_ref()?.template.as_ref()?;
 
@@ -484,8 +523,8 @@ impl TemplateCache {
         let source = Arc::clone(template);
         let mut template = (**template).clone();
         drop(cached);
-        template.cur_time = cur_time;
-        template.max_time = max_time;
+        template.response.cur_time = cur_time;
+        template.response.max_time = max_time;
         let template = Arc::new(template);
 
         // The header time is part of a proposal's identity, so a narrowed time has no cached
@@ -502,7 +541,7 @@ impl TemplateCache {
                     .as_ref()
                     .is_some_and(|served| Arc::ptr_eq(served, &source))
                     && state.next.as_ref().is_none_or(|next| {
-                        next.long_poll_id == template.long_poll_id && next.cur_time != cur_time
+                        next.generation == template.generation && next.cur_time != cur_time
                     });
                 if restage {
                     state.next = Some(Arc::clone(&template));
@@ -744,7 +783,9 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                 )
                 .await
                 {
-                    Ok(Some((template, _))) => cache.publish(template),
+                    Ok(Some((template, _))) => {
+                        cache.publish(template);
+                    }
                     // A coinbase-only template doesn't read the mempool, so it can't be out of
                     // sync with the state.
                     Ok(None) => {}
@@ -1040,7 +1081,7 @@ async fn validate_templates(
     // build's parent yet, or has reported it superseded.
     let mut pending = None;
     // The last build with a verdict, so work that stays queued after its check isn't checked again.
-    let mut checked: Option<Arc<BlockTemplateResponse>> = None;
+    let mut checked: Option<Arc<CachedTemplate>> = None;
     let mut was_failing = false;
     loop {
         tokio::select! {
