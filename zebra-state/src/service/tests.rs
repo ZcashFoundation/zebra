@@ -35,11 +35,35 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, Request, Response,
-    SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
+    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+/// Dropping every state handle must release the database without shutting down the runtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropped_state_releases_persistent_database() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        };
+        for _ in 0..8 {
+            let (state, read_state, _, _) =
+                crate::init(config.clone(), &Network::Mainnet, Height::MAX, 0).await;
+            tokio::task::yield_now().await;
+            drop(state);
+            let response = read_state.clone().oneshot(ReadRequest::Tip).await.unwrap();
+            assert!(matches!(response, ReadResponse::Tip(None)));
+            drop(read_state);
+        }
+    })
+    .await
+    .expect("state shutdown and reopening should finish within the timeout");
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn state_propagates_incomplete_block_body_errors() {

@@ -18,7 +18,7 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{mpsc, Arc},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -190,6 +190,11 @@ pub(crate) struct StateService {
 
     // Metrics
     //
+    /// Shutdown sender and thread owning the metrics database handle.
+    ///
+    /// Dropping the sender and joining the thread waits for any active export to release the handle.
+    metrics_exporter: Option<(mpsc::Sender<()>, std::thread::JoinHandle<()>)>,
+
     /// A metric tracking the maximum height that's currently in `finalized_state_queued_blocks`
     ///
     /// Set to `f64::NAN` if `finalized_state_queued_blocks` is empty, because grafana shows NaNs
@@ -244,6 +249,12 @@ impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some((shutdown_sender, metrics_thread)) = self.metrics_exporter.take() {
+            drop(shutdown_sender);
+            if let Err(thread_panic) = metrics_thread.join() {
+                std::panic::resume_unwind(thread_panic);
+            }
+        }
 
         // Close the channels (non-blocking)
         // This makes the block write thread exit the next time it checks the channels.
@@ -456,7 +467,7 @@ impl StateService {
                 .await
                 .expect("failed to join blocking task");
 
-        let state = Self {
+        let mut state = Self {
             network: network.clone(),
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
@@ -470,6 +481,7 @@ impl StateService {
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
+            metrics_exporter: None,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -511,15 +523,22 @@ impl StateService {
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
 
-        // Spawn a background task to periodically export RocksDB metrics to Prometheus
-        let db_for_metrics = read_service.db.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-            loop {
-                interval.tick().await;
+        // RocksDB property reads are blocking, so export metrics on a dedicated thread.
+        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+        let db_for_metrics = state.read_service.db.clone();
+        let span = Span::current();
+        let metrics_thread = std::thread::spawn(move || {
+            span.in_scope(|| loop {
                 db_for_metrics.export_metrics();
-            }
+                if !matches!(
+                    shutdown_receiver.recv_timeout(Duration::from_secs(30)),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    break;
+                }
+            });
         });
+        state.metrics_exporter = Some((shutdown_sender, metrics_thread));
 
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
