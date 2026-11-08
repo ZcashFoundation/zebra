@@ -37,7 +37,7 @@ use crate::{
 
 use super::zebra_db::transparent::{
     fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
-    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP, UTXO_LOC_BY_TRANSPARENT_ADDR_LOC,
 };
 // Doc-only imports
 #[allow(unused_imports)]
@@ -958,6 +958,15 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    /// Sliding window, in entries, that RocksDB checks for deletions when an SST file is written.
+    const DELETION_COMPACTION_WINDOW: usize = 10_000;
+
+    /// Deletions within one window that mark the SST file for compaction.
+    const DELETION_COMPACTION_TRIGGER: usize = 5_000;
+
+    /// Whole-file share of deletions that also marks the SST file for compaction.
+    const DELETION_COMPACTION_RATIO: f64 = 0.5;
+
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
@@ -986,6 +995,16 @@ impl DiskDb {
                     cf_options.set_merge_operator_associative(
                         BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
                         fetch_add_balance_and_received,
+                    );
+                }
+
+                // Spends delete from this index, and address queries range-scan it, so compact
+                // files dense with deletions instead of leaving the markers for scans to skip.
+                if cf_name == UTXO_LOC_BY_TRANSPARENT_ADDR_LOC {
+                    cf_options.add_compact_on_deletion_collector_factory(
+                        Self::DELETION_COMPACTION_WINDOW,
+                        Self::DELETION_COMPACTION_TRIGGER,
+                        Self::DELETION_COMPACTION_RATIO,
                     );
                 }
 
@@ -1162,6 +1181,14 @@ impl DiskDb {
 
     // Write methods
     // Low-level write methods are located in the WriteDisk trait
+
+    /// Compacts the whole `cf_name` column family, dropping obsolete entries and deletion markers.
+    pub(crate) fn compact_cf(&self, cf_name: &str) {
+        let cf = self
+            .cf_handle(cf_name)
+            .expect("column family was created when the database was opened");
+        self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+    }
 
     /// Writes `batch` to the database.
     pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {

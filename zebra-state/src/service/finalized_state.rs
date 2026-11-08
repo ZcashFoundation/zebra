@@ -32,7 +32,9 @@ use zebra_chain::{
 };
 use zebra_db::{
     chain::BLOCK_INFO,
-    transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
+    transparent::{
+        BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC, UTXO_LOC_BY_TRANSPARENT_ADDR_LOC,
+    },
 };
 
 use crate::{
@@ -87,7 +89,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     BALANCE_BY_TRANSPARENT_ADDR,
     "tx_loc_by_transparent_addr_loc",
     "utxo_by_out_loc",
-    "utxo_loc_by_transparent_addr_loc",
+    UTXO_LOC_BY_TRANSPARENT_ADDR_LOC,
     TX_LOC_BY_SPENT_OUT_LOC,
     // Sprout
     "sprout_nullifiers",

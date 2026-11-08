@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: 'The 29.1.0 database upgrade compacts the `utxo_loc_by_transparent_addr_loc` column family once, and deletion-heavy files in it are now compacted automatically, so address UTXO scans no longer skip millions of deletion markers.'
+time: 2026-11-08T16:00:00.000000000Z

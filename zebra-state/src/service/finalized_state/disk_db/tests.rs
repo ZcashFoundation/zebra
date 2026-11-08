@@ -72,3 +72,57 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that compacting a column family drops entries that were written and then deleted.
+#[test]
+fn compact_cf_drops_deleted_entries() {
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{
+            zebra_db::transparent::UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let db = DiskDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &zebra_chain::parameters::Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    let cf = db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
+    let sst_size = || {
+        db.property_int_value_cf(&cf, "rocksdb.total-sst-files-size")
+            .unwrap()
+            .unwrap()
+    };
+
+    // Like an address whose outputs were all spent: every entry is created, then deleted.
+    for i in 0u32..1_000 {
+        db.put_cf(&cf, i.to_be_bytes(), []).unwrap();
+    }
+    db.flush_cf(&cf).unwrap();
+    for i in 0u32..1_000 {
+        db.delete_cf(&cf, i.to_be_bytes()).unwrap();
+    }
+    db.flush_cf(&cf).unwrap();
+    assert!(
+        sst_size() > 0,
+        "the entries and their deletion markers are on disk"
+    );
+
+    db.compact_cf(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC);
+
+    assert_eq!(
+        sst_size(),
+        0,
+        "compaction drops both the entries and the deletion markers"
+    );
+}
