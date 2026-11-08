@@ -1,5 +1,8 @@
 //! Tests for [`TransactionError`] conversion and mempool misbehaviour scoring.
 
+use zebra_chain::{parameters::NetworkUpgrade, transaction};
+use zebra_state::DuplicateNullifierError;
+
 use super::*;
 
 /// Boxed shielded proof and signature verification errors must keep their concrete type when
@@ -59,5 +62,68 @@ fn verification_errors_have_high_misbehavior_score() {
         TransactionError::Script(zebra_script::Error::ScriptInvalid),
     ] {
         assert_eq!(error.mempool_misbehavior_score(), 100, "{error:?}");
+    }
+}
+
+/// Structural consensus rules are invalid on every node and match zcashd's score of 100.
+/// A peer that keeps sending them should be banned.
+#[test]
+fn structural_consensus_errors_have_high_misbehavior_score() {
+    let outpoint = transparent::OutPoint {
+        hash: transaction::Hash([0; 32]),
+        index: 0,
+    };
+    let orchard_nullifier =
+        orchard::Nullifier::try_from([0u8; 32]).expect("zero is a canonical field element");
+    let ironwood_nullifier = ironwood::Nullifier::from(orchard_nullifier);
+
+    for error in [
+        TransactionError::DuplicateTransparentSpend(outpoint),
+        TransactionError::DuplicateSproutNullifier(sprout::Nullifier([0; 32].into())),
+        TransactionError::DuplicateSaplingNullifier(sapling::Nullifier([0; 32].into())),
+        TransactionError::DuplicateOrchardNullifier(orchard_nullifier),
+        TransactionError::DuplicateIronwoodNullifier(ironwood_nullifier),
+        TransactionError::MaximumExpiryHeight {
+            expiry_height: block::Height::MAX,
+            is_coinbase: false,
+            block_height: block::Height(1),
+            transaction_hash: transaction::Hash([0; 32]),
+        },
+    ] {
+        assert_eq!(error.mempool_misbehavior_score(), 100, "{error:?}");
+    }
+}
+
+/// Policy rejections and errors that depend on the receiving node's view should not be punished,
+/// because honest relays can trigger them.
+#[test]
+fn policy_and_context_errors_have_zero_misbehavior_score() {
+    let orchard_nullifier =
+        orchard::Nullifier::try_from([0u8; 32]).expect("zero is a canonical field element");
+
+    for error in [
+        TransactionError::NonStandardScriptSigSize {
+            input_index: 0,
+            size: 0,
+        },
+        TransactionError::NonStandardScriptSigNotPushOnly { input_index: 0 },
+        TransactionError::NonStandardInputs,
+        TransactionError::TooManyShieldedActions {
+            pool: "Orchard actions",
+            count: 1,
+            limit: 0,
+        },
+        TransactionError::TransparentInputNotFound,
+        // ValidateContextError is #[non_exhaustive], so build one through the public DuplicateNullifierError trait.
+        TransactionError::from(orchard_nullifier.duplicate_nullifier_error(false)),
+        TransactionError::ValidateMempoolLockTimeError(String::new()),
+        TransactionError::UnsupportedByNetworkUpgrade(5, NetworkUpgrade::Nu5),
+        TransactionError::ExpiredTransaction {
+            expiry_height: block::Height(1),
+            block_height: block::Height(2),
+            transaction_hash: transaction::Hash([0; 32]),
+        },
+    ] {
+        assert_eq!(error.mempool_misbehavior_score(), 0, "{error:?}");
     }
 }
