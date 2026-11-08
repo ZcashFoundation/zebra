@@ -19,7 +19,7 @@ async fn published_template(
     changes: &mut TemplateChanges,
     hash: block::Hash,
     network: &Network,
-) -> Arc<BlockTemplateResponse> {
+) -> Arc<CachedTemplate> {
     loop {
         if let Some(template) = cache.template_for_tip(hash, network, DateTime32::now()) {
             return template;
