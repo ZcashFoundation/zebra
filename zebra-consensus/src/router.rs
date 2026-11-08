@@ -376,7 +376,8 @@ where
     // transaction verification
 
     let block_transaction = transaction::BlockTxVerifier::new(network, state_service.clone());
-    let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
+    // BlockTxVerifier is always ready and clones its request state; no dispatch worker is needed.
+    let block_transaction = block_transaction.map_err(BoxError::from);
 
     let mempool_transaction =
         transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
