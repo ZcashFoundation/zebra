@@ -4,7 +4,7 @@ expression: cf_data
 ---
 [
   KV(
-    k: "000000",
+    k: "00",
     v: "08ce3d9731b000c08338455c8a4a6bd05da16e26b11daa1b917184ece80f0400",
   ),
 ]

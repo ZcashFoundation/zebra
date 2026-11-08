@@ -63,8 +63,7 @@ use crate::methods::{
 
 use super::super::*;
 
-/// The first block height in the state that can never be stored in the database,
-/// due to optimisations in the disk format.
+/// The first height above the maximum valid block height.
 pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 
 /// Snapshot test for RPC methods responses.
@@ -1151,11 +1150,14 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getblockhash_valid(get_block_hash, &settings);
 
+    // This RPC takes an i32, so it cannot represent heights above Height::MAX.
+    // Use the maximum valid height to cover the unknown-block response instead.
     let get_block_hash = rpc
         .get_block_hash(
-            EXCESSIVE_BLOCK_HEIGHT
+            MAX_ON_DISK_HEIGHT
+                .0
                 .try_into()
-                .expect("constant fits in i32"),
+                .expect("the maximum valid height fits in i32"),
         )
         .await;
     snapshot_rpc_getblockhash_invalid("excessive_height", get_block_hash, &settings);
@@ -1182,21 +1184,12 @@ pub async fn test_mining_rpcs<State, ReadState>(
     snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
 
     let get_block_subsidy = rpc.get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT)).await;
-    if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(
-        zebra_chain::block::Height(EXCESSIVE_BLOCK_HEIGHT),
-        network,
-    ) {
-        // Post-D subsidy depends on the unavailable future parent's NSM reserve.
-        assert_eq!(
-            get_block_subsidy
-                .expect_err("future post-D subsidy requires an existing parent block")
-                .code(),
-            i32::from(server::error::LegacyCode::Misc),
-        );
-    } else {
-        let get_block_subsidy = get_block_subsidy.expect("We should have a success response");
-        snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
-    }
+    assert_eq!(
+        get_block_subsidy
+            .expect_err("heights above Height::MAX are invalid parameters")
+            .code(),
+        i32::from(server::error::LegacyCode::InvalidParameter),
+    );
 
     // `getnetworkinfo`
     let get_network_info = rpc

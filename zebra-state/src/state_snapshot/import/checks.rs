@@ -26,7 +26,7 @@ use zebra_chain::{
 use crate::{
     service::finalized_state::{
         CancelFormatChange, DbFormatChange, FormatCheckError, TransactionLocation, ZebraDb,
-        TRANSACTION_LOCATION_DISK_BYTES,
+        OUTPUT_INDEX_DISK_BYTES,
     },
     state_snapshot::format::{ComponentId, Manifest},
     Config, FromDisk, IntoDisk,
@@ -560,7 +560,11 @@ fn check_utxos(raw: &Raw, base: &SnapshotBase) -> Result<u64, SnapshotError> {
                 ),
             ));
         }
-        let transaction = &key[..TRANSACTION_LOCATION_DISK_BYTES];
+        let transaction_len = key
+            .len()
+            .checked_sub(OUTPUT_INDEX_DISK_BYTES)
+            .expect("validated output locations contain an output index");
+        let transaction = &key[..transaction_len];
         while transactions.valid() && item(&transactions).0 < transaction {
             transactions.next();
         }

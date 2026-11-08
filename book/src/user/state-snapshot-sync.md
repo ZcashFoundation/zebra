@@ -230,9 +230,10 @@ The node's blocks start at the snapshot height `H`, but it keeps every header fr
   earlier keep the services they started with. Until then, peers that require a service cannot
   download blocks from it, including the blocks it mines. It never advertises `NODE_NETWORK`.
 - The database records where its history starts, so a restart continues from the installed state
-  without downloading anything again. Its format version is 32.0.0 in `state/v32`: never open it
-  with an older Zebra build, and never move it to `v31`, `v30`, `v29`, or any older directory.
-  Those builds cannot tell that the history below `L` is missing.
+  without downloading anything again. Its format version is 33.0.0 in `state/v33`: never open it
+  with an older Zebra build, and never move it to `v32`, `v31`, `v30`, `v29`, or any older
+  directory. Those builds cannot decode its records, and the oldest cannot tell that the history
+  below `L` is missing.
 
 Pruning, `copy-state`, zcashd-compat mode, and the `indexer` feature treat a snapshot-born
 database like a pruned one: see [pruned mining nodes](pruning.md).
@@ -313,7 +314,7 @@ import.
 
 - The `get-object` request is a draft, and the snapshot format can change between releases: a
   snapshot exported by one Zebra version may be refused by another. This version reads and writes
-  snapshot format 2.
+  snapshot format 3.
 - Mainnet and the default Testnet need a pinned commitment, or `unsafe_trust_state_snapshot`.
   Custom testnets cannot use it, because the version 2 protocol has
   [no ALPN identifier for them](p2p-v2.md#known-limitations).

@@ -10,7 +10,7 @@
 //! # Manifest
 //!
 //! ```text
-//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
+//! magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (3)
 //! genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 //! [Regtest and custom testnets only: parameters_hash 32]
 //! component_count u16 (24), then each component in [`ComponentId`] order:
@@ -65,10 +65,13 @@ pub fn window_start(height: block::Height) -> block::Height {
 /// shipped components or encodings change; the importer maps it onto the
 /// running database format.
 ///
-/// Format 2 ships the bodies of genesis and the snapshot block only, instead of
-/// the whole window's, and no index the importer can rebuild: the transaction
-/// hashes by location, and the address balance, UTXO and transaction indexes.
-pub const SNAPSHOT_FORMAT: u16 = 2;
+/// Format 1 shipped the whole window's bodies and every index. Format 2 ships
+/// the bodies of genesis and the snapshot block only, and no index the importer
+/// can rebuild: the transaction hashes by location, and the address balance,
+/// UTXO and transaction indexes. Both use fixed three-byte heights. Format 3
+/// ships format 2's components with the variable-width heights and locations of
+/// database format 33.
+pub const SNAPSHOT_FORMAT: u16 = 3;
 
 /// The largest manifest, 1 MiB: a manifest is fetched whole before it is
 /// decoded, so this bounds the download and the decode.

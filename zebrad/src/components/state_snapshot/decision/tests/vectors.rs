@@ -172,8 +172,8 @@ fn existing_state_database_skips() {
     ));
 }
 
-/// Every registered source directory is protected, including sources older
-/// than the major immediately before the running version.
+/// Every registered source directory is protected, preferring v32, and
+/// including sources older than the major immediately before it.
 #[test]
 fn restorable_state_databases_skip() {
     let _init_guard = zebra_test::init();
@@ -182,13 +182,14 @@ fn restorable_state_databases_skip() {
     let config = bootstrapping_config(network.clone(), dir.path());
 
     let running_major = zebra_state::state_database_format_version_in_code().major;
-    assert_eq!(running_major, 32);
+    assert_eq!(running_major, 33);
     let sources = zebra_state::restorable_db_source_versions(running_major);
-    assert_eq!(sources.first(), Some(&31));
+    assert_eq!(sources.first(), Some(&32));
+    assert!(sources.contains(&31));
     assert!(sources.contains(&30));
     assert!(sources.contains(&29));
 
-    for source_major in [31, 30, 29] {
+    for source_major in [32, 31, 30, 29] {
         let source = config.state.db_path("state", source_major, &network);
         std::fs::create_dir_all(&source).unwrap();
         assert_eq!(

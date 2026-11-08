@@ -5,6 +5,6 @@ expression: cf_data
 [
   KV(
     k: "08ce3d9731b000c08338455c8a4a6bd05da16e26b11daa1b917184ece80f0400",
-    v: "000000",
+    v: "00",
   ),
 ]

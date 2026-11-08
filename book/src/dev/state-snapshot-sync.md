@@ -134,7 +134,7 @@ bounds before allocation, the running total, and key order on import.
 The **manifest** (at most 1 MiB) is:
 
 ```text
-magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (2)
+magic "ZEBRA-STATE-SNAPSHOT" ‖ snapshot_format u16 (3)
 genesis_hash 32 ‖ height u32 ‖ block_hash 32 ‖ window_start u32 ‖ db_format_major u16 ‖ index_mode u8 (0)
 [Regtest and custom testnets only: parameters_hash 32, the consensus parameters without checkpoints]
 component_count u16 (24), then per component in ComponentId order:
@@ -145,7 +145,9 @@ Decoding is strict: bounds before allocation, no trailing bytes, no unknown ids,
 exactly once in order, `entry_count == 0 ⇔ piece_count == 0`. The decoder takes the `Network`,
 because the parameters hash is present only on Regtest and custom testnets. `snapshot_format`
 changes only when the shipped components or encodings change; the importer maps it onto the running
-database format. Format 2 dropped the window bodies below `H` and the rebuildable indexes.
+database format. Format 2 dropped format 1's window bodies below `H` and its rebuildable indexes,
+both with fixed three-byte heights. Format 3 ships format 2's components with the variable-width
+heights and locations of database format 33, and the decoder rejects formats 1 and 2.
 
 The manifest and the optional version 2 handshake parameters record use the same hash. It binds
 every consensus parameter, including activation heights, funding streams, lockbox disbursements,
@@ -270,14 +272,18 @@ penalty. `SchedulerConfig` carries these values.
 
 ## State changes
 
-- A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height,
-  block_hash, manifest, deferred_checks }` (71 bytes on disk). The intermediate 31.1.0 upgrade adds
-  the column family without rewriting records because `create_missing_column_families` already
-  creates it. The current 32.0.0 major format puts snapshot-born databases in `state/v32`, enforcing
-  the compatibility barrier instead of relying on operators not to open them with older 31.x builds.
-  Existing v31 and older registered sources move to v32 and run every intervening upgrade.
-  Snapshot-born databases must not be renamed to v31, v30, v29, or any older directory: those readers cannot tell that the
-  history below `L` is missing.
+- A new column family `snapshot_base` holds `()` → `SnapshotBase { window_start, height, block_hash,
+  manifest, deferred_checks }`: two variable-width heights, two 32-byte hashes, and the deferred
+  checks byte. The intermediate 31.1.0 upgrade adds the column family without rewriting records
+  because `create_missing_column_families` already creates it. The 32.0.0 major format puts
+  snapshot-born databases in `state/v32`, enforcing the compatibility barrier instead of relying on
+  operators not to open them with older 31.x builds. The current 33.0.0 format then converts the
+  marker's heights and the other 26 height-dependent column families, including those of
+  snapshot-born v32 databases, and places the result in `state/v33`. Startup prefers an existing v32
+  source, with v31, v30, v29, and older registered sources as fallbacks, and runs every intervening
+  upgrade. Snapshot-born databases must not be renamed to v32, v31, v30, v29, or any older
+  directory: those readers cannot decode the records, and the oldest cannot tell that the history
+  below `L` is missing.
 - `HistoryCapabilities` gains `lowest_known_height` and `snapshot_base: Option<SnapshotBase>`. With
   a marker, the known floor is `L`, the retained floor is `max(H, first body)`, and the database
   counts as pruned.
@@ -290,7 +296,7 @@ penalty. `SchedulerConfig` carries these values.
   height when the lookup by hash misses, because `block_info[L − 1]` is shipped but has no hash row.
   `zebrad` skips `request_genesis` when the state has a tip.
 - **Importer** (`zebra_state::state_snapshot::import`): temp root
-  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v32/<net>`; a raw RocksDB handle with
+  `<cache_dir>/state-snapshot-import/<nonce>/` holding `state/v33/<net>`; a raw RocksDB handle with
   all column families and `DiskDb::options()`; one SST ingest per column family with `move_files`,
   into empty column families at the bottom level, auto-compactions off while ingesting; the rebuilt
   indexes ingested the same way; the headers above `H` checked and written by batch; singletons

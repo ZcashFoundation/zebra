@@ -43,12 +43,12 @@ symlinks outside it are skipped. Reuse considers only the immediately
 preceding major version, not format 27 or older. Do not rename a database
 directory manually to claim compatibility.
 
-Current builds use database format **32.0.0**, with finalized state under
-`<cache_dir>/state/v32/<network>/`. [Block-body pruning](pruning.md) is configured separately. When
-no v32 database exists, startup moves the newest reusable v31, v30 or v29 database there and runs
-the registered upgrades. This happens even with pruning disabled and leaves no source backup for an
-older binary. A never-pruned, never-snapshot-imported, never-hinted archive can be moved back for
-Zebra 7.0.0; read [format 32 and recovery](pruning.md#format-32-recovery-and-copies) before
+Current builds use database format **33.0.0**, with finalized state under
+`<cache_dir>/state/v33/<network>/`. [Block-body pruning](pruning.md) is configured separately. When
+no v33 database exists, startup moves the newest reusable v32, v31, v30, or v29 database there and
+runs the registered upgrades, including a one-way rewrite of its block heights. This happens even
+with pruning disabled and leaves no source backup for an older binary, which cannot read the
+migrated records. Read [format 33 and recovery](pruning.md#format-33-recovery-and-copies) before
 upgrading.
 
 Restore into a fresh cache root. Keep an independent backup for rollback:
@@ -204,7 +204,7 @@ that a snapshot contains the history you need. A checksum authenticates neither
 the producer nor its claimed retention.
 
 To back up your own pruned node, stop Zebra cleanly before copying the complete
-`state/v32/<network>/` directory. Do not copy live database files. Record the
+`state/v33/<network>/` directory. Do not copy live database files. Record the
 generating build, network, database version, finalized tip height and hash,
 actual `pruneheight`, configured retention, and whether the build uses the
 `indexer` feature. Keep that backup outside the managed cache.

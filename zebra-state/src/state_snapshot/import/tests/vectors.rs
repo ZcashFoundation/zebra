@@ -605,7 +605,7 @@ fn window_body_below_the_snapshot_block_is_refused() {
     let below = Height(HEIGHT.0 - 1);
     let body = fixture::rows(&chain.state, ComponentId::Transactions)
         .into_iter()
-        .filter(|(key, _)| Height::from_bytes(&key[..3]) == below)
+        .filter(|(key, _)| TransactionLocation::from_bytes(key).height == below)
         .collect::<Vec<_>>();
     assert!(!body.is_empty(), "the fixture block below H has a body");
     let result = import_tampered(&chain, |records| {

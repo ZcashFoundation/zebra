@@ -110,7 +110,7 @@ async fn unavailable_copy_range_does_not_create_or_modify_target() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn reusable_archive_copy_target_uses_retained_source_suffix() {
+async fn reusable_archive_copy_target_that_needs_the_height_rewrite_is_refused() {
     let _guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(60), async {
         let network = Network::Mainnet;
@@ -141,7 +141,8 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
                 .await
                 .unwrap();
 
-            // These registered source and running formats have compatible records; only the directory differs.
+            // Every registered source format stores fixed-width heights, so the running format can
+            // only reuse this archive after a writable start rewrites its records.
             let current_path = target.db_path("state", current_version.major, &network);
             let source_path = target.db_path("state", source_version.major, &network);
             std::fs::rename(
@@ -160,46 +161,43 @@ async fn reusable_archive_copy_target_uses_retained_source_suffix() {
             let version_path = target.version_file_path("state", source_version.major, &network);
             let version_bytes = std::fs::read(&version_path).unwrap();
 
-            // Preflight must read the same archive that the writer would reuse, without moving it.
-            let (_, db, _) = new_zs::spawn_init_read_only(target.clone(), &network)
+            // Preflight refuses the archive that the writer would reuse, without moving or
+            // changing it, and so does the copy.
+            let Err(error) = new_zs::spawn_init_read_only(target.clone(), &network)
                 .await
                 .unwrap()
-                .unwrap();
-            assert_eq!(db.path(), source_path);
-            assert_eq!(db.finalized_tip_height(), Some(Height(target_tip)));
-            assert!(!db.history_capabilities().unwrap().is_pruned());
-            drop(db);
-            assert!(!current_path.parent().unwrap().exists());
-            assert_eq!(std::fs::read(&version_path).unwrap(), version_bytes);
+            else {
+                panic!("a source that needs the height rewrite cannot open read-only");
+            };
+            assert!(
+                matches!(
+                    &error,
+                    new_zs::StateInitError::ReadOnlyDatabaseNeedsUpgrade { path }
+                        if path == &source_path
+                ),
+                "unexpected read-only error: {error}"
+            );
 
             let command = CopyStateCmd {
                 max_source_height: None,
                 target_config_path: None,
                 filters: vec![],
             };
-            let result = command.copy(&network, source.clone(), target.clone()).await;
-            if target_tip == 0 {
-                assert!(result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("requires unavailable block history"));
-                assert!(source_path.exists());
-                assert!(!current_path.parent().unwrap().exists());
-                assert_eq!(std::fs::read(&version_path).unwrap(), version_bytes);
-                continue;
-            }
-
-            result.unwrap();
-            assert!(!source_path.exists());
-            let (_, db, _) = new_zs::spawn_init_read_only(target, &network)
+            let error = command
+                .copy(&network, source.clone(), target.clone())
                 .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(db.path(), current_path);
-            assert_eq!(db.finalized_tip_height(), Some(Height(3)));
-            for height in 0..=3 {
-                assert!(db.block(Height(height).into()).unwrap().is_some());
-            }
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<new_zs::StateInitError>(),
+                    Some(new_zs::StateInitError::ReadOnlyDatabaseNeedsUpgrade { path })
+                        if path == &source_path
+                ),
+                "copy preflight must report the pending height rewrite: {error}"
+            );
+            assert!(source_path.exists());
+            assert!(!current_path.parent().unwrap().exists());
+            assert_eq!(std::fs::read(&version_path).unwrap(), version_bytes);
         }
     })
     .await

@@ -37,8 +37,7 @@ use zebra_chain::{
 
 use crate::{
     service::finalized_state::{
-        HistoryTreeParts, OutputLocation, TransactionLocation, HEIGHT_DISK_BYTES,
-        OUTPUT_LOCATION_DISK_BYTES, TRANSACTION_LOCATION_DISK_BYTES,
+        height_from_bytes_prefix, HistoryTreeParts, OutputLocation, TransactionLocation,
     },
     state_snapshot::format::ComponentId,
     IntoDisk,
@@ -49,9 +48,6 @@ const HASH_BYTES: usize = 32;
 
 /// The width of a note commitment subtree index.
 const SUBTREE_INDEX_BYTES: usize = 2;
-
-/// The width of a note commitment subtree: its end height and root.
-const SUBTREE_BYTES: usize = HEIGHT_DISK_BYTES + HASH_BYTES;
 
 /// The width of a chain value pool record in the current format.
 const VALUE_BALANCE_BYTES: usize = zebra_chain::value_balance::SERIALIZED_SIZE;
@@ -76,35 +72,31 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
 
     match component {
         HashByHeight => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             width(value, HASH_BYTES, "block hash")
         }
         HeightByHash => {
             width(key, HASH_BYTES, "block hash")?;
-            width(value, HEIGHT_DISK_BYTES, "height")
+            valid_height(value, "height")
         }
         Headers => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             decode_all::<block::Header>(value, "block header").map(drop)
         }
         Transactions => {
-            width(key, TRANSACTION_LOCATION_DISK_BYTES, "transaction location")?;
+            valid_transaction_location(key, "transaction location")?;
             decode_all::<Transaction>(value, "transaction").map(drop)
         }
         TxLocByHash => {
             width(key, HASH_BYTES, "transaction hash")?;
-            width(
-                value,
-                TRANSACTION_LOCATION_DISK_BYTES,
-                "transaction location",
-            )
+            valid_transaction_location(value, "transaction location")
         }
         BlockInfo => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             block_info(value).map(drop)
         }
         Utxos => {
-            width(key, OUTPUT_LOCATION_DISK_BYTES, "output location")?;
+            valid_output_location(key, "output location")?;
             decode_all::<transparent::Output>(value, "transparent output").map(drop)
         }
         SproutNullifiers | SaplingNullifiers | OrchardNullifiers | IronwoodNullifiers => {
@@ -130,25 +122,26 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             width(value, 0, "anchor value")
         }
         SaplingTree => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             sapling_tree(value).map(drop)
         }
         OrchardTree | IronwoodTree => {
-            width(key, HEIGHT_DISK_BYTES, "height")?;
+            valid_height(key, "height")?;
             orchard_tree(value).map(drop)
         }
         SaplingSubtrees => {
             width(key, SUBTREE_INDEX_BYTES, "subtree index")?;
-            width(value, SUBTREE_BYTES, "Sapling subtree")?;
-            let root = hash(&value[HEIGHT_DISK_BYTES..], "Sapling subtree root")?;
+            let root = hash(
+                subtree_root(value, "Sapling subtree")?,
+                "Sapling subtree root",
+            )?;
             Option::<sapling_crypto::Node>::from(sapling_crypto::Node::from_bytes(root))
                 .ok_or_else(|| "Sapling subtree root is not a field element".to_string())
                 .map(drop)
         }
         OrchardSubtrees | IronwoodSubtrees => {
             width(key, SUBTREE_INDEX_BYTES, "subtree index")?;
-            width(value, SUBTREE_BYTES, "subtree")?;
-            orchard::tree::Node::try_from(&value[HEIGHT_DISK_BYTES..])
+            orchard::tree::Node::try_from(subtree_root(value, "subtree")?)
                 .map_err(|_| "subtree root is not a field element".to_string())
                 .map(drop)
         }
@@ -165,6 +158,53 @@ pub(super) fn check_record(component: ComponentId, key: &[u8], value: &[u8]) -> 
             value_pools(value).map(drop)
         }
     }
+}
+
+fn height_prefix<'a>(bytes: &'a [u8], what: &str) -> Result<(Height, &'a [u8]), String> {
+    height_from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn transaction_location_prefix<'a>(
+    bytes: &'a [u8],
+    what: &str,
+) -> Result<(TransactionLocation, &'a [u8]), String> {
+    TransactionLocation::from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn output_location_prefix<'a>(
+    bytes: &'a [u8],
+    what: &str,
+) -> Result<(OutputLocation, &'a [u8]), String> {
+    OutputLocation::from_bytes_prefix(bytes).ok_or_else(|| format!("invalid {what}"))
+}
+
+fn finish(rest: &[u8], what: &str) -> Result<(), String> {
+    if rest.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} trailing bytes after the {what}", rest.len()))
+    }
+}
+
+fn valid_height(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = height_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn valid_transaction_location(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = transaction_location_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn valid_output_location(bytes: &[u8], what: &str) -> Result<(), String> {
+    let (_, rest) = output_location_prefix(bytes, what)?;
+    finish(rest, what)
+}
+
+fn subtree_root<'a>(bytes: &'a [u8], what: &str) -> Result<&'a [u8], String> {
+    let (_, root) = height_prefix(bytes, what)?;
+    width(root, HASH_BYTES, what)?;
+    Ok(root)
 }
 
 /// Checks that `bytes` is `expected` bytes long.
@@ -394,7 +434,7 @@ pub(super) fn block_info(bytes: &[u8]) -> Result<BlockInfo, String> {
     Ok(BlockInfo::new(value_pools, size))
 }
 
-/// Decodes a height key or value, which `check_record` already checked the width of.
+/// Decodes a height key or value, which `check_record` already validated.
 pub(super) fn height(bytes: &[u8]) -> Height {
     crate::FromDisk::from_bytes(bytes)
 }

@@ -1,0 +1,16 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Replaced the fixed three-byte `Height` disk encoding with a canonical length-prefixed minimal
+  big-endian encoding that preserves numeric key order and supports every `u32`. `MAX_ON_DISK_HEIGHT`
+  is now `Height::MAX`. The `IntoDisk::Bytes` associated types for heights, transaction and output
+  locations, and their transparent address composites and balance values are now `Vec<u8>` instead
+  of fixed arrays. State format v33 migrates every affected key and value in 29 column
+  families, including the checkpoint sync metadata, the spentness journal and the headers-first
+  header chain, above the v32 snapshot
+  barrier and before older pending upgrades, and prefers reusable v32 sources with v31/v30/v29
+  fallbacks. Direct readers must use v33-or-newer code and wait for the writer to finish. v32 and
+  older readers cannot decode v33 records. `SNAPSHOT_FORMAT` is now 3, because state snapshots
+  carry the new record encoding.
+  ([#12182](https://github.com/ZcashFoundation/zebra/pull/12182))
+time: 2026-11-03T19:10:59-05:00

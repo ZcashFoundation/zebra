@@ -22,10 +22,9 @@ use zebra_chain::{parameters::Network, transparent};
 use crate::{
     service::finalized_state::{
         AddressBalanceLocation, AddressUnspentOutput, DiskDb, OutputLocation,
-        TRANSACTION_LOCATION_DISK_BYTES,
     },
     state_snapshot::format::ComponentId,
-    FromDisk, IntoDisk,
+    FromDisk, IntoDisk, TransactionLocation,
 };
 
 use super::{column_family, db_error, io_error, records, refused, ImportCheck, SnapshotError};
@@ -59,12 +58,12 @@ pub(super) fn rebuild_indexes(
 
 /// Rebuilds `hash_by_tx_loc` as the inverse of `tx_loc_by_hash`.
 fn rebuild_hash_by_tx_loc(db: &DB, directory: &Path) -> Result<(), SnapshotError> {
-    let mut rows: Vec<([u8; TRANSACTION_LOCATION_DISK_BYTES], [u8; 32])> = Vec::new();
+    let mut rows: Vec<(Vec<u8>, [u8; 32])> = Vec::new();
     let mut iterator =
         db.raw_iterator_cf(column_family(db, ComponentId::TxLocByHash.column_family()));
     iterator.seek_to_first();
     while let Some((hash, location)) = iterator.item() {
-        // `check_record` checked the widths of every shipped record, so a malformed row here
+        // `check_record` checked the encodings of every shipped record, so a malformed row here
         // means the import database changed after the checks: refuse it instead of panicking.
         let malformed = || {
             refused(
@@ -72,10 +71,12 @@ fn rebuild_hash_by_tx_loc(db: &DB, directory: &Path) -> Result<(), SnapshotError
                 "a transaction location row is malformed",
             )
         };
-        rows.push((
-            location.try_into().map_err(|_| malformed())?,
-            hash.try_into().map_err(|_| malformed())?,
-        ));
+        if !TransactionLocation::from_bytes_prefix(location)
+            .is_some_and(|(_, rest)| rest.is_empty())
+        {
+            return Err(malformed());
+        }
+        rows.push((location.to_vec(), hash.try_into().map_err(|_| malformed())?));
         iterator.next();
     }
     iterator

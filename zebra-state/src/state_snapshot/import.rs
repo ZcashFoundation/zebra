@@ -789,6 +789,7 @@ fn open_raw(path: &Path) -> Result<DB, SnapshotError> {
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string),
+        false,
     );
     fs::create_dir_all(path).map_err(io_error(path))?;
     DB::open_cf_descriptors(&options, path, column_families)

@@ -2829,6 +2829,7 @@ async fn a_dropped_state_closes_its_database() {
             STATE_COLUMN_FAMILIES_IN_CODE
                 .iter()
                 .map(ToString::to_string),
+            false,
         );
         match rocksdb::DB::open_cf_descriptors(&DiskDb::options(), &path, column_families) {
             Ok(_db) => break,

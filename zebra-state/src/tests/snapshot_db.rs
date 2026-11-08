@@ -3,7 +3,7 @@
 //! The snapshot importer is not needed here: a Regtest chain is committed block by block, then
 //! every block row below the snapshot window and every body below the snapshot height is
 //! deleted, and the `snapshot_base` marker is written. That is the shape DESIGN §3 and §7
-//! describe, with the format 2 bodies: genesis, the hashes and headers of the window `L..=H`,
+//! describe, with the bodies that snapshot formats 2 and 3 ship: genesis, the hashes and headers of the window `L..=H`,
 //! the body of `H`, the `block_info` rows from `L - 1`, the validation state at `H`, and the
 //! transaction index pairs of every transaction that still has an unspent output.
 
