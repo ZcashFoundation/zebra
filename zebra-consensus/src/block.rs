@@ -947,8 +947,8 @@ where
             }
             let phase_start = Instant::now();
 
-            // Query only this block's candidates, against the mempool's processed tip.
-            let candidates = if let Some(mempool) = mempool {
+            // Coinbase transactions are never in the mempool, so empty blocks have no candidates.
+            let candidates = if let Some(mempool) = mempool.filter(|_| block.transactions.len() > 1) {
                 match tokio::time::timeout(
                     MEMPOOL_REUSE_TIMEOUT,
                     mempool.oneshot(mempool::Request::VerifiedTransactionsForBlock {

@@ -207,6 +207,44 @@ fn assert_dispatches(calls: &Calls, non_coinbase: usize) {
 }
 
 #[tokio::test]
+async fn coinbase_only_block_does_not_query_mempool() {
+    let _init_guard = zebra_test::init();
+    let network = network();
+    let height = Height(3);
+    let coinbase = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![transparent::Output::new(
+            zebra_chain::parameters::subsidy::block_subsidy(height, &network).unwrap(),
+            transparent::Script::new(&[0xac]),
+        )],
+        LockTime::unlocked(),
+        height,
+    ));
+    let genesis = block::genesis::regtest_genesis_block();
+    let mut header = *genesis.header;
+    header.previous_block_hash = genesis.hash();
+    header.merkle_root = [coinbase.hash()].into_iter().collect();
+    let block = Arc::new(Block {
+        header: Arc::new(header),
+        transactions: vec![coinbase],
+    });
+    let pool = BoxCloneService::new(service_fn(
+        |_| -> std::future::Ready<Result<mempool::Response, BoxError>> {
+            panic!("coinbase transactions cannot have resident mempool verdicts")
+        },
+    ));
+    let (result, calls) = verify(&network, block.clone(), pool, mock_state()).await;
+    assert_eq!(result.unwrap(), block.hash());
+    assert_dispatches(&calls, 0);
+    assert_eq!(calls.commits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn resident_hit_skips_transaction_dispatch_and_utxo_lookup() {
     let _init_guard = zebra_test::init();
     let network = network();
