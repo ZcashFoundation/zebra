@@ -3614,3 +3614,99 @@ async fn headers_first_extend_tips_follows_header_reorg() {
         sync.prospective_tips
     );
 }
+
+/// After a header reorg, the hashes left over from the previous header chain
+/// read are checked against the header chain again, and the ones it no longer
+/// has are not downloaded.
+#[tokio::test]
+async fn headers_first_leftover_hashes_follow_header_reorg() {
+    let _init_guard = zebra_test::init();
+    let tip = block::Hash([0; 32]);
+    let first: Vec<block::Hash> = (1..=6).map(|byte| block::Hash([byte; 32])).collect();
+    // The header chain after a reorg: it still has the first four hashes.
+    let after: Vec<block::Hash> = first[..4]
+        .iter()
+        .copied()
+        .chain((15..=16).map(|byte| block::Hash([byte; 32])))
+        .collect();
+
+    let state = {
+        let after = after.clone();
+        tower::service_fn(move |request| {
+            let response = match request {
+                zs::Request::HeaderChainHashes { known_blocks, .. } => {
+                    let mut chain = vec![tip];
+                    chain.extend(after.iter().copied());
+                    let hashes = known_blocks
+                        .iter()
+                        .find_map(|known| chain.iter().position(|hash| hash == known))
+                        .map_or_else(Vec::new, |position| chain[position + 1..].to_vec());
+                    zs::Response::BlockHashes(hashes)
+                }
+                zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
+                request => panic!("unexpected state request: {request:?}"),
+            };
+            std::future::ready(Ok::<_, zs::BoxError>(response))
+        })
+    };
+
+    let (downloads, mut requested) = tokio::sync::mpsc::channel(8);
+    let network = tower::service_fn(move |request| {
+        let downloads = downloads.clone();
+        async move {
+            match request {
+                zn::Request::BlockDownload {
+                    hash,
+                    advertiser: None,
+                } => {
+                    downloads.send(hash).await.unwrap();
+                    std::future::pending().await
+                }
+                request => panic!("headers-first sync sends no {request:?}"),
+            }
+        }
+    });
+
+    let config = ZebradConfig {
+        state: StateConfig::ephemeral(),
+        sync: crate::components::sync::Config {
+            full_verify_concurrency_limit: 2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (chain_tip, _tip_sender) = MockChainTip::new();
+    let (misbehavior, _reports) = tokio::sync::mpsc::channel(1);
+    let (mut sync, _status) = ChainSync::new(
+        &config,
+        Height(0),
+        network,
+        MockService::build().for_unit_tests(),
+        state,
+        MockService::build().for_unit_tests(),
+        chain_tip,
+        misbehavior,
+    );
+
+    // The first two hashes of the previous read were queued, the rest are left over.
+    sync.extra_hashes_parent = Some(first[1]);
+    let leftover: indexmap::IndexSet<block::Hash> = first[2..].iter().copied().collect();
+    let leftover = tokio::time::timeout(Duration::from_secs(5), sync.try_to_sync_once(leftover))
+        .await
+        .expect("syncing once is bounded")
+        .expect("the header chain still has some of the hashes");
+
+    let mut downloaded = Vec::new();
+    while let Ok(hash) = requested.try_recv() {
+        downloaded.push(hash);
+    }
+    assert_eq!(
+        downloaded,
+        first[2..4].to_vec(),
+        "only the hashes still on the header chain are downloaded"
+    );
+    assert!(
+        leftover.is_empty(),
+        "the displaced hashes are dropped: {leftover:?}"
+    );
+}
