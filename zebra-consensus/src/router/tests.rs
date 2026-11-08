@@ -30,7 +30,8 @@ use super::*;
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
 
-/// Initialization returns while preload is queued, and its handle covers all three key builds.
+/// Initialization returns while preload is queued, and its handles cover all three key builds
+/// and the Orchard tree tables.
 #[test]
 fn init_preloads_halo2_keys_without_waiting() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -67,7 +68,6 @@ fn init_preloads_halo2_keys_without_waiting() {
             .await
             .expect("test initialization must leave keys lazy while the blocking worker is busy")
             .unwrap();
-            test_handles.state_checkpoint_verify_handle.await.unwrap();
 
             let (_router, _transaction, handles, _, _) = tokio::time::timeout(
                 Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
@@ -99,15 +99,23 @@ fn init_preloads_halo2_keys_without_waiting() {
                     .contains(&std::thread::current().id()),
                 "key construction must not run on the async caller"
             );
+            tokio::task::yield_now().await;
+            assert!(
+                !handles.state_checkpoint_verify_handle.is_finished(),
+                "the checkpoint handle must cover queued Orchard table construction"
+            );
             release.send(()).unwrap();
             blocker.await.unwrap();
             handles.halo2_key_preload_handle.await.unwrap();
             handles.state_checkpoint_verify_handle.await.unwrap();
+            test_handles.state_checkpoint_verify_handle.await.unwrap();
             assert_eq!(
                 halo2::tests::KEY_BUILDS.lock().unwrap().len(),
                 3,
                 "preload must construct every era key without a verification request"
             );
+            let orchard_merkle = sinsemilla::HashDomain::new("z.cash:Orchard-MerkleCRH");
+            assert!(orchard_merkle.precomputed_message_words() >= 52);
         })
         .await
     });
