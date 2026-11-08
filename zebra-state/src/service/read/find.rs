@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
+    parameters::Network,
     serialization::DateTime32,
     value_balance::ValueBalance,
 };
@@ -269,6 +270,78 @@ where
     }
 
     Some(hashes)
+}
+
+/// Create a block locator over the header chain in `db`, with the height of
+/// each hash.
+///
+/// Uses the same heights as [`block_locator()`], from the header tip, then the
+/// last checkpoint of `network` if the header chain has it, and always ends
+/// with the finalized tip, which every honest peer has. Returns an empty
+/// locator before genesis is committed.
+///
+/// The last checkpoint keeps the headers a peer on a deep fork answers with,
+/// which the header chain already has, to the headers above it.
+pub fn header_locator(db: &ZebraDb, network: &Network) -> Vec<(block::Height, block::Hash)> {
+    let Some((tip_height, _)) = db.header_chain_tip() else {
+        return Vec::new();
+    };
+
+    let mut heights = block_locator_heights(tip_height);
+    let last_checkpoint = network.checkpoint_list().max_height();
+    if last_checkpoint <= tip_height {
+        heights.push(last_checkpoint);
+    }
+    heights.sort_unstable_by(|a, b| b.cmp(a));
+    heights.dedup();
+
+    let mut locator: Vec<_> = heights
+        .into_iter()
+        .filter_map(|height| Some((height, db.header_chain_hash(height)?)))
+        .collect();
+
+    if let Some(finalized_tip) = db.tip() {
+        if locator
+            .last()
+            .is_none_or(|(height, _)| *height > finalized_tip.0)
+        {
+            locator.push(finalized_tip);
+        }
+    }
+
+    locator
+}
+
+/// Returns up to `limit` header chain hashes in `db`, in height order, above
+/// the first hash in `known_blocks` that is on the header chain.
+///
+/// The hashes are one chain that links to that hash: the read stops at the
+/// first header that doesn't link to the one below it, which a concurrent
+/// header or block write can leave for a moment.
+///
+/// Returns an empty list if no hash in `known_blocks` is on the header chain.
+pub fn header_chain_hashes(
+    db: &ZebraDb,
+    known_blocks: &[block::Hash],
+    limit: u32,
+) -> Vec<block::Hash> {
+    let Some((intersection, mut previous)) = known_blocks
+        .iter()
+        .find_map(|hash| Some((db.header_chain_height(*hash)?, *hash)))
+    else {
+        return Vec::new();
+    };
+
+    (1..=limit)
+        .map_while(|offset| intersection.0.checked_add(offset).map(block::Height))
+        .map_while(|height| {
+            let header = db.any_header(height)?;
+            (header.previous_block_hash == previous).then(|| {
+                previous = header.hash();
+                previous
+            })
+        })
+        .collect()
 }
 
 /// Get the heights of the blocks for constructing a block_locator list.

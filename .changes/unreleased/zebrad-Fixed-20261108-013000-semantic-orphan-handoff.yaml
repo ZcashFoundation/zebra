@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Fixed initial sync stalling until a restart when a block above the final checkpoint named an earlier checkpoint block as its parent: checkpoint commits now stop only once the finalized tip reaches the final checkpoint.'
+time: 2026-11-08T01:30:00Z

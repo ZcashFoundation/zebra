@@ -1252,9 +1252,14 @@ where
         }
     }
 
-    /// Rotates find requests across ready connections, restricting them to serving peers until
-    /// the queued wait expires, unless no serving peers are connected.
-    fn select_ready_find_peer(&mut self, allow_non_serving: bool) -> Option<D::Key> {
+    /// Rotates find requests across ready connections that can answer `request`, restricting
+    /// them to serving peers until the queued wait expires, unless no serving peers are
+    /// connected.
+    fn select_ready_find_peer(
+        &mut self,
+        request: &Request,
+        allow_non_serving: bool,
+    ) -> Option<D::Key> {
         if self.ready_services.is_empty() {
             return None;
         }
@@ -1265,7 +1270,9 @@ where
             .iter()
             .enumerate()
             .find(|(_, (key, _))| {
-                self.ready_services.contains_key(key)
+                self.ready_services
+                    .get(key)
+                    .is_some_and(|service| service.supports(request))
                     && (!serving_only || self.serving_peer_keys.contains(key))
             })?;
         let key = *key;
@@ -1427,7 +1434,7 @@ where
         );
         let peer_key = if is_find_request {
             // Fast empty responses must not gain a latency-based routing advantage.
-            self.select_ready_find_peer(false)
+            self.select_ready_find_peer(&req, false)
         } else {
             self.select_ready_p2c_peer_for(&req)
         };
@@ -1450,7 +1457,7 @@ where
             if self.queued_find_requests.len() < MAX_QUEUED_FIND_REQUESTS {
                 return self.queue_find_request(req);
             }
-            if let Some(peer_key) = self.select_ready_find_peer(true) {
+            if let Some(peer_key) = self.select_ready_find_peer(&req, true) {
                 metrics::counter!(
                     "zcash.net.peer_set.find_fallback",
                     "reason" => "queue_full",
@@ -1786,7 +1793,7 @@ where
             }
 
             let expired = queued.deadline <= now;
-            if let Some(peer) = self.select_ready_find_peer(expired) {
+            if let Some(peer) = self.select_ready_find_peer(&queued.request, expired) {
                 if !self.serving_peer_keys.contains(&peer) {
                     let reason = if self.serving_peer_keys.is_empty() {
                         "no_serving_peer"

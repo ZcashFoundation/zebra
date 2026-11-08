@@ -138,3 +138,87 @@ fn mean_target_uses_pow_limit_through_exact_window_height() {
         }
     }
 }
+
+/// Below a full averaging window, the expected threshold is the minimum difficulty, as in
+/// zcashd and in the first Mainnet and Testnet blocks.
+#[test]
+fn first_blocks_use_the_minimum_difficulty() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let headers: Vec<_> = network
+            .blockchain_map()
+            .iter()
+            .enumerate()
+            .take_while(|(index, (height, _))| usize::try_from(**height) == Ok(*index))
+            .map(|(_, (_, bytes))| {
+                bytes
+                    .zcash_deserialize_into::<Block>()
+                    .expect("test data deserializes")
+                    .header
+            })
+            .collect();
+        assert!(headers.len() > 2, "{network} has test blocks");
+
+        for height in 1..headers.len() {
+            let context = headers[..height]
+                .iter()
+                .rev()
+                .map(|header| (header.difficulty_threshold, header.time));
+            let adjustment = AdjustedDifficulty::new_from_header_time(
+                headers[height].time,
+                block::Height(u32::try_from(height - 1).expect("test heights fit in u32")),
+                &network,
+                context,
+            );
+
+            assert_eq!(
+                adjustment.expected_difficulty_threshold(),
+                network.target_difficulty_limit().to_compact(),
+                "{network} {height}",
+            );
+            assert_eq!(
+                adjustment.expected_difficulty_threshold(),
+                headers[height].difficulty_threshold,
+                "{network} {height}",
+            );
+        }
+    }
+}
+
+/// On a custom Testnet that activates NU7 below its averaging window, every
+/// height up to the post-NU7 window uses the minimum difficulty, as in zcashd,
+/// not just the heights below the pre-NU7 window.
+#[test]
+fn early_nu7_uses_the_minimum_difficulty_through_the_post_nu7_window() {
+    let _init_guard = zebra_test::init();
+    let network = testnet(9);
+    let limit = network.target_difficulty_limit();
+
+    for candidate_height in 18..=103_u32 {
+        // Fast blocks, which retarget below the limit once a window is full.
+        let adjustment = AdjustedDifficulty::new_from_header_time(
+            DateTime::from_timestamp(PREVIOUS_TIME + 1, 0).unwrap(),
+            block::Height(candidate_height - 1),
+            &network,
+            recent_block_data(limit.to_compact(), 1)
+                .take(usize::try_from(candidate_height).unwrap()),
+        );
+
+        if candidate_height <= 102 {
+            assert_eq!(
+                adjustment.expected_difficulty_threshold(),
+                limit.to_compact(),
+                "candidate height {candidate_height}"
+            );
+        } else {
+            assert_ne!(
+                adjustment.expected_difficulty_threshold(),
+                limit.to_compact(),
+                "a full window of fast blocks retargets"
+            );
+        }
+    }
+}

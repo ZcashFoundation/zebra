@@ -234,6 +234,15 @@ Rebuild custom state created by an implementation that counted nonzero genesis
 transparent outputs, including experimental v29 state. A database-format
 upgrade does not recalculate those balances.
 
+Blocks at or below the difficulty averaging window must use the minimum
+difficulty, as in zcashd: heights 1 to 17, and, if NU7 activates at or below
+height 102, also every height from NU7 activation to 102, the post-NU7 window.
+Zebra versions before headers-first sync expected, and mined templates with, a
+slightly higher difficulty at those heights. A custom Testnet whose blocks at
+those heights were mined by those versions is invalid to newer Zebra versions,
+which check the difficulty of every header. Restart such a network from
+genesis.
+
 ## Differences from Mainnet and Regtest
 
 Custom Testnets keep Testnet address encodings and coin type, the Testnet

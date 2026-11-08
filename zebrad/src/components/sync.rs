@@ -67,6 +67,10 @@ pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
+/// The most header chain hashes one headers-first request queues, the same
+/// as one `FindBlocks` response.
+const HEADER_CHAIN_HASHES_LIMIT: u32 = 500;
+
 /// Match the missing-block errors used by both hedging and sync recovery.
 fn is_not_found(error: &dyn std::error::Error) -> bool {
     // TODO: improve this by checking the type (#2908).
@@ -291,6 +295,28 @@ pub struct Config {
     /// Off by default. It needs `network.v2_listen_addr` and version 2 peers.
     pub v2_checkpoint_sync: bool,
 
+    /// Whether to sync the header chain first, and download block bodies only
+    /// for headers whose proof of work, difficulty and checkpoints are valid.
+    ///
+    /// Headers come from legacy peers with `getheaders` and from version 2
+    /// peers with `get-headers`, so it works with either kind of peer. On by
+    /// default.
+    ///
+    /// Above the final checkpoint, the header chain runs at most
+    /// [`zebra_state::MAX_HEADER_LOOKAHEAD`] headers above the higher of the
+    /// final checkpoint and `MAX_BLOCK_REORG_HEIGHT` blocks above the
+    /// finalized tip.
+    ///
+    /// With `false`, the syncer finds new blocks with `getblocks`, which only
+    /// legacy peers answer, so it needs legacy peers: with only version 2 peers
+    /// it stops following the chain.
+    pub headers_first: bool,
+
+    /// The number of checkpoint spans of headers that headers-first sync
+    /// downloads at the same time, below the final checkpoint. A value of 0
+    /// is raised to 1.
+    pub header_sync_concurrency: usize,
+
     /// The most block data the checkpoint sync engine requests ahead of the
     /// committed state tip, in bytes.
     ///
@@ -385,6 +411,9 @@ impl Default for Config {
 
             // The checkpoint sync engine is opt-in.
             v2_checkpoint_sync: false,
+            headers_first: true,
+            header_sync_concurrency:
+                crate::components::header_sync::DEFAULT_HEADER_SYNC_CONCURRENCY,
             v2_lookahead_bytes: engine.lookahead_bytes,
             v2_min_peer_rate: engine.min_peer_rate,
             // Spentness hints are opt-in.
@@ -557,6 +586,10 @@ where
     /// Whether the node is running on regtest. Used to apply a shorter sync restart delay.
     is_regtest: bool,
 
+    /// Whether block hashes come from the verified header chain that
+    /// headers-first sync stores, instead of `FindBlocks` requests to peers.
+    headers_first: bool,
+
     // Services
     //
     /// A network service which is used to perform ObtainTips and ExtendTips
@@ -588,6 +621,12 @@ where
     //
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
+
+    /// The last hash [`ChainSync::request_blocks`] queued before it left the
+    /// rest of its hashes over, which is their parent. Headers-first sync
+    /// checks the leftover hashes against the header chain from it before
+    /// queueing them.
+    extra_hashes_parent: Option<block::Hash>,
 
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
@@ -779,11 +818,13 @@ where
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             is_regtest: config.network.network.is_regtest(),
+            headers_first: config.sync.headers_first,
             tip_network,
             downloads,
             state,
             latest_chain_tip,
             prospective_tips: HashSet::new(),
+            extra_hashes_parent: None,
             recent_syncs,
             past_lookahead_limit_receiver,
             misbehavior_sender,
@@ -1176,6 +1217,15 @@ where
             self.update_metrics();
         }
 
+        // A header reorg can replace the header chain hashes left over from the
+        // last header chain read, so only keep the ones still on it.
+        if self.headers_first && !extra_hashes.is_empty() {
+            extra_hashes = self
+                .retain_header_chain_hashes(extra_hashes)
+                .await
+                .map_err(|e| Self::tips_restart_error(RestartReason::ExtendTipsError, e))?;
+        }
+
         // Once we're below the lookahead limit, we can request more blocks or hashes.
         if !extra_hashes.is_empty() {
             debug!(
@@ -1273,6 +1323,24 @@ where
             ?block_locator,
             "got block locator and trying to obtain new chain tips"
         );
+
+        if self.headers_first {
+            let download_set = self.header_chain_download_set(block_locator).await?;
+
+            let new_downloads = download_set.len();
+            debug!(
+                new_downloads,
+                "queueing new downloads from the header chain"
+            );
+            metrics::gauge!("sync.obtain.queued.hash.count").set(new_downloads as f64);
+            self.recent_syncs.push_obtain_tips_length(new_downloads);
+
+            let response = self.request_blocks(download_set).await;
+            metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+                .record(stage_start.elapsed().as_secs_f64());
+
+            return Self::handle_hash_response(response).map_err(Into::into);
+        }
 
         let mut requests = FuturesUnordered::new();
         for attempt in 0..FANOUT {
@@ -1417,6 +1485,46 @@ where
 
         let tips = std::mem::take(&mut self.prospective_tips);
 
+        if self.headers_first {
+            let block_locator = match self
+                .state
+                .ready()
+                .await
+                .map_err(|e| eyre!(e))?
+                .call(zebra_state::Request::BlockLocator)
+                .await
+                .map_err(|e| eyre!(e))?
+            {
+                zebra_state::Response::BlockLocator(block_locator) => block_locator,
+                _ => unreachable!("BlockLocator request can only result in Response::BlockLocator"),
+            };
+
+            let mut download_set = IndexSet::new();
+            for tip in tips {
+                // A header reorg can replace `expected_next` on the header
+                // chain: then continue from the block chain's locator, on the
+                // header chain's new branch, instead of ending the round.
+                let known_blocks = std::iter::once(tip.expected_next)
+                    .chain(block_locator.iter().copied())
+                    .collect();
+                download_set.extend(self.header_chain_download_set(known_blocks).await?);
+            }
+
+            let new_downloads = download_set.len();
+            debug!(
+                new_downloads,
+                "queueing new downloads from the header chain"
+            );
+            metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
+            self.recent_syncs.push_extend_tips_length(new_downloads);
+
+            let response = self.request_blocks(download_set).await;
+            metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
+                .record(stage_start.elapsed().as_secs_f64());
+
+            return Self::handle_hash_response(response).map_err(Into::into);
+        }
+
         let mut download_set = IndexSet::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
@@ -1552,6 +1660,109 @@ where
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
+    /// Returns the header chain hashes above the first of `known_blocks` on the
+    /// header chain that the state doesn't have yet, and sets the prospective
+    /// tip to the last of them, so that extending it continues up the header
+    /// chain.
+    ///
+    /// Headers-first sync has verified the proof of work, difficulty and
+    /// checkpoints of every header on the header chain, so this never asks
+    /// for a body before its header is verified. Returns no hashes once the
+    /// state reaches the header tip.
+    async fn header_chain_download_set(
+        &mut self,
+        known_blocks: Vec<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        let hashes = match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::HeaderChainHashes {
+                known_blocks,
+                limit: HEADER_CHAIN_HASHES_LIMIT,
+            })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zebra_state::Response::BlockHashes(hashes) => hashes,
+            _ => unreachable!("HeaderChainHashes request can only result in Response::BlockHashes"),
+        };
+
+        // The hashes are in height order, and blocks commit in height order, so
+        // the state has a prefix of them.
+        let mut first_unknown = None;
+        for (index, &hash) in hashes.iter().enumerate() {
+            if !self.state_contains(hash).await? {
+                first_unknown = Some(index);
+                break;
+            }
+        }
+        let Some(first_unknown) = first_unknown else {
+            return Ok(IndexSet::new());
+        };
+        let unknown_hashes = &hashes[first_unknown..];
+
+        if let Some(&expected_next) = unknown_hashes.last() {
+            let tip = unknown_hashes
+                .len()
+                .checked_sub(2)
+                .map_or(expected_next, |index| unknown_hashes[index]);
+            self.prospective_tips
+                .insert(CheckedTip { tip, expected_next });
+        }
+
+        metrics::histogram!("sync.headers_first.response.hash.count")
+            .record(unknown_hashes.len() as f64);
+
+        Ok(unknown_hashes.iter().copied().collect())
+    }
+
+    /// Returns the longest prefix of `hashes`, left over from the last header
+    /// chain read, that is still on the header chain above their parent.
+    ///
+    /// Returns no hashes if the parent isn't on the header chain any more.
+    /// Extending the tips then continues on the header chain's new branch.
+    async fn retain_header_chain_hashes(
+        &mut self,
+        mut hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        let Some(parent) = self.extra_hashes_parent else {
+            return Ok(hashes);
+        };
+
+        let on_chain = match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::HeaderChainHashes {
+                known_blocks: vec![parent],
+                limit: u32::try_from(hashes.len()).unwrap_or(u32::MAX),
+            })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zebra_state::Response::BlockHashes(hashes) => hashes,
+            _ => unreachable!("HeaderChainHashes request can only result in Response::BlockHashes"),
+        };
+
+        let still_on_chain = hashes
+            .iter()
+            .zip(&on_chain)
+            .take_while(|(hash, on_chain)| hash == on_chain)
+            .count();
+        if still_on_chain < hashes.len() {
+            debug!(
+                dropped = hashes.len() - still_on_chain,
+                "dropping block hashes that a header reorg replaced"
+            );
+            hashes.truncate(still_on_chain);
+        }
+
+        Ok(hashes)
+    }
+
     /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
     async fn request_genesis(&mut self) -> Result<(), Report> {
@@ -1651,6 +1862,7 @@ where
         } else {
             IndexSet::new()
         };
+        self.extra_hashes_parent = hashes.last().copied().filter(|_| !extra_hashes.is_empty());
 
         // Dispatch blocks with duplicate-tolerant error handling.
         // DuplicateBlockQueuedForDownload is caught and skipped instead of

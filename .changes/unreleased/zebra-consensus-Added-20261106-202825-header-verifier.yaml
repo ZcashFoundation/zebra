@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: 'Added the `header` module, with `verify_headers` and `verify_headers_blocking`, which verify a contiguous batch of block headers before their bodies: the difficulty limit and filter, the Equihash solution, the 2-hour future time limit and the checkpoint hashes, in parallel on the rayon thread pool. `HeaderError::is_misbehavior` says whether the peer that sent the batch misbehaved.'
+time: 2026-11-06T20:28:25Z

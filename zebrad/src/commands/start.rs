@@ -102,7 +102,9 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel, Submitt
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
-        checkpoint_sync, health,
+        checkpoint_sync,
+        header_sync::HeaderSync,
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         notify::{self, BlockNotifyError},
@@ -288,6 +290,7 @@ impl StartCmd {
     ///
     /// `hints_gate` is `Some` while spentness hints may apply: the engine then
     /// commits nothing above genesis until the hints task opens it.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_checkpoint_sync_engine<ZS, ZSTip>(
         config: &ZebradConfig,
         peers: Option<zebra_network::SyncPeers>,
@@ -296,6 +299,7 @@ impl StartCmd {
         latest_chain_tip: ZSTip,
         known_hashes: Option<KnownHashListSpec>,
         hints_gate: Option<watch::Receiver<bool>>,
+        header_tip: Option<watch::Receiver<Option<zebra_chain::block::Height>>>,
     ) -> tokio::task::JoinHandle<Result<(), Report>>
     where
         ZS: tower::Service<
@@ -344,6 +348,10 @@ impl StartCmd {
             hints_gate,
             known_hashes,
         );
+        let supervisor = match header_tip {
+            Some(header_tip) => supervisor.with_headers_first(header_tip),
+            None => supervisor,
+        };
 
         tokio::spawn(
             async move {
@@ -637,6 +645,15 @@ impl StartCmd {
         )
         .await;
 
+        // Headers-first sync publishes its header chain tip, and the checkpoint
+        // sync engine downloads no body above it.
+        let (header_tip_sender, header_tip) = if config.sync.headers_first {
+            let (sender, receiver) = watch::channel(None);
+            (Some(sender), Some(receiver))
+        } else {
+            (None, None)
+        };
+
         let mut checkpoint_sync_task_handle = Self::spawn_checkpoint_sync_engine(
             &config,
             sync_peers,
@@ -645,7 +662,23 @@ impl StartCmd {
             latest_chain_tip.clone(),
             known_hashes,
             hints_gate,
+            header_tip,
         );
+
+        // Headers-first sync stores the verified header chain ahead of the bodies.
+        let header_sync_task_handle = if let Some(header_tip_sender) = header_tip_sender {
+            info!("initializing headers-first sync");
+            let header_sync = HeaderSync::new(
+                &config.network.network,
+                peer_set.clone(),
+                state.clone(),
+                config.sync.header_sync_concurrency,
+            )
+            .with_tip_sender(header_tip_sender);
+            tokio::spawn(header_sync.run().in_current_span())
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
+        };
 
         info!("initializing syncer");
         let (syncer, sync_status) = ChainSync::new(
@@ -1021,6 +1054,7 @@ impl StartCmd {
         pin!(indexer_rpc_task_handle);
         pin!(lightwalletd_rpc_task_handle);
         pin!(syncer_task_handle);
+        pin!(header_sync_task_handle);
         pin!(block_gossip_task_handle);
         pin!(block_notify_task_handle);
         pin!(zmq_task_handle);
@@ -1099,6 +1133,10 @@ impl StartCmd {
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
                     .map(|_| info!("syncer task exited")),
+
+                header_sync_result = &mut header_sync_task_handle => header_sync_result
+                    .expect("unexpected panic in the headers-first sync task")
+                    .map(|_| info!("headers-first sync task exited")),
 
                 // The checkpoint sync engine hands block download back to the syncer
                 // before it exits, so Zebra keeps running without it.
@@ -1234,6 +1272,7 @@ impl StartCmd {
         health_task_handle.abort();
         tip_delay_task_handle.abort();
         syncer_task_handle.abort();
+        header_sync_task_handle.abort();
         checkpoint_sync_task_handle.abort();
         block_gossip_task_handle.abort();
         block_notify_task_handle.abort();

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Changed the expected difficulty of blocks at or below the difficulty averaging window to the minimum difficulty, as in zcashd: heights 1 to 17, or up to 102 on custom Testnets that activate NU7 at or below height 102. Custom Testnets whose blocks at those heights were mined by earlier Zebra versions are now invalid: restart them from genesis. Mainnet, Testnet and Regtest are not affected.'
+time: 2026-11-07T21:15:02Z

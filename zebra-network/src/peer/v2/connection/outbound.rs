@@ -443,10 +443,11 @@ async fn drive_inner(
                     .collect(),
             )
         }
-        // There is no `get-hashes` yet: headers give the same chain walk, 160 at a time.
-        Request::FindBlocks { known_blocks, stop } => {
-            let headers = fetch_headers(connection, known_blocks, stop, genesis_hash).await?;
-            Response::BlockHashes(headers.iter().map(|header| header.hash()).collect())
+        // Version 2 sync is headers-first: block hashes without their headers would skip the
+        // proof of work checks, so the peer set routes `getblocks` to legacy peers.
+        Request::FindBlocks { .. } => {
+            tracing::debug!("FindBlocks is not answered on v2 connections, use FindHeaders");
+            Response::BlockHashes(Vec::new())
         }
 
         // The subscription has no snapshot delimiter, so there is nothing to answer with yet;

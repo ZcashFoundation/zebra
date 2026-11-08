@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Added the `header_by_height` and `height_by_header_hash` column families (database format 30.1.0, a minor upgrade with no migration), which hold block headers verified ahead of their bodies, and `ZebraDb::{header_chain_tip, stored_header_tip, any_header, header_chain_hash, header_chain_height}`, which read the header chain stitched onto the finalized chain. Rows at or below the finalized tip are stale, so readers ignore them.'
+time: 2026-11-06T20:16:44Z

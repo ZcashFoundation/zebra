@@ -61,6 +61,52 @@ fn peer(id: u64) -> ConnectionId {
     ConnectionId(id)
 }
 
+/// With headers-first sync, no unit ends above the header ceiling, and raising
+/// the ceiling plans the units above it, contiguously, up to the target.
+#[test]
+fn units_stay_below_the_header_ceiling() {
+    let _init_guard = zebra_test::init();
+
+    let anchors = mainnet_anchors();
+    let config = EngineConfig::default();
+    let target = anchors.final_height();
+    let mut scheduler = scheduler(&config, block::Height(1), target, Instant::now());
+
+    scheduler.set_ceiling(block::Height(0));
+    assert!(
+        !scheduler.plan_unit(),
+        "no unit is planned before any header above the tip is verified"
+    );
+
+    let (ceiling, _) = anchors.at_or_below(block::Height(100_000));
+    scheduler.set_ceiling(ceiling);
+    while scheduler.plan_unit() {}
+    let planned = scheduler.planned_through.expect("units were planned");
+    assert_eq!(
+        planned, ceiling,
+        "units are planned exactly up to the ceiling"
+    );
+    assert!(
+        scheduler
+            .units
+            .values()
+            .all(|state| state.unit.end <= ceiling),
+        "no unit ends above the ceiling"
+    );
+
+    scheduler.set_ceiling(anchors.final_height());
+    assert!(scheduler.plan_unit(), "a raised ceiling plans more units");
+    let next = scheduler
+        .queue
+        .iter()
+        .map(|(_, id)| scheduler.units[id].unit)
+        .find(|unit| unit.start > ceiling)
+        .expect("a unit above the old ceiling");
+    assert_eq!(next.start, ceiling.next().unwrap(), "units stay contiguous");
+    while scheduler.plan_unit() {}
+    assert_eq!(scheduler.planned_through, Some(target));
+}
+
 /// Units cover `start..=target` contiguously, end at checkpoints, and stay
 /// within the protocol's bounds; the frontier unit is exactly one interval,
 /// and deep units coalesce intervals while the estimate fits 64 MiB.

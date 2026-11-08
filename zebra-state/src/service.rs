@@ -82,6 +82,7 @@ pub mod check;
 pub(crate) mod early_relay;
 
 pub(crate) mod finalized_state;
+pub(crate) mod header_write;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
@@ -129,6 +130,14 @@ pub(crate) struct StateService {
     /// The configured Zcash network.
     network: Network,
 
+    /// The configured maximum checkpoint height.
+    ///
+    /// Checkpoint commits stop only once the finalized tip reaches it, so a
+    /// semantically verified block that names an earlier checkpoint as its
+    /// parent can't stop them. `Height::MAX` stops them at the first queued
+    /// child of the last checkpoint verified block on disk.
+    max_checkpoint_height: block::Height,
+
     /// The height that we start storing UTXOs from finalized blocks.
     ///
     /// This height should be lower than the last few checkpoints,
@@ -150,6 +159,9 @@ pub(crate) struct StateService {
 
     /// Channels to send blocks to the block write task.
     block_write_sender: write::BlockWriteSender,
+
+    /// The channel to the header writer, the only writer of the header chain.
+    header_write_sender: tokio::sync::mpsc::UnboundedSender<header_write::CommitHeadersMessage>,
 
     /// The [`block::Hash`] of the most recent block sent on
     /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
@@ -480,6 +492,8 @@ impl StateService {
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
+        let header_write_sender = header_write::spawn(finalized_state.db.clone(), network.clone());
+
         let finalized_block_write_last_sent_hash =
             tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
                 .await
@@ -487,10 +501,12 @@ impl StateService {
 
         let state = Self {
             network: network.clone(),
+            max_checkpoint_height,
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
+            header_write_sender,
             finalized_block_write_last_sent_hash,
             finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
@@ -919,36 +935,8 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending checkpoint verified blocks when:
-        // - we've sent the verified block for the last checkpoint, and
-        // - it has been successfully written to disk.
-        //
-        // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
-        if self.block_write_sender.finalized.is_some()
-            && self
-                .non_finalized_state_queued_blocks
-                .has_queued_children(self.finalized_block_write_last_sent_hash)
-            && self.read_service.db.finalized_tip_hash()
-                == self.finalized_block_write_last_sent_hash
-        {
-            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
-            // and move on to committing semantically verified blocks to the non-finalized state.
-            std::mem::drop(self.block_write_sender.finalized.take());
-            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
-            self.non_finalized_block_write_sent_hashes = SentHashes::default();
-            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-            self.non_finalized_block_write_sent_hashes
-                .can_fork_chain_at_hashes = true;
-            // Send blocks from non-finalized queue
-            self.send_ready_non_finalized(self.finalized_block_write_last_sent_hash, None);
-            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-                None,
-                KnownBlock::Finalized,
-            ));
+        if self.finish_checkpoint_commits_if_ready() {
+            // The queued non-finalized blocks were sent.
         } else if self.block_write_sender.finalized.is_none()
             && (ready.is_some() || self.can_fork_chain_at(&parent_hash))
         {
@@ -972,6 +960,52 @@ impl StateService {
         self.non_finalized_state_queued_blocks.prune_overflow();
 
         rsp_rx
+    }
+
+    /// Stops committing checkpoint verified blocks and sends the queued non-finalized blocks, if
+    /// the last checkpoint verified block is on disk. Returns `true` if it did.
+    fn finish_checkpoint_commits_if_ready(&mut self) -> bool {
+        // We've finished sending checkpoint verified blocks when:
+        // - we've sent the verified block for the last checkpoint, and
+        // - it has been successfully written to disk.
+        //
+        // We detect the last checkpoint by looking for non-finalized blocks
+        // that are a child of the last block we sent, once the finalized tip
+        // reaches the maximum checkpoint height. A block can claim any height
+        // and name an earlier checkpoint as its parent, so the parent's hash
+        // alone doesn't show it is the last checkpoint.
+        if self.block_write_sender.finalized.is_some()
+            && self
+                .non_finalized_state_queued_blocks
+                .has_queued_children(self.finalized_block_write_last_sent_hash)
+            && self.read_service.db.finalized_tip_hash()
+                == self.finalized_block_write_last_sent_hash
+            && (self.max_checkpoint_height == block::Height::MAX
+                || self
+                    .read_service
+                    .db
+                    .finalized_tip_height()
+                    .is_some_and(|height| height >= self.max_checkpoint_height))
+        {
+            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
+            // and move on to committing semantically verified blocks to the non-finalized state.
+            std::mem::drop(self.block_write_sender.finalized.take());
+            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
+            self.non_finalized_block_write_sent_hashes = SentHashes::default();
+            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
+            self.non_finalized_block_write_sent_hashes
+                .can_fork_chain_at_hashes = true;
+            // Send blocks from non-finalized queue
+            self.send_ready_non_finalized(self.finalized_block_write_last_sent_hash, None);
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
@@ -1234,6 +1268,11 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+
+        // The children of the last checkpoint verified block can all be queued before that block
+        // reaches disk. Then no later commit request makes the switch to non-finalized commits,
+        // so make it here, on the next request: the syncer keeps polling the state.
+        self.finish_checkpoint_commits_if_ready();
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -1603,6 +1642,27 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Used by headers-first sync to store verified headers ahead of their bodies.
+            Request::CommitHeaders(headers) => {
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let sent = self
+                    .header_write_sender
+                    .send(header_write::CommitHeadersMessage { headers, rsp_tx });
+
+                async move {
+                    if sent.is_err() {
+                        return Err(header_write::CommitHeadersError::WriterStopped.into());
+                    }
+
+                    let committed = rsp_rx
+                        .await
+                        .map_err(|_| header_write::CommitHeadersError::WriterStopped)??;
+
+                    Ok(Response::HeadersCommitted(committed))
+                }
+                .boxed()
+            }
+
             // Used by sync, inbound, and block verifier to check if a block is already in the state
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
@@ -1707,6 +1767,9 @@ impl Service<Request> for StateService {
             | Request::BestChainNextMedianTimePast
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
+            | Request::HeaderTip
+            | Request::HeaderLocator
+            | Request::HeaderChainHashes { .. }
             | Request::Transaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
@@ -2020,6 +2083,25 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(
                 read::block_locator(state.latest_best_chain(), &state.db).unwrap_or_default(),
             )),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderTip => Ok(ReadResponse::HeaderTip(state.db.header_chain_tip())),
+
+            // Used by headers-first sync.
+            ReadRequest::HeaderLocator => Ok(ReadResponse::HeaderLocator(read::header_locator(
+                &state.db,
+                &state.network,
+            ))),
+
+            // Used by the syncer to download bodies for stored headers.
+            ReadRequest::HeaderChainHashes {
+                known_blocks,
+                limit,
+            } => Ok(ReadResponse::BlockHashes(read::header_chain_hashes(
+                &state.db,
+                &known_blocks,
+                limit,
+            ))),
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {
