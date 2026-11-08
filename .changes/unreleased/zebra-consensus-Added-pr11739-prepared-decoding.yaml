@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: Added
-body: Added `PreparedBlockCache` and `DecodedBlock` to reuse parsed proposal transactions during submission decoding and carry exact proposal identity into verification through `Request::CommitDecoded` without repeating body hashing ([#11739](https://github.com/ZcashFoundation/zebra/pull/11739), [#11790](https://github.com/ZcashFoundation/zebra/pull/11790)).
+body: Added `PreparedBlockCache` and `DecodedBlock` to reuse parsed proposal transactions during submission decoding and carry exact proposal identity into verification through `Request::CommitDecoded` without repeating body hashing ([#11739](https://github.com/ZcashFoundation/zebra/pull/11739), [#11790](https://github.com/ZcashFoundation/zebra/pull/11790)). Added `PreparedBlockCache::reuse` to match solved submissions against cached transactions before ordinary decoding ([#12380](https://github.com/ZcashFoundation/zebra/pull/12380)).
 time: 2026-11-05T06:33:37.478540461+01:00

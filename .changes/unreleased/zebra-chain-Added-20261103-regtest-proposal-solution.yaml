@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: 'Added `equihash::Solution::for_proposal_on`, which returns a null solution of the size that solved blocks on the given network carry, so Regtest block proposals are the same size as the blocks they become.'
+time: 2026-11-03T00:00:00Z

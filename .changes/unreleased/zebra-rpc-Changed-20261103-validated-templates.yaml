@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'The template updater serves the first transaction-bearing build for a tip immediately and stages later builds for the same tip until background proposal validation accepts them. Fallback templates built without a live updater are validated in the background. `validate_block_proposal` takes an admission semaphore, and proposal checks time out after 30 seconds.'
+time: 2026-11-03T00:00:00Z

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Cancel background block proposal validation when its parent is no longer the best chain tip.
+time: 2026-10-23T02:45:46.681244052+02:00

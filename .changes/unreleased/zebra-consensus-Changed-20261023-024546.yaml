@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Skip queued CPU verification after cancellation and prevent cancelled proposals from populating the prepared-block cache.
+time: 2026-10-23T02:45:46.685675227+02:00
