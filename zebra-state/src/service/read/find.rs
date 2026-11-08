@@ -315,22 +315,32 @@ pub fn header_locator(db: &ZebraDb, network: &Network) -> Vec<(block::Height, bl
 /// Returns up to `limit` header chain hashes in `db`, in height order, above
 /// the first hash in `known_blocks` that is on the header chain.
 ///
+/// The hashes are one chain that links to that hash: the read stops at the
+/// first header that doesn't link to the one below it, which a concurrent
+/// header or block write can leave for a moment.
+///
 /// Returns an empty list if no hash in `known_blocks` is on the header chain.
 pub fn header_chain_hashes(
     db: &ZebraDb,
     known_blocks: &[block::Hash],
     limit: u32,
 ) -> Vec<block::Hash> {
-    let Some(intersection) = known_blocks
+    let Some((intersection, mut previous)) = known_blocks
         .iter()
-        .find_map(|hash| db.header_chain_height(*hash))
+        .find_map(|hash| Some((db.header_chain_height(*hash)?, *hash)))
     else {
         return Vec::new();
     };
 
     (1..=limit)
         .map_while(|offset| intersection.0.checked_add(offset).map(block::Height))
-        .map_while(|height| db.header_chain_hash(height))
+        .map_while(|height| {
+            let header = db.any_header(height)?;
+            (header.previous_block_hash == previous).then(|| {
+                previous = header.hash();
+                previous
+            })
+        })
         .collect()
 }
 
