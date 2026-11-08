@@ -1,3 +1,6 @@
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 //! Block-local completion of crypto queueing, independent of verification results.
 //!
 //! Unlike a yielded notifier, these guards wait for actual queue admission, including cache
@@ -17,6 +20,7 @@ pub(crate) mod tests;
 
 type Pending = Arc<Mutex<Progress>>;
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 static BLOCKS: LazyLock<Mutex<HashMap<usize, Pending>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -40,6 +44,7 @@ struct Progress {
     queued: u8,
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 /// Registration held until the block's transaction futures have been drained or cancelled.
 #[derive(Debug)]
 pub(crate) struct BlockFlush {
@@ -47,6 +52,7 @@ pub(crate) struct BlockFlush {
 }
 
 impl BlockFlush {
+    // Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
     /// Registers only blocks containing shielded data, using their existing shared allocation.
     ///
     /// Count transactions before dispatch: a Tower buffer may delay their service calls. Each
@@ -64,12 +70,14 @@ impl BlockFlush {
     }
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 impl Drop for BlockFlush {
     fn drop(&mut self) {
         BLOCKS.lock().remove(&self.key);
     }
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 fn key<T>(context: &Arc<T>) -> usize {
     // The allocation address is an opaque identity, never dereferenced or used for arithmetic.
     Arc::as_ptr(context) as usize
@@ -144,18 +152,22 @@ impl Drop for Queueing {
     }
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 fn flush_ed25519() -> Result<bool, crate::BoxError> {
     ed25519::VERIFIER.primary().clone().try_flush()
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 fn flush_halo2_pre_nu6_2() -> Result<bool, crate::BoxError> {
     halo2::VERIFIER_PRE_NU6_2.primary().clone().try_flush()
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 fn flush_halo2_nu6_2() -> Result<bool, crate::BoxError> {
     halo2::VERIFIER_NU6_2.primary().clone().try_flush()
 }
 
+// Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
 fn flush_halo2_nu6_3() -> Result<bool, crate::BoxError> {
     halo2::VERIFIER_NU6_3_ONWARD.primary().clone().try_flush()
 }
