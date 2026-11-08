@@ -569,6 +569,10 @@ impl ZebraDb {
             })
             .collect();
 
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
         // Read spent UTXOs before deleting any, including outputs created in this block.
         let outpoints: Vec<_> = finalized
             .block
@@ -624,6 +628,8 @@ impl ZebraDb {
 
         // Get the current address balances, before the transactions in this block
 
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
         fn read_addr_locs<T: Send, F: Fn(&transparent::Address) -> Option<T> + Sync>(
             changed_addresses: HashSet<transparent::Address>,
             f: F,
@@ -698,6 +704,8 @@ impl ZebraDb {
     }
 }
 
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
 /// Resolve a spent output from disk or from an earlier transaction in this block.
 fn read_spent_utxo(
     db: &ZebraDb,
@@ -853,6 +861,8 @@ impl DiskWriteBatch {
         self.zs_insert(&hash_by_height, height, hash);
         self.zs_insert(&height_by_hash, hash, height);
 
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
         // Indexed parallel collection preserves transaction order for the batch inserts.
         let raw_transactions: Option<Vec<_>> =
             (block.transactions.len() >= super::PARALLEL_BLOCK_TX_THRESHOLD).then(|| {
@@ -874,6 +884,8 @@ impl DiskWriteBatch {
         {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
             // Commit each transaction's data
             if let Some(raw_transactions) = &raw_transactions {
                 self.zs_insert(

@@ -290,6 +290,10 @@ pub struct SemanticallyVerifiedBlock {
     pub received_time: Option<Instant>,
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
 /// A block ready to be committed directly to the finalized state with
 /// a small number of checks if compared with a `ContextuallyVerifiedBlock`.
 ///
@@ -724,12 +728,16 @@ impl CheckpointVerifiedBlock {
         Self::from(SemanticallyVerifiedBlock::with_hash(block, hash))
     }
 
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
     /// Computes and caches the authorizing-data root from this immutable block body.
     pub fn with_precomputed_auth_data_root(mut self) -> Self {
         self.auth_data_root = Some(self.block.auth_data_root());
         self
     }
 
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
     /// Returns the cached root, if it was computed before the block reached the writer.
     pub(crate) fn precomputed_auth_data_root(&self) -> Option<AuthDataRoot> {
         self.auth_data_root
@@ -762,6 +770,8 @@ impl From<Arc<Block>> for CheckpointVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
 impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
     fn from(verified: SemanticallyVerifiedBlock) -> Self {
         Self {

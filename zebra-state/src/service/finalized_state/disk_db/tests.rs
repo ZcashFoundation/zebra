@@ -26,6 +26,9 @@ impl DiskDb {
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
 #[test]
 fn cached_disk_size_is_initialized_shared_and_refreshed() {
     use semver::Version;

@@ -1434,6 +1434,12 @@ where
         let network = self.network.clone();
         let reset_sender = self.reset_sender.clone();
         drop(tokio::spawn(async move {
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or
+            // the Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/3482b607a4008da9d2a6833243959d88f28a0659).
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
             let verified = if NetworkUpgrade::current(&network, verified.block.height)
                 >= NetworkUpgrade::Nu5
             {

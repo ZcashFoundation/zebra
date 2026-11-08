@@ -205,6 +205,12 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
                     "the history tree of the previous block must exist \
                  since the current block has a ChainHistoryBlockTxAuthCommitment",
                 );
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or
+            // the Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/3482b607a4008da9d2a6833243959d88f28a0659).
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
             let auth_data_root =
                 precomputed_auth_data_root.unwrap_or_else(|| block.auth_data_root());
 

@@ -100,6 +100,9 @@ pub struct DiskDb {
     //
     // Everything contained in this state must be shared by all clones, or read-only.
     //
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
     /// Database startup and each complete metrics export update this cached disk size.
     cached_size: Arc<AtomicU64>,
 
@@ -656,6 +659,7 @@ impl DiskDb {
         let mut total_disk: u64 = 0;
         let mut total_live: u64 = 0;
         let mut total_mem: u64 = 0;
+        // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
         let mut measured_column_family = false;
         let mut complete_disk_measurement = true;
 
@@ -731,6 +735,7 @@ impl DiskDb {
         self.measure_size().0
     }
 
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
     /// Returns the latest disk space estimate, measuring read-only secondaries on demand.
     ///
     /// Secondary services have no periodic metrics task to refresh the startup estimate.
@@ -742,6 +747,7 @@ impl DiskDb {
         }
     }
 
+    // Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
     /// Measures disk usage and reports whether every column family's property was available.
     fn measure_size(&self) -> (u64, bool) {
         let db: &Arc<DB> = &self.db;
@@ -991,6 +997,8 @@ impl DiskDb {
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
     const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
 
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/e2248cd8c58339800ac5928192fa4bafd0d97f22).
     /// The total WAL size that triggers flushing column families pinning the oldest logs.
     ///
     /// This limits restart recovery work during heavy sync without disabling WAL durability.
@@ -1379,6 +1387,8 @@ impl DiskDb {
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
 
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/e2248cd8c58339800ac5928192fa4bafd0d97f22).
         // Flush older WALs during heavy sync to reduce restart replay work.
         opts.set_max_total_wal_size(Self::MAX_TOTAL_WAL_SIZE_BYTES);
 
