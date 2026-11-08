@@ -578,3 +578,40 @@ async fn a_fork_below_the_locator_with_a_long_shared_prefix_replaces_the_headers
         Some((Height(1450), fork[1450].hash()))
     );
 }
+
+/// A silent peer fails inside the peer set, where it counts toward the stall
+/// threshold, before header sync gives up on the request.
+#[tokio::test(start_paused = true)]
+async fn a_silent_peer_times_out_inside_the_peer_set() {
+    let _init_guard = zebra_test::init();
+
+    let stalls = Arc::new(AtomicUsize::new(0));
+    let peers: Peers = {
+        let stalls = stalls.clone();
+        tower::util::BoxCloneService::new(service_fn(move |_request: zn::Request| {
+            let stalls = stalls.clone();
+            async move {
+                // The peer set's wait for a busy serving peer, then the
+                // connection's own response timer once the request is sent.
+                tokio::time::sleep(zn::constants::FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT).await;
+                tokio::time::sleep(zn::constants::REQUEST_TIMEOUT).await;
+                // The peer set records the stall when the routed future finishes.
+                stalls.fetch_add(1, Ordering::SeqCst);
+                Err::<zn::Response, BoxError>("connection receive timeout".into())
+            }
+        }))
+    };
+
+    let error = super::request_headers(peers, vec![regtest_genesis_block().hash()], None)
+        .await
+        .expect_err("the peer is silent");
+    assert_eq!(
+        stalls.load(Ordering::SeqCst),
+        1,
+        "the peer's own timeout must finish first: {error}"
+    );
+    assert!(
+        error.to_string().contains("connection receive timeout"),
+        "{error}"
+    );
+}

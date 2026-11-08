@@ -97,7 +97,19 @@ pub const MAX_FORK_REQUESTS: usize = 32;
 pub const MAX_SPAN_ATTEMPTS: usize = 3;
 
 /// How long a peer has to answer a header request.
-pub const HEADERS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(20);
+///
+/// Longer than the connection's own response timeout plus the peer set's wait
+/// for a busy serving peer, so a silent peer fails inside the peer set, where
+/// it counts toward the peer's stall threshold, before header sync gives up
+/// on the request and drops it. A dropped request doesn't count as a stall.
+pub const HEADERS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(26);
+
+const _: () = assert!(
+    HEADERS_RESPONSE_TIMEOUT.as_millis()
+        > zn::constants::REQUEST_TIMEOUT.as_millis()
+            + zn::constants::FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT.as_millis(),
+    "a silent peer must time out inside the peer set first"
+);
 
 /// How long a state request can take.
 pub const HEADER_STATE_TIMEOUT: Duration = Duration::from_secs(60);
