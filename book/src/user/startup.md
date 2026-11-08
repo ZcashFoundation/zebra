@@ -200,7 +200,10 @@ and the checkpoint at its height:
   checkpoints, up to `header_sync_concurrency` spans at a time, and stores a
   span only once it ends exactly at its checkpoint.
 - Above the final checkpoint, it extends the header chain from a locator, one
-  response at a time, and then polls peers for new headers.
+  response at a time, and then polls peers for new headers. It stores at most
+  500 headers above the higher of the final checkpoint and the height 1,000
+  blocks above the finalized tip, so a fork with more work always fits in one
+  batch of headers. The header chain moves up as blocks are finalized.
 
 The syncer then requests block bodies only for stored headers, instead of
 asking peers for block hashes, so it never downloads a block whose header
