@@ -110,6 +110,9 @@ fn mining_template_changed(
     })
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1094 (https://github.com/zakura-core/zakura/pull/1094).
 /// Waits for new work or channel closure, with periodic shutdown checks.
 async fn wait_for_mining_template_change(receiver: &mut WatchReceiver<Option<Arc<Block>>>) {
     let _ = timeout(BLOCK_TEMPLATE_WAIT_TIME, receiver.changed()).await;
@@ -526,6 +529,8 @@ where
 
             // Skip the wait if we didn't get a template because we are shutting down.
             if !is_shutting_down() {
+                // Adapted from zakura-core/zakura#1094
+                // (https://github.com/zakura-core/zakura/pull/1094).
                 wait_for_mining_template_change(&mut template_receiver).await;
             }
 
