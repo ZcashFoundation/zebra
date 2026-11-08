@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt};
+use std::{collections::HashSet, fmt, sync::Arc};
 
 use zebra_chain::{
     block,
@@ -6,7 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::PeerSocketAddr;
+use crate::{ConnectionInfo, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -80,7 +80,10 @@ pub enum Request {
     /// The peer's response timeout starts only when the request is dispatched.
     ///
     /// A known advertiser is preferred even if its advertisement was lost from the inventory
-    /// registry. Missing-inventory reports, prior failures, and connection eligibility still apply.
+    /// registry, but only while its shared [`ConnectionInfo`] still identifies the current connection.
+    /// A busy current advertiser is awaited for up to one second before trying unrelated peers.
+    /// This preference does not shorten connection readiness or the caller's operation deadline.
+    /// Missing-inventory reports, prior failures, and connection eligibility still apply.
     /// Without an eligible advertiser, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
@@ -93,8 +96,9 @@ pub enum Request {
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
-        /// A connected peer known to have advertised this block, if any.
-        advertiser: Option<PeerSocketAddr>,
+        /// Shared metadata identifying the connection that advertised this block, if any.
+        #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        advertiser: Option<Arc<ConnectionInfo>>,
     },
 
     /// Request transactions by their unmined transaction ID.
@@ -219,17 +223,21 @@ pub enum Request {
     /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
     /// includes configured sidecars independently of ordinary request readiness.
     ///
-    /// The second field is the address of the peer that sent us this `inv`:
-    /// `Some(addr)` when the advertisement was relayed from a remote peer,
-    /// and `None` when Zebra originates the advertisement itself (for
-    /// example from the sync gossip task). Consumers use the address to
-    /// apply per-peer policies such as the inbound download per-IP cap.
+    /// The second field retains the shared metadata of the connection that sent us this `inv`:
+    /// `Some(info)` when the advertisement was relayed from a remote peer with a known address,
+    /// and `None` when Zebra originates the advertisement itself (for example from the sync gossip
+    /// task). Consumers use its transient address for per-peer policies, and its shared allocation
+    /// to avoid assigning an old connection's advertisements to a same-address replacement.
     ///
     /// # Returns
     ///
     /// Outbound success acknowledges local writes to every selected peer, not remote receipt.
     /// Inbound handlers return [`Response::Nil`](super::Response::Nil) after accepting inventory.
-    AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
+    AdvertiseBlock(
+        block::Hash,
+        #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        Option<Arc<ConnectionInfo>>,
+    ),
 
     /// Advertise a block to every connected, non-banned peer.
     ///

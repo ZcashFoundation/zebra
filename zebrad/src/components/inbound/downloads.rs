@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -328,11 +329,17 @@ where
     /// When `advertiser` is `Some`, it is passed to the network as a known block source,
     /// and its IP is tracked in [`Self::in_flight_ips`] to enforce the one-download-per-IP cap.
     /// `None` bypasses per-IP accounting (for example when Zebra triggers the download internally).
-    #[instrument(skip(self, hash), fields(hash = %hash))]
+    #[instrument(
+        skip(self, hash, advertiser),
+        fields(
+            hash = %hash,
+            advertiser = ?advertiser.as_ref().and_then(|info| info.connected_addr.get_transient_addr()),
+        )
+    )]
     pub fn download_and_verify(
         &mut self,
         hash: block::Hash,
-        advertiser: Option<PeerSocketAddr>,
+        advertiser: Option<Arc<zn::ConnectionInfo>>,
     ) -> DownloadAction {
         if self.cancel_handles.contains_key(&hash) {
             debug!(
@@ -362,12 +369,15 @@ where
             return DownloadAction::FullQueue;
         }
 
-        let advertiser_ip = advertiser.map(|addr| addr.ip());
+        let advertiser_addr = advertiser
+            .as_ref()
+            .and_then(|info| info.connected_addr.get_transient_addr());
+        let advertiser_ip = advertiser_addr.map(|addr| addr.ip());
         if let Some(ip) = advertiser_ip {
             if self.in_flight_ips.contains(&ip) {
                 debug!(
                     ?hash,
-                    ?advertiser,
+                    ?advertiser_addr,
                     "already have an in-flight inbound download from peer IP: ignored block",
                 );
 

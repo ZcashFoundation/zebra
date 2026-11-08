@@ -1492,11 +1492,12 @@ async fn advertise_and_serve_block(
     serving_peer: PeerSocketAddr,
 ) -> Result<(), BoxError> {
     let hash = block.hash();
+    let advertiser = zebra_network::test_support::connection_info(advertiser);
 
     let response = inbound
         .ready()
         .await?
-        .call(Request::AdvertiseBlock(hash, Some(advertiser)))
+        .call(Request::AdvertiseBlock(hash, Some(advertiser.clone())))
         .await?;
     assert_eq!(
         response,

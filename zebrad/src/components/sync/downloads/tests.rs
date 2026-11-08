@@ -243,6 +243,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         })
         .await;
     let attacker_h: PeerSocketAddr = "192.168.180.28:10000".parse().unwrap();
+    let attacker_h_info = zn::test_support::connection_info(attacker_h);
     sync_request.respond(zn::Response::Blocks(vec![Available((
         honest.clone(),
         Some(attacker_h),
@@ -257,14 +258,17 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
         inbound
             .ready()
             .await?
-            .call(zn::Request::AdvertiseBlock(honest.hash(), Some(attacker_h),))
+            .call(zn::Request::AdvertiseBlock(
+                honest.hash(),
+                Some(attacker_h_info.clone()),
+            ))
             .await?,
         zn::Response::Nil
     );
     peer_set_handle
         .expect_request(zn::Request::BlockDownload {
             hash: honest.hash(),
-            advertiser: Some(attacker_h),
+            advertiser: Some(attacker_h_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
@@ -276,18 +280,22 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     // A different attacker IP provides the withheld range-completing body immediately after the
     // twin is queued, satisfying the inbound one-download-per-IP cap.
     let attacker_b: PeerSocketAddr = "192.168.180.29:10001".parse().unwrap();
+    let attacker_b_info = zn::test_support::connection_info(attacker_b);
     assert_eq!(
         inbound
             .ready()
             .await?
-            .call(zn::Request::AdvertiseBlock(child.hash(), Some(attacker_b),))
+            .call(zn::Request::AdvertiseBlock(
+                child.hash(),
+                Some(attacker_b_info.clone()),
+            ))
             .await?,
         zn::Response::Nil
     );
     peer_set_handle
         .expect_request(zn::Request::BlockDownload {
             hash: child.hash(),
-            advertiser: Some(attacker_b),
+            advertiser: Some(attacker_b_info),
         })
         .await
         .respond(zn::Response::Blocks(vec![Available((
