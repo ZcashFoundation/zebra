@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Compute transaction auth digests while checking a block's Merkle root, in parallel for larger blocks, instead of serially during transaction dispatch ([#12011](https://github.com/ZcashFoundation/zebra/issues/12011)).
+time: 2026-11-09T06:03:51.891942915+01:00
