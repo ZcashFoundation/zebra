@@ -336,6 +336,10 @@ impl FromHex for AuthDataRoot {
 /// <https://zips.z.cash/zip-0244#authorizing-data-commitment>
 pub const AUTH_DIGEST_PLACEHOLDER: transaction::AuthDigest = transaction::AuthDigest([0xFF; 32]);
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/f9ccea5f0d2c610ff44d3f3eaa6f8f7ca8b47279).
 /// Returns the transaction's auth digest, or the consensus placeholder for pre-v5 transactions.
 pub(crate) fn auth_digest_or_placeholder(tx: &Transaction) -> transaction::AuthDigest {
     tx.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER)
