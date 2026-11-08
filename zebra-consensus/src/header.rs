@@ -5,7 +5,8 @@
 //! - each header's difficulty threshold is at most the network's limit, and
 //!   its hash passes the difficulty filter,
 //! - each header's Equihash solution is valid,
-//! - no header's time is more than 2 hours in the future, and
+//! - no header's time is more than 2 hours in the future,
+//! - each header's commitment bytes are valid for its height, and
 //! - each header at a checkpoint height has the checkpoint's hash.
 //!
 //! The proof of work checks are skipped exactly where the block verifier skips
@@ -23,7 +24,7 @@ use rayon::prelude::*;
 use thiserror::Error;
 
 use zebra_chain::{
-    block::{self, BlockTimeError, Height},
+    block::{self, BlockTimeError, CommitmentError, Height},
     parameters::Network,
     work::equihash,
 };
@@ -74,6 +75,14 @@ pub enum HeaderError {
         hash: block::Hash,
         #[source]
         source: equihash::Error,
+    },
+
+    #[error("invalid commitment in header {height:?} {hash:?}")]
+    Commitment {
+        height: Height,
+        hash: block::Hash,
+        #[source]
+        source: CommitmentError,
     },
 
     #[error("invalid time in header {height:?}")]
@@ -142,13 +151,27 @@ pub fn verify_headers_blocking(
     let checkpoints = network.checkpoint_list();
     let skip_pow = network.disable_pow();
 
-    let hashes: Vec<block::Hash> = headers
+    // Check that the batch links together before checking any proof of work,
+    // so a batch that doesn't costs only its hashes.
+    let hashes: Vec<block::Hash> = headers.par_iter().map(|header| header.hash()).collect();
+    for (offset, (header, previous_hash)) in headers.iter().skip(1).zip(&hashes).enumerate() {
+        if header.previous_block_hash != *previous_hash {
+            // The offset is below `last_offset`, which fits in a u32.
+            let height = Height(first_height.0 + offset as u32 + 1);
+            return Err(HeaderError::NotContiguous {
+                height,
+                hash: hashes[offset + 1],
+            });
+        }
+    }
+
+    headers
         .par_iter()
+        .zip(hashes.par_iter())
         .enumerate()
-        .map(|(offset, header)| {
+        .try_for_each(|(offset, (header, &hash))| {
             // The offset is at most `last_offset`, which fits in a u32.
             let height = Height(first_height.0 + offset as u32);
-            let hash = header.hash();
 
             verify_header(network, header, height, hash, now, skip_pow)?;
 
@@ -162,20 +185,8 @@ pub fn verify_headers_blocking(
                 }
             }
 
-            Ok(hash)
-        })
-        .collect::<Result<_, _>>()?;
-
-    for (offset, (header, previous_hash)) in headers.iter().skip(1).zip(&hashes).enumerate() {
-        if header.previous_block_hash != *previous_hash {
-            // The offset is below `last_offset`, which fits in a u32.
-            let height = Height(first_height.0 + offset as u32 + 1);
-            return Err(HeaderError::NotContiguous {
-                height,
-                hash: hashes[offset + 1],
-            });
-        }
-    }
+            Ok(())
+        })?;
 
     Ok(hashes)
 }
@@ -207,6 +218,16 @@ fn verify_header(
             source,
         })?;
     }
+
+    // The block verifier checks the commitment on every network, so this
+    // doesn't depend on `skip_pow`.
+    header
+        .commitment(network, height)
+        .map_err(|source| HeaderError::Commitment {
+            height,
+            hash,
+            source,
+        })?;
 
     time_is_valid_at(header, now, &height, &hash)
         .map_err(|source| HeaderError::Time { height, source })

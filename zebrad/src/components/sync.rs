@@ -303,6 +303,11 @@ pub struct Config {
     /// peers with `get-headers`, so it works with either kind of peer. On by
     /// default.
     ///
+    /// Above the final checkpoint, the header chain runs at most
+    /// [`zebra_state::MAX_HEADER_LOOKAHEAD`] headers above the higher of the
+    /// final checkpoint and `MAX_BLOCK_REORG_HEIGHT` blocks above the
+    /// finalized tip.
+    ///
     /// With `false`, the syncer finds new blocks with `getblocks`, which only
     /// legacy peers answer, so it needs legacy peers: with only version 2 peers
     /// it stops following the chain.
@@ -729,6 +734,12 @@ where
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
 
+    /// The last hash [`ChainSync::request_blocks`] queued before it left the
+    /// rest of its hashes over, which is their parent. Headers-first sync
+    /// checks the leftover hashes against the header chain from it before
+    /// queueing them.
+    extra_hashes_parent: Option<block::Hash>,
+
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
 
@@ -925,6 +936,7 @@ where
             state,
             latest_chain_tip,
             prospective_tips: HashSet::new(),
+            extra_hashes_parent: None,
             recent_syncs,
             past_lookahead_limit_receiver,
             misbehavior_sender,
@@ -1317,6 +1329,15 @@ where
             self.update_metrics();
         }
 
+        // A header reorg can replace the header chain hashes left over from the
+        // last header chain read, so only keep the ones still on it.
+        if self.headers_first && !extra_hashes.is_empty() {
+            extra_hashes = self
+                .retain_header_chain_hashes(extra_hashes)
+                .await
+                .map_err(|e| Self::tips_restart_error(RestartReason::ExtendTipsError, e))?;
+        }
+
         // Once we're below the lookahead limit, we can request more blocks or hashes.
         if !extra_hashes.is_empty() {
             debug!(
@@ -1577,12 +1598,28 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         if self.headers_first {
+            let block_locator = match self
+                .state
+                .ready()
+                .await
+                .map_err(|e| eyre!(e))?
+                .call(zebra_state::Request::BlockLocator)
+                .await
+                .map_err(|e| eyre!(e))?
+            {
+                zebra_state::Response::BlockLocator(block_locator) => block_locator,
+                _ => unreachable!("BlockLocator request can only result in Response::BlockLocator"),
+            };
+
             let mut download_set = IndexSet::new();
             for tip in tips {
-                download_set.extend(
-                    self.header_chain_download_set(vec![tip.expected_next])
-                        .await?,
-                );
+                // A header reorg can replace `expected_next` on the header
+                // chain: then continue from the block chain's locator, on the
+                // header chain's new branch, instead of ending the round.
+                let known_blocks = std::iter::once(tip.expected_next)
+                    .chain(block_locator.iter().copied())
+                    .collect();
+                download_set.extend(self.header_chain_download_set(known_blocks).await?);
             }
 
             let new_downloads = download_set.len();
@@ -1793,6 +1830,51 @@ where
         Ok(unknown_hashes.iter().copied().collect())
     }
 
+    /// Returns the longest prefix of `hashes`, left over from the last header
+    /// chain read, that is still on the header chain above their parent.
+    ///
+    /// Returns no hashes if the parent isn't on the header chain any more.
+    /// Extending the tips then continues on the header chain's new branch.
+    async fn retain_header_chain_hashes(
+        &mut self,
+        mut hashes: IndexSet<block::Hash>,
+    ) -> Result<IndexSet<block::Hash>, Report> {
+        let Some(parent) = self.extra_hashes_parent else {
+            return Ok(hashes);
+        };
+
+        let on_chain = match self
+            .state
+            .ready()
+            .await
+            .map_err(|e| eyre!(e))?
+            .call(zebra_state::Request::HeaderChainHashes {
+                known_blocks: vec![parent],
+                limit: u32::try_from(hashes.len()).unwrap_or(u32::MAX),
+            })
+            .await
+            .map_err(|e| eyre!(e))?
+        {
+            zebra_state::Response::BlockHashes(hashes) => hashes,
+            _ => unreachable!("HeaderChainHashes request can only result in Response::BlockHashes"),
+        };
+
+        let still_on_chain = hashes
+            .iter()
+            .zip(&on_chain)
+            .take_while(|(hash, on_chain)| hash == on_chain)
+            .count();
+        if still_on_chain < hashes.len() {
+            debug!(
+                dropped = hashes.len() - still_on_chain,
+                "dropping block hashes that a header reorg replaced"
+            );
+            hashes.truncate(still_on_chain);
+        }
+
+        Ok(hashes)
+    }
+
     /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
     ///
@@ -1905,6 +1987,7 @@ where
         } else {
             IndexSet::new()
         };
+        self.extra_hashes_parent = hashes.last().copied().filter(|_| !extra_hashes.is_empty());
 
         // Dispatch blocks with duplicate-tolerant error handling.
         // DuplicateBlockQueuedForDownload is caught and skipped instead of
