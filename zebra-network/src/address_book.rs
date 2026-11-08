@@ -519,7 +519,7 @@ impl AddressBook {
     /// # Correctness
     ///
     /// Callers must call [`AddressBook::update_metrics`] once they have finished applying
-    /// changes, and only once: a refresh walks the address book several times, under the
+    /// changes, and only once: a refresh walks the address book under the
     /// mutex, so refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
     fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
@@ -881,30 +881,31 @@ impl AddressBook {
     /// in production code, to avoid deadlocks.
     /// (Using the watch channel receiver does not lock the address book mutex.)
     fn address_metrics_internal(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
-        let responded = self.state_peers(PeerAddrState::Responded).count();
-        let never_attempted_gossiped = self
-            .state_peers(PeerAddrState::NeverAttemptedGossiped)
-            .count();
-        let failed = self.state_peers(PeerAddrState::Failed).count();
-        let attempt_pending = self.state_peers(PeerAddrState::AttemptPending).count();
-
-        let recently_live = self.recently_live_peers(now).len();
-        let recently_stopped_responding = responded
-            .checked_sub(recently_live)
-            .expect("all recently live peers must have responded");
-
-        let num_addresses = self.len();
-
-        AddressMetrics {
-            responded,
-            never_attempted_gossiped,
-            failed,
-            attempt_pending,
-            recently_live,
-            recently_stopped_responding,
-            num_addresses,
+        let mut metrics = AddressMetrics {
+            num_addresses: self.len(),
             address_limit: self.addr_limit,
+            ..AddressMetrics::default()
+        };
+
+        // Counts need neither reconnection order nor owned peer metadata. Walk the address map
+        // once, without priority-index lookups, peer clones, or a temporary live-peer vector.
+        for peer in self.by_addr.values() {
+            match peer.last_connection_state {
+                PeerAddrState::Responded => {
+                    metrics.responded += 1;
+                    if peer.was_recently_live(now) {
+                        metrics.recently_live += 1;
+                    } else {
+                        metrics.recently_stopped_responding += 1;
+                    }
+                }
+                PeerAddrState::NeverAttemptedGossiped => metrics.never_attempted_gossiped += 1,
+                PeerAddrState::Failed => metrics.failed += 1,
+                PeerAddrState::AttemptPending => metrics.attempt_pending += 1,
+            }
         }
+
+        metrics
     }
 
     /// Update the metrics for this address book.

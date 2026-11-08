@@ -178,6 +178,48 @@ proptest! {
     }
 
     #[test]
+    fn metrics_match_peer_queries(
+        addresses in vec(any::<MetaAddr>(), 0..MAX_META_ADDR),
+    ) {
+        let book = AddressBook::new_with_addrs(
+            "0.0.0.0:0".parse().unwrap(),
+            &Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            MAX_ADDRS_IN_ADDRESS_BOOK,
+            Span::none(),
+            addresses,
+        );
+        // Recompute at different times: liveness must age even without address changes.
+        for now in [DateTime32::MIN, DateTime32::now(), DateTime32::MAX] {
+            let now = now.into();
+            let metrics = book.address_metrics(now);
+            prop_assert_eq!(
+                metrics.responded,
+                book.state_peers(crate::PeerAddrState::Responded).count(),
+            );
+            prop_assert_eq!(
+                metrics.never_attempted_gossiped,
+                book.state_peers(crate::PeerAddrState::NeverAttemptedGossiped).count(),
+            );
+            prop_assert_eq!(
+                metrics.failed,
+                book.state_peers(crate::PeerAddrState::Failed).count(),
+            );
+            prop_assert_eq!(
+                metrics.attempt_pending,
+                book.state_peers(crate::PeerAddrState::AttemptPending).count(),
+            );
+            prop_assert_eq!(metrics.recently_live, book.recently_live_peers(now).len());
+            prop_assert_eq!(
+                metrics.recently_stopped_responding,
+                metrics.responded - metrics.recently_live,
+            );
+            prop_assert_eq!(metrics.num_addresses, book.len());
+            prop_assert_eq!(metrics.address_limit, MAX_ADDRS_IN_ADDRESS_BOOK);
+        }
+    }
+
+    #[test]
     fn priority_key_matches_meta_addr_order(
         mut left in any::<MetaAddr>(),
         mut right in any::<MetaAddr>(),
