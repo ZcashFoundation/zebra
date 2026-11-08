@@ -27,17 +27,30 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
-use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
+use zebra_chain::{
+    block::{self, Height},
+    parameters::Network,
+    primitives::byte_array::increment_big_endian,
+};
 
 use crate::{
     database_format_version_on_disk,
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    write_database_format_version_to_disk, Config, StateInitError,
+    service::finalized_state::disk_format::{
+        block::TRANSACTION_LOCATION_DISK_BYTES, chain::SNAPSHOT_BASE_DISK_BYTES,
+        upgrade::restorable_db_source_versions, FromDisk, IntoDisk, TransactionIndex,
+        TransactionLocation, MAX_ON_DISK_HEIGHT,
+    },
+    write_database_format_version_to_disk, BoxError, Config, HistoryCapabilities, SnapshotBase,
+    StateInitError,
 };
 
-use super::zebra_db::transparent::{
-    fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
-    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+use super::zebra_db::{
+    chain::SNAPSHOT_BASE,
+    header_chain::HEADER_BY_HEIGHT,
+    transparent::{
+        fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+    },
 };
 // Doc-only imports
 #[allow(unused_imports)]
@@ -998,7 +1011,7 @@ impl DiskDb {
 
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
-    fn construct_column_families(
+    pub(crate) fn construct_column_families(
         db_options: Options,
         path: &Path,
         column_families_in_code: impl IntoIterator<Item = String>,
@@ -1038,6 +1051,7 @@ impl DiskDb {
     /// # Errors
     ///
     /// - In read-only mode, if the cache directory is missing or unreadable.
+    /// - If pruning retention is invalid or an archive writer opens pruned history.
     ///
     /// # Panics
     ///
@@ -1051,6 +1065,8 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<DiskDb, StateInitError> {
+        config.validate_pruning(network)?;
+
         // `ephemeral` and `read_only` describe mutually-exclusive modes: an ephemeral
         // database is a read-write primary this process owns and deletes on drop, while
         // a read-only secondary follows another process's primary and must never delete
@@ -1081,6 +1097,28 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
+        let mut column_families_in_code: Vec<String> =
+            column_families_in_code.into_iter().collect();
+        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        if read_only && !column_families_on_disk.is_empty() {
+            // A secondary instance can not create column families, and RocksDB refuses to open
+            // one with a column family that is not on disk. A database without one of the
+            // column families in code needs a writable start to add it, except `snapshot_base`:
+            // its reader treats a missing column family as an unmarked database, which every
+            // database from before 31.1.0 is.
+            if let Some(missing) = column_families_in_code
+                .iter()
+                .find(|cf| !column_families_on_disk.contains(cf) && cf.as_str() != SNAPSHOT_BASE)
+            {
+                info!(
+                    ?missing,
+                    path = %path.display(),
+                    "the read-only state is missing a column family"
+                );
+                return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade { path });
+            }
+            column_families_in_code.retain(|cf| column_families_on_disk.contains(cf));
+        }
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
@@ -1120,6 +1158,53 @@ impl DiskDb {
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
 
+                // Guard the lowest writable entry point before launching migrations or checks.
+                let history = db.history_capabilities()?;
+                if let Some(base) = history
+                    .snapshot_base
+                    .filter(|_| !read_only && config.prune_blocks_older_than.is_none())
+                {
+                    // A snapshot-imported database never has the history below its window, so
+                    // it can only run as a pruned node (DESIGN §7).
+                    return Err(StateInitError::SnapshotDatabase {
+                        path,
+                        height: base.height,
+                        window_start: base.window_start,
+                    });
+                }
+                if !read_only && config.prune_blocks_older_than.is_none() && history.is_pruned() {
+                    return Err(StateInitError::PrunedDatabase {
+                        path,
+                        lowest_retained_height: history.lowest_retained_height,
+                    });
+                }
+                if !read_only && history.is_pruned() {
+                    // Hold the writer lock while checking, before any caller can commit a block.
+                    let invalid_version = |source| StateInitError::HistoryRead {
+                        path: path.clone(),
+                        source,
+                    };
+                    let disk_version = database_format_version_on_disk(
+                        config,
+                        db_kind,
+                        format_version_in_code.major,
+                        network,
+                    )
+                    .map_err(invalid_version)?
+                    .ok_or_else(|| {
+                        invalid_version("pruned state requires a stored format version".into())
+                    })?;
+                    let disk_indexer = disk_version.build.contains("indexer");
+                    let running_indexer = cfg!(feature = "indexer");
+                    if disk_indexer != running_indexer {
+                        return Err(StateInitError::PrunedIndexModeMismatch {
+                            path,
+                            disk_indexer,
+                            running_indexer,
+                        });
+                    }
+                }
+
                 db.assert_default_cf_is_empty();
                 let (size, complete) = db.measure_size();
                 if complete {
@@ -1143,6 +1228,23 @@ impl DiskDb {
     }
 
     // Accessor methods
+
+    /// Returns true for a secondary instance following a primary database.
+    pub(super) fn is_read_only(&self) -> bool {
+        self.mode.is_read_only()
+    }
+
+    /// Returns an iterator borrowing raw keys and values without serialized copies.
+    pub(super) fn raw_iterator_cf_opt<C>(
+        &self,
+        cf: &C,
+        options: ReadOptions,
+    ) -> rocksdb::DBRawIteratorWithThreadMode<'_, DB>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+    {
+        self.db.raw_iterator_cf_opt(cf, options)
+    }
 
     /// Returns the configured database kind for this database.
     pub fn db_kind(&self) -> String {
@@ -1175,6 +1277,138 @@ impl DiskDb {
         &self.db
     }
 
+    /// Derives the retained suffix from body rows, anchored by the permanent height-one index.
+    ///
+    /// A database imported from a state snapshot has no blocks below its window start, and no
+    /// bodies below the snapshot height, so its [`SnapshotBase`] marker anchors the suffix
+    /// instead: the database counts as pruned, its known heights start at the window start, and
+    /// its bodies start at the snapshot height or the first retained body above it. The marker must
+    /// agree with the stored hash at its height.
+    pub(crate) fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
+        let invalid = |source: BoxError| StateInitError::HistoryRead {
+            path: self.path().to_path_buf(),
+            source,
+        };
+        let snapshot_base = self.snapshot_base().map_err(invalid)?;
+        let Some(index) = self.cf_handle("hash_by_tx_loc") else {
+            return Ok(HistoryCapabilities::default());
+        };
+        let first = TransactionLocation::min_for_height(Height(1)).as_bytes();
+        if snapshot_base.is_none()
+            && self
+                .db
+                .get_pinned_cf(&index, first)
+                .map_err(|error| invalid(error.into()))?
+                .is_none()
+        {
+            return Ok(HistoryCapabilities::default());
+        }
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .ok_or_else(|| invalid("indexed blocks have no transaction column family".into()))?;
+        let mut bodies = self.db.raw_iterator_cf(&transactions);
+        bodies.seek(first);
+        bodies.status().map_err(|error| invalid(error.into()))?;
+        let location = bodies
+            .key()
+            .filter(|key| key.len() == TRANSACTION_LOCATION_DISK_BYTES)
+            .map(TransactionLocation::from_bytes)
+            .ok_or_else(|| invalid("indexed blocks have no valid retained body suffix".into()))?;
+        if location.index != TransactionIndex::MIN {
+            return Err(invalid(
+                "the first retained body is missing its coinbase".into(),
+            ));
+        }
+        if let Some(base) = snapshot_base {
+            return Ok(HistoryCapabilities {
+                lowest_retained_height: location.height.max(base.body_start()),
+                lowest_known_height: base.window_start,
+                lowest_header_height: self
+                    .lowest_header_height(&base)
+                    .map_err(|error| invalid(error.into()))?,
+                snapshot_base: Some(base),
+            });
+        }
+        Ok(HistoryCapabilities {
+            lowest_retained_height: if location.height == Height(1) {
+                Height::MIN
+            } else {
+                location.height
+            },
+            lowest_known_height: Height::MIN,
+            lowest_header_height: Height::MIN,
+            snapshot_base: None,
+        })
+    }
+
+    /// Returns the first non-genesis height whose header a database imported from the snapshot
+    /// `base` holds: zero when the header chain has a row at height one and just below the
+    /// window, and the window start otherwise.
+    ///
+    /// The headers below the window are carried into the database whole, at import, and never
+    /// deleted, so their first and last rows show that they are all there.
+    fn lowest_header_height(&self, base: &SnapshotBase) -> Result<Height, rocksdb::Error> {
+        let Some(below_window) = base.window_start.previous().ok().filter(|h| !h.is_min()) else {
+            return Ok(Height::MIN);
+        };
+        let Some(headers) = self.cf_handle(HEADER_BY_HEIGHT) else {
+            return Ok(base.window_start);
+        };
+        for height in [Height(1), below_window] {
+            if self
+                .db
+                .get_pinned_cf(&headers, height.as_bytes())?
+                .is_none()
+            {
+                return Ok(base.window_start);
+            }
+        }
+
+        Ok(Height::MIN)
+    }
+
+    /// Reads the `snapshot_base` marker of a database imported from a state snapshot, checking
+    /// that its heights are ordered and that the stored hash at the snapshot height is its hash.
+    fn snapshot_base(&self) -> Result<Option<SnapshotBase>, BoxError> {
+        let Some(marker) = self.cf_handle(SNAPSHOT_BASE) else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.db.get_pinned_cf(&marker, ().as_bytes())? else {
+            return Ok(None);
+        };
+        if bytes.len() != SNAPSHOT_BASE_DISK_BYTES {
+            return Err("the snapshot base marker has an invalid length".into());
+        }
+        let base = SnapshotBase::from_bytes(bytes);
+        if base.window_start == Height::MIN
+            || base.window_start > base.height
+            || base.height > MAX_ON_DISK_HEIGHT
+        {
+            return Err(format!(
+                "the snapshot base marker has invalid heights: window start {:?}, height {:?}",
+                base.window_start, base.height
+            )
+            .into());
+        }
+        let hashes = self
+            .cf_handle("hash_by_height")
+            .ok_or("snapshot databases have a block hash column family")?;
+        let stored = self
+            .db
+            .get_pinned_cf(&hashes, base.height.as_bytes())?
+            .filter(|hash| hash.len() == 32)
+            .map(|hash| block::Hash::from_bytes(&hash[..]));
+        if stored != Some(base.block_hash) {
+            return Err(format!(
+                "the snapshot base marker's block hash {:?} does not match the stored hash {:?} \
+                 at height {:?}",
+                base.block_hash, stored, base.height
+            )
+            .into());
+        }
+        Ok(Some(base))
+    }
+
     /// Returns the column family handle for `cf_name`.
     pub fn cf_handle(&self, cf_name: &str) -> Option<rocksdb::ColumnFamilyRef<'_>> {
         // Note: the lifetime returned by this method is subtly wrong. As of December 2023 it is
@@ -1194,16 +1428,57 @@ impl DiskDb {
         self.db.write(batch.batch)
     }
 
+    /// Compacts transaction bodies in `heights`, where the pruning worker deleted them.
+    ///
+    /// A range starting at genesis starts at the beginning of the column family. Runs on the
+    /// pruning worker, without taking the state writer's locks or stalling writes for a flush.
+    pub(crate) fn compact_pruned_bodies(&self, heights: std::ops::Range<Height>) {
+        let transactions = self
+            .cf_handle("tx_by_loc")
+            .expect("transaction column family was created when opening state");
+        let mut options = rocksdb::CompactOptions::default();
+        options.set_exclusive_manual_compaction(false);
+        options.set_bottommost_level_compaction(rocksdb::BottommostLevelCompaction::ForceOptimized);
+        let start = (heights.start > Height::MIN)
+            .then(|| TransactionLocation::min_for_height(heights.start).as_bytes());
+        self.db.compact_range_cf_opt(
+            &transactions,
+            start,
+            Some(TransactionLocation::min_for_height(heights.end).as_bytes()),
+            &options,
+        );
+    }
+
+    /// Returns the newest source major version that a database at `running_major` can reuse,
+    /// whose directory holds a database: an existing directory without column families, such as
+    /// an empty one, is skipped, and older sources are tried.
+    pub(crate) fn newest_reusable_source(
+        config: &Config,
+        db_kind: &str,
+        network: &Network,
+        running_major: u64,
+    ) -> Option<u64> {
+        let opts = DiskDb::options();
+        restorable_db_source_versions(running_major)
+            .into_iter()
+            .find(|major| {
+                DB::list_cf(&opts, config.db_path(db_kind, *major, network))
+                    .is_ok_and(|cf| !cf.is_empty())
+            })
+    }
+
     // Private methods
 
     /// Tries to reuse an existing db after a major upgrade.
     ///
     /// If the current db version belongs to `restorable_db_versions`, the function renames the
-    /// immediately preceding major version's directory to the path used by the current version.
+    /// newest existing earlier registered major version's directory to the current version's path.
     /// It rewrites the version file with the old major version so the required upgrades can run.
     ///
-    /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
-    // TODO: Update this function to rename older major db format version to the current version (#9565).
+    /// In `read_only` mode, returns the candidate's stored version without modifying either path.
+    /// The caller must check that its records and directory version permit read-only reuse.
+    ///
+    /// Returns the old disk version if a candidate was found or moved, or `None` otherwise.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],
@@ -1211,6 +1486,7 @@ impl DiskDb {
         config: &Config,
         db_kind: impl AsRef<str>,
         network: &Network,
+        read_only: bool,
     ) -> Option<Version> {
         if let Some(&major_db_ver) = restorable_db_versions
             .iter()
@@ -1218,7 +1494,8 @@ impl DiskDb {
         {
             let db_kind = db_kind.as_ref();
 
-            let old_major_db_ver = major_db_ver - 1;
+            let old_major_db_ver =
+                Self::newest_reusable_source(config, db_kind, network, major_db_ver)?;
             let old_path = config.db_path(db_kind, old_major_db_ver, network);
             // Exit early if the path doesn't exist or there's an error checking it.
             if !fs::exists(&old_path).unwrap_or(false) {
@@ -1262,6 +1539,16 @@ impl DiskDb {
             let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
 
             if old_db_exists && !new_db_exists {
+                if read_only {
+                    return database_format_version_on_disk(
+                        config,
+                        db_kind,
+                        old_major_db_ver,
+                        network,
+                    )
+                    .expect("unable to read database format version file");
+                }
+
                 // Create the parent directory for the new db. This is because we can't directly
                 // rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with `fs::rename()` if
                 // `state/v26/` does not exist.
@@ -1336,7 +1623,7 @@ impl DiskDb {
     }
 
     /// Returns the database options for the finalized state database.
-    fn options() -> rocksdb::Options {
+    pub(crate) fn options() -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 

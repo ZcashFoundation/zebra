@@ -153,8 +153,7 @@ fn ephemeral_database_reads_back_its_format_version() {
     db.shutdown(true);
 }
 
-/// A v29 cache with legacy (v28-width) pool records is reused without rewriting them, then
-/// accepts new blocks in the current format.
+/// A v29 cache is reused without rewriting legacy pool records, then accepts new blocks.
 #[tokio::test]
 async fn v29_cache_is_reused_with_legacy_value_pools() {
     use std::{sync::Arc, time::Duration};
@@ -212,8 +211,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         .unwrap();
     state.db.mark_finished_format_upgrades();
 
-    // Commit real blocks to a persistent v29 database, then encode its pool records at the
-    // backwards-compatible v28 widths.
+    // Commit real blocks to a v29 database, retaining its backwards-compatible v28 pool records.
     let legacy_block_info = |info: &BlockInfo| {
         let mut bytes = [0; 52];
         bytes[..48].copy_from_slice(&info.value_pools().to_bytes()[..48]);
@@ -230,7 +228,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
             .commit_finalized_direct(
                 CheckpointVerifiedBlock::from(block).into(),
                 None,
-                "v29 cache reuse test",
+                "archive cache reuse test",
             )
             .unwrap();
         let info = state.db.block_info(height.into()).unwrap();
@@ -253,6 +251,23 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         )
         .unwrap();
     assert!(!expected_pools.transparent_amount().is_zero());
+
+    let mut batch = crate::DiskWriteBatch::new();
+    let error = batch
+        .prepare_history_pruning(
+            &state.db,
+            Height(2),
+            state.db.history_capabilities().unwrap(),
+            state.db.ready_for_pruning(),
+            state.db.finalized_tip_height(),
+            &mut Default::default(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "body deletion requires database format v31 or newer"
+    );
+    assert_eq!(batch, crate::DiskWriteBatch::new());
     drop(state);
 
     // Startup cleanup must not remove the cache before the upgrader has a chance to reuse it.
@@ -294,6 +309,10 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         !old_path.exists(),
         "reuse moves rather than backs up the cache"
     );
+    assert!(
+        !state.db.history_capabilities().unwrap().is_pruned(),
+        "the move keeps every body, so a never-pruned archive can be renamed back to v29",
+    );
     assert_eq!(state.db.finalized_tip_height(), Some(Height(1)));
     assert_eq!(state.db.finalized_tip_hash(), expected_tip_hash);
     assert_eq!(state.db.finalized_value_pool(), expected_pools);
@@ -325,7 +344,7 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         .commit_finalized_direct(
             CheckpointVerifiedBlock::from(next_block).into(),
             None,
-            "current format cache reuse test",
+            "upgraded archive cache reuse test",
         )
         .unwrap();
     assert_eq!(state.db.finalized_tip_hash(), next_hash);
@@ -337,6 +356,35 @@ async fn v29_cache_is_reused_with_legacy_value_pools() {
         let cf = state.db.cf_handle(column).unwrap();
         let raw = state.db.get_pinned_cf(&cf, key).unwrap().unwrap();
         assert_eq!(raw.len(), width);
+    }
+
+    // Rolling a never-pruned archive back to Zebra 7.0.0 renames the current directory to v29.
+    // The v29 reader must see every block, including the one written by the current build, with
+    // complete bodies.
+    let expected_blocks: Vec<_> = (0..=2)
+        .map(|height| state.db.block(Height(height).into()).unwrap().unwrap())
+        .collect();
+    let new_path = config.db_path(STATE_DATABASE_KIND, running_major, &network);
+    drop(state);
+    std::fs::create_dir_all(old_path.parent().unwrap()).unwrap();
+    std::fs::rename(&new_path, &old_path).unwrap();
+    let rolled_back = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &old_version,
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    assert_eq!(rolled_back.finalized_tip_hash(), next_hash);
+    assert!(!rolled_back.history_capabilities().unwrap().is_pruned());
+    for (height, expected) in (0..=2).zip(expected_blocks) {
+        let block = rolled_back.block(Height(height).into()).unwrap().unwrap();
+        assert_eq!(block, expected);
     }
 }
 

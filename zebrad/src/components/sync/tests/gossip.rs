@@ -1208,6 +1208,7 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             .send(InboundSetupData {
                 address_book: Arc::new(Mutex::new(zn::AddressBook::new(
                     "127.0.0.1:0".parse().unwrap(),
+                    zn::types::PeerServices::NODE_NETWORK,
                     &network,
                     zn::constants::DEFAULT_MAX_CONNS_PER_IP,
                     tracing::Span::none(),
@@ -1218,6 +1219,7 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
                 state: Buffer::new(BoxService::new(fallback_state.clone()), 1),
                 latest_chain_tip,
                 misbehavior_sender,
+                read_state: None,
             })
             .is_ok());
         let mut inbound = Inbound::new(1, setup_rx).with_submitted_blocks(cache.clone());

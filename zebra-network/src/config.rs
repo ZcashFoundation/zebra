@@ -40,6 +40,7 @@ use crate::{
         v2::object::ObjectSource,
     },
     sync_peer::SyncPeersSender,
+    types::PeerServices,
     BoxError, PeerSocketAddr,
 };
 
@@ -331,9 +332,65 @@ pub struct Config {
     /// Runtime-only: `zebrad` sets it on version 2 nodes, and config files never contain it.
     #[serde(skip)]
     pub object_source: Option<ObjectSource>,
+
+    /// The best chain tip height from which this node advertises `NODE_NETWORK_LIMITED` to
+    /// version 2 peers, or `None` to advertise only the services it started with.
+    ///
+    /// A node bootstrapped from a state snapshot starts with no block bodies below the snapshot
+    /// height, so it cannot serve the recent blocks `NODE_NETWORK_LIMITED` promises until it has
+    /// committed them. Each version 2 handshake compares the chain tip with this height, so only
+    /// connections made after the tip reaches it see the new services.
+    ///
+    /// Runtime-only: `zebrad` sets it on snapshot-born nodes, and config files never contain it.
+    #[serde(skip)]
+    pub v2_limited_service_from: Option<zebra_chain::block::Height>,
 }
 
 impl Config {
+    /// Applies configured experimental services to the caller's base service capabilities, for
+    /// `version` messages and this node's own address advertisements.
+    ///
+    /// Leaves out `NODE_NETWORK_LIMITED` and `NODE_SYNC_ARTIFACTS`, which ZIP 204 does not define
+    /// for legacy peers.
+    pub(crate) fn advertised_services(&self, mut services: PeerServices) -> PeerServices {
+        services.remove(PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS);
+        services.set(
+            PeerServices::NODE_EARLY_BLOCK_RELAY,
+            self.experimental_early_block_relay,
+        );
+        services
+    }
+
+    /// Returns the services advertised in version 2 `init` records: the caller's base service
+    /// capabilities, including `NODE_NETWORK_LIMITED` and `NODE_SYNC_ARTIFACTS`.
+    ///
+    /// A node with an [`object_source`](Self::object_source) serves `get-object` requests, so it
+    /// also advertises `NODE_SYNC_ARTIFACTS`: it answers the objects its index holds, and every
+    /// other object as not found (draft, "`get-object`").
+    ///
+    /// Leaves out early block relay, which is a legacy-only experiment.
+    pub(crate) fn v2_advertised_services(&self, services: PeerServices) -> PeerServices {
+        let mut services = services - PeerServices::NODE_EARLY_BLOCK_RELAY;
+        if self.object_source.is_some() {
+            services.insert(PeerServices::NODE_SYNC_ARTIFACTS);
+        }
+        services
+    }
+
+    /// Returns the services for a version 2 handshake that starts at the chain tip `tip`:
+    /// `services`, with `NODE_NETWORK_LIMITED` once `tip` reaches `limited_service_from`, the
+    /// [`v2_limited_service_from`](Self::v2_limited_service_from) height.
+    pub(crate) fn v2_services_now(
+        limited_service_from: Option<zebra_chain::block::Height>,
+        tip: Option<zebra_chain::block::Height>,
+        mut services: PeerServices,
+    ) -> PeerServices {
+        if limited_service_from.is_some_and(|from| tip.is_some_and(|tip| tip >= from)) {
+            services.insert(PeerServices::NODE_NETWORK_LIMITED);
+        }
+        services
+    }
+
     /// The maximum number of outbound connections that Zebra will open at the same time.
     /// When this limit is reached, Zebra stops opening outbound connections.
     ///
@@ -359,6 +416,15 @@ impl Config {
     /// overloads by dropping peer connections.
     pub fn peerset_outbound_connection_limit(&self) -> usize {
         self.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER
+    }
+
+    /// The maximum number of addresses accepted from a peer after each `getaddr` request.
+    ///
+    /// This is half the configured outbound connection limit, capped by the protocol message
+    /// limit. Scaling the response with the peer target prevents one response from dominating a
+    /// deliberately small peer set.
+    pub fn peer_addr_response_limit(&self) -> usize {
+        (self.peerset_outbound_connection_limit() / 2).min(crate::constants::MAX_ADDRS_IN_MESSAGE)
     }
 
     /// The maximum number of inbound connections that Zebra will accept at the same time.
@@ -850,6 +916,7 @@ impl Default for Config {
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
             v2_sync_peers: None,
             object_source: None,
+            v2_limited_service_from: None,
         }
     }
 }
@@ -1026,6 +1093,7 @@ impl From<Config> for DConfig {
             max_connections_per_ip,
             v2_sync_peers: _,
             object_source: _,
+            v2_limited_service_from: _,
         }: Config,
     ) -> Self {
         let dnetwork = match network.kind() {
@@ -1181,6 +1249,7 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
             v2_sync_peers: None,
             object_source: None,
+            v2_limited_service_from: None,
         })
     }
 }

@@ -17,7 +17,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };
-use zebra_network::{AddressBook, InventoryResponse, Request, Response};
+use zebra_network::{types::PeerServices, AddressBook, InventoryResponse, Request, Response};
 use zebra_node_services::constants::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebrad::config::ZebradConfig;
@@ -571,6 +571,7 @@ impl GenesisPeer {
         let (peer_set, address_book, misbehavior_tx, _advertiser) =
             runtime.block_on(zebra_network::init(
                 config,
+                PeerServices::NODE_NETWORK,
                 inbound_service,
                 NoChainTip,
                 "Genesis test peer".to_string(),

@@ -25,6 +25,9 @@ use crate::{
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
 
+#[cfg(test)]
+mod tests;
+
 /// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
 /// database.
 pub struct Upgrade;
@@ -90,6 +93,7 @@ impl DiskFormatUpgrade for Upgrade {
                     // parsing is slow.
                     let (block, size) = db
                         .block_and_size(HashOrHeight::Height(height))
+                        .expect("block info reconstruction requires complete stored block bodies")
                         .expect("block info should be in the database");
 
                     // Load the utxos for all the transactions inputs in the block.
@@ -102,6 +106,7 @@ impl DiskFormatUpgrade for Upgrade {
                             if let Some(outpoint) = input.outpoint() {
                                 let (tx, h, _) = db
                                     .transaction(outpoint.hash)
+                                    .expect("block info reconstruction requires parent bodies")
                                     .expect("transaction should be in the database");
                                 let outputs = tx.outputs();
                                 let output = outputs
@@ -217,27 +222,38 @@ impl DiskFormatUpgrade for Upgrade {
         db: &crate::ZebraDb,
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<Result<(), String>, super::CancelFormatChange> {
-        let network = db.network();
-
         // Return early before the next disk read if the upgrade was cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(super::CancelFormatChange);
-        }
-
-        // Read the finalized tip height or return early if the database is empty.
-        let Some(tip_height) = db.finalized_tip_height() else {
-            return Ok(Ok(()));
-        };
-
-        // Check any outputs in the last 1000 blocks.
-        let start_height = (tip_height - 1_000).unwrap_or(Height::MIN);
-
         if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
-        // Check that all blocks in the range have a BlockInfo.
+        // Capture availability first, so finalization cannot move pruning past an older tip's
+        // window before we record the floor.
+        let history = db
+            .history_capabilities()
+            .expect("historical availability must be readable during format checks");
+        let retained_floor = history.lowest_retained_height;
+        let Some(tip_height) = db.finalized_tip_height() else {
+            return Ok(Ok(()));
+        };
 
+        #[cfg(test)]
+        tests::AFTER_CAPTURED_TIP.with(|hook| {
+            if let Some(prune) = hook.borrow_mut().as_mut() {
+                prune();
+            }
+        });
+
+        // A database imported from a state snapshot has block info from its window start, so the
+        // window checked here cannot start below it (DESIGN §7).
+        let start_height = (tip_height - 1_000)
+            .unwrap_or(Height::MIN)
+            .max(history.lowest_known_height);
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
+        // Pruning never removes BlockInfo, so check the entire captured window.
         for height in start_height.0..=tip_height.0 {
             if let Some(block_info) = db.block_info_cf().zs_get(&Height(height)) {
                 if block_info == Default::default() {
@@ -248,13 +264,43 @@ impl DiskFormatUpgrade for Upgrade {
             }
         }
 
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
+        // Its received totals start at zero at the import, because the outputs spent below the
+        // snapshot height are gone, so the address checks start above the snapshot height.
+        let address_start = match history.snapshot_base {
+            Some(base) => start_height.max(base.height.next().unwrap_or(base.height)),
+            None => start_height,
+        };
+        if tip_height != Height::MIN && retained_floor > address_start.max(Height(1)) {
+            return Ok(Err(
+                "recent address-balance checks require unavailable block history; \
+                 restore an archive snapshot or resync"
+                    .to_string(),
+            ));
         }
 
-        // Check that all recipient addresses of transparent transfers in the range have a non-zero received balance.
+        // The captured window must be available above, but the transaction iterator's consistent
+        // view may skip bodies pruned since capture. Their received balances are permanent.
+        self.validate_addresses(db, cancel_receiver, address_start)
+    }
+}
 
-        // Collect the set of addresses that received transparent funds in the last query range (last 1000 blocks).
+impl Upgrade {
+    /// Checks addresses using the transaction iterator's consistent view.
+    #[allow(clippy::unwrap_in_result)]
+    fn validate_addresses(
+        &self,
+        db: &crate::ZebraDb,
+        cancel_receiver: &crossbeam_channel::Receiver<CancelFormatChange>,
+        start_height: Height,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
+        let network = db.network();
+
+        // Return early before the next disk read if the upgrade was cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+            return Err(super::CancelFormatChange);
+        }
+
+        // Check that all recipient addresses in the recent window have a non-zero received balance.
         let tx_loc_range = TransactionLocation::min_for_height(start_height)..;
         let addresses: HashSet<_> = db
             .transactions_by_location_range(tx_loc_range)

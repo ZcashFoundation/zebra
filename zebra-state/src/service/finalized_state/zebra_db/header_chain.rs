@@ -10,16 +10,20 @@
 //!
 //! # Authoritative rows
 //!
-//! A row is authoritative only above the finalized tip. The block commit path
-//! never touches these column families, so a row at or below the finalized
-//! tip is a stale duplicate of a committed block. Reads ignore stale rows,
-//! and the header writer deletes them when it starts, before each batch, and
-//! every second while it is idle (see
+//! A row is authoritative above the finalized tip, and, in a database imported
+//! from a state snapshot, below the snapshot window start `L`: the snapshot
+//! carries no block below `L`, so the headers there are the node's only record
+//! of those blocks, which it keeps without their bodies or block info.
+//!
+//! The block commit path never touches these column families, so any other row
+//! at or below the finalized tip is a stale duplicate of a committed block.
+//! Reads ignore stale rows, and the header writer deletes them when it starts,
+//! before each batch, and every second while it is idle (see
 //! [`DiskWriteBatch::prepare_header_chain_gc`]).
 //!
-//! The header chain tip is the last authoritative row, or the finalized tip
-//! when there are none. Above the finalized tip the header chain is
-//! contiguous, and its lowest row links to the finalized tip, once the header
+//! The header chain tip is the last row above the finalized tip, or the
+//! finalized tip when there are none. Above the finalized tip the header chain
+//! is contiguous, and its lowest row links to the finalized tip, once the header
 //! writer has collected stale rows: the block writer can finalize another
 //! block just below a header batch the header writer is writing. A read can
 //! also interleave with a header batch that replaces stored rows. So readers
@@ -30,8 +34,11 @@ use std::sync::Arc;
 
 use zebra_chain::block::{self, Height};
 
-use crate::service::finalized_state::{
-    disk_db::DiskWriteBatch, TypedColumnFamily, WriteTypedBatch, ZebraDb,
+use crate::{
+    service::finalized_state::{
+        disk_db::DiskWriteBatch, TypedColumnFamily, WriteTypedBatch, ZebraDb,
+    },
+    HashOrHeight,
 };
 
 #[cfg(test)]
@@ -68,17 +75,66 @@ impl ZebraDb {
     }
 
     /// Returns `true` if a header chain row at `height` is authoritative: it is
-    /// above the finalized tip.
+    /// above the finalized tip, or below the window of a snapshot database.
     fn is_authoritative_header_height(&self, height: Height) -> bool {
+        self.is_above_finalized_tip(height) || self.is_below_snapshot_window(height)
+    }
+
+    /// Returns `true` if `height` is above the finalized tip, or the database
+    /// has no finalized tip.
+    fn is_above_finalized_tip(&self, height: Height) -> bool {
         self.finalized_tip_height()
             .is_none_or(|finalized_tip| height > finalized_tip)
+    }
+
+    /// Returns `true` if `height` is above genesis and below the window start
+    /// of the state snapshot this database was imported from.
+    fn is_below_snapshot_window(&self, height: Height) -> bool {
+        height > Height::MIN
+            && self
+                .snapshot_base()
+                .is_some_and(|base| height < base.window_start)
+    }
+
+    /// The height and header of a block below the window of a snapshot
+    /// database: the stored header, which the snapshot didn't replace with a
+    /// block.
+    ///
+    /// `None` at any other height, and for heights the database has no header for.
+    pub fn header_below_snapshot_window(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<(Height, Arc<block::Header>)> {
+        let height = match hash_or_height {
+            HashOrHeight::Height(height) => height,
+            HashOrHeight::Hash(hash) => self.height_by_header_hash_cf().zs_get(&hash)?,
+        };
+        if !self.is_below_snapshot_window(height) {
+            return None;
+        }
+
+        let header = self.header_by_height_cf().zs_get(&height)?;
+        match hash_or_height {
+            // A reverse-index row can outlive its header row, so check that both agree.
+            HashOrHeight::Hash(hash) if header.hash() != hash => None,
+            _ => Some((height, Arc::new(header))),
+        }
+    }
+
+    /// The header of a known block: a finalized block, or a block below the
+    /// window of a snapshot database, which has a header but no body.
+    pub fn known_header(&self, hash_or_height: HashOrHeight) -> Option<Arc<block::Header>> {
+        self.block_header(hash_or_height).or_else(|| {
+            self.header_below_snapshot_window(hash_or_height)
+                .map(|(_, header)| header)
+        })
     }
 
     /// The tip of the stored header chain, if it is above the finalized tip.
     pub fn stored_header_tip(&self) -> Option<(Height, block::Hash)> {
         let (height, header) = self.header_by_height_cf().zs_last_key_value()?;
 
-        self.is_authoritative_header_height(height)
+        self.is_above_finalized_tip(height)
             .then(|| (height, header.hash()))
     }
 
@@ -89,7 +145,8 @@ impl ZebraDb {
     }
 
     /// The header at `height` on the header chain: the finalized block's header
-    /// at or below the finalized tip, or the stored header above it.
+    /// at or below the finalized tip, or the stored header above it, or below
+    /// the window of a snapshot database.
     pub fn any_header(&self, height: Height) -> Option<Arc<block::Header>> {
         if let Some(header) = self.block_header(height.into()) {
             return Some(header);
@@ -118,7 +175,8 @@ impl ZebraDb {
     }
 
     /// The height of `hash` on the header chain: a finalized block, or a
-    /// stored header above the finalized tip.
+    /// stored header above the finalized tip, or below the window of a
+    /// snapshot database.
     pub fn header_chain_height(&self, hash: block::Hash) -> Option<Height> {
         if let Some(height) = self.height(hash) {
             return Some(height);
@@ -175,14 +233,20 @@ impl DiskWriteBatch {
     /// Prepares the deletion of at most [`MAX_HEADER_GC_ROWS`] stale header
     /// chain rows, those at or below the finalized tip, in this batch, and
     /// returns how many rows it deletes.
+    ///
+    /// A snapshot database keeps the rows below its window start, which are
+    /// not stale: they are its headers of the blocks the snapshot didn't carry.
     pub fn prepare_header_chain_gc(&mut self, db: &ZebraDb) -> usize {
         let Some(finalized_tip) = db.finalized_tip_height() else {
             return 0;
         };
+        let floor = db
+            .snapshot_base()
+            .map_or(Height::MIN, |base| base.window_start);
 
         let rows: Vec<(Height, block::Header)> = db
             .header_by_height_cf()
-            .zs_forward_range_iter(..=finalized_tip)
+            .zs_forward_range_iter(floor..=finalized_tip)
             .take(MAX_HEADER_GC_ROWS)
             .collect();
 

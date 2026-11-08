@@ -7,20 +7,62 @@
 
 use std::collections::BTreeMap;
 
+use ::zcash_history::{NodeData, NodeDataV2, NodeDataV3, MAX_ENTRY_SIZE};
 use bincode::Options;
+use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{merkle::AuthDataRoot, Height, SyncHashEntry},
+    block::{self, merkle::AuthDataRoot, Height, SyncHashEntry},
     block_info::BlockInfo,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
-    parameters::{Network, NetworkKind},
+    parameters::{Network, NetworkKind, NetworkUpgrade},
     primitives::zcash_history,
+    state_snapshot::ObjectHash,
     value_balance::{ValueBalance, SERIALIZED_SIZE},
 };
 
-use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
+use crate::{
+    service::finalized_state::disk_format::{block::HEIGHT_DISK_BYTES, FromDisk, IntoDisk},
+    state_snapshot::SnapshotBase,
+};
+
+/// The on-disk width of a [`SnapshotBase`]: two heights, two hashes, and the
+/// deferred checks byte.
+pub const SNAPSHOT_BASE_DISK_BYTES: usize = 2 * HEIGHT_DISK_BYTES + 32 + 32 + 1;
+
+impl IntoDisk for SnapshotBase {
+    type Bytes = [u8; SNAPSHOT_BASE_DISK_BYTES];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let mut bytes = [0; SNAPSHOT_BASE_DISK_BYTES];
+        bytes[..3].copy_from_slice(&self.window_start.as_bytes());
+        bytes[3..6].copy_from_slice(&self.height.as_bytes());
+        bytes[6..38].copy_from_slice(&self.block_hash.as_bytes());
+        bytes[38..70].copy_from_slice(&self.manifest.0);
+        bytes[70] = self.deferred_checks;
+        bytes
+    }
+}
+
+impl FromDisk for SnapshotBase {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
+        assert_eq!(
+            bytes.len(),
+            SNAPSHOT_BASE_DISK_BYTES,
+            "unexpected snapshot base length"
+        );
+        SnapshotBase {
+            window_start: Height::from_bytes(&bytes[..3]),
+            height: Height::from_bytes(&bytes[3..6]),
+            block_hash: block::Hash::from_bytes(&bytes[6..38]),
+            manifest: ObjectHash(bytes[38..70].try_into().expect("32 bytes were sliced")),
+            deferred_checks: bytes[70],
+        }
+    }
+}
 
 impl IntoDisk for ValueBalance<NonNegative> {
     type Bytes = [u8; SERIALIZED_SIZE];
@@ -52,6 +94,43 @@ pub struct HistoryTreeParts {
 }
 
 impl HistoryTreeParts {
+    /// Decodes a state snapshot's `history_tree` value for `network` without trusting it: the
+    /// bytes must be exactly the current encoding of a tree for this network at a height where
+    /// the history tree exists, and the tree must rebuild from its peaks.
+    pub(crate) fn decode_canonical(
+        bytes: &[u8],
+        network: &Network,
+    ) -> Result<NonEmptyHistoryTree, String> {
+        let parts: HistoryTreeParts = bincode::DefaultOptions::new()
+            .deserialize(bytes)
+            .map_err(|error| format!("the history tree does not decode: {error}"))?;
+
+        if parts.as_bytes() != bytes {
+            return Err("the history tree is not in the canonical encoding".to_string());
+        }
+
+        if parts.network_kind != network.kind() {
+            return Err(format!(
+                "the history tree is for {:?}, not {:?}",
+                parts.network_kind,
+                network.kind()
+            ));
+        }
+
+        let upgrade = NetworkUpgrade::current(network, parts.current_height);
+        if upgrade < NetworkUpgrade::Heartwood {
+            return Err(format!(
+                "the history tree ends at height {}, before Heartwood",
+                parts.current_height.0
+            ));
+        }
+
+        check_history_tree_peaks(bytes, upgrade)?;
+        parts
+            .with_network(network)
+            .map_err(|error| format!("the history tree does not rebuild from its peaks: {error}"))
+    }
+
     /// Converts [`HistoryTreeParts`] to a [`NonEmptyHistoryTree`].
     pub(crate) fn with_network(
         self,
@@ -64,6 +143,22 @@ impl HistoryTreeParts {
         );
 
         NonEmptyHistoryTree::from_cache(network, self.size, self.peaks, self.current_height)
+    }
+
+    /// Returns the kind of network the tree is for.
+    pub(crate) fn network_kind(&self) -> NetworkKind {
+        self.network_kind
+    }
+
+    /// Returns the height of the last block in the tree.
+    pub(crate) fn current_height(&self) -> Height {
+        self.current_height
+    }
+
+    /// Returns the number of peaks in the tree, which is never zero for a tree
+    /// that [`Self::with_network`] can rebuild.
+    pub(crate) fn peak_count(&self) -> usize {
+        self.peaks.len()
     }
 }
 
@@ -88,6 +183,103 @@ impl IntoDisk for HistoryTreeParts {
     }
 }
 
+/// A stored history tree, with its peaks as bytes: the layout of
+/// [`HistoryTreeParts`], whose fields are private.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct RawHistoryTree {
+    network_kind: NetworkKind,
+    size: u32,
+    pub(crate) peaks: BTreeMap<u32, RawEntry>,
+    current_height: Height,
+}
+
+/// A stored history tree entry: its kind, then the node data of the tree's version.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct RawEntry {
+    #[serde(with = "BigArray")]
+    pub(crate) inner: [u8; MAX_ENTRY_SIZE],
+}
+
+/// Checks that the history tree `bytes` rebuilds without panicking: it has peaks, every peak is an
+/// entry of the tree version of `upgrade`, and the work and transaction counts added while combining
+/// them do not overflow.
+pub(crate) fn check_history_tree_peaks(
+    bytes: &[u8],
+    upgrade: NetworkUpgrade,
+) -> Result<(), String> {
+    let raw: RawHistoryTree = bincode::DefaultOptions::new()
+        .deserialize(bytes)
+        .map_err(|error| format!("invalid history tree: {error}"))?;
+    let branch_id = upgrade
+        .branch_id()
+        .ok_or_else(|| format!("{upgrade:?} has no history tree"))?;
+    let overflow = |what| format!("the history tree's {what} overflow when its peaks are combined");
+
+    let mut peaks = raw
+        .peaks
+        .values()
+        .map(|entry| read_peak(upgrade, branch_id.into(), &entry.inner));
+    let (first, [orchard, ironwood]) = peaks
+        .next()
+        .ok_or_else(|| "the history tree has no peaks".to_string())??;
+    let mut work = first.subtree_total_work;
+    let mut transactions = [first.sapling_tx, orchard, ironwood];
+    for peak in peaks {
+        let (data, [orchard, ironwood]) = peak?;
+        work = work
+            .checked_add(data.subtree_total_work)
+            .ok_or_else(|| overflow("total work"))?;
+        for (total, count) in transactions
+            .iter_mut()
+            .zip([data.sapling_tx, orchard, ironwood])
+        {
+            *total = total
+                .checked_add(count)
+                .ok_or_else(|| overflow("transaction counts"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Parses a stored history tree peak as an entry of the tree version of `upgrade`, and returns its
+/// node data before Orchard, with its Orchard and Ironwood transaction counts.
+fn read_peak(
+    upgrade: NetworkUpgrade,
+    branch_id: u32,
+    entry: &[u8],
+) -> Result<(NodeData, [u64; 2]), String> {
+    use NetworkUpgrade::*;
+
+    // An entry is its kind, then its node data: a leaf, or a node with the indexes of its two children.
+    let header = match entry.first().copied() {
+        Some(1) => 1,
+        Some(0) => 1 + 2 * 4,
+        _ => return Err("a history tree peak has an unknown entry kind".to_string()),
+    };
+    let mut reader = entry
+        .get(header..)
+        .ok_or_else(|| "a history tree peak is truncated".to_string())?;
+    let invalid = |error| format!("invalid history tree peak: {error}");
+    Ok(match upgrade {
+        Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom => {
+            return Err(format!("{upgrade:?} has no history tree"))
+        }
+        Heartwood | Canopy => (
+            NodeData::read(branch_id, &mut reader).map_err(invalid)?,
+            [0, 0],
+        ),
+        Nu5 | Nu6 | Nu6_1 | Nu6_2 => {
+            let data = NodeDataV2::read(branch_id, &mut reader).map_err(invalid)?;
+            (data.v1, [data.orchard_tx, 0])
+        }
+        // NU6.3 and every later upgrade use V3 trees, as `NonEmptyHistoryTree::from_cache` does.
+        _ => {
+            let data = NodeDataV3::read(branch_id, &mut reader).map_err(invalid)?;
+            (data.v2.v1, [data.v2.orchard_tx, data.ironwood_tx])
+        }
+    })
+}
+
 /// The width of a history-tree [`zcash_history::Entry`] as serialized by database formats written
 /// before NU6.3 (Ironwood) widened `zcash_history::NodeData`. Equal to the pre-Ironwood
 /// `MAX_ENTRY_SIZE`: a `MAX_NODE_DATA_SIZE` of 244 bytes plus the 9-byte entry header.
@@ -99,7 +291,7 @@ const LEGACY_MAX_ENTRY_SIZE: usize = 253;
 /// parse at the current width. The field order must match [`HistoryTreeParts`] so the two share a
 /// bincode layout (bincode ignores field names and identifies fields by position).
 #[derive(serde::Serialize, serde::Deserialize)]
-struct LegacyHistoryTreeParts {
+pub(crate) struct LegacyHistoryTreeParts {
     network_kind: NetworkKind,
     size: u32,
     peaks: BTreeMap<u32, LegacyEntry>,
@@ -108,7 +300,7 @@ struct LegacyHistoryTreeParts {
 
 /// A history-tree entry serialized at the pre-NU6.3 [`LEGACY_MAX_ENTRY_SIZE`] width.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct LegacyEntry {
+pub(crate) struct LegacyEntry {
     #[serde(with = "BigArray")]
     inner: [u8; LEGACY_MAX_ENTRY_SIZE],
 }

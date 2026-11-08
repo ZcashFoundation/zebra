@@ -1,0 +1,13 @@
+project: zebra-state
+kind: breaking
+body: >-
+  Bumped the state database format to 32.0.0, which adds the `snapshot_base` column family that
+  marks a database imported from a state snapshot, and added the `lowest_known_height` and
+  `snapshot_base` fields to `HistoryCapabilities`: struct literals must supply them or use
+  `..HistoryCapabilities::default()`. Snapshot-born databases use `state/v32`, so older 31.x builds
+  cannot open and downgrade them. Existing 31.x databases move to v32 without record rewrites;
+  older compatible caches are upgraded through the registered migrations. Added
+  `restorable_db_source_versions()` so
+  callers can protect every reusable source directory. Snapshot-born databases must not be renamed
+  to an older format directory.
+time: 2026-11-03T09:00:00.000000000-05:00

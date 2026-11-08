@@ -726,6 +726,7 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
         inbound_service: tower::service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
         inv_collector: tokio::sync::broadcast::channel(16).0,
         genesis_hash: network.genesis_hash(),
+        network: network.clone(),
         misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
         address_book: None,
         discovery: false,
@@ -1336,7 +1337,7 @@ fn real_advert_peer_with_authorization<C: zebra_chain::chain_tip::ChainTip + Sen
         }),
         ActiveConnectionCounter::new_counter().track_connection(),
         client.connection_info.clone(),
-        Vec::new(),
+        (Vec::new(), crate::constants::PEER_ADDR_RESPONSE_LIMIT),
     );
     (client, harness, connection.run(stream::pending()), wire_rx)
 }

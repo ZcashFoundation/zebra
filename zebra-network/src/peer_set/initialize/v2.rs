@@ -30,6 +30,11 @@ use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network};
 
+/// Dialling version 2 peers for a state-snapshot bootstrap, before the peer set exists.
+pub(super) mod bootstrap;
+
+pub use bootstrap::{v2_bootstrap_clients, BootstrapPeers};
+
 use crate::{
     connection_metrics::{
         record_connection_attempt_finished, record_connection_attempt_started,
@@ -98,6 +103,11 @@ pub(super) struct Shared<S, C> {
     connected_peers: ConnectedPeers,
     /// Where completed connections are registered for the checkpoint sync engine, if anywhere.
     sync_peers: Option<SyncPeersSender>,
+    /// The chain tip height from which new connections advertise `NODE_NETWORK_LIMITED`, if
+    /// that can change.
+    limited_service_from: Option<zebra_chain::block::Height>,
+    /// The best chain tip, which decides the services of new connections.
+    latest_chain_tip: C,
 }
 
 impl<S, C> Shared<S, C>
@@ -132,11 +142,15 @@ where
             inbound_interval,
             open_inbound,
             nonces: NonceRegistry::spawn(config.peerset_total_connection_limit()),
-            minimum_peer_version: MinimumPeerVersion::new(latest_chain_tip, &config.network),
+            minimum_peer_version: MinimumPeerVersion::new(
+                latest_chain_tip.clone(),
+                &config.network,
+            ),
             connection_params: ConnectionParams {
                 inbound_service,
                 inv_collector,
                 genesis_hash: config.network.genesis_hash(),
+                network: config.network.clone(),
                 misbehavior: MisbehaviorScores::spawn(
                     misbehavior_tx,
                     config.peerset_total_connection_limit(),
@@ -160,6 +174,8 @@ where
             address_book,
             connected_peers,
             sync_peers: config.v2_sync_peers.clone(),
+            limited_service_from: config.v2_limited_service_from,
+            latest_chain_tip,
         };
         (shared, open_inbound_tx)
     }
@@ -208,6 +224,7 @@ pub async fn close_v2_endpoint(grace: Duration) {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     inv_collector: broadcast::Sender<InventoryChange>,
     latest_chain_tip: C,
@@ -224,6 +241,7 @@ where
 {
     start_with_intervals(
         config,
+        local_services,
         inbound_service,
         inv_collector,
         latest_chain_tip,
@@ -242,6 +260,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start_with_intervals<S, C>(
     config: Config,
+    local_services: PeerServices,
     inbound_service: S,
     inv_collector: broadcast::Sender<InventoryChange>,
     latest_chain_tip: C,
@@ -268,20 +287,15 @@ where
          {MAX_USER_AGENT_LENGTH} bytes.",
         user_agent.len(),
     );
-    // A node with an object index serves `get-object` requests, so it advertises them: it answers
-    // the objects its index holds, and every other object as not found (draft, "`get-object`").
-    let mut services = PeerServices::NODE_NETWORK;
-    services.set(
-        PeerServices::NODE_SYNC_ARTIFACTS,
-        config.object_source.is_some(),
-    );
     let identity = LocalIdentity {
         user_agent,
-        services,
+        services: config.v2_advertised_services(local_services),
         relay: true,
     };
 
-    let endpoint = match quic::bind(&config.network, listen_addr) {
+    // A node that serves snapshot objects gets the larger send window.
+    let windows = quic::Windows::for_services(identity.services);
+    let endpoint = match quic::bind_with_windows(&config.network, listen_addr, windows) {
         Ok(endpoint) => endpoint,
         Err(error) => panic!(
             "Opening the version 2 (QUIC) Zcash protocol endpoint {listen_addr:?} failed: \
@@ -1018,6 +1032,15 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    // The services can gain `NODE_NETWORK_LIMITED` after startup: each handshake reads them now,
+    // and the connection serves what it advertised.
+    let services = Config::v2_services_now(
+        shared.limited_service_from,
+        shared.latest_chain_tip.best_tip_height(),
+        shared.identity.services,
+    );
+    shared.identity.services = services;
+    shared.connection_params.local_services = services;
     let completed = handshake(
         &connection,
         connected_addr,

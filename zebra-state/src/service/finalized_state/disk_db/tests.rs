@@ -17,6 +17,16 @@ impl Deref for DiskDb {
 }
 
 impl DiskDb {
+    /// Returns the column family names of the state database at `major` under `config`.
+    pub fn list_cf_at(
+        config: &crate::Config,
+        major: u64,
+        network: &zebra_chain::parameters::Network,
+    ) -> Vec<String> {
+        rocksdb::DB::list_cf(&DiskDb::options(), config.db_path("state", major, network))
+            .unwrap_or_default()
+    }
+
     /// Returns a list of column family names in this database.
     pub fn list_cf(&self) -> Result<Vec<String>, rocksdb::Error> {
         let opts = DiskDb::options();
@@ -144,6 +154,182 @@ fn secondary_disk_usage_tracks_primary_growth() {
         secondary.cached_size(),
         live_size,
         "secondary usage queries must not retain the startup estimate"
+    );
+}
+
+#[test]
+fn read_only_reuse_rejects_an_interrupted_older_major_upgrade() {
+    read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0));
+}
+
+#[test]
+fn read_only_reuse_rejects_a_compatible_major_mismatch() {
+    read_only_reuse_rejects_recorded_version(semver::Version::new(29, 0, 0));
+}
+
+fn read_only_reuse_rejects_recorded_version(recorded_version: semver::Version) {
+    use std::{collections::BTreeMap, fs};
+
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{config::write_database_format_version_to_disk, Config, StateInitError, ZebraDb};
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let old_path = config.db_path("state", 28, &network);
+    let new_path = config.db_path("state", 29, &network);
+    let db = DiskDb::new(
+        &config,
+        "state",
+        &Version::new(28, 0, 0),
+        &network,
+        ["utxo_loc_by_transparent_addr_loc".to_owned()],
+        false,
+    )
+    .unwrap();
+    drop(db);
+
+    // A directory's recorded version can still describe an unfinished format transition.
+    write_database_format_version_to_disk(&config, "state", 28, &recorded_version, &network)
+        .unwrap();
+    let files = || {
+        fs::read_dir(&old_path)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let bytes = fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let before = files();
+    let result = ZebraDb::new(
+        &config,
+        "state",
+        &Version::new(29, 0, 0),
+        &network,
+        true,
+        ["utxo_loc_by_transparent_addr_loc".to_owned()],
+        true,
+    );
+    let error = result.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            StateInitError::ReadOnlyDatabaseNeedsUpgrade { ref path } if path == &old_path
+        ),
+        "read-only reuse must distinguish an unfinished transition from a missing database: {error}"
+    );
+    assert_eq!(files(), before, "the old directory must remain unmodified");
+    assert!(!new_path.parent().unwrap().exists());
+}
+
+/// A read-only start reads an older-major database from before 31.1.0 in place, although that
+/// database has no `snapshot_base` column family and a secondary instance can not create one.
+#[test]
+fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{
+        config::write_database_format_version_to_disk,
+        service::finalized_state::{
+            can_read_without_migration, SNAPSHOT_BASE, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        Config, StateInitError, ZebraDb,
+    };
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let disk_version = Version::new(31, 0, 0);
+    let running_version = Version::new(32, 0, 0);
+    let in_code = || {
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string)
+    };
+
+    let db = DiskDb::new(
+        &config,
+        "state",
+        &disk_version,
+        &network,
+        in_code().filter(|cf| cf != SNAPSHOT_BASE),
+        false,
+    )
+    .unwrap();
+    drop(db);
+    write_database_format_version_to_disk(&config, "state", 31, &disk_version, &network).unwrap();
+
+    let result = ZebraDb::new(
+        &config,
+        "state",
+        &running_version,
+        &network,
+        true,
+        in_code(),
+        true,
+    );
+    if can_read_without_migration(&disk_version, &running_version) {
+        let db = result.expect("a compatible 31.0.0 database opens read-only");
+        assert_eq!(db.snapshot_base(), None);
+    } else {
+        // A later record migration makes the source need a writable start first.
+        assert!(matches!(
+            result.unwrap_err(),
+            StateInitError::ReadOnlyDatabaseNeedsUpgrade { .. }
+        ));
+    }
+    assert!(!config.db_path("state", 32, &network).exists());
+    assert!(DiskDb::list_cf_at(&config, 31, &network)
+        .iter()
+        .all(|cf| cf != SNAPSHOT_BASE));
+}
+
+/// The reusable source is the newest directory that holds a database: an empty newer directory
+/// does not hide an older database.
+#[test]
+fn reusable_source_skips_a_directory_without_a_database() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::{service::finalized_state::STATE_COLUMN_FAMILIES_IN_CODE, Config};
+
+    let _guard = zebra_test::init();
+    let cache = tempfile::tempdir().unwrap();
+    let config = Config {
+        cache_dir: cache.path().to_path_buf(),
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let db = DiskDb::new(
+        &config,
+        "state",
+        &Version::new(29, 0, 0),
+        &network,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .unwrap();
+    drop(db);
+    std::fs::create_dir_all(config.db_path("state", 30, &network)).unwrap();
+
+    assert_eq!(
+        DiskDb::newest_reusable_source(&config, "state", &network, 32),
+        Some(29)
     );
 }
 

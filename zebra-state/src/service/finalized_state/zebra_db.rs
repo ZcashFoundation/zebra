@@ -11,7 +11,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 use crossbeam_channel::bounded;
@@ -24,7 +27,10 @@ use crate::{
         database_format_version_at_path, database_format_version_on_disk,
         write_database_format_version_at_path,
     },
-    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
+    constants::{
+        state_database_format_version_in_code, DATABASE_FORMAT_VERSION_FILE_NAME,
+        STATE_DATABASE_KIND,
+    },
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -32,11 +38,12 @@ use crate::{
             transparent::AddressLocation,
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
+        STATE_COLUMN_FAMILIES_IN_CODE,
     },
     BoxError, Config, StateInitError,
 };
 
-use super::disk_format::upgrade::restorable_db_versions;
+use super::disk_format::upgrade::{can_read_without_migration, restorable_db_versions};
 
 /// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
 /// than parallel serialization saves.
@@ -48,6 +55,7 @@ const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
 pub mod block;
 pub mod chain;
 pub mod header_chain;
+pub(crate) mod history;
 pub mod metrics;
 pub mod shielded;
 pub mod spentness;
@@ -76,7 +84,7 @@ pub struct ZebraDb {
     config: Arc<Config>,
 
     /// Should format upgrades and format checks be skipped for this instance?
-    /// Only used in test code.
+    /// Only used in test code, and by the state snapshot importer, which runs the checks itself.
     //
     // TODO: move this to DiskDb
     debug_skip_format_upgrades: bool,
@@ -95,6 +103,9 @@ pub struct ZebraDb {
     // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
+    /// All history-dependent startup work and initial format checks have completed.
+    ready_for_pruning: Arc<AtomicBool>,
+
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
 }
@@ -105,7 +116,7 @@ impl ZebraDb {
     /// and returns a shared high-level typed database wrapper.
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
-    /// This argument is only used when running tests, it is ignored in production code.
+    /// This argument is only used in tests or with `proptest-impl`, and is ignored otherwise.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
     #[allow(clippy::unwrap_in_result)]
@@ -118,12 +129,14 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> Result<ZebraDb, StateInitError> {
+        config.validate_pruning(network)?;
+
         // A read-only secondary instance must never modify the primary's cache directory, so it
         // skips the post-major-upgrade DB reuse (which can create directories and rename the
         // on-disk database) and reads the on-disk format version directly. The cache directory is
-        // checked for readability first, so a missing or unreadable directory returns a typed
-        // `ReadOnlyCacheDirUnreadable` error here instead of panicking on the version-file read.
-        let disk_version = if read_only {
+        // checked before either lookup. A compatible reusable archive can be read in place,
+        // but no migration, directory rename, or primary-cache creation is allowed.
+        if read_only {
             // While this check is also done in `DiskDB::new()` below, we must
             // repeat it here because the `check_cache_dir_readable()` call just
             // after this will look into `cache_dir` but that should be ignored
@@ -133,11 +146,10 @@ impl ZebraDb {
             }
 
             DiskDb::check_cache_dir_readable(&config.cache_dir)?;
+        }
 
-            database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
-                .expect("unable to read database format version file")
-        } else if config.ephemeral {
-            // An ephemeral database lives in a new temporary directory, so it is always new.
+        // An ephemeral database lives in a new temporary directory, so it is always new.
+        let reused_version = if config.ephemeral {
             None
         } else {
             DiskDb::try_reusing_previous_db_after_major_upgrade(
@@ -146,8 +158,35 @@ impl ZebraDb {
                 config,
                 &db_kind,
                 network,
+                read_only,
             )
-            .or_else(|| {
+        };
+        let read_previous_version = read_only && reused_version.is_some();
+        if read_only {
+            if let Some(disk_version) = &reused_version {
+                let directory_major = DiskDb::newest_reusable_source(
+                    config,
+                    db_kind.as_ref(),
+                    network,
+                    format_version_in_code.major,
+                )
+                .expect("a reused database was found by the same source lookup");
+                // Even compatible records cannot finish a directory transition read-only.
+                // Current-directory secondaries can follow a writable primary during an upgrade;
+                // only older-major reuse candidates require a completed transition here.
+                if disk_version.major != directory_major
+                    || !can_read_without_migration(disk_version, format_version_in_code)
+                {
+                    return Err(StateInitError::ReadOnlyDatabaseNeedsUpgrade {
+                        path: config.db_path(&db_kind, directory_major, network),
+                    });
+                }
+            }
+        }
+        let disk_version = if config.ephemeral {
+            None
+        } else {
+            reused_version.or_else(|| {
                 database_format_version_on_disk(
                     config,
                     &db_kind,
@@ -173,8 +212,9 @@ impl ZebraDb {
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
         //
-        // We also allow skipping them when we are running tests.
-        let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
+        // We also allow skipping them in unit tests and dependent crates' test fixtures.
+        let debug_skip_format_upgrades =
+            read_only || (cfg!(any(test, feature = "proptest-impl")) && debug_skip_format_upgrades);
 
         // Open the low-level database and do initial checks.
         //
@@ -182,10 +222,17 @@ impl ZebraDb {
         // changes to the default database version. Then we set the correct version in the
         // upgrade thread. We need to do the version change in this order, because the version
         // file can only be changed while we hold the RocksDB database lock.
+        // Read-only reuse checked that the stored major matches the selected directory above.
+        let format_version_for_open = match &format_change {
+            DbFormatChange::Upgrade {
+                older_disk_version, ..
+            } if read_previous_version => older_disk_version,
+            _ => format_version_in_code,
+        };
         let disk_db = DiskDb::new(
             config,
             db_kind,
-            format_version_in_code,
+            format_version_for_open,
             network,
             column_families_in_code,
             read_only,
@@ -195,6 +242,7 @@ impl ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
+            ready_for_pruning: Arc::new(AtomicBool::new(false)),
             db: disk_db,
         };
 
@@ -217,6 +265,35 @@ impl ZebraDb {
         db.spawn_format_change(format_change);
 
         Ok(db)
+    }
+
+    /// Opens the existing state database `config` names for `network`, without launching the
+    /// format change thread and without the format check at shutdown.
+    ///
+    /// The state snapshot importer opens the database it built this way, and runs the format
+    /// checks itself, so an invalid snapshot is refused instead of panicking the format thread.
+    pub(crate) fn open_without_format_change(
+        config: &Config,
+        network: &Network,
+    ) -> Result<ZebraDb, StateInitError> {
+        let db = DiskDb::new(
+            config,
+            STATE_DATABASE_KIND,
+            &state_database_format_version_in_code(),
+            network,
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            false,
+        )?;
+
+        Ok(ZebraDb {
+            config: Arc::new(config.clone()),
+            debug_skip_format_upgrades: true,
+            format_change_handle: None,
+            ready_for_pruning: Arc::new(AtomicBool::new(false)),
+            db,
+        })
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.
@@ -252,6 +329,20 @@ impl ZebraDb {
     /// indicate that Zebra has finished applying any required db format upgrades.
     pub fn finished_format_upgrades(&self) -> bool {
         self.db.finished_format_upgrades()
+    }
+
+    /// Returns whether migrations, spending-index conversion, and initial format checks completed.
+    ///
+    /// This is an in-memory startup gate, not evidence of historical body availability. Skipped,
+    /// cancelled, or failed startup checks leave it false, including on read-only instances.
+    /// Runtime and shutdown checks cannot enable pruning or replace startup's conversions.
+    pub fn ready_for_pruning(&self) -> bool {
+        self.ready_for_pruning.load(Ordering::Acquire)
+    }
+
+    /// Allows pruning only after the format task has completed all history-dependent work.
+    pub(crate) fn mark_ready_for_pruning(&self) {
+        self.ready_for_pruning.store(true, Ordering::Release);
     }
 
     /// Returns config for this database.
@@ -326,6 +417,21 @@ impl ZebraDb {
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
+    }
+
+    /// Returns a raw iterator over the column family `cf_name` that reads with
+    /// `options`, or `None` if the database has no such column family.
+    ///
+    /// The state snapshot exporter copies rows through it without decoding them.
+    pub(crate) fn raw_iterator(
+        &self,
+        cf_name: &str,
+        options: rocksdb::ReadOptions,
+    ) -> Option<
+        rocksdb::DBRawIteratorWithThreadMode<'_, crate::service::finalized_state::disk_db::DB>,
+    > {
+        let cf = self.db.cf_handle(cf_name)?;
+        Some(self.db.raw_iterator_cf_opt(&cf, options))
     }
 
     /// Spawns a blocking task to try catching up with the primary DB instance.

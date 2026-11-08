@@ -1,0 +1,11 @@
+project: zebra-network
+kind: breaking
+body: >-
+  Added a required `local_services: PeerServices` argument after `config` in `init` and
+  `init_with_block_gossip_peer_ips`. Pass `NODE_NETWORK` only for nodes serving full block history;
+  `Config::experimental_early_block_relay` controls early relay independently. Pass the local service
+  mask to `AddressBook::new` and `MetaAddr::new_local_listener_change`, and include `services` when
+  constructing `MetaAddrChange::NewLocal`. Cached alternate listeners use the top-level version
+  services, matching handshake validation.
+  ([#12155](https://github.com/ZcashFoundation/zebra/pull/12155))
+time: 2026-10-25T00:57:38.119496636+02:00

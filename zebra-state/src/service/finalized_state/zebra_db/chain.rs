@@ -36,7 +36,7 @@ use crate::{
         zebra_db::{metrics::value_pool_metrics, ZebraDb},
         TypedColumnFamily,
     },
-    HashOrHeight, ValidateContextError,
+    HashOrHeight, SnapshotBase, ValidateContextError,
 };
 
 #[cfg(test)]
@@ -77,14 +77,41 @@ pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNeg
 /// This constant should be used so the compiler can detect typos.
 pub const BLOCK_INFO: &str = "block_info";
 
+/// The name of the snapshot base column family: `()` → [`SnapshotBase`] in a
+/// database imported from a state snapshot, and empty otherwise.
+///
+/// This constant should be used so the compiler can detect typos.
+///
+/// [`SnapshotBase`]: crate::SnapshotBase
+pub const SNAPSHOT_BASE: &str = "snapshot_base";
+
 /// The type for reading value pools from the database.
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
 pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
+/// The type for reading the snapshot base marker from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type SnapshotBaseCf<'cf> = TypedColumnFamily<'cf, (), SnapshotBase>;
+
 impl ZebraDb {
     // Column family convenience methods
+
+    /// Returns a typed handle to the snapshot base column family.
+    pub(crate) fn snapshot_base_cf(&self) -> SnapshotBaseCf<'_> {
+        SnapshotBaseCf::new(&self.db, SNAPSHOT_BASE)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns the marker of the state snapshot this database was imported from, if any.
+    ///
+    /// A read-only database from before 31.1.0 has no snapshot base column family, and no marker.
+    pub fn snapshot_base(&self) -> Option<SnapshotBase> {
+        SnapshotBaseCf::new(&self.db, SNAPSHOT_BASE)?.zs_get(&())
+    }
 
     /// Returns a typed handle to the `history_tree` column family.
     pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {
@@ -201,6 +228,18 @@ impl ZebraDb {
 }
 
 impl DiskWriteBatch {
+    // Snapshot base methods
+
+    /// Replaces the snapshot base marker, which records the checks a snapshot import deferred.
+    ///
+    /// The batch must be written to the database by the caller.
+    pub(crate) fn update_snapshot_base(&mut self, db: &ZebraDb, base: &SnapshotBase) {
+        let _ = db
+            .snapshot_base_cf()
+            .with_batch_for_writing(self)
+            .zs_insert(&(), base);
+    }
+
     // History tree methods
 
     /// Updates the history tree for the tip, if it is not empty.

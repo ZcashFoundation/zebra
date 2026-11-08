@@ -27,6 +27,8 @@ use crate::common::{
 
 mod compact_relay;
 mod nu7;
+mod pruning;
+mod state_snapshot;
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]

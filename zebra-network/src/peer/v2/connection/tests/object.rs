@@ -128,6 +128,7 @@ impl RawServer {
                 inbound_service,
                 inv_collector: tokio::sync::broadcast::channel(16).0,
                 genesis_hash: network.genesis_hash(),
+                network: network.clone(),
                 misbehavior: scores.clone(),
                 address_book: None,
                 discovery: false,

@@ -19,7 +19,9 @@ pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
-pub use initialize::{close_v2_endpoint, init, init_with_block_gossip_peer_ips};
+pub use initialize::{
+    close_v2_endpoint, init, init_with_block_gossip_peer_ips, v2_bootstrap_clients, BootstrapPeers,
+};
 pub use service::{NetworkResponseFuture, NetworkService};
 
 use std::{

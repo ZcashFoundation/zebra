@@ -15,8 +15,100 @@ use zebra_chain::{
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    types::PeerServices,
     Config, ObjectIndex, ObjectSource,
 };
+
+/// Limited service and artifact serving are version 2 flags, and early block relay is a
+/// legacy-only experiment.
+#[test]
+fn advertised_services_depend_on_the_protocol() {
+    let config = Config {
+        experimental_early_block_relay: true,
+        ..Config::default()
+    };
+    let pruned = PeerServices::NODE_NETWORK_LIMITED;
+    assert_eq!(
+        config.advertised_services(pruned),
+        PeerServices::NODE_EARLY_BLOCK_RELAY
+    );
+    assert_eq!(
+        config.v2_advertised_services(pruned),
+        PeerServices::NODE_NETWORK_LIMITED
+    );
+    let serving = PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS;
+    assert_eq!(
+        config.advertised_services(serving),
+        PeerServices::NODE_EARLY_BLOCK_RELAY
+    );
+    assert_eq!(config.v2_advertised_services(serving), serving);
+
+    let archive = Config::default();
+    assert_eq!(
+        archive.advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+    assert_eq!(
+        archive.v2_advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+    let archive_serving = PeerServices::NODE_NETWORK | PeerServices::NODE_SYNC_ARTIFACTS;
+    assert_eq!(
+        archive.advertised_services(archive_serving),
+        PeerServices::NODE_NETWORK
+    );
+    assert_eq!(
+        archive.v2_advertised_services(archive_serving),
+        archive_serving
+    );
+
+    // A node with an object source serves `get-object`, so version 2 peers see the bit.
+    let (_sender, source) = ObjectSource::channel(Arc::new(ObjectIndex::new()));
+    let source_config = Config {
+        object_source: Some(source),
+        ..Config::default()
+    };
+    assert_eq!(
+        source_config.v2_advertised_services(PeerServices::NODE_NETWORK),
+        archive_serving
+    );
+    assert_eq!(
+        source_config.advertised_services(PeerServices::NODE_NETWORK),
+        PeerServices::NODE_NETWORK
+    );
+}
+
+/// A snapshot-born node advertises `NODE_NETWORK_LIMITED` to version 2 peers only once the
+/// chain tip reaches its threshold, and the threshold is runtime-only.
+#[test]
+fn limited_service_starts_at_its_tip_height() {
+    let _init_guard = zebra_test::init();
+
+    let base = PeerServices::NODE_SYNC_ARTIFACTS;
+    let limited = base | PeerServices::NODE_NETWORK_LIMITED;
+    let from = Some(Height(100));
+    assert_eq!(
+        Config::v2_services_now(None, Some(Height(1_000)), base),
+        base
+    );
+    assert_eq!(Config::v2_services_now(from, None, base), base);
+    assert_eq!(Config::v2_services_now(from, Some(Height(99)), base), base);
+    assert_eq!(
+        Config::v2_services_now(from, Some(Height(100)), base),
+        limited
+    );
+    assert_eq!(
+        Config::v2_services_now(from, Some(Height(101)), base),
+        limited
+    );
+
+    let config = Config {
+        v2_limited_service_from: from,
+        ..Config::default()
+    };
+    let toml = toml::to_string(&config).unwrap();
+    assert!(!toml.contains("limited"), "{toml}");
+}
 
 /// The objects a node serves are runtime-only: a config never writes them, a config file that
 /// names them is rejected, and two configs are equal only if they watch the same object index.
@@ -136,6 +228,22 @@ fn total_connection_limit_includes_v2_share_only_when_enabled() {
             + v2.v2_outbound_connection_limit()
             + v2.v2_inbound_connection_limit(),
     );
+
+    assert_eq!(legacy.peerset_initial_target_size, 25);
+    assert_eq!(legacy.peerset_outbound_connection_limit(), 75);
+    assert_eq!(legacy.peerset_inbound_connection_limit(), 125);
+    assert_eq!(
+        legacy.peer_addr_response_limit(),
+        crate::constants::PEER_ADDR_RESPONSE_LIMIT
+    );
+    assert_eq!(crate::constants::PEER_ADDR_RESPONSE_LIMIT, 37);
+
+    let reduced_config = Config {
+        peerset_initial_target_size: 1,
+        ..legacy
+    };
+    assert_eq!(reduced_config.peerset_outbound_connection_limit(), 3);
+    assert_eq!(reduced_config.peer_addr_response_limit(), 1);
 
     // A configured endpoint gets at least one connection of each kind, even with tiny limits.
     let tiny = Config {

@@ -111,6 +111,27 @@ const PEER_SET_UNREADY_POLLS: usize = 2;
 const MISBEHAVIOR_FLUSH_TIMEOUT: Duration =
     constants::MISBEHAVIOR_FLUSH_INTERVAL.saturating_add(Duration::from_secs(5));
 
+#[test]
+fn inventory_channel_capacity_is_independent_of_large_peer_limits() {
+    let _init_guard = zebra_test::init();
+    let config = Config::default();
+
+    assert_eq!(config.peerset_total_connection_limit(), 200);
+    assert_eq!(
+        crate::peer_set::initialize::inventory_channel_capacity(&config),
+        crate::peer_set::inventory_registry::INVENTORY_CHANNEL_CAPACITY,
+    );
+
+    let small_config = Config {
+        peerset_initial_target_size: 1,
+        ..config
+    };
+    assert_eq!(
+        crate::peer_set::initialize::inventory_channel_capacity(&small_config),
+        small_config.peerset_total_connection_limit(),
+    );
+}
+
 /// Test that zebra-network discovers dynamic bind-to-all-interfaces listener ports,
 /// and sends them to the `AddressBook`.
 ///
@@ -395,7 +416,7 @@ async fn written_peer_cache_is_automatically_read_on_startup() {
         address_book_service,
         _address_metrics,
         _address_book_updater_task_handle,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Exercise the startup loader without opening sockets or handshaking with public peers.
     let initial_peers = limit_initial_peers(&config, &address_book_service).await;
@@ -779,7 +800,7 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Add enough candidates for the initial fill and the replacement dials.
     let candidate_count = outbound_limit * 2 + 1;
@@ -922,7 +943,7 @@ async fn crawler_does_not_readd_initial_peers_after_finding_candidates() {
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     let peer_set = service_fn(move |req| async move {
         match req {
@@ -1296,7 +1317,7 @@ where
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    ) = AddressBookUpdater::spawn(&config, unused_v4, PeerServices::NODE_NETWORK);
 
     if add_to_address_book {
         let initial_peers = limit_initial_peers(&config, &address_book_service).await;
@@ -1993,6 +2014,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     let (mut peer_set, address_book, misbehavior_tx, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         peers_inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2665,6 +2687,7 @@ async fn add_initial_peers_deadlock() {
 
     let init_future = init(
         config,
+        PeerServices::NODE_NETWORK,
         nil_inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2694,6 +2717,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 
     let (_peer_service, address_book, _, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2725,7 +2749,8 @@ async fn local_listener_bound_port_with(listen_addr: SocketAddr, network: Networ
         ..Config::default()
     };
     let (listener, bound_addr) = open_listener(&config).await;
-    let (address_book, _, _, _, _, updater_task) = AddressBookUpdater::spawn(&config, bound_addr);
+    let (address_book, _, _, _, _, updater_task) =
+        AddressBookUpdater::spawn(&config, bound_addr, PeerServices::NODE_NETWORK);
     let local_listener = address_book
         .lock()
         .unwrap()
@@ -2782,6 +2807,7 @@ where
 
     let (peer_service, address_book, _, _advertiser) = init(
         config,
+        PeerServices::NODE_NETWORK,
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
@@ -2833,7 +2859,7 @@ where
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -3139,7 +3165,7 @@ where
         address_book_service,
         _address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    ) = AddressBookUpdater::spawn(&config, unused_v4, PeerServices::NODE_NETWORK);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_service);
     let add_task_handle = tokio::spawn(add_fut);
@@ -3237,6 +3263,7 @@ async fn mixed_legacy_and_v2_peers_route_by_capability() {
     });
     let (_responder_service, _responder_book, _, _advertiser) = init(
         responder_config,
+        PeerServices::NODE_NETWORK,
         responder_inbound,
         NoChainTip,
         "v2 responder".to_string(),
@@ -3257,8 +3284,14 @@ async fn mixed_legacy_and_v2_peers_route_by_capability() {
         ..Config::default()
     };
     let inbound = service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) });
-    let (mut peer_set, address_book, _, _advertiser) =
-        init(config, inbound, NoChainTip, "mixed node".to_string()).await;
+    let (mut peer_set, address_book, _, _advertiser) = init(
+        config,
+        PeerServices::NODE_NETWORK,
+        inbound,
+        NoChainTip,
+        "mixed node".to_string(),
+    )
+    .await;
 
     // The version 2 peer is dialled in the background and is the only peer that can answer yet,
     // so the first answer proves the version 2 connection was established.
@@ -3343,6 +3376,7 @@ async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
     });
     let (_responder_service, _responder_book, _, _advertiser) = init(
         responder_config,
+        PeerServices::NODE_NETWORK,
         responder_inbound,
         NoChainTip,
         "v2 responder".to_string(),
@@ -3366,8 +3400,14 @@ async fn ipv4_v2_endpoint_skips_ipv6_initial_peers() {
         ..Config::default()
     };
     let inbound = service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) });
-    let (mut peer_set, _address_book, _, _advertiser) =
-        init(config, inbound, NoChainTip, "ipv4 node".to_string()).await;
+    let (mut peer_set, _address_book, _, _advertiser) = init(
+        config,
+        PeerServices::NODE_NETWORK,
+        inbound,
+        NoChainTip,
+        "ipv4 node".to_string(),
+    )
+    .await;
 
     assert_eq!(
         first_response(&mut peer_set, v2_headers_request()).await,
@@ -4274,7 +4314,13 @@ fn spawn_v2_node(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
-    spawn_v2_node_with_delay(config, bans_receiver, V2_TEST_RECONNECTION_DELAY)
+    spawn_v2_node_with(
+        config,
+        PeerServices::NODE_NETWORK,
+        bans_receiver,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+    )
 }
 
 /// [`spawn_v2_node`], redialling configured peers after `reconnection_delay` plus jitter.
@@ -4286,8 +4332,9 @@ fn spawn_v2_node_with_delay(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
-    spawn_v2_node_with_connected_peers(
+    spawn_v2_node_with(
         config,
+        PeerServices::NODE_NETWORK,
         bans_receiver,
         ConnectedPeers::unconnected(),
         reconnection_delay,
@@ -4304,12 +4351,52 @@ fn spawn_v2_node_with_connected_peers(
     mpsc::Receiver<DiscoveredPeer>,
     JoinHandle<Result<(), BoxError>>,
 ) {
+    spawn_v2_node_with(
+        config,
+        PeerServices::NODE_NETWORK,
+        bans_receiver,
+        connected_peers,
+        reconnection_delay,
+    )
+}
+
+/// [`spawn_v2_node`], advertising `local_services` to its peers.
+fn spawn_v2_node_with_services(
+    config: Config,
+    local_services: PeerServices,
+    bans_receiver: watch::Receiver<crate::BanList>,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
+    spawn_v2_node_with(
+        config,
+        local_services,
+        bans_receiver,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+    )
+}
+
+/// [`spawn_v2_node`] with every parameter: the services it advertises, the addresses its dialer
+/// skips, and the delay before it redials a configured peer.
+fn spawn_v2_node_with(
+    config: Config,
+    local_services: PeerServices,
+    bans_receiver: watch::Receiver<crate::BanList>,
+    connected_peers: ConnectedPeers,
+    reconnection_delay: Duration,
+) -> (
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+) {
     let (peerset_tx, peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
     let (inv_collector, _) = broadcast::channel(16);
     // These tests do not check misbehavior reports; a closed channel drops them.
     let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
     let task = v2::start_with_intervals(
         config,
+        local_services,
         service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
         inv_collector,
         NoChainTip,
@@ -4324,6 +4411,39 @@ fn spawn_v2_node_with_connected_peers(
     .expect("version 2 test configs listen");
 
     (peerset_rx, task)
+}
+
+/// A version 2 `init` record advertises the configured services, so a pruned node advertises
+/// limited service instead of `NODE_NETWORK`, and never the legacy-only early relay bit.
+#[tokio::test]
+async fn v2_init_records_advertise_the_configured_services() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_addr = free_udp_addr();
+    let (mut listener_rx, listener_task) =
+        spawn_v2_node(v2_test_config(listener_addr, &[]), no_bans());
+    // A syncing dialer requires `NODE_NETWORK` from the peers it dials, so the pruned node dials.
+    let pruned = Config {
+        experimental_early_block_relay: true,
+        ..v2_test_config(any_udp_addr(), &[listener_addr])
+    };
+    let (_dialer_rx, dialer_task) =
+        spawn_v2_node_with_services(pruned, PeerServices::NODE_NETWORK_LIMITED, no_bans());
+
+    let (_addr, client) = tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, listener_rx.next())
+        .await
+        .expect("the pruned node connects")
+        .expect("the listener is running");
+    assert_eq!(
+        client.connection_info.remote.services(),
+        PeerServices::NODE_NETWORK_LIMITED
+    );
+
+    listener_task.abort();
+    dialer_task.abort();
 }
 
 /// An empty ban list.
@@ -5055,7 +5175,7 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         address_book_service,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
     address_book.lock().unwrap().update(connected_change);
     let change =
         MetaAddr::new_gossiped_meta_addr(open_addr, PeerServices::NODE_NETWORK, DateTime32::now())
@@ -5233,6 +5353,7 @@ async fn mixed_node_with_one_connection_per_ip_skips_legacy_dial_to_v2_host() {
     });
     let (_responder_service, _responder_book, _, _advertiser) = init(
         responder_config,
+        PeerServices::NODE_NETWORK,
         responder_inbound,
         NoChainTip,
         "v2 responder".to_string(),
@@ -5252,8 +5373,14 @@ async fn mixed_node_with_one_connection_per_ip_skips_legacy_dial_to_v2_host() {
         ..Config::default()
     };
     let inbound = service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) });
-    let (mut peer_set, address_book, _, _advertiser) =
-        init(config, inbound, NoChainTip, "mixed node".to_string()).await;
+    let (mut peer_set, address_book, _, _advertiser) = init(
+        config,
+        PeerServices::NODE_NETWORK,
+        inbound,
+        NoChainTip,
+        "mixed node".to_string(),
+    )
+    .await;
 
     // The version 2 peer is the only peer, so its answer proves the connection is up.
     assert_eq!(

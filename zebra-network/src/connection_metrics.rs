@@ -238,14 +238,18 @@ fn classify_connection_error(
         };
         return ConnectionErrorLabels {
             stage: match v2_error {
-                SelfConnection | MissingRequiredServices { .. } | Obsolete { .. } => "version",
+                SelfConnection
+                | MissingRequiredServices { .. }
+                | Obsolete { .. }
+                | ParametersMismatch => "version",
                 _ => "handshake",
             },
             outcome: match v2_error {
                 Timeout => "timeout",
                 SelfConnection => "self_connection",
                 Obsolete { .. } => "obsolete_version",
-                Init(_) => "protocol_parse_error",
+                Init(_) | Parameters(_) => "protocol_parse_error",
+                ParametersMismatch => "parameters_mismatch",
                 MissingRequiredServices { .. } => "missing_required_services",
                 // The framing error's own handling: a stream that failed or was reset is a
                 // transport failure, and this node's own oversized record is a local bug.

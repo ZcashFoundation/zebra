@@ -937,15 +937,30 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 }
             }
         });
+        // Initialization reads the state's history capabilities before anything else.
+        let read_state: MockService<_, _, _, zebra_consensus::BoxError> =
+            MockService::build().for_unit_tests();
+        let history_read = tokio::spawn({
+            let mut read_state = read_state.clone();
+            async move {
+                read_state
+                    .expect_request(zebra_state::ReadRequest::HistoryCapabilities)
+                    .await
+                    .respond(zebra_state::ReadResponse::HistoryCapabilities(
+                        Default::default(),
+                    ));
+            }
+        });
         let (router, _, _handles, _, prepared) = zebra_consensus::router::init_test(
             zebra_consensus::Config {
                 checkpoint_sync: false,
             },
             &network,
             state,
-            MockService::build().for_unit_tests(),
+            read_state,
         )
         .await;
+        history_read.await.unwrap();
         let cache = TemplateCache::default();
         // Proposal conversion runs off-thread; the outer deadline bounds its mock requests.
         let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =

@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Read the parent's block info by height in `getblock` when the lookup by its hash misses, so the first block of a state snapshot's window reports its `valuePools` deltas instead of the whole pool.
+time: 2026-11-03T12:50:00.000000000Z

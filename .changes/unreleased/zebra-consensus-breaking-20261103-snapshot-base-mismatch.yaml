@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: Added `VerifyCheckpointError::SnapshotBaseMismatch`, returned for every block in a checkpoint range whose chain does not reach the unchecked block hash of the state snapshot the state was imported from; callers exhaustively matching the enum must handle the new variant. The state checkpoint validation task now skips the checkpoints below a snapshot-imported state's window, and the checkpoint verifier reads the state's history capabilities at initialization.
+time: 2026-11-03T12:45:00.000000000Z

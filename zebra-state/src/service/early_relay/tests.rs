@@ -405,6 +405,7 @@ fn early_relay_rejected_commit_releases_context_before_response() {
         None,
         relay.clone(),
         None,
+        None,
     );
     let (version_tx, version_rx) = std::sync::mpsc::channel();
     let waker = Waker::from(Arc::new(ContextAtWake {
@@ -420,9 +421,11 @@ fn early_relay_rejected_commit_releases_context_before_response() {
         .non_finalized
         .as_ref()
         .unwrap()
-        .send(NonFinalizedWriteMessage::Commit(
-            (genesis.block.clone().prepare(), rsp_tx, None, None),
-            std::time::Instant::now(),
+        .send(super::super::write::WriteMessage::NonFinalized(
+            NonFinalizedWriteMessage::Commit(
+                (genesis.block.clone().prepare(), rsp_tx, None, None),
+                std::time::Instant::now(),
+            ),
         ))
         .unwrap();
     let version = version_rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -481,6 +484,7 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
         None,
         relay.clone(),
         None,
+        None,
     );
     let (observed_tx, observed_rx) = std::sync::mpsc::channel();
     let waker = Waker::from(Arc::new(PublishedContextAtWake {
@@ -501,11 +505,11 @@ fn early_relay_checkpoint_commit_publishes_context_before_notifications() {
         .finalized
         .as_ref()
         .unwrap()
-        .send((
+        .send(super::super::write::WriteMessage::Finalized((
             block.into(),
             rsp_tx,
             Some(MinedBlockNotifications::new(committed, validated)),
-        ))
+        )))
         .unwrap();
     let observations = [
         observed_rx.recv_timeout(Duration::from_secs(10)).unwrap(),

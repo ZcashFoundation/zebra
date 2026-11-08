@@ -30,6 +30,7 @@ use tower::{
 use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
+    state_snapshot::StateSnapshotCommitment,
 };
 use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
 use zebra_network as zn;
@@ -399,6 +400,111 @@ pub struct Config {
     /// Testnet use the pins compiled into Zebra, and refuse this field: Zebra
     /// does not start if it is set for them.
     pub v2_known_hash_pins: Option<KnownHashPins>,
+
+    /// Whether an empty pruned node downloads a state snapshot over the version 2 protocol and
+    /// syncs only the blocks above it, instead of syncing from genesis.
+    ///
+    /// On by default, so it only takes effect on pruned nodes. The snapshot is downloaded only when `state.prune_blocks_older_than` is
+    /// set, the state is not ephemeral, no state database exists yet, a snapshot commitment is
+    /// pinned for the network or configured in `state_snapshot`, `consensus.checkpoint_sync` is
+    /// on, zcashd-compat mode is off, and `state_snapshot_peers` names a peer or
+    /// `network.v2_listen_addr` is set. Otherwise Zebra logs why and syncs
+    /// normally.
+    ///
+    /// The node first syncs and verifies headers from genesis, then checks the snapshot against
+    /// them, and keeps every header.
+    ///
+    /// The UTXO set, the nullifiers, the Sprout tree, and the value pools of a snapshot are
+    /// trusted on its commitment, like the checkpoints are trusted, and the history below the
+    /// snapshot is never downloaded.
+    pub state_snapshot_sync: bool,
+
+    /// The state snapshot to trust: its `height`, the `hash` of the block at that height, and
+    /// the `manifest` hash, as hex strings.
+    ///
+    /// `None` by default, which uses the commitment this build pins for the network, if any. On
+    /// Mainnet and the default Testnet, a configured commitment is accepted only if it equals the
+    /// pinned one, or if `unsafe_trust_state_snapshot` is on. On Regtest and custom testnets any
+    /// commitment is accepted.
+    pub state_snapshot: Option<StateSnapshotCommitment>,
+
+    /// Whether to trust a configured `state_snapshot` on Mainnet or the default Testnet that
+    /// differs from the commitment this build pins.
+    ///
+    /// Off by default. Turning it on makes the node trust whoever produced the configured
+    /// snapshot with its view of the chain state, and logs a warning at every start.
+    pub unsafe_trust_state_snapshot: bool,
+
+    /// The version 2 peers the snapshot is downloaded from, as `host:port` strings.
+    ///
+    /// Empty by default, which uses the connected version 2 peers that advertise
+    /// `NODE_SYNC_ARTIFACTS`: `network.initial_v2_peers`, the peers that dialled this node, and
+    /// the peers it discovered. Zebra dials these peers for the download only, so a peer listed
+    /// here and in `network.initial_v2_peers` must allow two connections from this node's IP
+    /// address.
+    pub state_snapshot_peers: Vec<String>,
+
+    /// What to do when the snapshot cannot be downloaded or is rejected.
+    ///
+    /// `"auto"` by default: continue with a normal sync from genesis, except when a snapshot
+    /// configured in `state_snapshot` is rejected, which exits. A node that uses the pinned
+    /// snapshot always starts, even when no peer serves it. `"error"` always exits with an
+    /// actionable message, and `"genesis"` always continues with a normal sync. After `"error"`
+    /// exits, an aborted download leaves no state directory and is retried on the next start. A
+    /// normal sync after `"auto"` or `"genesis"` creates the state, so later starts continue it
+    /// and do not bootstrap again: delete the state directory to retry. A rejected snapshot stays
+    /// refused until its commitment changes or its rejection marker is removed after
+    /// investigation.
+    pub state_snapshot_fallback: StateSnapshotFallback,
+
+    /// Whether to serve the state snapshots this node holds to version 2 peers.
+    ///
+    /// Every node with `network.v2_listen_addr` set advertises the `NODE_SYNC_ARTIFACTS` service,
+    /// with or without this setting, and answers the objects it does not hold as not found.
+    ///
+    /// Off by default. A node that downloaded a snapshot keeps its pieces only when this is on;
+    /// the `zebrad export-state-snapshot` command adds snapshots to serve.
+    pub serve_state_snapshots: bool,
+}
+
+/// What `zebrad start` does when a state snapshot cannot be downloaded or is rejected.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateSnapshotFallback {
+    /// Continue with a normal sync from genesis, except when a configured snapshot is rejected,
+    /// which exits like [`Self::Error`]: a configured snapshot is the operator's choice, and the
+    /// pinned one must never stop a node from starting.
+    #[default]
+    Auto,
+
+    /// Exit with an actionable error. An aborted download is retried on the next start; a rejected
+    /// snapshot stays refused until its commitment changes or its marker is removed.
+    Error,
+
+    /// Continue with a normal sync from genesis.
+    Genesis,
+}
+
+impl StateSnapshotFallback {
+    /// Returns the value's name in a config file.
+    pub fn name(self) -> &'static str {
+        match self {
+            StateSnapshotFallback::Auto => "auto",
+            StateSnapshotFallback::Error => "error",
+            StateSnapshotFallback::Genesis => "genesis",
+        }
+    }
+
+    /// Returns whether a snapshot failure exits instead of continuing with a normal sync:
+    /// always for [`Self::Error`], never for [`Self::Genesis`], and for [`Self::Auto`] only when
+    /// a snapshot the operator configured was `rejected`.
+    pub fn exits(self, configured: bool, rejected: bool) -> bool {
+        match self {
+            StateSnapshotFallback::Auto => configured && rejected,
+            StateSnapshotFallback::Error => true,
+            StateSnapshotFallback::Genesis => false,
+        }
+    }
 }
 
 impl Default for Config {
@@ -443,6 +549,12 @@ impl Default for Config {
 
             // Mainnet and the default Testnet use their compiled-in lists.
             v2_known_hash_pins: None,
+            state_snapshot_sync: true,
+            state_snapshot: None,
+            unsafe_trust_state_snapshot: false,
+            state_snapshot_peers: Vec::new(),
+            state_snapshot_fallback: StateSnapshotFallback::Auto,
+            serve_state_snapshots: false,
         }
     }
 }
@@ -1765,7 +1877,20 @@ where
 
     /// Download and verify the genesis block, if it isn't currently known to
     /// our node.
+    ///
+    /// A state that already has a tip is not checked: a snapshot-imported state
+    /// ships genesis with its window, and any other state committed
+    /// genesis before its tip, so asking would only download a block below the
+    /// tip.
     async fn request_genesis(&mut self) -> Result<(), Report> {
+        if let Some(tip_height) = self.latest_chain_tip.best_tip_height() {
+            debug!(
+                ?tip_height,
+                "the state has a tip, so the genesis block is not requested"
+            );
+            return Ok(());
+        }
+
         // Due to Bitcoin protocol limitations, we can't request the genesis
         // block using our standard tip-following algorithm:
         //  - getblocks requires at least one hash

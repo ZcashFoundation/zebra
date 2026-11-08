@@ -1,0 +1,7 @@
+project: zebra-network
+kind: Changed
+body: >-
+  Changed `LoadTrackedClient::supports` to avoid ordinary requests to zero-service version 2 peers
+  and to require full or limited block service for block and transaction inventory requests, so
+  short-lived bootstrap clients are not used for normal chain sync.
+time: 2026-11-03T20:00:00.000000000Z

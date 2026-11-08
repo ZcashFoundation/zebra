@@ -25,6 +25,37 @@ use crate::protocol::external::{
 /// The record kind byte of an `init` record (draft, "Connection Handshake").
 pub const INIT_RECORD_KIND: u8 = 0x00;
 
+/// The record kind byte of Zebra's optional consensus-parameters extension.
+/// It is sent before `init` on networks whose genesis hash does not identify
+/// their consensus parameters. Older peers ignore it as an unknown record kind.
+pub const CONSENSUS_PARAMETERS_RECORD_KIND: u8 = 0x01;
+
+/// The length of a complete consensus-parameters record payload.
+pub const CONSENSUS_PARAMETERS_RECORD_LEN: usize = 33;
+
+/// Encodes a consensus-parameters record for `parameters_hash`.
+pub fn encode_consensus_parameters_record(parameters_hash: [u8; 32]) -> Bytes {
+    let mut payload = Vec::with_capacity(CONSENSUS_PARAMETERS_RECORD_LEN);
+    payload.push(CONSENSUS_PARAMETERS_RECORD_KIND);
+    payload.extend_from_slice(&parameters_hash);
+    payload.into()
+}
+
+/// Decodes a complete consensus-parameters record payload.
+pub fn decode_consensus_parameters_record(payload: &[u8]) -> Result<[u8; 32], SerializationError> {
+    if payload.len() != CONSENSUS_PARAMETERS_RECORD_LEN
+        || payload.first() != Some(&CONSENSUS_PARAMETERS_RECORD_KIND)
+    {
+        return Err(SerializationError::Parse(
+            "consensus parameters record must contain its kind byte and a 32-byte hash",
+        ));
+    }
+
+    let mut parameters_hash = [0; 32];
+    parameters_hash.copy_from_slice(&payload[1..]);
+    Ok(parameters_hash)
+}
+
 /// Decodes a complete handshake stream record payload, as the record codec
 /// yields it: `Some` for an `init` record, `None` for a record kind the
 /// draft says to ignore ("Connection Handshake").

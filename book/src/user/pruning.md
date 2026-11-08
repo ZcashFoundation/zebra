@@ -1,0 +1,197 @@
+# Pruned mining nodes
+
+Pruning saves disk space on mining and pool backends by deleting old finalized transaction bodies.
+Validation state, current UTXOs, headers, transaction IDs, address indexes, and shielded tree data
+remain available. Mining, block submission, and spending old unspent outputs still work. Initial
+sync still downloads and validates the chain; pruning does not skip validation. An empty pruned
+node can instead [start from a state snapshot](state-snapshot-sync.md) downloaded from version 2
+peers, which skips the history below the snapshot and trusts the snapshot's producer with it.
+
+Use an archive node instead for historical wallet rescans, indexer bootstrap, or serving full block
+history to peers. Both zcashd sidecar modes require an archive and are rejected when pruning is
+configured, even before deletion. A pool may also need an archive for payout and accounting queries.
+
+**Deletion is irreversible.** Keep an archive backup if you may need the history again. Pruning does
+not promise lower RAM use or a fixed database-size ceiling: retained indexes and validation state
+keep growing. Allow free disk space for initial sync, snapshot extraction, and RocksDB compaction;
+logical deletion does not immediately free disk space.
+
+## Enable pruning and choose retention
+
+Add the following to `zebrad.toml`, or add the option to its existing `[state]` section,
+then restart:
+
+```toml
+[state]
+prune_blocks_older_than = 10000
+```
+
+The value is the number of recent **finalized** block bodies to retain, measured from the durable
+finalized tip rather than the best chain tip. Genesis and all non-finalized blocks are
+also retained.
+The minimum is 10,000 on Mainnet and Testnet, including custom testnets, or 1,001 on Regtest
+(`MAX_BLOCK_REORG_HEIGHT + 1`). Zero and smaller values are invalid. Omitting the setting selects
+archive operation, the default; it cannot reopen a database whose history has already been pruned.
+
+Choose the window for the queries your pool actually makes, not just for mining work. At 75-second
+spacing, 10,000 blocks cover about 8.7 days; at 25-second spacing they cover about 2.9 days.
+These are spacing estimates, not a time-based retention guarantee. Allow for payout delays, accounting
+reconciliation, outages, and retries. Keep an archive backend for queries outside that window.
+
+Increasing retention preserves more future history but never restores deleted bodies. A restored
+pruned snapshot can therefore start with less history than the configured window requests.
+
+## Startup and deletion
+
+A single background worker waits for database migrations, spending-index conversion, and initial
+format checks to finish successfully. Skipped, cancelled, or failed checks do not permit deletion.
+The worker runs at startup and after finalized-tip changes, deleting at most 100 complete block
+heights per batch. It yields between batches. After a backlog spanning more than one batch has
+been deleted, the worker compacts the deleted transaction-body range and logs its start and
+completion. Normal RocksDB compaction handles ongoing deletion. Both run outside the block commit
+path; shutdown waits for any in-flight deletion or compaction. Unexpected deletion failures are
+fatal, not silently retried.
+
+Restart checks require retained evidence that the cached chain follows the configured network
+upgrades. After NU5, a matching V5/V6 transaction provides that evidence; the check searches back at
+most 100,000 blocks and refuses to start if missing history prevents it from finding a witness.
+Pruning never deletes the witness needed by this check. It can retain an older suffix than requested
+until a newer witness appears, and does not begin before suitable NU5 evidence exists.
+
+Keep the same `indexer` build-feature setting after pruning. Switching the spending-index layout in
+either direction requires full history and is rejected on pruned state. Future migrations that need
+old bodies also require an archive snapshot or resync; changing the retention setting cannot satisfy
+them.
+
+## RPC and peer behaviour
+
+The `getblockchaininfo` response describes actual stored history, not the configuration:
+
+- An archive reports `pruned: false` and omits `pruneheight`, including before the first deletion.
+- After deletion, `pruned: true` accompanies `pruneheight`, the first height of the complete
+  retained body suffix. Genesis remains available separately below it. This floor is derived
+  from the first retained transaction row above genesis, not a separately persisted pruning marker.
+  A node [started from a state snapshot](state-snapshot-sync.md#after-the-bootstrap) also records
+  the snapshot height, its first body, and reports the higher of the two from its first start.
+
+For historical queries:
+
+- Requests using `getblock` verbosity 1 still return the complete transaction-ID list. Headers,
+  address balances, address transaction IDs, current UTXOs, treestates, and subtrees
+  remain available.
+- Requests using `getblock` verbosity 0, 2, or 3 fail with code `-32603` and
+  `"Block not available (pruned data)"` when a needed body is missing. Verbosity 3 can fail
+  even for a retained block if a spent output's parent transaction was pruned.
+- Requests using `getrawtransaction` for a known pruned transaction fail with code `-32603` and
+  `"Transaction not available (pruned data)"`. Unknown transactions still return `-5`; mempool and
+  retained transactions remain available.
+- Responses from `gettxout` still include the value, script, confirmations, and coinbase flag for an
+  old unspent output, but `version` is `null` if its creating transaction was pruned. Unlike Zebra,
+  zcashd stores the version in its coins database.
+- The indexer and native lightwalletd gRPC services report `FAILED_PRECONDITION` for pruned bodies.
+  A stream that encounters pruned history attempts to send a terminal error, but a stalled consumer
+  can miss it when the send times out. Earlier results or stream closure alone do not prove that
+  the requested range is complete.
+
+See the [RPC migration guide](zcashd-api-migration-guide.md#pruned-history) and
+[API history contract](../api.md#historical-data-availability) for compatibility details.
+
+Enabling pruning removes `NODE_NETWORK` from peer-service advertisements immediately, before any
+body is deleted. The node still syncs, relays, and serves retained data and historical headers, but
+returns `notfound` for unavailable block bodies. Block inventory stops at missing history rather
+than skipping the gap. Do not use this node as an archive source for other peers or a
+zcashd sidecar.
+
+Peers treat a node without `NODE_NETWORK` as unable to serve blocks. zcashd-derived nodes never
+download blocks from it, even near the tip, and syncing Zebra nodes do not keep it as an outbound
+peer. A pruned mining node should therefore also connect to archive nodes, or to Zebra peers that
+use [early block relay](mining.md#early-block-relay-and-compact-blocks), so that the blocks it finds still propagate.
+
+With a retention of at least 2,304 blocks, a pruned node advertises `NODE_NETWORK_LIMITED` to
+[version 2 protocol](p2p-v2.md) peers, which tells them it serves at least the most recent 2,304
+blocks; pruning keeps at least `state.prune_blocks_older_than` recent bodies, so the promise holds
+while the node syncs too. Legacy peers are not told, because ZIP 204 defines no such service for the
+legacy protocol.
+
+## Watch pruning converge
+
+Enable the [Prometheus endpoint](metrics.md) and watch these metrics:
+
+- The `state.pruning.retained.height` gauge is the actual retained-body floor; zero means no missing
+  historical prefix.
+- The `state.pruning.deleted.height.count` counter counts block heights deleted by this process,
+  not transactions or bytes.
+- The `state.pruning.batch.duration_seconds` histogram measures successful deletion batches,
+  including their safety checks, not compaction.
+
+Prometheus replaces dots in these names with underscores. After a finalized block commit, use
+`state.finalized.block.height` as the finalized tip. For retention `N`, the target floor is
+`max(1, finalized_tip + 1 - N)`. The remaining deletion backlog is
+`max(0, target_floor - max(1, retained_floor))`; there is no separate target or backlog metric.
+
+The floor should approach that target as deletion catches up. A paused floor can mean startup
+checks are still running or an older restart witness must be preserved. Check startup logs and
+actual `getblockchaininfo` availability before treating it as stalled. Disk usage can lag logical
+deletion while compaction runs, so also monitor free space and the existing RocksDB metrics.
+
+## Starting from a state snapshot
+
+Syncing a pruned node from genesis still downloads and validates every block. An empty pruned
+node can instead bootstrap from a state snapshot at a height `H`, downloaded from
+[version 2 protocol](p2p-v2.md) peers that advertise `NODE_SYNC_ARTIFACTS`, and sync only the
+blocks above `H`. The snapshot ships the complete state at `H`, the headers of the 2,304 most
+recent blocks, and the body of block `H` only, so the node starts with `pruneheight` at `H`, and
+advertises `NODE_NETWORK_LIMITED` once its tip is 2,304 finalized blocks above `H`. The bodies
+below `H` are never downloaded.
+
+The snapshot is checked against a commitment, and the commitment's producer is trusted with the
+UTXO set, the nullifier and anchor sets, and the value pools, which the node cannot verify
+without the history. The node rebuilds its address indexes from the UTXO set. The feature is on by
+default for pruned nodes, falls back to a normal sync when it cannot run, and is documented in
+[Starting a pruned node from a state snapshot](state-snapshot-sync.md), including what is verified,
+what is trusted, and how to export and serve a snapshot from a stopped node.
+
+## Format 32, recovery, and copies
+
+This release uses database format 32.0.0 for both archive and pruned nodes. When no v32 database
+exists, startup moves the newest reusable source inside the cache directory, preferring v31,
+then v30, then v29, to `state/v32/<network>/`. This is a move, not a backup, and happens even with pruning
+disabled. An older binary looking in the source directory will not find the moved state and may
+start syncing again.
+
+For fixed-height v29, v30 and v31 sources, the upgrades through format 32 rewrite no existing
+records, so an archive that has **never** been pruned, snapshot-imported, or built with [spentness
+hints](spentness-hints.md) can be rolled back to Zebra 7.0.0 by moving the directory back:
+
+1. With this release still running, confirm `getblockchaininfo` reports `pruned: false`, and that
+   the config does not set `prune_blocks_older_than`.
+2. Stop Zebra and every process that opens its database directly.
+3. Move `state/v32/<network>/` back to `state/v29/<network>/`. The `state/v29/<network>/` path must
+   not already exist.
+4. Start Zebra 7.0.0, built with the same `indexer` feature setting. It logs that it is opening a
+   newer database format and continues from the existing tip.
+
+Never do this with a database that has been pruned, even partially: Zebra 7.0.0 cannot detect
+missing block bodies, and would serve incomplete blocks to peers and RPC clients. A pruned node can
+only return to 7.0.0 from a separate archive backup.
+
+A database built from a [state snapshot](state-snapshot-sync.md) uses format 32.0.0 and records
+where its history starts. Never open it with an older Zebra build, and never move it to `v31`,
+`v30`, `v29`, or any older directory: those builds cannot tell that the history below the snapshot's
+window is missing, and would treat the database as a complete archive. See the canonical
+[format 32 upgrade and rollback rules](upgrading.md#zebra-710).
+
+Before upgrading or pruning, stop Zebra and keep any required archive backup outside the managed
+cache directory. After deletion, simply removing the option makes writable startup fail. To regain
+archive service, restore a compatible **archive** snapshot or fully resync in a separate cache
+directory with pruning disabled. Do not overlay an archive onto pruned files or expect a larger
+retention value to fill gaps. Follow the [snapshot guide](snapshots.md) for format, trust,
+and restore requirements.
+
+The `copy-state` command replays available blocks; it does not recreate deleted history. It rejects
+a pruned target and any source range crossing missing bodies before opening the target for writes.
+Copying only genesis is allowed; resuming into an existing archive target is possible if its tip
+matches the source chain and the needed range is retained. Target pruning is disabled for the copy
+and comparison, regardless of its config; normal startup applies that config afterward. Use a
+stopped-node backup to preserve a pruned database rather than trying to rebuild one
+with `copy-state`.

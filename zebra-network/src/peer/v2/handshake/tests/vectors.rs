@@ -7,13 +7,23 @@ use futures::StreamExt;
 use quinn::Connection;
 use tokio::time::Instant;
 
-use zebra_chain::{block, chain_tip::NoChainTip, parameters::Network};
+use zebra_chain::{
+    block,
+    chain_tip::NoChainTip,
+    parameters::{
+        testnet::{ConfiguredActivationHeights, RegtestParameters},
+        Network,
+    },
+};
 
 use crate::{
     constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     peer::{
         v2::{
-            handshake::{handshake, HandshakeError, LocalIdentity, Role},
+            handshake::{
+                handshake, handshake_requiring, CompletedHandshake, HandshakeError, LocalIdentity,
+                Role,
+            },
             nonces::NonceRegistry,
             tests::{connected_pair, identity, run_handshake},
         },
@@ -22,7 +32,10 @@ use crate::{
     protocol::{
         external::types::{Nonce, PeerServices, Version},
         v2::{
-            handshake::{InitRecord, INIT_RECORD_KIND},
+            handshake::{
+                decode_consensus_parameters_record, InitRecord, CONSENSUS_PARAMETERS_RECORD_KIND,
+                INIT_RECORD_KIND,
+            },
             record::RecordCodec,
             types::{ErrorCode, StreamType},
         },
@@ -45,6 +58,18 @@ fn raw_init(nonce: u64, version: Version) -> InitRecord {
         announce: false,
         full_ids: false,
     }
+}
+
+/// Returns Regtest parameters with NU7 at `nu7`, leaving the other consensus
+/// parameters at their defaults.
+fn regtest(nu7: Option<u32>) -> Network {
+    Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu7,
+            ..Default::default()
+        },
+        ..Default::default()
+    })
 }
 
 /// Frames `payload` as one record.
@@ -134,6 +159,131 @@ async fn handshake_completes_in_both_roles() {
             !initiator_init.announce && !initiator_init.full_ids,
             "compact blocks are not requested yet"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Regtest peers with the same consensus parameters complete the handshake.
+#[tokio::test]
+async fn regtest_handshake_accepts_matching_consensus_parameters() {
+    let _init_guard = zebra_test::init();
+    let network = regtest(None);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let identity = identity("/regtest/");
+        let initiator_nonces = NonceRegistry::spawn(8);
+        let responder_nonces = NonceRegistry::spawn(8);
+        let (initiator, responder) = tokio::join!(
+            run_handshake(
+                &outbound,
+                Role::Initiator,
+                &network,
+                &identity,
+                &initiator_nonces
+            ),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &identity,
+                &responder_nonces
+            ),
+        );
+        initiator.expect("matching parameters complete for the initiator");
+        responder.expect("matching parameters complete for the responder");
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Regtest peers with different activation heights reject each other before
+/// either side can mistake the other for a compatible consensus peer.
+#[tokio::test]
+async fn regtest_handshake_rejects_mismatched_consensus_parameters() {
+    let _init_guard = zebra_test::init();
+    let network = regtest(None);
+    let other = regtest(Some(20));
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (outbound, inbound, _client, _server) = connected_pair(&other).await;
+        let identity = identity("/regtest/");
+        let initiator_nonces = NonceRegistry::spawn(8);
+        let responder_nonces = NonceRegistry::spawn(8);
+        let (initiator, responder) = tokio::join!(
+            run_handshake(
+                &outbound,
+                Role::Initiator,
+                &other,
+                &identity,
+                &initiator_nonces
+            ),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &identity,
+                &responder_nonces
+            ),
+        );
+        let mut detected = 0;
+        for (role, result) in [("initiator", initiator), ("responder", responder)] {
+            match result {
+                Err(HandshakeError::ParametersMismatch) => detected += 1,
+                Err(HandshakeError::Record(_) | HandshakeError::Connection(_)) => {}
+                Err(error) => panic!("{role} returned the wrong error: {error}"),
+                Ok(_) => panic!("{role} completed with mismatched parameters"),
+            }
+        }
+        assert!(
+            detected >= 1,
+            "at least one side must identify the parameter mismatch before the connection closes"
+        );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// A legacy Regtest peer that sends only `init` remains compatible. A new peer
+/// sends its optional parameters record first, which an older peer can ignore.
+#[tokio::test]
+async fn regtest_handshake_accepts_legacy_peers_without_parameters() {
+    let _init_guard = zebra_test::init();
+    let network = regtest(None);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (raw_peer, inbound, _client, _server) = connected_pair(&network).await;
+        let responder = identity("/responder/");
+        let nonces = NonceRegistry::spawn(8);
+        let expected = network
+            .state_snapshot_parameters_hash()
+            .expect("Regtest has a consensus parameters hash");
+
+        let raw = async {
+            let (mut send, recv) = raw_peer.open_bi().await.expect("opens");
+            send.write_all(&[StreamType::Handshake.code()])
+                .await
+                .expect("writes");
+            let init = raw_init(2, CURRENT_NETWORK_PROTOCOL_VERSION).encode();
+            send.write_all(&record(&init)).await.expect("writes");
+
+            let mut framed = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+            let payload = framed.next().await.expect("parameters").expect("valid");
+            assert_eq!(payload[0], CONSENSUS_PARAMETERS_RECORD_KIND);
+            assert_eq!(
+                decode_consensus_parameters_record(&payload).expect("valid parameters"),
+                expected
+            );
+            let payload = framed.next().await.expect("init").expect("valid");
+            assert_eq!(payload[0], INIT_RECORD_KIND);
+        };
+
+        let (_, result) = tokio::join!(
+            raw,
+            run_handshake(&inbound, Role::Responder, &network, &responder, &nonces)
+        );
+        result.expect("a legacy peer without the extension stays compatible");
     })
     .await
     .expect("the test completes well within the timeout");
@@ -471,6 +621,132 @@ async fn non_serving_outbound_peers_are_declined_while_syncing() {
         theirs.expect("the initiator completes");
         let ours = ours.expect("a non-serving inbound peer is accepted");
         assert_eq!(ours.connection_info.remote.services(), PeerServices::empty());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Runs the handshake as `role` on `connection`, requiring
+/// `required_services` of an outbound peer.
+async fn run_handshake_requiring(
+    connection: &Connection,
+    role: Role,
+    network: &Network,
+    identity: &LocalIdentity,
+    nonces: &NonceRegistry,
+    required_services: PeerServices,
+) -> Result<CompletedHandshake, HandshakeError> {
+    let addr = connection.remote_address().into();
+    let connected_addr = match role {
+        Role::Initiator => ConnectedAddr::new_outbound_direct(addr),
+        Role::Responder => ConnectedAddr::new_inbound_direct(addr),
+    };
+    let mut minimum_peer_version = MinimumPeerVersion::new(NoChainTip, network);
+    handshake_requiring(
+        connection,
+        connected_addr,
+        role,
+        identity,
+        &mut minimum_peer_version,
+        nonces,
+        Instant::now() + TEST_TIMEOUT,
+        required_services,
+    )
+    .await
+}
+
+/// A state-snapshot bootstrap requires `NODE_SYNC_ARTIFACTS` of the peers it
+/// dials instead of `NODE_NETWORK`: while syncing, a pruned node
+/// that serves snapshot objects is accepted by the bootstrap's handshake and
+/// declined by the normal dialer's, and a node that serves blocks but no
+/// objects is accepted by the normal dialer's and declined by the
+/// bootstrap's.
+#[tokio::test]
+async fn bootstrap_handshake_requires_artifact_service_instead_of_node_network() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // `NoChainTip` reports no tip, so the dialling node counts as syncing.
+        let us = identity("/us/");
+        let pruned_services =
+            PeerServices::NODE_NETWORK_LIMITED | PeerServices::NODE_SYNC_ARTIFACTS;
+        let pruned_server = LocalIdentity {
+            user_agent: "/pruned/".to_string(),
+            services: pruned_services,
+            relay: true,
+        };
+        let archive = identity("/archive/");
+        let our_nonces = NonceRegistry::spawn(8);
+        let their_nonces = NonceRegistry::spawn(8);
+
+        // The normal dialer declines the pruned server.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake(&outbound, Role::Initiator, &network, &us, &our_nonces),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &pruned_server,
+                &their_nonces
+            ),
+        );
+        let error = ours
+            .err()
+            .expect("the normal dialer declines a pruned server");
+        assert!(
+            matches!(error, HandshakeError::MissingRequiredServices { services } if services == pruned_services),
+            "got {error:?}"
+        );
+        drop(theirs);
+        assert_eq!(closed_with(&inbound).await, Some(ErrorCode::NoError.code()));
+
+        // The bootstrap accepts it.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake_requiring(
+                &outbound,
+                Role::Initiator,
+                &network,
+                &us,
+                &our_nonces,
+                PeerServices::NODE_SYNC_ARTIFACTS,
+            ),
+            run_handshake(
+                &inbound,
+                Role::Responder,
+                &network,
+                &pruned_server,
+                &their_nonces
+            ),
+        );
+        let ours = ours.expect("the bootstrap accepts a pruned server with the artifact bit");
+        theirs.expect("the responder completes");
+        assert_eq!(ours.connection_info.remote.services(), pruned_services);
+
+        // The bootstrap declines a node that serves blocks but no objects.
+        let (outbound, inbound, _client, _server) = connected_pair(&network).await;
+        let (ours, theirs) = tokio::join!(
+            run_handshake_requiring(
+                &outbound,
+                Role::Initiator,
+                &network,
+                &us,
+                &our_nonces,
+                PeerServices::NODE_SYNC_ARTIFACTS,
+            ),
+            run_handshake(&inbound, Role::Responder, &network, &archive, &their_nonces),
+        );
+        let error = ours
+            .err()
+            .expect("the bootstrap declines a server without the artifact bit");
+        assert!(
+            matches!(error, HandshakeError::MissingRequiredServices { services } if services == PeerServices::NODE_NETWORK),
+            "got {error:?}"
+        );
+        drop(theirs);
+        assert_eq!(closed_with(&inbound).await, Some(ErrorCode::NoError.code()));
     })
     .await
     .expect("the test completes well within the timeout");

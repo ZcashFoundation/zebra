@@ -25,8 +25,10 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, router::RouterError, transaction};
 use zebra_network::{
-    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash, CacheDir,
-    Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
+    canonical_peer_addr, connect_isolated_tcp_direct_with_inbound,
+    types::{InventoryHash, PeerServices},
+    CacheDir, Config as NetworkConfig, InventoryResponse, PeerError, Request, Response,
+    SharedPeerError,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -778,6 +780,7 @@ async fn setup(
     };
     let (mut peer_set, address_book, _, block_advertiser) = zebra_network::init(
         network_config,
+        PeerServices::NODE_NETWORK,
         inbound_service.clone(),
         latest_chain_tip.clone(),
         "Zebra user agent".to_string(),
@@ -846,6 +849,7 @@ async fn setup(
         state: state_service.clone(),
         latest_chain_tip,
         misbehavior_sender,
+        read_state: None,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
@@ -956,6 +960,7 @@ mod submitblock_test {
 
         let (_peer_set, _address_book, _misbehavior_tx, block_advertiser) = zebra_network::init(
             network_config,
+            PeerServices::NODE_NETWORK,
             inbound_service.clone(),
             latest_chain_tip.clone(),
             "Zebra user agent".to_string(),

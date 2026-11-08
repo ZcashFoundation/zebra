@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `state_snapshot::StateSnapshotCommitment`, `Network::state_snapshot_commitment` and `Network::state_snapshot_parameters_hash` for state-snapshot sync, with the pinned Mainnet snapshot's `state_snapshot::{MAINNET_STATE_SNAPSHOT_HEIGHT, MAINNET_STATE_SNAPSHOT_BLOCK_HASH, MAINNET_STATE_SNAPSHOT_MANIFEST}` (the snapshot at checkpoint 3,522,060, with manifest hash `08e3821f8e4e39a75b347590d94513d4bbe27e704e908e0a2e306c798b9f3eed`, so `Network::state_snapshot_commitment` returns a commitment for Mainnet), and `NonEmptyHistoryTree::last_peak`, `HistoryPeak`, `HistoryTreeError::InvalidPeak` and `zcash_history::Tree::root_node_data` to read the note commitment tree roots a history tree commits to.
+time: 2026-11-03T03:04:15.609564169-05:00

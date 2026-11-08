@@ -30,8 +30,8 @@ use crate::{
         },
         v2::{
             announcement::{
-                clamp_relayed_time, decode_addr_record, decode_block_announcement,
-                decode_tx_record, encode_addr_record, encode_tx_record,
+                clamp_relayed_time, decode_addr_record, decode_addr_record_for_network,
+                decode_block_announcement, decode_tx_record, encode_addr_record, encode_tx_record,
             },
             constants::{
                 alpn_protocol_id, GET_OBJECT_REQUEST_LEN, MAX_ADDRS_PER_RESPONSE,
@@ -39,7 +39,11 @@ use crate::{
                 MAX_OBJECT_REQUEST_LEN, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
                 MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
             },
-            handshake::{decode_record, InitRecord},
+            handshake::{
+                decode_consensus_parameters_record, decode_record,
+                encode_consensus_parameters_record, InitRecord, CONSENSUS_PARAMETERS_RECORD_KIND,
+                CONSENSUS_PARAMETERS_RECORD_LEN,
+            },
             object::ObjectHash,
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetObject, GetTx, Request},
@@ -408,8 +412,8 @@ fn init_record_golden_vector_round_trips() {
     assert_eq!(init.encode().as_ref(), wire.as_slice());
     assert_eq!(decode_record(&wire).expect("valid"), Some(init.clone()));
 
-    // Bit 10 (`NODE_NETWORK_LIMITED` in the draft) and bit 40, neither known to Zebra: a 9-byte
-    // CompactSize after the kind and version bytes, kept rather than truncated.
+    // Bit 10 (`NODE_NETWORK_LIMITED`) and bit 40, which no flag defines: a 9-byte CompactSize
+    // after the kind and version bytes, kept rather than truncated.
     let services = PeerServices::from_bits_retain((1 << 10) | (1 << 40));
     let with_unknown_bits = InitRecord {
         services,
@@ -435,6 +439,30 @@ fn init_record_golden_vector_round_trips() {
         decode_record(&at_limit.encode()).expect("valid"),
         Some(at_limit)
     );
+}
+
+/// The optional parameters extension is exactly its kind byte and a 32-byte
+/// hash, and the init decoder still treats it as an ignorable unknown kind.
+#[test]
+fn consensus_parameters_record_pins_layout_and_compatibility() {
+    let parameters_hash = [0xA5; 32];
+    let encoded = encode_consensus_parameters_record(parameters_hash);
+    assert_eq!(encoded.len(), CONSENSUS_PARAMETERS_RECORD_LEN);
+    assert_eq!(encoded[0], CONSENSUS_PARAMETERS_RECORD_KIND);
+    assert_eq!(&encoded[1..], &parameters_hash);
+    assert_eq!(
+        decode_consensus_parameters_record(&encoded).expect("valid"),
+        parameters_hash
+    );
+    assert!(matches!(decode_record(&encoded), Ok(None)));
+
+    assert!(decode_consensus_parameters_record(&encoded[..32]).is_err());
+    let mut long = encoded.to_vec();
+    long.push(0);
+    assert!(decode_consensus_parameters_record(&long).is_err());
+    let mut wrong_kind = encoded.to_vec();
+    wrong_kind[0] = 0x7F;
+    assert!(decode_consensus_parameters_record(&wrong_kind).is_err());
 }
 
 /// Malformed payloads built by mutating the golden bytes are rejected, and
@@ -1271,7 +1299,7 @@ fn addr_response_pins_layout_and_limit() {
     // Unknown service bits are discarded when a record is read, as the shared legacy `addrv2`
     // reader does, so they are not relayed (the draft's "Service Flags" says they SHOULD be).
     let mut unknown_bits = vec![1];
-    unknown_bits.extend_from_slice(&[0x00, 0x00, 0x00, 0x60, 0xFD, 0x01, 0x04]);
+    unknown_bits.extend_from_slice(&[0x00, 0x00, 0x00, 0x60, 0xFD, 0x01, 0x08]);
     unknown_bits.extend_from_slice(&[0x01, 0x04, 203, 0, 113, 7]);
     unknown_bits.extend_from_slice(&8233u16.to_be_bytes());
     let decoded = decode_addr_response(&unknown_bits).expect("valid");
@@ -1426,9 +1454,9 @@ fn addr_record_pins_layout_and_skips_unsupported() {
         Some(meta.clone())
     );
 
-    // Unknown service bits are discarded, as in `get-addr` responses.
+    // Unknown service bits are discarded, as in `get-addr` responses: bit 11 is not a known flag.
     let mut unknown_bits = expected.clone();
-    unknown_bits.splice(4..5, [0xFD, 0x01, 0x04]);
+    unknown_bits.splice(4..5, [0xFD, 0x01, 0x08]);
     assert_eq!(
         decode_addr_record(&unknown_bits).expect("valid"),
         Some(meta)
@@ -1444,6 +1472,55 @@ fn addr_record_pins_layout_and_skips_unsupported() {
     let mut long = expected.clone();
     long.push(0);
     assert_err!(decode_addr_record(&long), WireError::TrailingBytes { .. });
+}
+
+/// Public networks never turn gossiped internal addresses into outbound
+/// candidates, but Regtest still accepts them for local test networks.
+#[test]
+fn addr_records_skip_internal_addresses_outside_regtest() {
+    let _init_guard = zebra_test::init();
+
+    let regtest = Network::new_regtest(Default::default());
+    for address in [
+        "127.0.0.1:8233",
+        "10.0.0.1:8233",
+        "169.254.1.1:8233",
+        "[::1]:8233",
+        "[fc00::1]:8233",
+        "[fe80::1]:8233",
+        "[::ffff:127.0.0.1]:8233",
+    ] {
+        let addr: PeerSocketAddr = address.parse::<SocketAddr>().unwrap().into();
+        let meta = MetaAddr::new_gossiped_meta_addr(
+            addr,
+            PeerServices::NODE_NETWORK,
+            DateTime32::from(0x6000_0000),
+        );
+        let encoded = encode_addr_response(std::slice::from_ref(&meta)).expect("valid address");
+        let payload = &encoded[1..];
+
+        assert_eq!(
+            decode_addr_record_for_network(payload, &Network::Mainnet).expect("valid"),
+            None,
+            "{address} is not an outbound candidate on Mainnet"
+        );
+        assert_eq!(
+            decode_addr_record_for_network(payload, &regtest).expect("valid"),
+            Some(meta),
+            "{address} remains usable on Regtest"
+        );
+    }
+
+    let public = MetaAddr::new_gossiped_meta_addr(
+        "203.0.113.9:8233".parse::<SocketAddr>().unwrap().into(),
+        PeerServices::NODE_NETWORK,
+        DateTime32::from(0x6000_0000),
+    );
+    let encoded = encode_addr_response(std::slice::from_ref(&public)).expect("valid address");
+    assert_eq!(
+        decode_addr_record_for_network(&encoded[1..], &Network::Mainnet).expect("valid"),
+        Some(public)
+    );
 }
 
 #[test]

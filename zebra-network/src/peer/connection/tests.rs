@@ -113,7 +113,7 @@ where
         peer_tx,
         ActiveConnectionCounter::new_counter().track_connection(),
         Arc::new(connection_info),
-        Vec::new(),
+        (Vec::new(), crate::constants::PEER_ADDR_RESPONSE_LIMIT),
     );
 
     (

@@ -86,8 +86,9 @@ pub fn ancestor_blocks<'a, C: AsRef<Chain> + 'a>(
     };
 
     for height in (0..=entry_height.0).rev() {
-        // A missing body ends the walk early, which the protocol allows.
-        let Some((block, size)) = db.block_and_size(HashOrHeight::Height(block::Height(height)))
+        // A missing or pruned body ends the walk early, which the protocol allows.
+        let Ok(Some((block, size))) =
+            db.block_and_size(HashOrHeight::Height(block::Height(height)))
         else {
             break;
         };

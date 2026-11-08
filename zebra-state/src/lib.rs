@@ -31,6 +31,7 @@ mod error;
 mod request;
 mod response;
 mod service;
+pub mod state_snapshot;
 
 #[cfg(test)]
 mod tests;
@@ -41,11 +42,12 @@ pub use config::{
 };
 pub use constants::{
     state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS,
-    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MIN_PRUNING_RETENTION,
 };
 pub use error::{
-    AwaitUtxoError, BoxError, CloneError, CommitBlockError, CommitCheckpointVerifiedError,
-    CommitSemanticallyVerifiedError, DuplicateNullifierError, StateInitError, ValidateContextError,
+    AwaitUtxoError, BlockReadError, BoxError, CloneError, CommitBlockError,
+    CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
+    StateInitError, ValidateContextError,
 };
 pub use request::{
     AwaitUtxoRequest, CheckpointVerifiedBlock, CommitAids, CommitSemanticallyVerifiedBlockRequest,
@@ -57,8 +59,9 @@ pub use request::{
 pub use request::Spend;
 
 pub use response::{
-    AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, MiningCandidateChanges,
-    MiningCandidateGuard, NonFinalizedBlocksListener, ReadResponse, Response,
+    AnyTx, BlockHeader, GetBlockTemplateChainInfo, HistoryCapabilities, KnownBlock, MinedTx,
+    MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, OutputWithMetadata,
+    ReadResponse, Response,
 };
 pub use service::header_write::{
     CommitHeadersError, HeadersCommitted, MAX_COMMIT_HEADERS, MAX_HEADER_LOOKAHEAD,
@@ -80,15 +83,23 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
+// Allow external tests to write prepared blocks directly to a database
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use request::{FinalizedBlock, Treestate};
+
 pub use service::{
-    finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
+    finalized_state::{
+        restorable_db_source_versions, restorable_db_versions, DiskWriteBatch, FromDisk, IntoDisk,
+        WriteDisk, ZebraDb,
+    },
     ReadStateService,
 };
+pub use state_snapshot::SnapshotBase;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
-    arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
+    arbitrary::{populated_state, populated_state_with_debug, CHAIN_TIP_UPDATE_WAIT_LIMIT},
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };

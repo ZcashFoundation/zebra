@@ -135,6 +135,27 @@ pub struct InboundSetupData {
 
     /// A channel to send misbehavior reports to the [`AddressBook`].
     pub misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
+
+    /// The read-only state the network's requests are answered from, which
+    /// replaces any given to the builder methods.
+    ///
+    /// `zebrad start` gives it here instead of to the builder, because the network can start
+    /// before the state it serves from is opened: a state snapshot bootstrap replaces the state
+    /// the network started with.
+    pub read_state: Option<InboundReadState>,
+}
+
+/// The read-only state services of [`InboundSetupData::read_state`].
+pub struct InboundReadState {
+    /// The network, for compact block reconstruction.
+    pub network: Network,
+
+    /// The read-only state, for compact block reconstruction and for version 2
+    /// `get-block-range` and `get-hashes` requests.
+    pub read_state: zs::ReadStateService,
+
+    /// Authenticated uncommitted bodies, for negotiated early-relay connections.
+    pub early_blocks: Option<zs::EarlyRelayCache>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -350,7 +371,19 @@ impl Service<zn::Request> for Inbound {
                         state,
                         latest_chain_tip,
                         misbehavior_sender,
+                        read_state,
                     } = setup_data;
+
+                    if let Some(InboundReadState {
+                        network,
+                        read_state,
+                        early_blocks,
+                    }) = read_state
+                    {
+                        self.compact_relay = Some((network, read_state.clone()));
+                        self.block_range_state = Some(BoxCloneService::new(read_state));
+                        self.early_blocks = early_blocks;
+                    }
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
 
@@ -578,7 +611,14 @@ impl Service<zn::Request> for Inbound {
                         let response = if let Some(block) = cached {
                             zs::Response::Block(Some(block))
                         } else {
-                            state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
+                            match state.clone().ready().await?.call(zs::Request::Block(hash.into())).await {
+                                Ok(response) => response,
+                                Err(error) if matches!(
+                                    error.downcast_ref::<zs::BlockReadError>(),
+                                    Some(zs::BlockReadError::BlockBodyUnavailable { .. })
+                                ) => zs::Response::Block(None),
+                                Err(error) => return Err(error),
+                            }
                         };
 
                         // Add the block responses to the list, while updating the size limit.
@@ -753,8 +793,8 @@ impl Service<zn::Request> for Inbound {
                 block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
-            // The size of this response is limited in the network layer, by the legacy `Connection`
-            // state machine and by the version 2 `get-mempool` responder
+            // The production mempool bounds this snapshot before allocation, and both the legacy
+            // `Connection` state machine and the version 2 responder enforce the wire limit.
             zn::Request::MempoolTransactionIds => {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),

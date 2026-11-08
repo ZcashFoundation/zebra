@@ -211,6 +211,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
     let buffered_mempool = Buffer::new(BoxService::new(mempool_service), 10);
     let address_book = Arc::new(std::sync::Mutex::new(AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        zebra_network::types::PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -227,6 +228,7 @@ async fn rejected_checkpoint_twin_is_downloaded_again() -> Result<(), crate::Box
             state: state_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             misbehavior_sender,
+            read_state: None,
         })
         .map_err(|_| "inbound setup receiver remains open")?;
     inbound.ready().await?;
@@ -672,12 +674,12 @@ async fn contradicted_behind_tip_height_is_attributed_and_never_verified() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
             header: block_1.header.clone(),
             hash: block_1.hash(),
             height: Height(1),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let error = downloads
         .next()
@@ -747,12 +749,12 @@ async fn genuinely_old_block_is_dropped_without_attribution() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(zs::ReadResponse::BlockHeader {
+        .respond(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
             header: genesis.header.clone(),
             hash: genesis.hash(),
             height: Height(0),
             next_block_hash: Some(hash),
-        });
+        })));
 
     let error = downloads
         .next()
@@ -808,7 +810,7 @@ async fn behind_tip_block_with_unknown_parent_is_not_attributed() {
             block.header.previous_block_hash.into(),
         ))
         .await
-        .respond(Err(zn::BoxError::from("block not found in any chain")));
+        .respond(zs::ReadResponse::BlockHeader(None));
 
     let error = downloads
         .next()
@@ -1114,4 +1116,34 @@ async fn cancelling_pressure_retry_releases_downloaded_body() {
     assert!(downloads.is_empty());
     verifier.expect_no_requests().await;
     network.expect_no_requests().await;
+}
+
+/// Runtime shutdown can cancel a spawned download before its JoinHandle is polled.
+#[tokio::test]
+async fn cancelled_download_task_ends_stream_without_panicking() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, _, _, _) = mock_downloads(Height(0));
+    let task = tokio::spawn(futures::future::pending::<
+        Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>,
+    >());
+    task.abort();
+    downloads.pending.push(task);
+
+    assert!(timeout(MAX_SERVICE_REQUEST_DELAY, downloads.next())
+        .await
+        .expect("a cancelled download does not stall the stream")
+        .is_none());
+}
+
+/// Filtering expected cancellation must not hide an actual download-task panic.
+#[tokio::test]
+#[should_panic(expected = "block download and verify tasks must not panic")]
+async fn download_task_panic_still_propagates() {
+    let _init_guard = zebra_test::init();
+    let (mut downloads, _, _, _) = mock_downloads(Height(0));
+    downloads.pending.push(tokio::spawn(async {
+        panic!("injected download task panic")
+    }));
+
+    let _ = downloads.next().await;
 }
