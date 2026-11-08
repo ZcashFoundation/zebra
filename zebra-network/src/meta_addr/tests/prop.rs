@@ -43,6 +43,10 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         if let Some(sanitized) = addr.sanitize(&Mainnet) {
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+            // Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura#1183
+            // (https://github.com/zakura-core/zakura/pull/1183).
             // check that all sanitized addresses are valid for outbound
             prop_assert!(sanitized.address_is_valid_for_outbound(&Mainnet));
             // also check the address, port, and services individually
