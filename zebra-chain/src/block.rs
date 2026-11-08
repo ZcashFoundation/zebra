@@ -397,6 +397,10 @@ impl Block {
             })
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/f9ccea5f0d2c610ff44d3f3eaa6f8f7ca8b47279).
     /// Compute the root of the authorizing data Merkle tree,
     /// as defined in [ZIP-244].
     /// Digests are computed in parallel for blocks with at least 16 transactions.
