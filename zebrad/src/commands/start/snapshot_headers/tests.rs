@@ -135,7 +135,10 @@ async fn the_network_chain_tip_follows_a_reopened_state() {
     switch.end_bootstrap();
     assert!(!tip.is_at_or_near_network_tip(chrono::Utc::now()));
 
+    // Keep a handle to the state: dropping the last one shuts the state down, which can stop its
+    // write task before it commits the block.
     reopened_state
+        .clone()
         .oneshot(zs::Request::CommitCheckpointVerifiedBlock(
             regtest_genesis_block().into(),
         ))
