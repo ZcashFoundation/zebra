@@ -1294,7 +1294,14 @@ where
 
             if !freshness_checked && cache.updater_is_running() && !cache.is_first_work(&template) {
                 freshness_checked = true;
-                cache.refresh_if_changed(&template).await;
+                tokio::select! {
+                    () = cache.refresh_if_changed(&template) => {}
+                    changed = tip_change.best_tip_changed() => {
+                        if changed.is_err() {
+                            return Ok(None);
+                        }
+                    }
+                }
                 // Even an unchanged snapshot can cross a publication or parent change.
                 continue;
             }
@@ -1304,7 +1311,7 @@ where
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = Arc::unwrap_or_clone(template);
+                let mut template = Arc::unwrap_or_clone(template).response;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -1356,7 +1363,7 @@ where
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
-    ) -> Option<Arc<BlockTemplateResponse>> {
+    ) -> Option<Arc<precompute::CachedTemplate>> {
         // Subscribe before the first read below, so a template published while this call is
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
