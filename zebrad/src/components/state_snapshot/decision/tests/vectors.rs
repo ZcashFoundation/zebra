@@ -205,27 +205,65 @@ fn restorable_state_databases_skip() {
     }
 }
 
-/// On Mainnet, a configured commitment that is not pinned needs
-/// `unsafe_trust_state_snapshot`; with it, the configured one is used.
+/// On Mainnet, a pruned node with no configured commitment bootstraps from the
+/// pinned one.
+#[test]
+fn mainnet_bootstraps_from_the_pinned_commitment() {
+    let _init_guard = zebra_test::init();
+    let dir = TempDir::new().unwrap();
+
+    let pinned = Network::Mainnet
+        .state_snapshot_commitment()
+        .expect("Mainnet pins a state snapshot commitment");
+
+    let mut config = bootstrapping_config(Network::Mainnet, dir.path());
+    config.sync.state_snapshot = None;
+    assert_eq!(
+        decide(&config, dir.path()),
+        Decision::Bootstrap {
+            commitment: pinned,
+            peers: vec!["127.0.0.1:18233".to_string()],
+        }
+    );
+
+    // Configuring the pinned commitment changes nothing.
+    config.sync.state_snapshot = Some(pinned);
+    assert_eq!(
+        decide(&config, dir.path()),
+        Decision::Bootstrap {
+            commitment: pinned,
+            peers: vec!["127.0.0.1:18233".to_string()],
+        }
+    );
+}
+
+/// On Mainnet, a configured commitment that is not the pinned one is ignored
+/// for the pinned one, unless `unsafe_trust_state_snapshot` is on; with it, the
+/// configured one is used.
 #[test]
 fn configured_commitment_on_mainnet_needs_unsafe_trust() {
     let _init_guard = zebra_test::init();
     let dir = TempDir::new().unwrap();
 
-    // Mainnet has no pinned commitment yet, so a configured one differs from it.
-    assert_eq!(Network::Mainnet.state_snapshot_commitment(), None);
+    let pinned = Network::Mainnet
+        .state_snapshot_commitment()
+        .expect("Mainnet pins a state snapshot commitment");
 
     // NU5 is active at this height, and the block after it is below the last checkpoint.
     let mainnet_commitment = StateSnapshotCommitment {
         height: Height(2_000_000),
         ..commitment()
     };
+    assert_ne!(mainnet_commitment, pinned);
 
     let mut config = bootstrapping_config(Network::Mainnet, dir.path());
     config.sync.state_snapshot = Some(mainnet_commitment);
     assert_eq!(
         decide(&config, dir.path()),
-        skip(SkipReason::CommitmentNotAllowed)
+        Decision::Bootstrap {
+            commitment: pinned,
+            peers: vec!["127.0.0.1:18233".to_string()],
+        }
     );
 
     config.sync.unsafe_trust_state_snapshot = true;

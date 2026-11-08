@@ -18,19 +18,19 @@ before `zebra_state::init`; the state changes for a database whose history start
 below `H`; config, docs, unit tests, a Regtest end-to-end test, and a Mainnet benchmark.
 
 Out of scope, for follow-ups: live export at pinned heights; backfill below `H`, including the
-headers below `L`; the drafts' `get-block-range`, `get-hashes`, `get-tree-roots`, and hints; the
-Mainnet manifest hash (the height and block hash are pinned, see below) and a Testnet commitment;
-reusing an existing header-only state.
+headers below `L`; the drafts' `get-block-range`, `get-hashes`, `get-tree-roots`, and hints; a
+Testnet commitment; reusing an existing header-only state.
 
 ## Trust model and verification
 
 The **commitment** is `StateSnapshotCommitment { height: H, block_hash: hash(H), manifest }`
 (`zebra-chain/src/state_snapshot.rs`). It is pinned per network through
 `Network::state_snapshot_commitment()`, or configured in `[sync] state_snapshot`. Mainnet's is at
-the checkpoint `MAINNET_STATE_SNAPSHOT_HEIGHT` (3,522,060); its `MAINNET_STATE_SNAPSHOT_MANIFEST`
-is a placeholder `None` until the deterministic export of that snapshot is done, so no network pins
-a commitment yet. A configured commitment is accepted on Regtest and custom testnets; on
-Mainnet and the default Testnet only if it equals the pinned one or
+the checkpoint `MAINNET_STATE_SNAPSHOT_HEIGHT` (3,522,060), with the `MAINNET_STATE_SNAPSHOT_MANIFEST`
+that the deterministic export of that state gave byte for byte from two independent copies of it,
+so an empty pruned Mainnet node bootstraps from it by default. No other network pins one. A
+configured commitment is accepted on Regtest and custom testnets; on Mainnet and the default
+Testnet only if it equals the pinned one or
 `[sync] unsafe_trust_state_snapshot` is set, which logs a warning at every start. A pinned
 commitment wins otherwise.
 
@@ -95,7 +95,8 @@ A snapshot ships nothing the importing node would not keep. The window `L..=H` h
 headers and `block_info` (with `L − 1`'s), which give block `H + 1` its difficulty context and
 `getblockheader` its answers, but only block `H` has a body, so the chain tip reads back
 (`SnapshotBase::body_start`). Genesis is shipped too. Blocks below `L` have no bodies and no hash
-rows. On Mainnet this is about 2 GB, against 4.4 GB with the window bodies and address indexes.
+rows. On Mainnet at the pinned height this is 3.35 GB in 220 pieces, against 4.4 GB with the
+window bodies and address indexes.
 
 A snapshot-born node therefore cannot serve the most recent 2,304 blocks at first. It advertises
 `NODE_NETWORK_LIMITED` to the version 2 peers it connects to only once its tip is

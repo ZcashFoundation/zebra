@@ -9,7 +9,7 @@ address balances. It does repeat a little the node already has: the headers of i
 genesis block. The node first syncs and verifies the block headers from genesis, like any node.
 Then it checks the snapshot against a _commitment_ and against those headers, installs it as its
 state, keeps every header, and syncs only the blocks above `H`. On Mainnet that replaces about
-278 GB of block history with about 2 GB. While it installs the snapshot, the node copies its synced
+278 GB of block history with a 3.4 GB snapshot. While it installs the snapshot, the node copies its synced
 headers into it, so it briefly needs free disk space for a second copy of them, about 5 GB on
 Mainnet, besides the snapshot.
 
@@ -18,12 +18,13 @@ complete database that you download and extract yourself. Snapshot sync happens 
 the peer-to-peer network, and only for pruned nodes.
 
 Snapshot sync is **on by default** for pruned nodes, and does nothing on archive nodes. It uses the
-draft version 2 protocol's `get-object` request, which can still change. This build has the
-Mainnet snapshot height and block hash, but not yet its manifest hash, so it pins no Mainnet or
-Testnet commitment yet, and on those networks it needs a setting that accepts a commitment of your
-own (see [Where the commitment comes from](#where-the-commitment-comes-from)). A pruned node that
-finds no commitment, or no version 2 peer to download from, logs why and syncs normally, so the
-default never stops a node from starting.
+draft version 2 protocol's `get-object` request, which can still change. This build pins the
+Mainnet snapshot at checkpoint 3,522,060, so an empty pruned Mainnet node looks for that snapshot
+on its version 2 peers by default. It pins no Testnet commitment, so on the default Testnet snapshot
+sync needs a setting that accepts a commitment of your own (see
+[Where the commitment comes from](#where-the-commitment-comes-from)). A pruned node that finds no
+commitment, or no version 2 peer to download from, logs why and syncs normally, so the default
+never stops a node from starting.
 
 ## What is verified, and what is trusted
 
@@ -78,9 +79,11 @@ trusting a snapshot producer.
 
 ### Where the commitment comes from
 
-- A release can **pin** a commitment for a network, next to its checkpoints. This build has the
-  Mainnet snapshot at checkpoint 3,522,060, but its manifest hash is still unset, so no commitment
-  is pinned yet, and on Mainnet and the default Testnet snapshot sync needs the setting below.
+- A release can **pin** a commitment for a network, next to its checkpoints. This build pins the
+  Mainnet snapshot at checkpoint 3,522,060, with block hash
+  `00000000000705964fc4c75da9cce97978197b666c9dcdfc1bcf8d44cd776e4d` and manifest hash
+  `08e3821f8e4e39a75b347590d94513d4bbe27e704e908e0a2e306c798b9f3eed`: 220 pieces, 3.35 GB in
+  all. It pins none for the default Testnet, where snapshot sync needs the setting below.
 - `[sync] state_snapshot` **configures** one. On Regtest any commitment is accepted. On Mainnet
   and the default Testnet, a configured commitment is accepted only if it equals the pinned one,
   or if `[sync] unsafe_trust_state_snapshot = true` is also set, which logs a warning at every
