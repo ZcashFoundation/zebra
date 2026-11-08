@@ -688,19 +688,19 @@ where
             // > The block data MUST be validated and checked against the server's usual
             // > acceptance rules (excluding the check for a valid proof-of-work).
             // <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-            let header = block.header.clone();
-            let pow_network = network.clone();
-            let skip_pow = request.is_proposal() || network.disable_pow();
-            run_blocking(blocking_checks.clone(), move || {
-                if skip_pow {
-                    check::difficulty_threshold_is_valid(&header, &pow_network, &height, &hash)?;
-                } else {
+            if request.is_proposal() || network.disable_pow() {
+                // Checking the encoded threshold is constant work, not an Equihash verification.
+                check::difficulty_threshold_is_valid(&block.header, &network, &height, &hash)?;
+            } else {
+                let header = block.header.clone();
+                let pow_network = network.clone();
+                run_blocking(blocking_checks.clone(), move || {
                     check::difficulty_is_valid(&header, &pow_network, &height, &hash)?;
                     check::equihash_solution_is_valid(&header)?;
-                }
-                Ok::<_, VerifyBlockError>(())
-            })
-            .await?;
+                    Ok::<_, VerifyBlockError>(())
+                })
+                .await?;
+            }
 
             // Exact decoder matches avoid hashing the body again, but only while the matched
             // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
@@ -760,7 +760,9 @@ where
             let transaction_hashes = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
-                Some(run_blocking(blocking_checks, move || {
+                // A trusted wire-size bound keeps small-body hashing cheaper than a worker hop.
+                let inline = size.is_some_and(|size| size <= 4 * 1024);
+                let checks = move || {
                     if size.is_none()
                         && u64::try_from(block.zcash_serialized_size()).unwrap_or(u64::MAX)
                             > block::MAX_BLOCK_BYTES
@@ -770,7 +772,12 @@ where
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
                     Ok::<_, VerifyBlockError>(hashes)
-                }).await?)
+                };
+                Some(if inline {
+                    checks()
+                } else {
+                    run_blocking(blocking_checks, checks).await
+                }?)
             } else {
                 None
             };
