@@ -166,7 +166,7 @@ impl PreparedBlockCache {
     /// candidate. Exact streaming byte comparison permits reuse; the returned block keeps the
     /// submitted header and a private cache handle for [`Request::CommitDecoded`]. Misses, evictions
     /// and malformed input use ordinary deserialization.
-    /// No full-body hash pass or transaction-byte allocation is needed. Call from a blocking worker.
+    /// No full-body hash pass or transaction-byte allocation is needed. Run large inputs on a worker.
     pub fn deserialize(&self, bytes: &[u8]) -> Result<DecodedBlock, SerializationError> {
         self.reuse(bytes).map(Ok).unwrap_or_else(|| {
             block::Block::zcash_deserialize(bytes)
