@@ -32,6 +32,15 @@ futures = { workspace = true }
 jsonrpsee = { workspace = true, features = ["server"] }
 serde_json = { workspace = true }
 
+# Batch-equivalence harness support
+rand = { workspace = true }
+tower-batch-control = { path = "../../tower-batch-control" }
+groth16 = { workspace = true }
+bls12_381 = { workspace = true }
+jubjub = { workspace = true }
+group = { workspace = true }
+
+
 # structure-aware oracle support
 proptest = { workspace = true }
 # address_fuzz third oracle uses zebra-chain's address conversion traits.
@@ -53,6 +62,18 @@ tokio-util = { workspace = true, features = ["codec"] }
 # generate_v6_seeds bundle types
 orchard = { workspace = true }
 zcash_protocol = { workspace = true }
+
+[[bin]]
+name = "orchard_batch_equivalence"
+path = "fuzz_targets/orchard_batch_equivalence.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tower_partition_equivalence"
+path = "fuzz_targets/tower_partition_equivalence.rs"
+test = false
+doc = false
 
 [[bin]]
 name = "rpc_handler_fuzz"
