@@ -1498,10 +1498,7 @@ impl VerifyCheckpointError {
             VerifyCheckpointError::CommitCheckpointVerified(source) => source
                 .downcast_ref::<zs::CommitCheckpointVerifiedError>()
                 .is_some_and(|commit_err| {
-                    matches!(
-                        commit_err.inner(),
-                        zs::CommitBlockError::WriteTaskExited { .. }
-                    )
+                    matches!(commit_err.inner(), zs::CommitBlockError::WriteTaskExited)
                 }),
             _ => false,
         }

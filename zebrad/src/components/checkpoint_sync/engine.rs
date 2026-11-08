@@ -805,7 +805,7 @@ fn commit_verdict(result: Result<zs::Response, BoxError>) -> CommitVerdict {
         // A legacy verifier's leftover, or a retried timeout, already queued
         // or committed this block.
         Some(commit) if commit.inner().is_duplicate_request() => CommitVerdict::Committed,
-        Some(commit) if matches!(commit.inner(), zs::CommitBlockError::WriteTaskExited { .. }) => {
+        Some(commit) if matches!(commit.inner(), zs::CommitBlockError::WriteTaskExited) => {
             CommitVerdict::Dropped
         }
         None if error.is::<tower::buffer::error::Closed>() || error.is::<ConvertError>() => {

@@ -3,38 +3,7 @@
 #![allow(clippy::unwrap_in_result)]
 #![allow(dead_code)]
 
-use std::ops::Deref;
-
-use crate::service::finalized_state::disk_db::{DiskDb, DB};
-
-// Enable older test code to automatically access the inner database via Deref coercion.
-impl Deref for DiskDb {
-    type Target = DB;
-
-    fn deref(&self) -> &Self::Target {
-        &self.db
-    }
-}
-
-impl DiskDb {
-    /// Returns the column family names of the state database at `major` under `config`.
-    pub fn list_cf_at(
-        config: &crate::Config,
-        major: u64,
-        network: &zebra_chain::parameters::Network,
-    ) -> Vec<String> {
-        rocksdb::DB::list_cf(&DiskDb::options(), config.db_path("state", major, network))
-            .unwrap_or_default()
-    }
-
-    /// Returns a list of column family names in this database.
-    pub fn list_cf(&self) -> Result<Vec<String>, rocksdb::Error> {
-        let opts = DiskDb::options();
-        let path = self.path();
-
-        rocksdb::DB::list_cf(&opts, path)
-    }
-}
+use crate::service::finalized_state::disk_db::DiskDb;
 
 #[test]
 fn cached_disk_size_is_initialized_shared_and_refreshed() {
@@ -292,9 +261,12 @@ fn read_only_reuse_reads_a_database_without_the_snapshot_base_column_family() {
         ));
     }
     assert!(!config.db_path("state", 32, &network).exists());
-    assert!(DiskDb::list_cf_at(&config, 31, &network)
-        .iter()
-        .all(|cf| cf != SNAPSHOT_BASE));
+    assert!(
+        rocksdb::DB::list_cf(&DiskDb::options(), config.db_path("state", 31, &network))
+            .unwrap()
+            .iter()
+            .all(|cf| cf != SNAPSHOT_BASE)
+    );
 }
 
 /// The reusable source is the newest directory that holds a database: an empty newer directory

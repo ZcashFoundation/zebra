@@ -1,18 +1,21 @@
 //! Format checks preserve permanent metadata checks while their body window is pruned.
 
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
-use zebra_chain::{parameters::Network, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::{Block, Height},
+    block_info::BlockInfo,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+};
+use zebra_db::service::finalized_state::disk_format::upgrade::block_info_and_address_received::tests::AFTER_CAPTURED_TIP;
 
-use crate::{CheckpointVerifiedBlock, Config, FinalizedState, ZebraDb};
+use crate::{
+    service::finalized_state::disk_format::upgrade::DiskFormatUpgrade, CheckpointVerifiedBlock,
+    Config, DiskWriteBatch, FinalizedState, TransactionLocation, WriteDisk, ZebraDb,
+};
 
 use super::*;
-
-thread_local! {
-    /// Advances finalization and pruning after the check captures its tip.
-    pub(super) static AFTER_CAPTURED_TIP: RefCell<Option<Box<dyn FnMut()>>> =
-        const { RefCell::new(None) };
-}
 
 fn state_with_recent_window() -> FinalizedState {
     let mut state = FinalizedState::new_with_debug(

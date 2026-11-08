@@ -24,14 +24,15 @@ progress-bar = [
 ]
 
 # Indexes spending transaction ids by spent outpoints and revealed nullifiers
-indexer = []
+indexer = ["zebra-db/indexer"]
 
 # Test-only features
 proptest-impl = [
     "proptest",
     "proptest-derive",
     "zebra-test",
-    "zebra-chain/proptest-impl"
+    "zebra-chain/proptest-impl",
+    "zebra-db/proptest-impl",
 ]
 
 # Experimental elasticsearch support
@@ -39,31 +40,21 @@ elasticsearch = [
     "dep:elasticsearch",
     "dep:serde_json",
     "zebra-chain/elasticsearch",
+    "zebra-db/elasticsearch",
 ]
 
 [dependencies]
-bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
-dirs = { workspace = true }
 futures = { workspace = true }
 hashbrown = { workspace = true }
 hex = { workspace = true }
-hex-literal = { workspace = true }
-humantime-serde = { workspace = true }
-human_bytes = { workspace = true }
 indexmap = { workspace = true }
 itertools = { workspace = true }
-lazy_static = { workspace = true }
 metrics = { workspace = true }
 mset = { workspace = true }
-regex = { workspace = true }
-rlimit = { workspace = true }
-rocksdb = { workspace = true, features = ["lz4"] }
 semver = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
-serde-big-array = { workspace = true }
-sha2 = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 
@@ -73,7 +64,6 @@ tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
-zcash_history = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
@@ -82,6 +72,7 @@ serde_json = { workspace = true, optional = true }
 
 zebra-node-services = { path = "../zebra-node-services", version = "13.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
+zebra-db = { path = "../zebra-db", version = "0.1.0" }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
@@ -91,10 +82,14 @@ zebra-test = { path = "../zebra-test/", version = "5.0.0", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 derive-getters.workspace = true
-derive-new.workspace = true
 
 [dev-dependencies]
+bincode = { workspace = true }
 color-eyre = { workspace = true }
+hex-literal = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4"] }
+serde-big-array = { workspace = true }
+zcash_history = { workspace = true }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }
@@ -113,6 +108,7 @@ jubjub = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-db = { path = "../zebra-db", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
 
 [lints]

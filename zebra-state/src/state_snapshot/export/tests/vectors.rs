@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
 };
 
 use bincode::Options;
@@ -871,13 +871,7 @@ fn a_failed_component_stops_the_other_scans() {
     let config = new_state(&dir.path().join("cache"), &Network::Mainnet, &test_chain());
     let store = ArtifactStore::at(dir.path().join("store"));
     let state = open_state(&config, &Network::Mainnet);
-    let exporter = Exporter {
-        db: &state.db,
-        store: &store,
-        height: TIP,
-        window_start: WINDOW_START,
-        cancelled: AtomicBool::new(false),
-    };
+    let exporter = Exporter::new(&state.db, &store, TIP, WINDOW_START);
 
     // A scan whose row fails returns the failure, and stops the others before they read a row.
     let mut rows = 0;

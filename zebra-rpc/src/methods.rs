@@ -3470,7 +3470,7 @@ where
                         | VerifyBlockError::StateService { .. }
                         | VerifyBlockError::Time(_)
                         | VerifyBlockError::Commit(
-                            zebra_state::CommitBlockError::WriteTaskExited { .. },
+                            zebra_state::CommitBlockError::WriteTaskExited,
                         )
                         | VerifyBlockError::Transaction(
                             TransactionError::TransparentInputNotFound,
@@ -3479,7 +3479,7 @@ where
                             zebra_state::CommitBlockError::ValidateContextError(error),
                         ) => matches!(
                             error.as_ref(),
-                            zebra_state::ValidateContextError::NotReadyToBeCommitted { .. }
+                            zebra_state::ValidateContextError::NotReadyToBeCommitted
                         ),
                         _ => false,
                     },

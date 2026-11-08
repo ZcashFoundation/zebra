@@ -22,7 +22,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    arbitrary::Prepare,
+    arbitrary::{Prepare, SemanticallyVerifiedBlockTestExt},
     request::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock},
     service::{arbitrary::PreparedChain, non_finalized_state::Chain},
 };

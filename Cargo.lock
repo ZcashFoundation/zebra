@@ -7627,6 +7627,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "zebra-db"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "chrono",
+ "crossbeam-channel",
+ "derive-new",
+ "dirs",
+ "elasticsearch",
+ "hex",
+ "hex-literal",
+ "human_bytes",
+ "humantime-serde",
+ "itertools 0.14.0",
+ "lazy_static",
+ "metrics",
+ "proptest",
+ "proptest-derive",
+ "rayon",
+ "regex",
+ "rlimit",
+ "rocksdb",
+ "sapling-crypto",
+ "semver",
+ "serde",
+ "serde-big-array",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "zcash_history",
+ "zebra-chain",
+ "zebra-test",
+]
+
+[[package]]
 name = "zebra-network"
 version = "15.0.0"
 dependencies = [
@@ -7781,8 +7818,6 @@ dependencies = [
  "color-eyre",
  "crossbeam-channel",
  "derive-getters",
- "derive-new",
- "dirs",
  "elasticsearch",
  "futures",
  "halo2_proofs",
@@ -7790,13 +7825,10 @@ dependencies = [
  "hex",
  "hex-literal",
  "howudoin",
- "human_bytes",
- "humantime-serde",
  "indexmap 2.14.0",
  "insta",
  "itertools 0.14.0",
  "jubjub",
- "lazy_static",
  "metrics",
  "mset",
  "once_cell",
@@ -7804,8 +7836,6 @@ dependencies = [
  "proptest-derive",
  "rand 0.10.2",
  "rayon",
- "regex",
- "rlimit",
  "rocksdb",
  "sapling-crypto",
  "semver",
@@ -7821,6 +7851,7 @@ dependencies = [
  "tracing",
  "zcash_history",
  "zebra-chain",
+ "zebra-db",
  "zebra-node-services",
  "zebra-test",
 ]

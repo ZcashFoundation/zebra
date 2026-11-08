@@ -37,22 +37,31 @@ where
     }
 }
 
-impl SemanticallyVerifiedBlock {
+/// Test-only contextual block constructors for semantically verified blocks.
+pub trait SemanticallyVerifiedBlockTestExt {
     /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with fake zero-valued UTXOs for spends from earlier blocks.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_spent_utxos(&self) -> ContextuallyVerifiedBlock {
-        ContextuallyVerifiedBlock::test_with_zero_spent_utxos(self)
-    }
+    fn test_with_zero_spent_utxos(&self) -> ContextuallyVerifiedBlock;
 
     /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with no chain value pool change.
     ///
     /// Only for use in tests.
     #[cfg(test)]
-    pub fn test_with_zero_chain_pool_change(&self) -> ContextuallyVerifiedBlock {
+    fn test_with_zero_chain_pool_change(&self) -> ContextuallyVerifiedBlock;
+}
+
+impl SemanticallyVerifiedBlockTestExt for SemanticallyVerifiedBlock {
+    #[cfg(test)]
+    fn test_with_zero_spent_utxos(&self) -> ContextuallyVerifiedBlock {
+        ContextuallyVerifiedBlock::test_with_zero_spent_utxos(self)
+    }
+
+    #[cfg(test)]
+    fn test_with_zero_chain_pool_change(&self) -> ContextuallyVerifiedBlock {
         ContextuallyVerifiedBlock::test_with_zero_chain_pool_change(self)
     }
 }

@@ -1,0 +1,4 @@
+project: zebra-db
+kind: Added
+body: Added the zebra-db crate for finalized-state RocksDB storage, disk formats, migrations, and state snapshots.
+time: 2026-11-06T06:57:26.288989525Z

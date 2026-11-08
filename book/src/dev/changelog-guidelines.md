@@ -36,7 +36,7 @@ source PRs do not batch releases or regenerate changelogs.
 Use these configured project keys:
 
 - `zebrad`
-- `zebra-chain`, `zebra-consensus`, `zebra-network`, `zebra-node-services`
+- `zebra-chain`, `zebra-db`, `zebra-consensus`, `zebra-network`, `zebra-node-services`
 - `zebra-rpc`, `zebra-script`, `zebra-state`, `zebra-test`, `zebra-utils`
 - `tower-batch-control`, `tower-fallback`
 

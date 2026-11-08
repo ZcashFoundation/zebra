@@ -2,7 +2,7 @@
 
 Status (Zebra 7.0.0): **Implemented**.
 
-Code: [`ValueBalance`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs), [block accounting](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block.rs), and [pool persistence](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/chain.rs).
+Code: [`ValueBalance`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/value_balance.rs), [block accounting](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block.rs), and [pool persistence](https://github.com/ZcashFoundation/zebra/blob/main/zebra-db/src/service/finalized_state/zebra_db/chain.rs).
 
 - Balances include deferred funding ([NU6](https://zips.z.cash/zip-1015)), Ironwood ([NU6.3](https://zips.z.cash/zip-0258)), and the Network Sustainability Mechanism ([NSM, NU7](https://zips.z.cash/zip-0237)).
 - The NSM balance is not a chain value pool and is excluded from issued supply.

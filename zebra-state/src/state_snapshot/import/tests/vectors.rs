@@ -27,14 +27,15 @@ use crate::{
         format::{ComponentId, PieceManifest, PieceWriter},
         import::{
             build_piece_sst, decode_history_tree, import_dir, import_state_snapshot, is_singleton,
-            records::{self, RawHistoryTree},
-            sst_path, window_start, ImportCheck, SstMetadata,
+            records, sst_path, window_start, ImportCheck, SstMetadata,
         },
         SnapshotBase, SnapshotError,
     },
     CheckpointVerifiedBlock, Config, FromDisk, HistoryCapabilities, IntoDisk,
     MAX_BLOCK_REORG_HEIGHT,
 };
+
+use zebra_db::service::finalized_state::disk_format::chain::RawHistoryTree;
 
 use super::fixture::{self, Records, HEIGHT};
 
@@ -543,8 +544,14 @@ fn headers_above_a_window_from_height_one_include_genesis_in_their_context() {
     let mut above = *headers[6];
     above.previous_block_hash = headers[6].hash();
     above.time = genesis.time + chrono::Duration::seconds(75 * 4);
-    super::super::headers::store_headers_above(&db, &base, &network, &[Arc::new(above)])
-        .expect("the header's time is above the median-time-past from genesis");
+    super::super::headers::store_headers_above(
+        &db,
+        &base,
+        &network,
+        &[Arc::new(above)],
+        crate::service::check::check_header_context,
+    )
+    .expect("the header's time is above the median-time-past from genesis");
 
     let stored = db
         .cf_handle(crate::service::finalized_state::HEADER_BY_HEIGHT)
