@@ -29,6 +29,7 @@ use super::*;
 
 mod decoded_size;
 mod early_relay;
+mod inline_checks;
 mod nu7;
 
 /// Shielded transactions must reach the transaction verifier before transparent transactions.
