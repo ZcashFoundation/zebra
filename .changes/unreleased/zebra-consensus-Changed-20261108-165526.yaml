@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Precompute Orchard tree hash tables during verifier initialization; the existing background startup handle covers checkpoint verification and table construction ([#11846](https://github.com/ZcashFoundation/zebra/pull/11846)).
+time: 2026-11-08T16:55:26.125996251+01:00
