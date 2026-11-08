@@ -528,3 +528,53 @@ async fn an_invalid_reply_from_the_span_start_keeps_progress() {
         Some(Height(400))
     );
 }
+
+/// Above the last checkpoint, a fork more than `MAX_BLOCK_REORG_HEIGHT` below
+/// the header tip, whose shared prefix above the finalized tip is longer than
+/// one response, still replaces the stored headers once it has more work.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_below_the_locator_with_a_long_shared_prefix_replaces_the_headers() {
+    let _init_guard = zebra_test::init();
+
+    // Finalized tip 0, header tip 1400: the locator covers 1400 down to 400, then 0.
+    let stored = chain(1400, 0);
+    // Forks at 300, more than 1000 below the tip and more than 160 above the
+    // finalized tip, and is longer, so it has more work.
+    let fork = fork_of(&stored, 300, 1150, 3);
+    let network = regtest(&stored, &[0]);
+    let mut state = state(&network).await;
+
+    let mut sync = HeaderSync::new(
+        &network,
+        honest_peers(stored.clone(), Arc::default(), Arc::default()),
+        state.clone(),
+        1,
+    );
+    while sync.sync_once().await.expect("the headers are valid") > 0 {}
+    assert_eq!(
+        header_tip(&mut state).await,
+        Some((Height(1400), stored[1400].hash()))
+    );
+
+    let mut sync = HeaderSync::new(
+        &network,
+        honest_peers(fork.clone(), Arc::default(), Arc::default()),
+        state.clone(),
+        1,
+    );
+    // Bounded, so the test fails rather than hangs.
+    for _ in 0..20 {
+        if sync
+            .sync_once()
+            .await
+            .expect("the fork's headers are valid")
+            == 0
+        {
+            break;
+        }
+    }
+    assert_eq!(
+        header_tip(&mut state).await,
+        Some((Height(1450), fork[1450].hash()))
+    );
+}

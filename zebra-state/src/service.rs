@@ -2072,9 +2072,10 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::HeaderTip => Ok(ReadResponse::HeaderTip(state.db.header_chain_tip())),
 
             // Used by headers-first sync.
-            ReadRequest::HeaderLocator => {
-                Ok(ReadResponse::HeaderLocator(read::header_locator(&state.db)))
-            }
+            ReadRequest::HeaderLocator => Ok(ReadResponse::HeaderLocator(read::header_locator(
+                &state.db,
+                &state.network,
+            ))),
 
             // Used by the syncer to download bodies for stored headers.
             ReadRequest::HeaderChainHashes {

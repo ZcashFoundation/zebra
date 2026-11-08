@@ -75,6 +75,19 @@ pub const MAX_SPAN_REQUESTS: usize = 12;
 /// The most headers a peer returns in one response, legacy or version 2.
 const MAX_HEADERS_PER_RESPONSE: usize = 160;
 
+/// The most responses one round above the last checkpoint asks for, when each
+/// response is full of headers the header chain already has.
+///
+/// The header locator holds the last checkpoint, so a peer on another branch
+/// shares at most the stored headers above it, which the state keeps below
+/// `MAX_BLOCK_REORG_HEIGHT + MAX_HEADER_LOOKAHEAD`.
+//
+// Both constants are small u32s, so they fit in a usize.
+const MAX_KNOWN_RESPONSES: usize = (zs::MAX_BLOCK_REORG_HEIGHT as usize
+    + zs::MAX_HEADER_LOOKAHEAD as usize)
+    .div_ceil(MAX_HEADERS_PER_RESPONSE)
+    + 1;
+
 /// The most requests that continue one fork above the last checkpoint before
 /// it is dropped: enough for [`zs::MAX_COMMIT_HEADERS`] headers, with retries.
 pub const MAX_FORK_REQUESTS: usize = 32;
@@ -292,6 +305,11 @@ where
 
     /// Extends the header chain above the last checkpoint with one response
     /// from a peer. Returns the number of new headers.
+    ///
+    /// A full response of headers the header chain already has is continued
+    /// from its last header, up to [`MAX_KNOWN_RESPONSES`] responses: a peer
+    /// on a fork below the locator's recent hashes answers with the headers
+    /// both chains share, and the fork starts above them.
     async fn extend_header_tip(&mut self) -> Result<usize, Report> {
         let locator = match self.call_state(zs::Request::HeaderLocator).await? {
             zs::Response::HeaderLocator(locator) => locator,
@@ -300,66 +318,95 @@ where
         if locator.is_empty() {
             return Ok(0);
         }
-        let heights: HashMap<block::Hash, Height> = locator
+        let mut heights: HashMap<block::Hash, Height> = locator
             .iter()
             .map(|(height, hash)| (*hash, *height))
             .collect();
+        let mut known_blocks: Vec<block::Hash> = locator.iter().map(|(_, hash)| *hash).collect();
+        // The last header of the previous full response the header chain already had.
+        let mut shared: Option<block::Hash> = None;
 
-        let headers = request_headers(
-            self.peers.clone(),
-            locator.iter().map(|(_, hash)| *hash).collect(),
-            None,
-        )
-        .await?;
+        for _ in 0..MAX_KNOWN_RESPONSES {
+            let headers = request_headers(self.peers.clone(), known_blocks.clone(), None).await?;
 
-        let Some(first) = headers.first() else {
-            info!(tip = ?locator[0], "{HEADER_SYNC_CAUGHT_UP}");
-            return Ok(0);
-        };
+            let Some(first) = headers.first() else {
+                info!(tip = ?locator[0], "{HEADER_SYNC_CAUGHT_UP}");
+                return Ok(0);
+            };
 
-        let Some(parent_height) = heights.get(&first.previous_block_hash) else {
-            debug!("dropping headers that don't connect to the header chain locator");
-            return Ok(0);
-        };
-        let first_height = parent_height
-            .next()
-            .map_err(|_| eyre!("headers above the maximum height"))?;
-
-        verify_headers(&self.network, first_height, headers.clone(), Utc::now())
-            .await
-            .map_err(|error| {
-                if error.is_misbehavior() {
-                    metrics::counter!("sync.headers.invalid.count").increment(1);
-                }
-                eyre!("a peer sent invalid headers: {error}")
-            })?;
-
-        match self.commit(headers.clone()).await {
-            Ok(committed) => {
-                if committed.added == 0 {
-                    info!(tip = ?committed.tip, "{HEADER_SYNC_CAUGHT_UP}");
-                }
-                Ok(committed.added)
+            // A continuation must start at the last shared header, so a peer
+            // can't spend the responses resending headers from lower down.
+            if shared.is_some_and(|shared| first.previous_block_hash != shared) {
+                debug!("dropping headers that don't continue the shared headers");
+                return Ok(0);
             }
-            Err(error) => match error.downcast_ref::<zs::CommitHeadersError>() {
-                Some(zs::CommitHeadersError::LessWork { fork_parent }) => {
-                    let fork_parent = *fork_parent;
-                    self.extend_fork(fork_parent, first_height, headers).await
+            let Some(parent_height) = heights.get(&first.previous_block_hash) else {
+                debug!("dropping headers that don't connect to the header chain locator");
+                return Ok(0);
+            };
+            let first_height = parent_height
+                .next()
+                .map_err(|_| eyre!("headers above the maximum height"))?;
+
+            let hashes = verify_headers(&self.network, first_height, headers.clone(), Utc::now())
+                .await
+                .map_err(|error| {
+                    if error.is_misbehavior() {
+                        metrics::counter!("sync.headers.invalid.count").increment(1);
+                    }
+                    eyre!("a peer sent invalid headers: {error}")
+                })?;
+
+            let result = self.commit(headers.clone()).await;
+            if let Ok(committed) = &result {
+                if committed.added == 0 && headers.len() >= MAX_HEADERS_PER_RESPONSE {
+                    // The peer shares all these headers, so a fork could start
+                    // above them: continue from the last one.
+                    let last = *hashes.last().expect("the response is full");
+                    let last_height = u32::try_from(headers.len() - 1)
+                        .ok()
+                        .and_then(|offset| first_height.0.checked_add(offset))
+                        .map(Height)
+                        .ok_or_else(|| eyre!("headers above the maximum height"))?;
+                    heights.insert(last, last_height);
+                    // Keep the locator after it, so a peer that doesn't have it
+                    // still answers from an intersection.
+                    known_blocks.insert(0, last);
+                    shared = Some(last);
+                    continue;
                 }
-                Some(zs::CommitHeadersError::AboveLookahead { limit, .. }) => {
-                    debug!(
-                        ?limit,
-                        "the header chain is at its lookahead limit, waiting for the block chain"
-                    );
-                    Ok(0)
+            }
+
+            return match result {
+                Ok(committed) => {
+                    if committed.added == 0 {
+                        info!(tip = ?committed.tip, "{HEADER_SYNC_CAUGHT_UP}");
+                    }
+                    Ok(committed.added)
                 }
-                Some(commit_error) if !commit_error.is_misbehavior() => {
-                    debug!(?commit_error, "headers are not on the best header chain");
-                    Ok(0)
-                }
-                _ => Err(error),
-            },
+                Err(error) => match error.downcast_ref::<zs::CommitHeadersError>() {
+                    Some(zs::CommitHeadersError::LessWork { fork_parent }) => {
+                        let fork_parent = *fork_parent;
+                        self.extend_fork(fork_parent, first_height, headers).await
+                    }
+                    Some(zs::CommitHeadersError::AboveLookahead { limit, .. }) => {
+                        debug!(
+                                ?limit,
+                                "the header chain is at its lookahead limit, waiting for the block chain"
+                            );
+                        Ok(0)
+                    }
+                    Some(commit_error) if !commit_error.is_misbehavior() => {
+                        debug!(?commit_error, "headers are not on the best header chain");
+                        Ok(0)
+                    }
+                    _ => Err(error),
+                },
+            };
         }
+
+        debug!("a peer only sent headers the header chain already has");
+        Ok(0)
     }
 
     /// Collects more of a fork whose first headers, `headers` from

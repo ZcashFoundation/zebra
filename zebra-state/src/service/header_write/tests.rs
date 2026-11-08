@@ -140,7 +140,7 @@ fn batches_append_and_skip_known_headers() {
         vec![chain[6].hash()]
     );
 
-    let locator = read::header_locator(&state.db);
+    let locator = read::header_locator(&state.db, &network);
     assert_eq!(locator.first(), Some(&tip_of(&chain, 8)));
     assert_eq!(locator.last(), Some(&(Height(0), genesis.hash())));
 }

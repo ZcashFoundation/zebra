@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
+    parameters::Network,
     serialization::DateTime32,
     value_balance::ValueBalance,
 };
@@ -274,15 +275,27 @@ where
 /// Create a block locator over the header chain in `db`, with the height of
 /// each hash.
 ///
-/// Uses the same heights as [`block_locator()`], from the header tip, and
-/// always ends with the finalized tip, which every honest peer has. Returns an
-/// empty locator before genesis is committed.
-pub fn header_locator(db: &ZebraDb) -> Vec<(block::Height, block::Hash)> {
+/// Uses the same heights as [`block_locator()`], from the header tip, then the
+/// last checkpoint of `network` if the header chain has it, and always ends
+/// with the finalized tip, which every honest peer has. Returns an empty
+/// locator before genesis is committed.
+///
+/// The last checkpoint keeps the headers a peer on a deep fork answers with,
+/// which the header chain already has, to the headers above it.
+pub fn header_locator(db: &ZebraDb, network: &Network) -> Vec<(block::Height, block::Hash)> {
     let Some((tip_height, _)) = db.header_chain_tip() else {
         return Vec::new();
     };
 
-    let mut locator: Vec<_> = block_locator_heights(tip_height)
+    let mut heights = block_locator_heights(tip_height);
+    let last_checkpoint = network.checkpoint_list().max_height();
+    if last_checkpoint <= tip_height {
+        heights.push(last_checkpoint);
+    }
+    heights.sort_unstable_by(|a, b| b.cmp(a));
+    heights.dedup();
+
+    let mut locator: Vec<_> = heights
         .into_iter()
         .filter_map(|height| Some((height, db.header_chain_hash(height)?)))
         .collect();
