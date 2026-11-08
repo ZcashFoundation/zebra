@@ -67,6 +67,11 @@ fn database_open_errors_preserve_the_cause() {
             .expect("the database open panic contains a formatted message");
         assert!(message.contains(&path.display().to_string()), "{message}");
         assert!(message.contains("Error: IO error:"), "{message}");
+        assert_eq!(
+            crate::constants::LOCK_FILE_ERROR.is_match(message),
+            locked,
+            "{message}"
+        );
         assert!(
             !message.contains("Database likely already open"),
             "{message}"
