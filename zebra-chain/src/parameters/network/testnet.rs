@@ -274,6 +274,9 @@ impl ConfiguredFundingStreams {
                 .clone(),
         };
         let funding_streams = FundingStreams::new(height_range, recipients);
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura#729 (https://github.com/zakura-core/zakura/pull/729).
         let sum_numerators = funding_streams
             .recipients()
             .values()
@@ -953,6 +956,7 @@ impl ParametersBuilder {
         self
     }
 
+    // Adapted from zakura-core/zakura#729 (https://github.com/zakura-core/zakura/pull/729).
     /// Checks configured lockbox outputs before they can reach subsidy consumers.
     fn check_lockbox_disbursements(&self) -> Result<(), ParametersBuilderError> {
         let mut total = Amount::zero();

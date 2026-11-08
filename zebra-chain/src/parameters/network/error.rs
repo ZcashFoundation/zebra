@@ -109,6 +109,9 @@ pub enum ParametersBuilderError {
         address: crate::transparent::Address,
     },
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#729 (https://github.com/zakura-core/zakura/pull/729).
     /// A configured lockbox disbursement address cannot be parsed.
     #[error("invalid lockbox disbursement address: {address}")]
     #[non_exhaustive]
@@ -117,6 +120,7 @@ pub enum ParametersBuilderError {
         address: String,
     },
 
+    // Adapted from zakura-core/zakura#729 (https://github.com/zakura-core/zakura/pull/729).
     /// The configured lockbox disbursements exceed the monetary range.
     #[error("lockbox disbursement total must not exceed MAX_MONEY")]
     #[non_exhaustive]
