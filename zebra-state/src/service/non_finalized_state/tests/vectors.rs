@@ -740,6 +740,7 @@ fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
             &cloned.spent_outputs
         ));
         let semantic = SemanticallyVerifiedBlock::from(cloned);
+        // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
         assert!(Arc::ptr_eq(&semantic.new_outputs, &contextual.new_outputs));
         drop(semantic);
         let unique = contextual;
