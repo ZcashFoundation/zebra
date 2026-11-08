@@ -299,6 +299,10 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura
+        // (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
         let block_size = block_serialized_size(&finalized.block);
 
         let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
@@ -310,6 +314,8 @@ impl DiskWriteBatch {
     }
 }
 
+// Adapted from zakura-core/zakura
+// (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
 /// Sum independent transaction sizes in parallel, retaining the exact block wire framing.
 fn block_serialized_size(block: &Block) -> usize {
     if block.transactions.len() < super::PARALLEL_BLOCK_TX_THRESHOLD {
