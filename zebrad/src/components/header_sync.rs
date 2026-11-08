@@ -92,6 +92,15 @@ const MAX_KNOWN_RESPONSES: usize = (zs::MAX_BLOCK_REORG_HEIGHT as usize
 /// it is dropped: enough for [`zs::MAX_COMMIT_HEADERS`] headers, with retries.
 pub const MAX_FORK_REQUESTS: usize = 32;
 
+/// How many empty responses continuing one fork are retried before the fork is
+/// treated as ended.
+///
+/// A continuation carries only the fork's last hash and can go to any peer.
+/// Peers that don't have that hash can answer with no headers, for example
+/// fresh peers, or version 2 peers whose state request failed, so one empty
+/// response doesn't show that the fork has ended.
+pub const MAX_FORK_EMPTY_RESPONSES: usize = 3;
+
 /// How many times one round tries each checkpoint span, before it gives up and
 /// starts again from the header tip.
 pub const MAX_SPAN_ATTEMPTS: usize = 3;
@@ -429,8 +438,9 @@ where
     /// headers than that. So the fork is continued
     /// from its last header, and the whole fork is sent to the header writer
     /// after each response, which compares its work with the stored headers
-    /// above the fork point. The fork is dropped when a peer has no more of it,
-    /// or it reaches [`zs::MAX_COMMIT_HEADERS`] headers. Returns the number of
+    /// above the fork point. The fork is dropped when peers have no more of it,
+    /// after [`MAX_FORK_EMPTY_RESPONSES`] empty responses, or it reaches
+    /// [`zs::MAX_COMMIT_HEADERS`] headers. Returns the number of
     /// new headers.
     async fn extend_fork(
         &mut self,
@@ -438,6 +448,7 @@ where
         first_height: Height,
         mut headers: Vec<Arc<block::Header>>,
     ) -> Result<usize, Report> {
+        let mut empty_responses = 0;
         for _ in 0..MAX_FORK_REQUESTS {
             if headers.len() >= zs::MAX_COMMIT_HEADERS {
                 break;
@@ -452,7 +463,12 @@ where
                 }
             };
             match response.first() {
-                // A peer that serves the fork has no more of it.
+                // The peer may not have the fork, so ask another one.
+                None if empty_responses < MAX_FORK_EMPTY_RESPONSES => {
+                    empty_responses += 1;
+                    continue;
+                }
+                // Several peers have no more of the fork.
                 None => break,
                 Some(first) if first.previous_block_hash != last => continue,
                 Some(_) => {}

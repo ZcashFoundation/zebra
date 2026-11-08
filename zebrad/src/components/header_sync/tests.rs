@@ -615,3 +615,56 @@ async fn a_silent_peer_times_out_inside_the_peer_set() {
         "{error}"
     );
 }
+
+/// Empty replies from peers that don't have a fork's last header don't drop a
+/// fork that is still being collected.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_reply_does_not_drop_a_fork_being_collected() {
+    let _init_guard = zebra_test::init();
+
+    let stored = chain(300, 0);
+    let fork = fork_of(&stored, 10, 400, 3);
+    let network = regtest(&stored, &[0]);
+    let state = state(&network).await;
+
+    let mut sync = HeaderSync::new(
+        &network,
+        honest_peers(stored.clone(), Arc::default(), Arc::default()),
+        state.clone(),
+        1,
+    );
+    while sync.sync_once().await.expect("the headers are valid") > 0 {}
+
+    // The first two fork continuations, which carry only the fork's last hash,
+    // go to peers that don't have it.
+    let empty = Arc::new(AtomicUsize::new(2));
+    let honest = honest_peers(fork.clone(), Arc::default(), Arc::default());
+    let peers = tower::util::BoxCloneService::new(service_fn(move |request: zn::Request| {
+        let empty = empty.clone();
+        let honest = honest.clone();
+        async move {
+            if let zn::Request::FindHeaders { known_blocks, .. } = &request {
+                if known_blocks.len() == 1
+                    && empty
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                            left.checked_sub(1)
+                        })
+                        .is_ok()
+                {
+                    return Ok(zn::Response::BlockHeaders(Vec::new()));
+                }
+            }
+            honest.oneshot(request).await
+        }
+    }));
+
+    let mut sync = HeaderSync::new(&network, peers, state.clone(), 1);
+    let added = sync
+        .sync_once()
+        .await
+        .expect("the fork's headers are valid");
+    assert!(
+        added > 290,
+        "the fork replaces the 290 headers above its fork point: {added}"
+    );
+}
