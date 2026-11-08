@@ -92,7 +92,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent = { workspace = true }
-sinsemilla = { workspace = true, features = ["runtime-precomputation"] }
+sinsemilla = { workspace = true, features = ["merkle-table"] }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }

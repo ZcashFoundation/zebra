@@ -5275,7 +5275,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 [[package]]
 name = "sinsemilla"
 version = "0.2.0"
-source = "git+https://github.com/zcash/sinsemilla?rev=09b92cf4e87bb3f5a803053d457f6604d1a1dce5#09b92cf4e87bb3f5a803053d457f6604d1a1dce5"
+source = "git+https://github.com/zcash/sinsemilla?rev=d17214e2a336d71071adfef4a7c453b57877ac27#d17214e2a336d71071adfef4a7c453b57877ac27"
 dependencies = [
  "group",
  "pasta_curves",
@@ -7405,6 +7405,7 @@ dependencies = [
  "rayon",
  "sapling-crypto",
  "serde",
+ "sinsemilla",
  "spandoc",
  "thiserror 2.0.18",
  "tokio",

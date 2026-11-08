@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Prepare checked Orchard tree hash tables in the background during startup without delaying RPC initialization ([#11846](https://github.com/ZcashFoundation/zebra/pull/11846)).
+time: 2026-11-08T16:55:26.122142118+01:00

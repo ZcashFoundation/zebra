@@ -409,5 +409,5 @@ unwrap_in_result = "warn"
 result_large_err = "allow"
 
 [patch.crates-io]
-# Await the checked public-input batch API in https://github.com/zcash/sinsemilla/pull/17.
-sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "09b92cf4e87bb3f5a803053d457f6604d1a1dce5" }
+# Await the checked batch API and startup precomputation from zcash/sinsemilla#17 and #19.
+sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "d17214e2a336d71071adfef4a7c453b57877ac27" }
