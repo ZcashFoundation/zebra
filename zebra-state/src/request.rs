@@ -256,6 +256,7 @@ pub struct SemanticallyVerifiedBlock {
     pub hash: block::Hash,
     /// The height of the block.
     pub height: block::Height,
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// New transparent outputs created in this block, indexed by
     /// [`OutPoint`](transparent::OutPoint).
     /// Shared with contextual verification and cached proposal clones.
@@ -469,6 +470,7 @@ impl FinalizedBlock {
         )
     }
 
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
@@ -617,6 +619,7 @@ impl ContextuallyVerifiedBlock {
 
     // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's gross transaction
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
@@ -743,6 +746,7 @@ impl CheckpointVerifiedBlock {
 }
 
 impl SemanticallyVerifiedBlock {
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Creates [`SemanticallyVerifiedBlock`] from [`Block`] and [`block::Hash`].
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         let height = block
@@ -782,6 +786,7 @@ impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<Arc<Block>> for SemanticallyVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
         let hash = block.hash();
@@ -807,6 +812,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
 
 // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
 // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
         Self {
@@ -820,6 +826,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         Self {

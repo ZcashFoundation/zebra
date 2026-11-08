@@ -1220,6 +1220,8 @@ where
                 )?;
             }
 
+            // Adapted from zakura-core/zakura#1905
+            // (https://github.com/zakura-core/zakura/pull/1905).
             // Finally, submit the block for contextual verification.
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
