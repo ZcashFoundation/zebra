@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Database startup panics preserve the underlying RocksDB error for lock conflicts and other I/O failures.
+time: 2026-11-08T06:47:47.161622488+01:00

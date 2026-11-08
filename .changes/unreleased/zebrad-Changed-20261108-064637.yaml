@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Database startup failures include the underlying RocksDB error instead of reporting every I/O failure as an already-open database.
+time: 2026-11-08T06:46:37.253667191+01:00

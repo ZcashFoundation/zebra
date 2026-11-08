@@ -26,6 +26,54 @@ impl DiskDb {
     }
 }
 
+/// Both lock conflicts and other I/O failures must preserve RocksDB's actual error.
+#[test]
+fn database_open_errors_preserve_the_cause() {
+    use semver::Version;
+    use zebra_chain::parameters::Network;
+
+    use crate::Config;
+
+    let _init_guard = zebra_test::init();
+    for locked in [false, true] {
+        let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        };
+        let version = Version::new(1, 0, 0);
+        let path = config.db_path("open-error-test", version.major, &Network::Mainnet);
+        let open = || {
+            DiskDb::new(
+                &config,
+                "open-error-test",
+                &version,
+                &Network::Mainnet,
+                [],
+                false,
+            )
+        };
+        let _held_db = if locked {
+            Some(open().expect("the first database open should succeed"))
+        } else {
+            std::fs::create_dir_all(path.join("LOCK"))
+                .expect("a directory can occupy the database's lock file path");
+            None
+        };
+
+        let panic = std::panic::catch_unwind(open).expect_err("the database cannot be opened");
+        let message = panic
+            .downcast_ref::<String>()
+            .expect("the database open panic contains a formatted message");
+        assert!(message.contains(&path.display().to_string()), "{message}");
+        assert!(message.contains("Error: IO error:"), "{message}");
+        assert!(
+            !message.contains("Database likely already open"),
+            "{message}"
+        );
+    }
+}
+
 /// Check that zs_iter_opts returns an upper bound one greater than provided inclusive end bounds.
 #[test]
 fn zs_iter_opts_increments_key_by_one() {

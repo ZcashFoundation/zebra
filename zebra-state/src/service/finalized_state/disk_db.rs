@@ -1086,14 +1086,10 @@ impl DiskDb {
                 Ok(db)
             }
 
-            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
-                "Database likely already open {path:?} \
-                         Hint: Check if another zebrad process is running."
-            ),
-
             Err(e) => panic!(
                 "Opening database {path:?} failed. \
-                        Hint: Try changing the state cache_dir in the Zebra config. \
+                        Hint: Check the state cache_dir, available disk space, \
+                        and whether another zebrad process is using the database. \
                         Error: {e}",
             ),
         }
