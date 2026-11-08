@@ -87,6 +87,9 @@ pub(crate) type SpendingTransactionId = ();
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1194 (https://github.com/zakura-core/zakura/pull/1194).
     /// The contextually valid blocks which form this non-finalized partial chain, in height order.
     ///
     /// Records are immutable once pushed, so snapshots share them.
@@ -100,6 +103,7 @@ pub struct ChainInner {
 
     // Transparent outputs and spends
     //
+    // Adapted from zakura-core/zakura#1153 (https://github.com/zakura-core/zakura/pull/1153).
     /// The [`transparent::Utxo`]s created by `blocks`.
     ///
     /// Note that these UTXOs may not be unspent.
@@ -230,6 +234,7 @@ pub struct ChainInner {
     // Transparent Transfers
     // TODO: move to the transparent section
     //
+    // Adapted from zakura-core/zakura#1193 (https://github.com/zakura-core/zakura/pull/1193).
     /// Partial transparent address indexes, sharing unchanged partitions and histories.
     pub(super) partial_transparent_transfers: AddressTransfers,
 

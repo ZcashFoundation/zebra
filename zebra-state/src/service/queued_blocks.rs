@@ -367,6 +367,9 @@ impl SentHashes {
         self.add_outputs(block.hash, block.height, &block.new_outputs);
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     /// Stores borrowed block metadata without materializing another verified block.
     fn add_outputs(
         &mut self,

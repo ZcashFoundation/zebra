@@ -86,6 +86,9 @@ impl AddressTransfers {
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1193 (https://github.com/zakura-core/zakura/pull/1193).
 impl PartialEq for AddressTransfers {
     fn eq(&self, other: &Self) -> bool {
         // Independently built indexes can partition equal entries differently.

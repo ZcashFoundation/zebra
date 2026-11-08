@@ -61,6 +61,10 @@ fn construct_single() -> Result<()> {
     Ok(())
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+// Adapted from zakura-core/zakura#1194 (https://github.com/zakura-core/zakura/pull/1194).
 #[test]
 fn chain_snapshots_share_records_and_outputs_until_finalization() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -351,6 +355,8 @@ fn coinbase_fee_transfer_preserves_non_finalized_indexes() -> Result<()> {
     Ok(())
 }
 
+// Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+// Adapted from zakura-core/zakura#1194 (https://github.com/zakura-core/zakura/pull/1194).
 #[test]
 fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
     use crate::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock};

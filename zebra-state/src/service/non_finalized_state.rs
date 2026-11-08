@@ -324,6 +324,9 @@ impl NonFinalizedState {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1194 (https://github.com/zakura-core/zakura/pull/1194).
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
@@ -680,6 +683,8 @@ impl NonFinalizedState {
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        // Adapted from zakura-core/zakura#1153 (https://github.com/zakura-core/zakura/pull/1153).
+        // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             &new_chain.created_utxos,
@@ -715,6 +720,7 @@ impl NonFinalizedState {
             block_hash,
         })?;
 
+        // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
         let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
             prepared,
             spent_utxos,

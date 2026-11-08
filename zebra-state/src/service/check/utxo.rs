@@ -20,6 +20,10 @@ use crate::{
     },
 };
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1153 (https://github.com/zakura-core/zakura/pull/1153).
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Lookup all the [`transparent::Utxo`]s spent by a [`SemanticallyVerifiedBlock`].
 /// If any of the spends are invalid, return an error.
 /// Otherwise, return the looked up UTXOs.
@@ -219,6 +223,7 @@ pub fn transparent_coinbase_spend(
     }
 }
 
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Reject negative remaining transaction value.
 ///
 /// "As in Bitcoin, the remaining value in the transparent transaction value pool
