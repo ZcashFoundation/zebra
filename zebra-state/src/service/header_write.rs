@@ -256,11 +256,14 @@ pub(crate) fn collect_stale_headers(db: &ZebraDb) {
 }
 
 /// Deletes the stored headers above the last checkpoint they match, if a
-/// checkpoint they reach has another hash.
+/// checkpoint they reach has another hash, or if they stop below the next
+/// checkpoint.
 ///
 /// A fork below the last checkpoint is never replaced, so headers stored above
 /// an older Zebra's last checkpoint must still match the checkpoints a newer
-/// Zebra adds there.
+/// Zebra adds there. Headers that stop below a checkpoint can't be checked
+/// against it, so they are dropped too, and headers-first sync downloads them
+/// again from the last checkpoint they match, which honest peers have.
 pub(crate) fn drop_headers_off_the_checkpoints(db: &ZebraDb, network: &Network) {
     let (Some(finalized_tip), Some((header_tip, _))) =
         (db.finalized_tip_height(), db.header_chain_tip())
@@ -275,7 +278,20 @@ pub(crate) fn drop_headers_off_the_checkpoints(db: &ZebraDb, network: &Network) 
             continue;
         }
         if height > header_tip {
-            break;
+            if last_match < header_tip {
+                let Ok(from) = last_match.next() else {
+                    return;
+                };
+                tracing::info!(
+                    checkpoint = ?height,
+                    "stored headers stop below a checkpoint: dropping the headers above the last match"
+                );
+                let mut batch = DiskWriteBatch::new();
+                batch.prepare_header_chain_truncate(db, from);
+                db.write_batch(batch)
+                    .expect("unexpected rocksdb error while deleting headers below a checkpoint");
+            }
+            return;
         }
         if db.header_chain_hash(height) == Some(hash) {
             last_match = height;

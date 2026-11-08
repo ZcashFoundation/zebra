@@ -633,3 +633,35 @@ fn a_fork_across_the_lookahead_limit_replaces_a_shorter_chain() {
         })
     );
 }
+
+/// Stored headers that stop below a newer Zebra's checkpoint, on a fork above
+/// the last checkpoint they match, are dropped at startup, so the honest span
+/// to that checkpoint can be stored.
+#[test]
+fn a_shorter_fork_below_a_new_checkpoint_is_dropped_at_startup() {
+    let _init_guard = zebra_test::init();
+
+    // An older Zebra with no checkpoints above genesis stored a fork that ends at 6.
+    let network = regtest();
+    let (state, genesis) = genesis_state(&network);
+    let chain = headers_above(&genesis.header, Height(0), 6, 0);
+    commit_headers(&state.db, &network, chain.clone()).expect("the chain is valid");
+
+    // The honest chain leaves it above 3, and a newer Zebra checkpoints 2 and 10.
+    let tail = headers_above(&chain[2], Height(3), 7, 1);
+    let newer =
+        regtest_with_checkpoints(&[(Height(2), chain[1].hash()), (Height(10), tail[6].hash())]);
+    drop_headers_off_the_checkpoints(&state.db, &newer);
+    assert_eq!(
+        state.db.header_chain_tip(),
+        Some((Height(2), chain[1].hash()))
+    );
+
+    // The span from the checkpoint at 2 to the one at 10 can now be stored.
+    let mut span = vec![chain[2].clone()];
+    span.extend(tail.iter().cloned());
+    assert_eq!(
+        commit_headers(&state.db, &newer, span).map(|committed| committed.tip),
+        Ok(tip_of(&tail, 10))
+    );
+}
