@@ -139,6 +139,11 @@ pub(crate) struct StateService {
     network: Network,
 
     /// The configured maximum checkpoint height.
+    ///
+    /// Checkpoint commits stop only once the last sent checkpoint verified block
+    /// reaches it, so a semantically verified block that names an earlier
+    /// checkpoint as its parent can't stop them. `Height::MAX` stops them at the
+    /// first queued child of the last sent checkpoint verified block.
     max_checkpoint_height: block::Height,
 
     /// The height that we start storing UTXOs from finalized blocks.
@@ -1098,11 +1103,15 @@ impl StateService {
     fn finish_checkpoint_commits_if_ready(&mut self) -> bool {
         // Start the handoff for a semantic child of the configured maximum checkpoint.
         // Checking the parent's height as well as its hash rejects height-skipping orphans whose
-        // parent is merely an intermediate checkpoint. An unspecified maximum retains hash-based
-        // detection for callers that do not use checkpoint heights.
+        // parent is merely an intermediate checkpoint. A restored finalized tip can already be
+        // above the maximum checkpoint, so any height at or above it starts the handoff. An
+        // unspecified maximum retains hash-based detection for callers that do not use checkpoint
+        // heights.
         if self.block_write_sender.accepts_finalized()
             && (self.max_checkpoint_height == block::Height::MAX
-                || self.finalized_block_write_last_sent_height == Some(self.max_checkpoint_height))
+                || self
+                    .finalized_block_write_last_sent_height
+                    .is_some_and(|height| height >= self.max_checkpoint_height))
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
@@ -2359,9 +2368,10 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::HeaderTip => Ok(ReadResponse::HeaderTip(state.db.header_chain_tip())),
 
             // Used by headers-first sync.
-            ReadRequest::HeaderLocator => {
-                Ok(ReadResponse::HeaderLocator(read::header_locator(&state.db)))
-            }
+            ReadRequest::HeaderLocator => Ok(ReadResponse::HeaderLocator(read::header_locator(
+                &state.db,
+                &state.network,
+            ))),
 
             // Used by the syncer to download bodies for stored headers.
             ReadRequest::HeaderChainHashes {
