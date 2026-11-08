@@ -1602,3 +1602,55 @@ async fn mined_cached_future_time_suppresses_early_body_but_preserves_commit() {
     .await
     .expect("a live time check must not change normal cached commit handling");
 }
+
+/// A semantic orphan above the maximum checkpoint whose parent is an
+/// intermediate checkpoint block doesn't stop checkpoint commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_orphan_above_max_checkpoint_preserves_checkpoint_admission() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(4)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let (mut state, _, _, _) =
+            StateService::new(Config::ephemeral(), &Network::Mainnet, Height(2), 0).await;
+        for block in &blocks[..2] {
+            state
+                .queue_and_commit_to_finalized_state(block.clone().into(), None)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        // Block 3, claiming its own height, but linking to the intermediate block 1.
+        let mut orphan = blocks[3].clone();
+        Arc::make_mut(&mut Arc::make_mut(&mut orphan).header).previous_block_hash =
+            blocks[1].hash();
+        let orphan_response =
+            state.queue_and_commit_to_non_finalized_state(orphan.prepare(), None, None);
+        if let Ok(result) = tokio::time::timeout(Duration::from_secs(1), orphan_response).await {
+            assert!(
+                result.unwrap().is_err(),
+                "the height-skipping orphan must not commit"
+            );
+        }
+        assert!(
+            state.block_write_sender.finalized.is_some(),
+            "an orphan above the maximum checkpoint stopped checkpoint commits"
+        );
+
+        state
+            .queue_and_commit_to_finalized_state(blocks[2].clone().into(), None)
+            .await
+            .unwrap()
+            .expect("the maximum checkpoint still commits after the orphan");
+        assert_eq!(
+            state.read_service.db.finalized_tip_height(),
+            Some(Height(2))
+        );
+    })
+    .await
+    .expect("the intermediate-parent handoff regression finishes");
+}

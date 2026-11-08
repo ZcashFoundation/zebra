@@ -130,6 +130,14 @@ pub(crate) struct StateService {
     /// The configured Zcash network.
     network: Network,
 
+    /// The configured maximum checkpoint height.
+    ///
+    /// Checkpoint commits stop only once the finalized tip reaches it, so a
+    /// semantically verified block that names an earlier checkpoint as its
+    /// parent can't stop them. `Height::MAX` stops them at the first queued
+    /// child of the last checkpoint verified block on disk.
+    max_checkpoint_height: block::Height,
+
     /// The height that we start storing UTXOs from finalized blocks.
     ///
     /// This height should be lower than the last few checkpoints,
@@ -493,6 +501,7 @@ impl StateService {
 
         let state = Self {
             network: network.clone(),
+            max_checkpoint_height,
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
@@ -961,15 +970,22 @@ impl StateService {
         // - it has been successfully written to disk.
         //
         // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
+        // that are a child of the last block we sent, once the finalized tip
+        // reaches the maximum checkpoint height. A block can claim any height
+        // and name an earlier checkpoint as its parent, so the parent's hash
+        // alone doesn't show it is the last checkpoint.
         if self.block_write_sender.finalized.is_some()
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
+            && (self.max_checkpoint_height == block::Height::MAX
+                || self
+                    .read_service
+                    .db
+                    .finalized_tip_height()
+                    .is_some_and(|height| height >= self.max_checkpoint_height))
         {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
