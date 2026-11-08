@@ -227,3 +227,30 @@ async fn non_contiguous_batch_is_rejected_before_equihash() {
         "contiguity must be checked before the proof of work: {error:?}"
     );
 }
+
+/// A header whose commitment bytes can't be valid at its height is rejected,
+/// even on networks that skip the proof of work.
+#[tokio::test]
+async fn invalid_commitment_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let regtest = Network::new_regtest(RegtestParameters {
+        activation_heights: zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+            overwinter: Some(1),
+            sapling: Some(1),
+            blossom: Some(1),
+            heartwood: Some(1),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let mut header = *mainnet_headers()[1];
+    // Heartwood activation requires all-zero reserved bytes.
+    header.commitment_bytes = [1; 32].into();
+    let error = verify_headers(&regtest, Height(1), vec![Arc::new(header)], Utc::now())
+        .await
+        .expect_err("a non-zero reserved commitment at Heartwood activation can't be valid");
+    assert!(matches!(error, HeaderError::Commitment { .. }), "{error:?}");
+    assert!(error.is_misbehavior());
+}

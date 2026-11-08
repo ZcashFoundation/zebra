@@ -5,7 +5,8 @@
 //! - each header's difficulty threshold is at most the network's limit, and
 //!   its hash passes the difficulty filter,
 //! - each header's Equihash solution is valid,
-//! - no header's time is more than 2 hours in the future, and
+//! - no header's time is more than 2 hours in the future,
+//! - each header's commitment bytes are valid for its height, and
 //! - each header at a checkpoint height has the checkpoint's hash.
 //!
 //! The proof of work checks are skipped exactly where the block verifier skips
@@ -23,7 +24,7 @@ use rayon::prelude::*;
 use thiserror::Error;
 
 use zebra_chain::{
-    block::{self, BlockTimeError, Height},
+    block::{self, BlockTimeError, CommitmentError, Height},
     parameters::Network,
     work::equihash,
 };
@@ -74,6 +75,14 @@ pub enum HeaderError {
         hash: block::Hash,
         #[source]
         source: equihash::Error,
+    },
+
+    #[error("invalid commitment in header {height:?} {hash:?}")]
+    Commitment {
+        height: Height,
+        hash: block::Hash,
+        #[source]
+        source: CommitmentError,
     },
 
     #[error("invalid time in header {height:?}")]
@@ -209,6 +218,16 @@ fn verify_header(
             source,
         })?;
     }
+
+    // The block verifier checks the commitment on every network, so this
+    // doesn't depend on `skip_pow`.
+    header
+        .commitment(network, height)
+        .map_err(|source| HeaderError::Commitment {
+            height,
+            hash,
+            source,
+        })?;
 
     time_is_valid_at(header, now, &height, &hash)
         .map_err(|source| HeaderError::Time { height, source })
