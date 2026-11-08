@@ -14,6 +14,76 @@ not promise lower RAM use or a fixed database-size ceiling: retained indexes and
 keep growing. Allow free disk space for initial sync, snapshot extraction, and RocksDB compaction;
 logical deletion does not immediately free disk space.
 
+## What pruning deletes and keeps
+
+The [pruning batch][pruning-batch] (`DiskWriteBatch::prepare_history_pruning`) deletes serialized
+transactions only from the `tx_by_loc` column family, below the actual retained-body floor and
+excluding genesis. It does not prune the other column families:
+
+- Full headers and block hash/height mappings remain in `block_header_by_height`, `hash_by_height`,
+  and `height_by_hash`.
+- Transaction IDs and locations remain in `hash_by_tx_loc` and `tx_loc_by_hash`.
+- Live transparent outputs remain in `utxo_by_out_loc`. Address balances, transaction history, and
+  live-output links remain in `balance_by_transparent_addr`, `tx_loc_by_transparent_addr_loc`, and
+  `utxo_loc_by_transparent_addr_loc`. These address indexes support optional address RPCs, but pruning
+  does not disable them, even in a non-indexer build.
+- All four shielded pools keep their `*_nullifiers`, `*_anchors`, and `*_note_commitment_tree` column
+  families. Sapling, Orchard, and Ironwood also keep historical frontier versions and
+  `*_note_commitment_subtree` indexes; Sprout keeps historical frontiers in its anchors.
+- Per-block metadata remains in `block_info`; the current chain-history tree and value pools remain
+  in `history_tree` and `tip_chain_value_pool`.
+- Existing indexer spending attribution remains, including `tx_loc_by_spent_out_loc` when populated.
+
+Retention therefore bounds transaction-body history, not every state index.
+
+### Measured Mainnet size
+
+In one **non-indexer Mainnet snapshot at finalized height 3,533,784**, retaining **10,000 heights
+plus genesis**, the archive database occupied **282,358,918,899 apparent bytes** and the stopped
+pruned database occupied **15,319,900,010 apparent bytes**, a **94.57% reduction**. The comparison
+includes the database upgrade, pruning, compaction, and reopening, not deletion alone.
+
+For that same **non-indexer Mainnet snapshot at finalized height 3,533,784**, with **10,000 retained
+heights plus genesis**, the largest remaining column families and the address-index group were:
+
+| Retained data | SST-file bytes after pruning |
+| --- | ---: |
+| Full headers (`block_header_by_height`) | 5,334,539,278 (about 5.3 GB) |
+| Three address indexes listed above, combined | 3,044,793,091 (about 3.0 GB) |
+| Orchard nullifiers (`orchard_nullifiers`) | 1,864,269,709 |
+| Transaction locations (`tx_loc_by_hash`) | 886,003,493 |
+| Live transparent outputs (`utxo_by_out_loc`) | 840,681,699 |
+| Transaction IDs (`hash_by_tx_loc`) | 779,468,593 |
+
+These are per-column-family SST-file sizes, not complete-directory sizes or additional savings
+available through a pruning option.
+
+### Measured tmpfs latency: Regtest only
+
+One **Regtest-only, non-indexer campaign** used a **3,576,076-byte pruned baseline**, **1,001-height
+retention plus genesis**, and **1,200 replay blocks per trial**, from parent height **1,400** through
+**2,600**. Across **22 accepted trials**, tmpfs showed no consistent latency benefit. The pooled
+medians below compare NVMe with warmed SST files against tmpfs:
+
+| Regtest measurement | Warm NVMe | tmpfs | Accepted trials per treatment |
+| --- | ---: | ---: | ---: |
+| Block-submission RPC response | 0.681 ms | 0.694 ms | 3 |
+| Submission to first template with the new parent | 0.716 ms | 0.692 ms | 2 |
+
+Each trial contributed **1,200 samples**; the campaign also included cold-NVMe and proposal trials.
+Startup pruning and compaction were outside timing, and non-finalized backups were disabled for
+both treatments. The campaign was incomplete and treatment order was not randomized; the samples
+are not independent repetitions.
+
+The [finalized write path][state-write] (`DiskDb::write`) uses default RocksDB write options:
+the WAL is enabled and [synchronization defaults to `false`][write-options]. Moving these writes to
+tmpfs therefore does not remove a mandatory per-block WAL synchronization. File-page residency,
+Mainnet latency, total RAM use, and crash/recovery behavior were not measured.
+
+[pruning-batch]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/history.rs
+[state-write]: https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_db.rs
+[write-options]: https://docs.rs/rocksdb/0.24.0/rocksdb/struct.WriteOptions.html#method.set_sync
+
 ## Enable pruning and choose retention
 
 For a fresh cache with no existing state, add the setting below and start Zebra; the new
