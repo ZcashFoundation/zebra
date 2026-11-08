@@ -256,6 +256,9 @@ impl VerifiedSet {
             .clear_mined_dependencies(mined_ids);
     }
 
+    // Copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
     /// Removes the listed transactions and their descendants.
     ///
     /// Returns all removed unmined IDs. Missing IDs, duplicate IDs, and IDs already
