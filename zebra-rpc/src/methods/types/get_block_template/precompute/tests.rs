@@ -97,12 +97,12 @@ fn full_template(seconds: u32) -> BlockTemplateResponse {
 }
 
 /// Returns the work `getblocktemplate` serves.
-fn served_work(cache: &TemplateCache) -> Option<Arc<BlockTemplateResponse>> {
+fn served_work(cache: &TemplateCache) -> Option<Arc<CachedTemplate>> {
     cache.served.borrow().as_ref()?.template.clone()
 }
 
 /// Returns the work waiting to replace the served template.
-fn next_work(cache: &TemplateCache) -> Option<Arc<BlockTemplateResponse>> {
+fn next_work(cache: &TemplateCache) -> Option<Arc<CachedTemplate>> {
     cache.served.borrow().as_ref()?.next.clone()
 }
 
@@ -876,6 +876,7 @@ async fn slow_builds_pace_mempool_refresh_without_delaying_tip_changes() {
                 slow_build
             },
         );
+
         updater.abort();
     }
 }
@@ -1207,7 +1208,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             .template_for_tip(full.previous_block_hash, &network, full.cur_time)
             .expect("coinbase-only work remains served during validation");
         assert_eq!(
-            *served, empty,
+            served.response, empty,
             "staged work must not be served before validation"
         );
         let validated = full.clone();
@@ -1244,7 +1245,7 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             publications.changed().await;
         };
         assert_eq!(
-            *served, validated,
+            served.response, validated,
             "the validated build is served once the verifier accepts it"
         );
         let cached = prepared
@@ -1310,7 +1311,7 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
     cache.clear();
     cache.update(full_template(2));
     let newer = served_work(&cache).expect("newer work is served");
-    assert_eq!(*newer, full_template(2));
+    assert_eq!(newer.response, full_template(2));
     assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &newer)));
     assert!(!cache.promote(&later, Some(&first)));
     assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
@@ -1337,7 +1338,9 @@ fn validated_work_replaces_only_the_work_it_was_checked_against() {
     assert!(next_work(&cache).is_none());
     assert!(!cache.promote(&stale, Some(&replacement)));
     assert_eq!(
-        *served_work(&cache).expect("the new parent's work is served"),
+        served_work(&cache)
+            .expect("the new parent's work is served")
+            .response,
         other
     );
 }
@@ -1447,7 +1450,7 @@ fn narrowed_work_is_queued_once_unless_newer_work_waits() {
         .expect("a usable range survives clock rollback");
     assert_ne!(narrowed.cur_time, full.cur_time);
     let queued = next_work(&cache).expect("narrowed work is queued for validation");
-    assert_eq!(queued, narrowed);
+    assert_eq!(queued.response, narrowed.response);
     assert!(
         !changes.take_changed(),
         "queueing work for validation must not wake long polls"
@@ -1523,7 +1526,9 @@ async fn late_verdicts_do_not_replace_newer_work() {
             .expect_request(VerifyRequest::CheckProposal(proposal(&full_template(2))))
             .await;
         assert_eq!(
-            *served_work(&cache).expect("the newer work stays served"),
+            served_work(&cache)
+                .expect("the newer work stays served")
+                .response,
             full_template(2),
             "a late verdict must not replace newer work"
         );
@@ -1679,8 +1684,9 @@ async fn later_builds_are_served_only_after_validation() {
         assert_eq!(
             cache
                 .template_for_tip(hash, &network, DateTime32::now())
-                .expect("the first build remains served during validation"),
-            first
+                .expect("the first build remains served during validation")
+                .response,
+            first.response
         );
         request.respond_error("rejected".into());
         assert!(
@@ -1692,8 +1698,9 @@ async fn later_builds_are_served_only_after_validation() {
         assert_eq!(
             cache
                 .template_for_tip(hash, &network, DateTime32::now())
-                .expect("the first build remains served after a rejection"),
-            first
+                .expect("the first build remains served after a rejection")
+                .response,
+            first.response
         );
 
         // The next rebuild is accepted and served unchanged.
@@ -1718,7 +1725,10 @@ async fn later_builds_are_served_only_after_validation() {
             }
             publications.changed().await;
         };
-        assert_eq!(validated, third, "the accepted build is served unchanged");
+        assert_eq!(
+            validated.response, third.response,
+            "the accepted build is served unchanged"
+        );
         updater.abort();
     })
     .await
