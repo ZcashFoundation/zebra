@@ -231,6 +231,9 @@ where
             Some(worker_handle);
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
     /// Queues an explicit flush after all requests already sent through this batch service.
     ///
     /// Returns `Ok(false)` if the bounded queue is full, or an error if its worker has stopped.
