@@ -221,7 +221,7 @@ fn bytes_body(bytes: Bytes) -> HttpBody {
 
 /// Returns true if `body` is a single JSON-RPC 2.0 call that `jsonrpsee` reads the same way
 /// before and after re-encoding: only known fields, no escapes, canonical positional params.
-fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
+pub(super) fn is_canonical_json_rpc_2_request(body: &[u8]) -> bool {
     // `jsonrpsee` only skips 128 bytes of leading whitespace, and re-encoding removes it.
     if body.first() != Some(&b'{') {
         return false;
