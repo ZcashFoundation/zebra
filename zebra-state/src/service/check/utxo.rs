@@ -221,6 +221,9 @@ pub fn transparent_coinbase_spend(
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
 /// Reject negative remaining transaction value.
 ///
 /// "As in Bitcoin, the remaining value in the transparent transaction value pool
