@@ -476,8 +476,9 @@ where
 /// Each response's proof of work is checked before it extends the span. Each
 /// request also carries the span's start, so a peer that doesn't have the
 /// span's last header answers from the start, and the span starts again from
-/// that answer. So one bogus response can't stop honest peers from completing
-/// the span.
+/// that answer once it is verified. So one bogus response can't stop honest
+/// peers from completing the span, and an invalid one can't erase its
+/// progress.
 async fn fetch_span<ZN>(
     peers: ZN,
     network: &Network,
@@ -510,55 +511,71 @@ where
             }
         };
 
-        match response.first() {
+        // Whether the response starts again from the span's start. Nothing is
+        // dropped until the response is verified, so an invalid response can't
+        // erase the span's progress.
+        let restart = match response.first() {
             None => continue,
-            Some(first) if first.previous_block_hash == last => {}
-            Some(first) if first.previous_block_hash == span.start.1 => {
-                // The peer doesn't have the span's last header, so one of the
-                // earlier responses is on another chain.
-                debug!(
-                    ?span,
-                    "a peer answered from the span's start, starting it again"
-                );
-                headers.clear();
-                last = span.start.1;
-            }
+            Some(first) if first.previous_block_hash == last => false,
+            // The peer doesn't have the span's last header, so either one of
+            // the earlier responses is on another chain, or this one is.
+            Some(first) if first.previous_block_hash == span.start.1 => true,
             Some(_) => {
                 // A peer that has neither hash answers from its genesis block,
                 // or from its own chain.
                 trace!(?span, "dropping headers that don't continue the span");
                 continue;
             }
-        }
+        };
+        let base_len = if restart { 0 } else { headers.len() };
 
-        if headers.len() + response.len() > span.len() {
+        if base_len + response.len() > span.len() {
             debug!(
                 ?span,
-                "headers ran past the span's checkpoint, starting it again"
+                "dropping headers that run past the span's checkpoint"
             );
             metrics::counter!("sync.headers.invalid.count").increment(1);
-            headers.clear();
-            last = span.start.1;
             continue;
         }
 
         // The span is shorter than the gap between two checkpoints, so this fits in a u32.
-        let first_height = Height(span.first_height().0 + headers.len() as u32);
-        if let Err(error) =
-            verify_headers(network, first_height, response.clone(), Utc::now()).await
+        let first_height = Height(span.first_height().0 + base_len as u32);
+        let hashes = match verify_headers(network, first_height, response.clone(), Utc::now()).await
         {
-            if error.is_misbehavior() {
-                metrics::counter!("sync.headers.invalid.count").increment(1);
+            Ok(hashes) => hashes,
+            Err(error) => {
+                if error.is_misbehavior() {
+                    metrics::counter!("sync.headers.invalid.count").increment(1);
+                }
+                debug!(
+                    ?error,
+                    ?span,
+                    "dropping invalid headers, asking another peer"
+                );
+                continue;
             }
+        };
+
+        if restart {
+            // Valid headers from the start that the span already has don't
+            // show that it is on another chain, so they keep its progress.
+            if hashes.len() <= headers.len()
+                && hashes
+                    .iter()
+                    .zip(&headers)
+                    .all(|(hash, header)| *hash == header.hash())
+            {
+                continue;
+            }
+
             debug!(
-                ?error,
                 ?span,
-                "dropping invalid headers, asking another peer"
+                "a peer answered from the span's start, starting it again"
             );
-            continue;
+            headers.clear();
         }
 
-        last = response.last().expect("the response is not empty").hash();
+        last = *hashes.last().expect("the response is not empty");
         headers.extend(response);
 
         if headers.len() == span.len() {

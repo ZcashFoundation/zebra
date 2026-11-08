@@ -468,3 +468,63 @@ async fn a_span_longer_than_the_request_budget_completes() {
         Some((Height(length), headers[length as usize].hash()))
     );
 }
+
+/// An invalid reply that links to a span's start, or a reply that runs past the
+/// span's checkpoint, doesn't erase the span's verified progress: invalid replies
+/// alternating with honest ones still let the span complete.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_invalid_reply_from_the_span_start_keeps_progress() {
+    let _init_guard = zebra_test::init();
+
+    let headers = chain(400, 0);
+    // The same chain, longer than the span, for replies that run past its checkpoint.
+    let longer = chain(1000, 0);
+    let network = regtest(&headers, &[0, 400]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let honest = honest_peers(headers.clone(), Arc::default(), Arc::default());
+
+    let peers = tower::util::BoxCloneService::new(service_fn(move |request: zn::Request| {
+        let calls = calls.clone();
+        let honest = honest.clone();
+        let headers = headers.clone();
+        let longer = longer.clone();
+        async move {
+            let call = calls.fetch_add(1, Ordering::SeqCst);
+            let zn::Request::FindHeaders { known_blocks, .. } = &request else {
+                panic!("headers-first sync only sends FindHeaders");
+            };
+            let reply = match call % 4 {
+                // A header that links to the span's start, but is too far in the future.
+                1 => {
+                    let mut header = *headers[1];
+                    header.time = chrono::Utc::now() + TimeDelta::hours(3);
+                    vec![Arc::new(header)]
+                }
+                // Headers that continue the span, but run past its checkpoint.
+                3 => {
+                    let start = longer
+                        .iter()
+                        .position(|header| header.hash() == known_blocks[0])
+                        .expect("the requester's last header is on the chain");
+                    longer[start + 1..].iter().take(401).cloned().collect()
+                }
+                _ => return honest.oneshot(request).await,
+            };
+            Ok(zn::Response::BlockHeaders(
+                reply
+                    .into_iter()
+                    .map(|header| CountedHeader { header })
+                    .collect(),
+            ))
+        }
+    }));
+
+    let mut state = state(&network).await;
+    let mut sync = HeaderSync::new(&network, peers, state.clone(), 1);
+
+    assert_eq!(sync.sync_once().await.expect("the span completes"), 400);
+    assert_eq!(
+        header_tip(&mut state).await.map(|tip| tip.0),
+        Some(Height(400))
+    );
+}
