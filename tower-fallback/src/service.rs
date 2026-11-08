@@ -75,6 +75,9 @@ impl<S1, S2: Clone, F: Clone> Fallback<S1, S2, F> {
         Self { svc1, svc2, policy }
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#417 (https://github.com/zakura-core/zakura/pull/417).
     /// Returns the primary service, for controls that do not submit a fallback request.
     pub fn primary(&self) -> &S1 {
         &self.svc1

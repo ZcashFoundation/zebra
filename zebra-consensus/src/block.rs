@@ -757,6 +757,10 @@ where
                         &known_utxos,
                         shielded_transactions,
                     ));
+                    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT
+                    // license or the Apache License, Version 2.0, at your option.
+                    // Adapted from zakura-core/zakura#417
+                    // (https://github.com/zakura-core/zakura/pull/417).
                 }
                 let rsp = transaction_verifier
                     .ready()

@@ -256,6 +256,10 @@ where
 
                         let request = match msg.request {
                             BatchControl::Item(request) => request,
+                            // Portions copyright (c) 2026 Zakura Contributors, licensed under the
+                            // MIT license or the Apache License, Version 2.0, at your option.
+                            // Adapted from zakura-core/zakura#417
+                            // (https://github.com/zakura-core/zakura/pull/417).
                             BatchControl::Flush => {
                                 // A zero-weight item still creates a pending batch.
                                 if self.pending_batch_timer.is_some() {
