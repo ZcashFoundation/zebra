@@ -3,6 +3,7 @@
 Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
+- [miner-poll](#miner-poll)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
@@ -95,6 +96,89 @@ Then use the commands above to regenerate the checkpoints.
   of the existing checkpoint file. If you started from genesis, replace the entire file.
 - Open a pull request with the updated Mainnet and Testnet lists at:
   <https://github.com/ZcashFoundation/zebra/pulls>
+
+## miner-poll
+
+This command encodes and checks Miner Ballots, and tallies Miner Polls, which gauge miners'
+sentiment on upcoming network upgrades as specified in the
+[draft ZIP "Miner Sentiment Polling"](https://github.com/zcash/zips/pull/1421). Miners cast
+ballots with Zebra's mining options, as described in
+[the Zebra book](https://zebra.zfnd.org/user/mining.html#miner-sentiment-polls).
+
+Install it with:
+
+```sh
+cargo install --locked --git https://github.com/ZcashFoundation/zebra zebra-utils --bin miner-poll
+```
+
+All subcommands take the Election Identifier and the questions from the Poll Definition: the
+number of options of each question, written `<options>:<max>` for a multiple-choice question
+that allows selecting up to `<max>` options. For an Election `nu8` whose five questions have 4,
+4, 4, 3, and 4 options:
+
+#### Encoding a ballot
+
+Miners give the option they select for each question, in order, or `-` to leave a question
+unanswered, and get the ballot to put in Zebra's mining configuration:
+
+```sh
+$ miner-poll encode --election nu8 --options 4,4,4,3,4 --answers 2,3,1,1,-
+zpoll:nu8:2311-
+```
+
+For a multiple-choice question, miners join the selected options with `+`. For an Election
+`devfund` whose first question has 6 options, of which up to 3 can be selected, and whose second
+has 3 options:
+
+```sh
+$ miner-poll encode --election devfund --options 6:3,3 --answers 1+3+5,2
+zpoll:devfund:(135)2
+```
+
+The command fails if the answers don't form a ballot that counts, for example if an option
+doesn't exist for its question.
+
+#### Checking a ballot
+
+Miners can check that configured data counts and see the answers it selects:
+
+```sh
+$ miner-poll check --election nu8 --options 4,4,4,3,4 'zpoll:nu8:2311-'
+{
+  "election": "nu8",
+  "answers": [2, 3, 1, 1, null]
+}
+```
+
+`null` marks an unanswered question, and the answer to a multiple-choice question is the list of
+its selected options. The data is searched like the coinbase data or a memo, so it can include
+other text, such as a pool tag. The command fails if it contains no ballot that counts for the
+Election.
+
+#### Tallying a poll
+
+`miner-poll tally` reads the blocks of the Voting Period from a synced `zebrad`, and prints the
+results specified in the ZIP as JSON:
+
+```sh
+miner-poll tally --election nu8 --options 4,4,4,3,4 \
+  --network mainnet --start 3600000 --end 3669120 --threshold 25
+```
+
+- Percentages are relative to all blocks in the Voting Period; blocks without a ballot count as
+  not answering.
+- Each question is `representative` if the blocks answering it reach the Participation Threshold.
+- Until the block at the Voting End Height has 100 confirmations, the results count only the
+  blocks mined so far, and `final` is `false`. Miners can use this to confirm that their blocks
+  count, for example by tallying a range that contains only their block.
+- The results include the hash of the block at the Voting End Height, so anyone can check that
+  an independent tally covers the same chain.
+
+The node must be [listening for RPC requests](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html#structfield.listen_addr)
+on `--addr` (default `127.0.0.1:8232`). If the node uses cookie authentication and `--addr` is a
+loopback address, `miner-poll` reads the cookie from Zebra's default cache directory; use
+`--cookie-dir` if the node's `rpc.cookie_dir` differs. For a node on another machine, the cookie
+is sent only if `--cookie-dir` is given, in plain HTTP, so only use it over a trusted network.
 
 ## zebrad-hash-lookup
 
