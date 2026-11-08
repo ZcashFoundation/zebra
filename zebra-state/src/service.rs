@@ -1023,6 +1023,9 @@ impl StateService {
         rsp_rx
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     fn send_precious_block(
         &self,
         hash: block::Hash,
@@ -1449,6 +1452,7 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
             // The expected error type for this request is `PreciousError`.
             Request::PreciousBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {

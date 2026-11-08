@@ -165,6 +165,9 @@ pub enum NonFinalizedWriteMessage {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     /// The hash of a block to prefer over equal-work chain tips.
     Precious {
         hash: block::Hash,
@@ -381,6 +384,8 @@ impl WriteBlockWorkerTask {
                         .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
                 }
+                // Adapted from zakura-core/zakura#1117
+                // (https://github.com/zakura-core/zakura/pull/1117).
                 NonFinalizedWriteMessage::Precious { hash, rsp_tx } => {
                     tracing::info!(?hash, "preferring a block in the non-finalized state");
                     let result = non_finalized_state.precious_block(hash, &finalized_state.db);

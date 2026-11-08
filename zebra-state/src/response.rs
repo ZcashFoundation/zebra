@@ -50,6 +50,9 @@ pub enum Response {
     /// of block hashes that were reconsidered in the state and successfully re-committed.
     Reconsidered(Vec<block::Hash>),
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     /// Response to [`Request::PreciousBlock`] with the hash whose preference was processed.
     /// Finalized blocks and known non-tip blocks succeed without changing the state.
     Precious(block::Hash),

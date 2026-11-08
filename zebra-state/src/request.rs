@@ -1135,6 +1135,9 @@ pub enum Request {
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     /// Prefers the given block over equal-work chain tips in the non-finalized state.
     ///
     /// Finalized blocks, known non-tip blocks, and lower-work tips succeed without changing state.

@@ -298,6 +298,9 @@ pub enum ReconsiderError {
     ReplayFailed(#[source] ValidateContextError),
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
 /// An error describing why a `PreciousBlock` request failed.
 #[derive(Debug, Error)]
 #[non_exhaustive]

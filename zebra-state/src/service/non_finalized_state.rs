@@ -420,6 +420,9 @@ impl NonFinalizedState {
         Ok(())
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
     /// Prefer this tip over other equal-work tips until it is extended or forked.
     ///
     /// Known non-tip blocks, tips with less work than the best chain, and repeats of the latest
