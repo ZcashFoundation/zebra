@@ -94,6 +94,9 @@ impl From<&MetaAddr> for PeerPriority {
 /// - the canonical address of any connection.
 #[derive(Debug)]
 pub struct AddressBook {
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
     /// Peer listener metadata, stored once and keyed by canonical outbound address.
     ///
     /// Some peers in this map might have open outbound or inbound connections.
@@ -195,6 +198,7 @@ impl AddressBook {
         // Avoid initiating outbound handshakes when max_connections_per_ip is 1.
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
+            // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
             by_addr: HashMap::new(),
             by_priority: BTreeSet::new(),
             by_group: HashMap::new(),
@@ -212,6 +216,7 @@ impl AddressBook {
         new_book
     }
 
+    // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
     fn insert_meta_addr(&mut self, mut meta_addr: MetaAddr) -> Option<MetaAddr> {
         meta_addr.addr = canonical_peer_addr(meta_addr.addr);
         let addr = meta_addr.addr;
@@ -238,6 +243,7 @@ impl AddressBook {
         previous
     }
 
+    // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
     /// Remove a peer from all three indexes without updating metrics or the response cache.
     #[allow(clippy::unwrap_in_result)]
     fn remove_meta_addr(&mut self, addr: PeerSocketAddr) -> Option<MetaAddr> {
@@ -258,6 +264,7 @@ impl AddressBook {
         Some(removed)
     }
 
+    // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
     fn ordered_peers(&self) -> impl DoubleEndedIterator<Item = &MetaAddr> {
         self.by_priority.iter().map(|priority| {
             self.by_addr
@@ -580,6 +587,8 @@ impl AddressBook {
                     most_recent_by_ip.remove(&group);
                 }
 
+                // Adapted from zakura-core/zakura#431
+                // (https://github.com/zakura-core/zakura/pull/431).
                 // Remove every address in the banned group, not just the one
                 // that crossed the threshold: the rest of an IPv6 `/64` belongs
                 // to the same peer.
@@ -648,6 +657,7 @@ impl AddressBook {
                 "updated address book entry",
             );
 
+            // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
             // Security: Limit the number of peers in the address book.
             //
             // We only delete outdated peers when we have too many peers.
@@ -709,6 +719,7 @@ impl AddressBook {
             recent_peers = self.recently_live_peers(chrono_now).len(),
         );
 
+        // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
         if let Some(entry) = self.remove_meta_addr(removed_addr) {
             // Check if this surplus peer's addr matches that in `most_recent_by_ip`
             // for this the surplus peer's ip to remove it there as well.
@@ -1042,6 +1053,7 @@ impl Clone for AddressBook {
             watch::channel(*self.address_metrics_tx.borrow());
 
         AddressBook {
+            // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
             by_addr: self.by_addr.clone(),
             by_priority: self.by_priority.clone(),
             by_group: self.by_group.clone(),

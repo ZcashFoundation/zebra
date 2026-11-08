@@ -48,6 +48,9 @@ proptest! {
             Span::none(),
             addresses
         );
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
         assert_address_book_invariants(&address_book);
 
         // Only recently reachable are sanitized
@@ -88,6 +91,7 @@ proptest! {
             Span::none(),
             addresses
         );
+        // Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
         assert_address_book_invariants(&address_book);
 
         for peer in address_book.reconnection_peers(instant_now, chrono_now) {
@@ -132,6 +136,8 @@ proptest! {
         for (_addr, changes) in addr_changes_lists.iter() {
             for change in changes {
                 address_book.update(change.clone());
+                // Adapted from zakura-core/zakura#431
+                // (https://github.com/zakura-core/zakura/pull/431).
                 assert_address_book_invariants(&address_book);
 
                 prop_assert!(
@@ -157,6 +163,8 @@ proptest! {
             for (_addr, changes) in addr_changes_lists.iter() {
                 if let Some(change) = changes.get(index) {
                     address_book.update(change.clone());
+                    // Adapted from zakura-core/zakura#431
+                    // (https://github.com/zakura-core/zakura/pull/431).
                     assert_address_book_invariants(&address_book);
 
                     prop_assert!(

@@ -55,6 +55,9 @@ fn gossiped_change(
         .expect("gossiped MetaAddr should produce a NewGossiped change")
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
 pub(super) fn assert_address_book_invariants(address_book: &AddressBook) {
     assert_eq!(address_book.by_addr.len(), address_book.by_priority.len());
     assert_eq!(
@@ -90,6 +93,7 @@ pub(super) fn assert_address_book_invariants(address_book: &AddressBook) {
     }
 }
 
+// Adapted from zakura-core/zakura#431 (https://github.com/zakura-core/zakura/pull/431).
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
 ///
 /// Applying a ban-threshold misbehavior update with
