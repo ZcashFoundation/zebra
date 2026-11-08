@@ -283,6 +283,8 @@ impl HashSer for Node {
     }
 }
 
+impl crate::parallel::batch_frontier::TreeHash for Node {}
+
 impl Hashable for Node {
     fn empty_leaf() -> Self {
         Self(NoteCommitmentTree::uncommitted())
