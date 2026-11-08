@@ -1,0 +1,27 @@
+[package]
+name = "zebra-tui"
+version = "0.1.0"
+authors.workspace = true
+description = "Terminal dashboard for a running zebrad node, using its JSON-RPC interface"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+publish = false
+
+[[bin]]
+name = "zebra-tui"
+path = "src/main.rs"
+
+[dependencies]
+base64 = { workspace = true }
+chrono = { workspace = true, features = ["alloc"] }
+clap = { workspace = true, features = ["derive"] }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ureq = { version = "3.3", default-features = false, features = ["json"] }
