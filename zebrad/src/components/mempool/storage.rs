@@ -511,6 +511,9 @@ impl Storage {
         result
     }
 
+    // Copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
     /// Remove transactions from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
@@ -563,6 +566,7 @@ impl Storage {
         mined_ids: &HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
     ) -> RemovedTransactionIds {
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         let removed_mined = self.verified.remove_all(mined_ids.iter().copied());
 
         let spent_outpoints: HashSet<_> = transactions
@@ -610,6 +614,7 @@ impl Storage {
             })
             .collect();
 
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         let removed_duplicate_spend = self
             .verified
             .remove_all(duplicate_spend_ids.iter().map(UnminedTxId::mined_id));
@@ -930,6 +935,7 @@ impl Storage {
             return unmined_tx_ids;
         }
 
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         // expiry height is effecting data, so we match by non-malleable TXID
         self.verified.remove_all(tx_ids.iter().copied());
 
