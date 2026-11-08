@@ -7,7 +7,10 @@
 
 use std::{
     collections::VecDeque,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc, Arc,
+    },
     thread,
     time::Instant,
 };
@@ -27,6 +30,8 @@ pub(crate) type TreesResult = Result<NoteCommitmentTrees, NoteCommitmentTreeErro
 
 struct Job {
     block: Arc<Block>,
+    /// The [`TreesAhead::discard`] count when this job was sent; older jobs are skipped.
+    generation: u64,
     /// The parent's trees, or `None` to continue from the previous job's result.
     base: Option<NoteCommitmentTrees>,
     /// Receives `None` if there were no trees to continue from.
@@ -56,9 +61,18 @@ impl PendingTrees {
     }
 }
 
+/// The worker thread, started when the first trees are computed ahead.
+enum Worker {
+    NotStarted,
+    Running(mpsc::Sender<Job>),
+    Stopped,
+}
+
 /// Queued checkpoint blocks, with tree updates running ahead on a worker thread.
 pub(crate) struct TreesAhead {
-    jobs: Option<mpsc::Sender<Job>>,
+    worker: Worker,
+    /// Incremented by [`Self::discard`], so the worker skips jobs sent before it.
+    generation: Arc<AtomicU64>,
     pending: VecDeque<PendingBlock>,
     /// The hash of the last block sent to the worker, if the next pending block can continue
     /// from its trees.
@@ -66,20 +80,12 @@ pub(crate) struct TreesAhead {
 }
 
 impl TreesAhead {
-    /// Starts the worker thread, which exits when this queue is dropped.
-    ///
-    /// No trees are computed ahead until [`Self::resume_from`] gives the worker trees to start from.
+    /// Creates an empty queue. The worker thread starts the first time [`Self::resume_from`]
+    /// gives it trees to start from, and exits when this queue is dropped.
     pub(crate) fn new() -> Self {
-        let (sender, receiver) = mpsc::channel::<Job>();
-        let span = tracing::Span::current();
-        let jobs = thread::Builder::new()
-            .name("checkpoint-trees".to_string())
-            .spawn(move || span.in_scope(|| run_worker(receiver)))
-            .ok()
-            .map(|_handle| sender);
-
         Self {
-            jobs,
+            worker: Worker::NotStarted,
+            generation: Arc::new(AtomicU64::new(0)),
             pending: VecDeque::new(),
             last_submitted: None,
         }
@@ -119,7 +125,7 @@ impl TreesAhead {
     /// calls this after its commits, so trees are computed ahead again after a block whose trees
     /// weren't, such as the first block or a block after a failed commit.
     pub(crate) fn resume_from(&mut self, tip_hash: block::Hash, tip_trees: &NoteCommitmentTrees) {
-        if self.jobs.is_none() || self.last_submitted.is_some() {
+        if matches!(self.worker, Worker::Stopped) || self.last_submitted.is_some() {
             return;
         }
 
@@ -151,6 +157,28 @@ impl TreesAhead {
             pending.trees = None;
         }
         self.last_submitted = None;
+        self.generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Returns the worker's job sender, starting the worker if this is its first job.
+    fn jobs(&mut self) -> Option<&mpsc::Sender<Job>> {
+        if matches!(self.worker, Worker::NotStarted) {
+            let (sender, receiver) = mpsc::channel::<Job>();
+            let span = tracing::Span::current();
+            let generation = self.generation.clone();
+            self.worker = match thread::Builder::new()
+                .name("checkpoint-trees".to_string())
+                .spawn(move || span.in_scope(|| run_worker(receiver, generation)))
+            {
+                Ok(_handle) => Worker::Running(sender),
+                Err(_) => Worker::Stopped,
+            };
+        }
+
+        match &self.worker {
+            Worker::Running(sender) => Some(sender),
+            _ => None,
+        }
     }
 
     fn submit_block(
@@ -159,11 +187,18 @@ impl TreesAhead {
         hash: block::Hash,
         base: Option<NoteCommitmentTrees>,
     ) -> Option<mpsc::Receiver<Option<TreesResult>>> {
-        let jobs = self.jobs.as_ref()?;
+        let generation = self.generation.load(Ordering::Relaxed);
+        let jobs = self.jobs()?;
         let (reply, receiver) = mpsc::sync_channel(1);
-        if jobs.send(Job { block, base, reply }).is_err() {
+        let job = Job {
+            block,
+            generation,
+            base,
+            reply,
+        };
+        if jobs.send(job).is_err() {
             // The worker stopped, so the writer computes every block's trees itself.
-            self.jobs = None;
+            self.worker = Worker::Stopped;
             self.last_submitted = None;
             return None;
         }
@@ -172,17 +207,43 @@ impl TreesAhead {
     }
 }
 
-fn run_worker(jobs: mpsc::Receiver<Job>) {
+fn run_worker(jobs: mpsc::Receiver<Job>, current_generation: Arc<AtomicU64>) {
     let mut trees: Option<NoteCommitmentTrees> = None;
 
-    while let Ok(Job { block, base, reply }) = jobs.recv() {
+    // Block parsing runs on the global rayon pool, and tree tasks queued behind it wait for whole
+    // blocks to parse, so tree updates get their own pool.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(rayon::current_num_threads())
+        .thread_name(|index| format!("trees-rayon-{index}"))
+        .build()
+        .ok();
+
+    while let Ok(Job {
+        block,
+        generation,
+        base,
+        reply,
+    }) = jobs.recv()
+    {
+        // The writer discarded this job's chain after a failed commit.
+        if generation != current_generation.load(Ordering::Relaxed) {
+            trees = None;
+            let _ = reply.send(None);
+            continue;
+        }
+
         if base.is_some() {
             trees = base;
         }
 
         let result = trees.as_ref().cloned().map(|mut next| {
             let start = Instant::now();
-            let result = next.update_trees_parallel(&block).map(|()| next);
+            let mut update = || next.update_trees_parallel(&block);
+            let result = match &pool {
+                Some(pool) => pool.install(update),
+                None => update(),
+            }
+            .map(|()| next);
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",
                 "phase" => "checkpoint_trees_ahead"

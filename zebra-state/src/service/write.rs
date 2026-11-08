@@ -439,6 +439,9 @@ impl WriteBlockWorkerTask {
             let _ = rsp_tx.send(result);
         }
 
+        // Stops the trees worker, which non-finalized commits don't use.
+        drop(trees_ahead);
+
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.
         if invalid_block_reset_sender.is_closed() {
