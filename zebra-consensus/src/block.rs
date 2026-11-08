@@ -21,6 +21,7 @@ use std::{
 use chrono::Utc;
 use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
+use rayon::prelude::*;
 use thiserror::Error;
 use tokio::sync::{watch, Semaphore};
 use tokio_util::task::AbortOnDropHandle;
@@ -865,6 +866,18 @@ where
                     transaction_hash_computations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
+                    // Warm immutable auth-digest caches here rather than serially during
+                    // transaction dispatch. Pre-V5 transactions have no digest.
+                    if inline {
+                        // Rayon can block its caller waiting for a saturated pool.
+                        for transaction in &block.transactions {
+                            let _ = transaction.auth_digest();
+                        }
+                    } else {
+                        block.transactions.par_iter().for_each(|transaction| {
+                            let _ = transaction.auth_digest();
+                        });
+                    }
                     Ok::<_, VerifyBlockError>(hashes)
                 };
                 Some(if inline {
