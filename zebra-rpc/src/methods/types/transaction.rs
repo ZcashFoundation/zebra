@@ -748,7 +748,7 @@ pub enum Input {
     /// A coinbase input.
     Coinbase {
         /// The coinbase scriptSig as hex.
-        #[serde(with = "hex")]
+        #[serde(with = "crate::methods::hex_data::bytes")]
         coinbase: Vec<u8>,
         /// The script sequence number.
         sequence: u32,
@@ -929,33 +929,33 @@ pub struct JoinSplit {
     #[serde(rename = "vpub_newZat")]
     new_public_value_zat: i64,
     /// Merkle root of the Sprout note commitment tree.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input notes.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     nullifiers: Vec<[u8; 32]>,
     /// The commitments of the output notes.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     commitments: Vec<[u8; 32]>,
     /// The onetime public key used to encrypt the ciphertexts
     #[serde(rename = "onetimePubKey")]
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     one_time_pubkey: [u8; 32],
     /// The random seed
     #[serde(rename = "randomSeed")]
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     random_seed: [u8; 32],
     /// The input notes MACs.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     macs: Vec<[u8; 32]>,
     /// A zero-knowledge proof using the Sprout circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     proof: Vec<u8>,
     /// The output notes ciphertexts.
-    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    #[serde_as(as = "Vec<crate::methods::hex_data::Hex>")]
     ciphertexts: Vec<Vec<u8>>,
 }
 
@@ -967,23 +967,23 @@ pub struct ShieldedSpend {
     #[getter(skip)]
     cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     nullifier: [u8; 32],
     /// The randomized public key for spendAuthSig.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     rk: [u8; 32],
     /// A zero-knowledge proof using the Sapling Spend circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     proof: [u8; 192],
     /// A signature authorizing this Spend.
-    #[serde(rename = "spendAuthSig", with = "hex")]
+    #[serde(rename = "spendAuthSig", with = "crate::methods::hex_data::bytes")]
     #[getter(copy)]
     spend_auth_sig: [u8; 64],
 }
@@ -1004,19 +1004,19 @@ pub struct ShieldedOutput {
     #[getter(skip)]
     cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmu", with = "hex")]
+    #[serde(rename = "cmu", with = "crate::methods::hex_data::bytes")]
     cm_u: [u8; 32],
     /// A Jubjub public key.
-    #[serde(rename = "ephemeralKey", with = "hex")]
+    #[serde(rename = "ephemeralKey", with = "crate::methods::hex_data::bytes")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "outCiphertext", with = "hex")]
+    #[serde(rename = "outCiphertext", with = "crate::methods::hex_data::bytes")]
     out_ciphertext: [u8; 80],
     /// A zero-knowledge proof using the Sapling Output circuit.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     proof: [u8; 192],
 }
 
@@ -1044,18 +1044,18 @@ pub struct Orchard {
     #[serde(skip_serializing_if = "Option::is_none")]
     flags: Option<OrchardFlags>,
     /// A root of the Orchard note commitment tree at some block height in the past
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     anchor: Option<[u8; 32]>,
     /// Encoding of aggregated zk-SNARK proofs for Orchard Actions
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     proof: Option<Vec<u8>>,
     /// An Orchard binding signature on the SIGHASH transaction hash
     #[serde(rename = "bindingSig")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde_as(as = "Option<crate::methods::hex_data::Hex>")]
     #[getter(copy)]
     binding_sig: Option<[u8; 64]>,
 }
@@ -1076,28 +1076,28 @@ pub struct OrchardFlags {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     cv: [u8; 32],
     /// The nullifier of the input note.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     nullifier: [u8; 32],
     /// The randomized validating key for spendAuthSig.
-    #[serde(with = "hex")]
+    #[serde(with = "crate::methods::hex_data::bytes")]
     rk: [u8; 32],
     /// The x-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmx", with = "hex")]
+    #[serde(rename = "cmx", with = "crate::methods::hex_data::bytes")]
     cm_x: [u8; 32],
     /// An encoding of an ephemeral Pallas public key.
-    #[serde(rename = "ephemeralKey", with = "hex")]
+    #[serde(rename = "ephemeralKey", with = "crate::methods::hex_data::bytes")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
     #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "spendAuthSig", with = "hex")]
+    #[serde(rename = "spendAuthSig", with = "crate::methods::hex_data::bytes")]
     spend_auth_sig: [u8; 64],
     /// A signature authorizing the spend in this Action.
-    #[serde(rename = "outCiphertext", with = "hex")]
+    #[serde(rename = "outCiphertext", with = "crate::methods::hex_data::bytes")]
     out_ciphertext: [u8; 80],
 }
 

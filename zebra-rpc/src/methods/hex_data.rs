@@ -97,6 +97,49 @@ where
     deserializer.deserialize_str(HexVisitor(PhantomData))
 }
 
+/// `#[serde(with = ...)]` helpers for byte fields in RPC responses: lookup-table encoding,
+/// and the `hex` crate's decoding so accepted input is unchanged.
+pub(crate) mod bytes {
+    use serde::{Deserializer, Serializer};
+
+    /// Serialize bytes as a lowercase hex string.
+    pub(crate) fn serialize<S: Serializer, T: AsRef<[u8]>>(
+        data: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&super::encode(data.as_ref()))
+    }
+
+    /// Deserialize a hex string, as `hex::deserialize` does.
+    pub(crate) fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: hex::FromHex,
+        <T as hex::FromHex>::Error: std::fmt::Display,
+    {
+        hex::deserialize(deserializer)
+    }
+}
+
+/// `serde_with` adapter for byte fields in RPC responses: lookup-table encoding, and
+/// `serde_with::hex::Hex` decoding so accepted input is unchanged.
+pub(crate) struct Hex;
+
+impl<T: AsRef<[u8]>> serde_with::SerializeAs<T> for Hex {
+    fn serialize_as<S: Serializer>(source: &T, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&encode(source.as_ref()))
+    }
+}
+
+impl<'de, T> serde_with::DeserializeAs<'de, T> for Hex
+where
+    serde_with::hex::Hex: serde_with::DeserializeAs<'de, T>,
+{
+    fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<T, D::Error> {
+        <serde_with::hex::Hex as serde_with::DeserializeAs<'de, T>>::deserialize_as(deserializer)
+    }
+}
+
 /// Deserialize hex-encoded strings to bytes.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
