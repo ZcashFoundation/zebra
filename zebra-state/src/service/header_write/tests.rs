@@ -555,3 +555,81 @@ async fn state_service_commits_and_reads_headers() {
     };
     assert_eq!(locator.first(), Some(&tip_of(&chain, 3)));
 }
+
+/// Above the last checkpoint, the stored header chain runs at most
+/// `MAX_HEADER_LOOKAHEAD` past the finalized tip's reorg window, so every fork
+/// competes with fewer stored headers than one batch can hold.
+#[test]
+fn stored_headers_stop_at_the_lookahead_limit() {
+    let _init_guard = zebra_test::init();
+
+    let network = regtest();
+    let (state, genesis) = genesis_state(&network);
+    let limit = MAX_BLOCK_REORG_HEIGHT + super::MAX_HEADER_LOOKAHEAD;
+    let batch = u32::try_from(super::MAX_COMMIT_HEADERS).expect("the batch limit fits in a u32");
+
+    let chain = headers_above(&genesis.header, Height(0), batch + 1, 0);
+    let _ = commit_headers(
+        &state.db,
+        &network,
+        chain[..super::MAX_COMMIT_HEADERS].to_vec(),
+    );
+    let _ = commit_headers(
+        &state.db,
+        &network,
+        chain[super::MAX_COMMIT_HEADERS..].to_vec(),
+    );
+    assert_eq!(
+        state.db.header_chain_tip(),
+        Some(tip_of(&chain[..limit as usize], limit)),
+        "a batch that crosses the limit stores the headers below it"
+    );
+
+    // A fork from genesis that also crosses the limit only ties the stored
+    // headers up to it, so the stored chain stays.
+    let fork = headers_above(&genesis.header, Height(0), batch, 1);
+    assert_eq!(
+        commit_headers(&state.db, &network, fork),
+        Err(CommitHeadersError::LessWork {
+            fork_parent: Height(0)
+        })
+    );
+
+    // Headers above the limit are not stored until the limit moves up.
+    let above = headers_above(&chain[limit as usize - 1], Height(limit), 1, 0);
+    let error =
+        commit_headers(&state.db, &network, above).expect_err("the header is above the limit");
+    assert_eq!(
+        error,
+        CommitHeadersError::AboveLookahead {
+            height: Height(limit + 1),
+            limit: Height(limit),
+        }
+    );
+    assert!(!error.is_misbehavior());
+}
+
+/// A fork that crosses the lookahead limit replaces a shorter stored chain,
+/// and stores only its headers up to the limit.
+#[test]
+fn a_fork_across_the_lookahead_limit_replaces_a_shorter_chain() {
+    let _init_guard = zebra_test::init();
+
+    let network = regtest();
+    let (state, genesis) = genesis_state(&network);
+    let limit = MAX_BLOCK_REORG_HEIGHT + super::MAX_HEADER_LOOKAHEAD;
+    let batch = u32::try_from(super::MAX_COMMIT_HEADERS).expect("the batch limit fits in a u32");
+
+    let stored = headers_above(&genesis.header, Height(0), 1000, 0);
+    commit_headers(&state.db, &network, stored).expect("the chain is valid");
+
+    let fork = headers_above(&genesis.header, Height(0), batch, 1);
+    assert_eq!(
+        commit_headers(&state.db, &network, fork.clone()),
+        Ok(HeadersCommitted {
+            tip: tip_of(&fork[..limit as usize], limit),
+            added: limit as usize,
+            reorged: true,
+        })
+    );
+}

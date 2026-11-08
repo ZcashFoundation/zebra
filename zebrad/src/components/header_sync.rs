@@ -22,7 +22,9 @@
 //! # Above the last checkpoint
 //!
 //! The header chain is extended one response at a time from a locator over the
-//! header chain, until a peer returns no new headers. Then the task polls
+//! header chain, until a peer returns no new headers, or the header chain
+//! reaches the state's lookahead limit, [`zs::MAX_HEADER_LOOKAHEAD`] above the
+//! final checkpoint or the finalized tip's reorg window. Then the task polls
 //! again on a timer. A response that doesn't connect to the locator is dropped
 //! without a penalty: an honest peer on another chain sends those.
 //!
@@ -343,6 +345,13 @@ where
                 Some(zs::CommitHeadersError::LessWork { fork_parent }) => {
                     let fork_parent = *fork_parent;
                     self.extend_fork(fork_parent, first_height, headers).await
+                }
+                Some(zs::CommitHeadersError::AboveLookahead { limit, .. }) => {
+                    debug!(
+                        ?limit,
+                        "the header chain is at its lookahead limit, waiting for the block chain"
+                    );
+                    Ok(0)
                 }
                 Some(commit_error) if !commit_error.is_misbehavior() => {
                     debug!(?commit_error, "headers are not on the best header chain");

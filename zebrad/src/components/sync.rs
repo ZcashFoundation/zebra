@@ -302,6 +302,11 @@ pub struct Config {
     /// peers with `get-headers`, so it works with either kind of peer. On by
     /// default.
     ///
+    /// Above the final checkpoint, the header chain runs at most
+    /// [`zebra_state::MAX_HEADER_LOOKAHEAD`] headers above the higher of the
+    /// final checkpoint and `MAX_BLOCK_REORG_HEIGHT` blocks above the
+    /// finalized tip.
+    ///
     /// With `false`, the syncer finds new blocks with `getblocks`, which only
     /// legacy peers answer, so it needs legacy peers: with only version 2 peers
     /// it stops following the chain.

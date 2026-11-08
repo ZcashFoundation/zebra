@@ -19,6 +19,11 @@
 //!    chosen by work alone, however deep they are below the header tip, but
 //!    never below the finalized tip or the last checkpoint.
 //!
+//! The writer stores no header above the lookahead limit, see
+//! [`MAX_HEADER_LOOKAHEAD`]. So every fork it can accept competes with fewer
+//! stored headers than one batch holds, and the work of both is compared over
+//! the same heights.
+//!
 //! The header chain only chooses which bodies to download. The block chain is
 //! still chosen by the block writer, from validated blocks.
 
@@ -34,6 +39,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
         check::{check_header_context, difficulty::MAX_POW_ADJUSTMENT_BLOCK_SPAN},
         finalized_state::{DiskWriteBatch, ZebraDb},
@@ -47,6 +53,23 @@ mod tests;
 /// The most headers one [`Request::CommitHeaders`](crate::Request::CommitHeaders)
 /// can hold: more than one checkpoint span on Mainnet.
 pub const MAX_COMMIT_HEADERS: usize = 2_000;
+
+/// How many headers the header writer stores above the highest of the last
+/// checkpoint and the finalized tip's reorg window, `MAX_BLOCK_REORG_HEIGHT`
+/// above the finalized tip.
+///
+/// Every fork the writer accepts forks at or above the finalized tip, and at
+/// or above the last checkpoint, so it competes with at most
+/// `MAX_BLOCK_REORG_HEIGHT + MAX_HEADER_LOOKAHEAD` stored headers, fewer than
+/// one batch of [`MAX_COMMIT_HEADERS`]. The block chain is at most
+/// `MAX_BLOCK_REORG_HEIGHT` above the finalized tip, so its bodies can always
+/// be downloaded at least this many headers further, and the finalized tip,
+/// and the limit with it, keep moving up.
+pub const MAX_HEADER_LOOKAHEAD: u32 = 500;
+
+// A fork can always send more headers than the stored headers it competes with.
+// `MAX_COMMIT_HEADERS` is a small constant, so the cast is exact.
+const _: () = assert!(MAX_BLOCK_REORG_HEIGHT + MAX_HEADER_LOOKAHEAD < MAX_COMMIT_HEADERS as u32);
 
 /// How often the header writer deletes stale rows while it has no batch to
 /// commit, so they don't pile up while the block writer commits bodies.
@@ -116,6 +139,9 @@ pub enum CommitHeadersError {
     #[error("the fork at {fork_parent:?} doesn't have more work than the header chain")]
     LessWork { fork_parent: Height },
 
+    #[error("header {height:?} is above the header lookahead limit {limit:?}")]
+    AboveLookahead { height: Height, limit: Height },
+
     #[error("the header writer has stopped: is Zebra shutting down?")]
     WriterStopped,
 }
@@ -123,8 +149,9 @@ pub enum CommitHeadersError {
 impl CommitHeadersError {
     /// Whether the peer that sent the batch misbehaved.
     ///
-    /// A batch that doesn't connect, or a valid fork with less work, can come
-    /// from an honest peer on another chain. Invalid headers can't.
+    /// A batch that doesn't connect, a valid fork with less work, or headers
+    /// above the lookahead limit can come from an honest peer. Invalid headers
+    /// can't.
     pub fn is_misbehavior(&self) -> bool {
         matches!(
             self,
@@ -270,7 +297,21 @@ pub(crate) fn drop_headers_off_the_checkpoints(db: &ZebraDb, network: &Network) 
     }
 }
 
-/// Checks `headers` and stores them on the header chain of `db`.
+/// The highest height the header writer stores a header at in `db`: see
+/// [`MAX_HEADER_LOOKAHEAD`].
+pub(crate) fn header_lookahead_limit(db: &ZebraDb, network: &Network) -> Height {
+    let reorg_window = db
+        .finalized_tip_height()
+        .unwrap_or(Height(0))
+        .0
+        .saturating_add(MAX_BLOCK_REORG_HEIGHT);
+    let base = reorg_window.max(network.checkpoint_list().max_height().0);
+
+    Height(base.saturating_add(MAX_HEADER_LOOKAHEAD).min(Height::MAX.0))
+}
+
+/// Checks `headers` and stores them on the header chain of `db`, up to the
+/// [lookahead limit](MAX_HEADER_LOOKAHEAD).
 ///
 /// See the [module docs](self) for the steps.
 ///
@@ -336,7 +377,6 @@ pub(crate) fn commit_headers(
         Some(last_known) => height_at(parent_height, last_known)?,
     };
     let first_height = height_at(fork_parent, 0)?;
-    let last_height = height_at(fork_parent, new_headers.len() - 1)?;
 
     if let Some(finalized_tip) = db.finalized_tip_height() {
         if fork_parent < finalized_tip {
@@ -359,6 +399,21 @@ pub(crate) fn commit_headers(
             checkpoint: last_checkpoint,
         });
     }
+
+    // Store, check and compare only the headers up to the lookahead limit, so a
+    // batch that crosses it still stores the headers below it.
+    let limit = header_lookahead_limit(db, network);
+    // Heights fit in a usize.
+    let below_limit = limit.0.saturating_sub(fork_parent.0) as usize;
+    if below_limit == 0 {
+        return Err(CommitHeadersError::AboveLookahead {
+            height: first_height,
+            limit,
+        });
+    }
+    let new_headers = &new_headers[..new_headers.len().min(below_limit)];
+    let new_hashes = &new_hashes[..new_headers.len()];
+    let last_height = height_at(fork_parent, new_headers.len() - 1)?;
 
     for (offset, hash) in new_hashes.iter().enumerate() {
         let height = height_at(fork_parent, offset)?;
@@ -383,15 +438,21 @@ pub(crate) fn commit_headers(
         // tip: the header tip can be far ahead of the block chain, and a peer
         // could otherwise store a long low-work chain first and keep the
         // honest chain out. Forks below the finalized tip or the last
-        // checkpoint were rejected above.
+        // checkpoint were rejected above, so the stored headers above the fork
+        // point fit in one batch.
+        //
+        // The fork and the stored headers are compared up to the lookahead
+        // limit, the same heights, so two chains that both cross it can't
+        // replace each other in turn. The stored chain wins ties.
         let new_work: u128 = new_headers
             .iter()
             .map(|header| header_work(header))
             .fold(0, u128::saturating_add);
 
         // Stop reading stored headers once they have at least the fork's work.
+        // Older Zebra versions could store headers above the limit.
         let mut stored_work: u128 = 0;
-        for height in first_height.0..=tip.0 .0 {
+        for height in first_height.0..=tip.0 .0.min(limit.0) {
             if let Some(header) = db.any_header(Height(height)) {
                 stored_work = stored_work.saturating_add(header_work(&header));
             }
