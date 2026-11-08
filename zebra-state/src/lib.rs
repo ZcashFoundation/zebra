@@ -63,7 +63,9 @@ pub use response::{
     MiningCandidateChanges, MiningCandidateGuard, NonFinalizedBlocksListener, OutputWithMetadata,
     ReadResponse, Response,
 };
-pub use service::header_write::{CommitHeadersError, HeadersCommitted, MAX_COMMIT_HEADERS};
+pub use service::header_write::{
+    CommitHeadersError, HeadersCommitted, MAX_COMMIT_HEADERS, MAX_HEADER_LOOKAHEAD,
+};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,

@@ -254,3 +254,70 @@ fn truncate_deletes_rows_and_reverse_index() {
         );
     }
 }
+
+/// If the block writer finalizes a different block just below stored headers,
+/// reading the header chain stops at the row that doesn't link to it, until the
+/// next stale-header collection drops those rows.
+#[test]
+fn header_chain_hashes_stop_at_a_disconnected_row() {
+    let _init_guard = zebra_test::init();
+
+    let blocks = test_blocks();
+    let mut state = empty_state();
+    for block in &blocks[..2] {
+        commit(&mut state, block);
+    }
+
+    // A fork from height 2, stored after the header writer checked the finalized tip.
+    let mut fork: Vec<Arc<block::Header>> = Vec::new();
+    for block in &blocks[2..6] {
+        let mut header = *block.header;
+        if let Some(previous) = fork.last() {
+            header.previous_block_hash = previous.hash();
+        } else {
+            header.time += chrono::Duration::seconds(1);
+        }
+        fork.push(Arc::new(header));
+    }
+    append(&state.db, Height(2), &fork);
+
+    // The block writer finalizes the real block 2.
+    commit(&mut state, &blocks[2]);
+
+    assert_eq!(
+        crate::service::read::header_chain_hashes(&state.db, &[blocks[2].hash()], 10),
+        Vec::<block::Hash>::new(),
+        "the stored rows don't link to the finalized block"
+    );
+
+    crate::service::header_write::collect_stale_headers(&state.db);
+    assert!(stored_rows(&state.db).is_empty());
+}
+
+/// Reading the header chain stops at a row that doesn't link to the one below
+/// it, so a read that races a header reorg returns one chain.
+#[test]
+fn header_chain_hashes_stop_at_a_link_break() {
+    let _init_guard = zebra_test::init();
+
+    let blocks = test_blocks();
+    let mut state = empty_state();
+    commit(&mut state, &blocks[0]);
+    let db = &state.db;
+    append(db, Height(1), &headers(&blocks[1..=3]));
+
+    assert_eq!(
+        crate::service::read::header_chain_hashes(db, &[blocks[1].hash()], 10),
+        vec![blocks[2].hash(), blocks[3].hash()],
+    );
+
+    // A torn read: height 3 now holds a header from another branch.
+    let mut fork = *blocks[3].header;
+    fork.previous_block_hash = block::Hash([0xff; 32]);
+    append(db, Height(3), &[Arc::new(fork)]);
+
+    assert_eq!(
+        crate::service::read::header_chain_hashes(db, &[blocks[1].hash()], 10),
+        vec![blocks[2].hash()],
+    );
+}

@@ -22,8 +22,13 @@
 //! [`DiskWriteBatch::prepare_header_chain_gc`]).
 //!
 //! The header chain tip is the last row above the finalized tip, or the
-//! finalized tip when there are none. Above the finalized tip the header chain is
-//! contiguous, and its lowest row links to the finalized tip.
+//! finalized tip when there are none. Above the finalized tip the header chain
+//! is contiguous, and its lowest row links to the finalized tip, once the header
+//! writer has collected stale rows: the block writer can finalize another
+//! block just below a header batch the header writer is writing. A read can
+//! also interleave with a header batch that replaces stored rows. So readers
+//! that walk the header chain check that each header links to the one below
+//! it.
 
 use std::sync::Arc;
 
