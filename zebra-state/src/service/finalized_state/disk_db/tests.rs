@@ -26,6 +26,9 @@ impl DiskDb {
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#854 (https://github.com/zakura-core/zakura/pull/854).
 #[test]
 fn read_only_reuse_rejects_an_interrupted_older_major_upgrade() {
     read_only_reuse_rejects_recorded_version(semver::Version::new(27, 0, 0));
