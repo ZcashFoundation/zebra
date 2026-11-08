@@ -115,10 +115,13 @@ merged to the [`next` branch](next-branch.md):
    train, two weeks later.
 
 The [`Next stable release` milestone](https://github.com/ZcashFoundation/zebra/milestones)
-lists the release task and anything that would stop the cut, and nothing
-else. It is renamed to the version on release Monday, and a new one opens
-with the next date. Changes to the state database format are always listed
-there, because operators cannot roll back from them without a resync.
+holds the release task issue, created from the release issue template on or
+before the cut, and the issues that block it. An issue is a release blocker
+when it is linked as **blocked by** on the release task issue; the milestone
+follows from those links and holds nothing else. The milestone is renamed to
+the version on release Monday, and a new one opens with the next date.
+Changes to the state database format always block the release, because
+operators cannot roll back from them without a resync.
 
 Cutting the release rotates between the maintainers, one train each. Alphas
 and betas are [published from `next`](next-branch.md#publish-a-pre-release)
