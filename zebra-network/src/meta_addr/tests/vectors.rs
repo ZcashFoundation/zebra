@@ -99,6 +99,10 @@ fn new_local_listener_is_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura:
+    // https://github.com/zakura-core/zakura/commit/d397cf9d490df6afaffaffbc23f6eacf74eea54b
     let peer = MetaAddr::new_local_listener_change(address, PeerServices::NODE_NETWORK)
         .into_new_meta_addr(instant_now, local_now);
 

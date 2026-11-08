@@ -275,6 +275,10 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura:
+        // https://github.com/zakura-core/zakura/commit/d397cf9d490df6afaffaffbc23f6eacf74eea54b
         services: PeerServices,
     },
 
@@ -453,6 +457,8 @@ impl MetaAddr {
         }
     }
 
+    // Adapted from zakura-core/zakura:
+    // https://github.com/zakura-core/zakura/commit/d397cf9d490df6afaffaffbc23f6eacf74eea54b
     /// Returns a [`MetaAddrChange::NewLocal`] for our listener address and advertised services.
     pub fn new_local_listener_change(
         addr: impl Into<PeerSocketAddr>,
@@ -842,6 +848,8 @@ impl MetaAddrChange {
             NewGossiped {
                 untrusted_services, ..
             } => Some(*untrusted_services),
+            // Adapted from zakura-core/zakura:
+            // https://github.com/zakura-core/zakura/commit/d397cf9d490df6afaffaffbc23f6eacf74eea54b
             NewLocal { services, .. } => Some(*services),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
