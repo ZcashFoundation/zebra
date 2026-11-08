@@ -133,6 +133,9 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
     }
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+// License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
 /// Fee-independent resources reserved before selecting a template's transactions.
 pub(super) struct CoinbaseResourceUsage {
     pub(super) serialized_size: usize,
@@ -140,6 +143,7 @@ pub(super) struct CoinbaseResourceUsage {
     pub(super) shielded_actions: ShieldedActionCounts,
 }
 
+// Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
 /// The receiver supported by the coinbase's network upgrade.
 #[derive(Clone, Copy)]
 enum MinerRewardAddress {
@@ -149,6 +153,7 @@ enum MinerRewardAddress {
     Ironwood(::orchard::Address),
 }
 
+// Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
 /// The same fee-independent output plan is used for sizing and proving the coinbase.
 struct CoinbasePlan {
     miner_address: MinerRewardAddress,
@@ -157,6 +162,7 @@ struct CoinbasePlan {
 }
 
 impl CoinbasePlan {
+    // Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
     fn new(
         net: &Network,
         height: Height,
@@ -219,6 +225,7 @@ impl CoinbasePlan {
         })
     }
 
+    // Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
     /// Counts the serialized fields without constructing any shielded output or proof.
     fn resource_usage(
         &self,
@@ -351,6 +358,7 @@ impl CoinbasePlan {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
+    // Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
     /// Returns the exact coinbase resources without building a sizing transaction or proof.
     pub(super) fn coinbase_resource_usage(
         net: &Network,
@@ -391,6 +399,7 @@ impl TransactionTemplate<NegativeOrZero> {
         txs_fee: Amount<NonNegative>,
         parent_nsm_value_balance: Option<Amount<NonNegative>>,
     ) -> Result<Self, TransactionError> {
+        // Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
         let plan = CoinbasePlan::new(net, height, miner_params, parent_nsm_value_balance)?;
         // From NU7 activation, the coinbase can't claim the fees ZIP 235 removes from circulation.
         let miner_fees = (txs_fee - nsm_fee_contribution(height, net, txs_fee))?;

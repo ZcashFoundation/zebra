@@ -55,6 +55,9 @@ pub fn select_mempool_transactions(
     mempool_tx_deps: TransactionDependencies,
     parent_nsm_value_balance: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1035 (https://github.com/zakura-core/zakura/pull/1035).
     let coinbase = TransactionTemplate::coinbase_resource_usage(
         net,
         height,
