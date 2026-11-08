@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Committing a block to the non-finalized state no longer copies the chain''s indexes, so commit time does not grow with the length of the non-finalized chain. A solved block built from an unmodified template is applied by rebinding the chain state prepared while validating that template, so `submitblock` completes in about the time of its proof-of-work check plus a fixed overhead. The state keeps one extra copy of the best chain''s indexes in memory, and two on mining nodes.'
+time: 2026-11-03T00:00:00Z
