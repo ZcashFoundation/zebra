@@ -202,6 +202,31 @@ fn raw_reads_from_non_finalized_chain() -> Result<()> {
         assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
     }
 
+    // A side chain: its block is not in the best chain, but its transactions are in some chain.
+    let side_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let side_chain = Arc::new(
+        Chain::new(
+            &Mainnet,
+            Height(0),
+            NoteCommitmentTrees::default(),
+            Default::default(),
+            ValueBalance::fake_populated_pool(),
+        )
+        .push(side_block.clone().prepare().test_with_zero_spent_utxos())?,
+    );
+    assert_eq!(
+        read::raw_block(Some(chain.clone()), &db, side_block.hash().into())
+            .expect("empty db reads"),
+        None,
+        "raw blocks are only read from the best chain"
+    );
+    for tx in &side_block.transactions {
+        let raw = read::any_raw_transaction([&chain, &side_chain].into_iter(), &db, tx.hash())
+            .expect("transaction is in a side chain");
+        assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
+    }
+
     Ok(())
 }
 

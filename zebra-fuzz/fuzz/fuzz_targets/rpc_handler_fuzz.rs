@@ -36,6 +36,8 @@
 //! * `ReadRequest::Block(_)` → `Ok(ReadResponse::Block(None))` — drives the
 //!   `getblock` "block not found" formatter, including the verbosity=2 branch
 //!   that walks each tx (which is decode-light when the block is None).
+//! * `ReadRequest::RawBlock(_)` / `ReadRequest::AnyChainRawTransaction(_)` → `None` —
+//!   drives the verbosity 0 "not found" branches of `getblock` / `getrawtransaction`.
 //! * `ReadRequest::Transaction(_)` → `Ok(ReadResponse::Transaction(None))` —
 //!   drives `getrawtransaction` None-branch.
 //! * `ReadRequest::AddressBalance(_)` → constructed zero balance to walk the
@@ -391,6 +393,8 @@ impl Service<zebra_state::ReadRequest> for MockReadState {
         let resp: Result<Resp, BoxError> = match req {
             R::Tip => Ok(Resp::Tip(Some((block::Height(0), block::Hash([0u8; 32]))))),
             R::Block(_) => Ok(Resp::Block(None)),
+            R::RawBlock(_) => Ok(Resp::RawBlock(None)),
+            R::AnyChainRawTransaction(_) => Ok(Resp::RawTransaction(None)),
             R::AnyChainBlock(_) => Ok(Resp::Block(None)),
             R::BlockAndSize(_) => Ok(Resp::BlockAndSize(None)),
             R::Transaction(_) => Ok(Resp::Transaction(None)),
