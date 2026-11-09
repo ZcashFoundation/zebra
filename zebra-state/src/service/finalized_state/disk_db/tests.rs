@@ -99,7 +99,11 @@ fn cached_size_reuses_fresh_measurement() {
         "clones share the cache"
     );
 
-    let stale = Instant::now() - DiskDb::SIZE_CACHE_TTL - Duration::from_secs(1);
+    // The clock can start at boot, so a host up for less than the TTL can't build a stale time.
+    let Some(stale) = Instant::now().checked_sub(DiskDb::SIZE_CACHE_TTL + Duration::from_secs(1))
+    else {
+        return;
+    };
     *db.size_cache.lock().unwrap() = Some((stale, sentinel));
     assert_eq!(
         db.cached_size(),
