@@ -66,6 +66,8 @@ pub struct SemanticBlockVerifier<S, V> {
     proposal_key_computations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     block_size_serializations: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    transaction_hash_computations: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 async fn run_blocking<T: Send + 'static>(
@@ -166,18 +168,18 @@ fn cache_proposal(
     });
 }
 
-/// A decoded submission, optionally carrying its consumed size or an exact proposal match.
+/// A decoded submission, optionally carrying size, reconstruction, or exact proposal evidence.
 ///
-/// The private match is bound to this immutable block, including its submitted header. It proves
-/// byte identity only: the verifier must still check proof of work, time, and live state. A weak
-/// handle does not retain contextual data after cache eviction or authorize reuse by another cache.
-///
-/// Ordinary decoding records only the consumed wire size, not any validation or authorization.
+/// Private evidence is bound to the immutable block, including its submitted header. Proposal
+/// matches prove byte identity; reconstruction proves bounded size and the transaction Merkle root.
+/// All other semantic and contextual checks still run, including network-specific transaction rules.
+/// A weak proposal handle cannot retain contextual data or authorize reuse by another cache.
 #[derive(Clone, Debug)]
 pub struct DecodedBlock {
     block: Arc<block::Block>,
     consumed_size: Option<usize>,
     matched: Option<(Weak<zs::ContextuallyVerifiedBlock>, usize)>,
+    reconstructed: Option<zebra_network::compact::ReconstructedBlock>,
 }
 
 impl DecodedBlock {
@@ -192,7 +194,21 @@ impl DecodedBlock {
             block,
             consumed_size: Some(input_size - bytes.len()),
             matched: None,
+            reconstructed: None,
         })
+    }
+
+    /// Retains exact size and checked transaction-Merkle evidence from compact reconstruction.
+    ///
+    /// The network seals this evidence against the same immutable block. Authorizing-data,
+    /// network-specific transaction rules, and all remaining consensus checks still run.
+    pub fn from_reconstructed(reconstructed: zebra_network::compact::ReconstructedBlock) -> Self {
+        Self {
+            block: reconstructed.block().clone(),
+            consumed_size: None,
+            matched: None,
+            reconstructed: Some(reconstructed),
+        }
     }
 
     /// Returns the decoded block without exposing or transferring its private evidence.
@@ -207,6 +223,7 @@ impl From<Arc<block::Block>> for DecodedBlock {
             block,
             consumed_size: None,
             matched: None,
+            reconstructed: None,
         }
     }
 }
@@ -215,6 +232,7 @@ impl PartialEq for DecodedBlock {
     fn eq(&self, other: &Self) -> bool {
         self.block == other.block
             && self.consumed_size == other.consumed_size
+            && self.reconstructed == other.reconstructed
             && self
                 .matched
                 .as_ref()
@@ -299,6 +317,7 @@ impl PreparedBlockCache {
             block,
             consumed_size: None,
             matched: Some((matched, bytes.len())),
+            reconstructed: None,
         })
     }
 }
@@ -633,6 +652,8 @@ where
             proposal_key_computations: Default::default(),
             #[cfg(test)]
             block_size_serializations: Default::default(),
+            #[cfg(test)]
+            transaction_hash_computations: Default::default(),
         }
     }
 
@@ -698,6 +719,8 @@ where
         let proposal_key_computations = self.proposal_key_computations.clone();
         #[cfg(test)]
         let block_size_serializations = self.block_size_serializations.clone();
+        #[cfg(test)]
+        let transaction_hash_computations = self.transaction_hash_computations.clone();
 
         let block = request.block();
 
@@ -792,7 +815,15 @@ where
                 .map(|(_, size)| *size)
                 .or_else(|| proposal_key.map(|(_, size)| size))
                 .or(match &request {
-                    Request::CommitDecoded(decoded, _) => decoded.consumed_size,
+                    Request::CommitDecoded(decoded, _) | Request::CommitEarlyRelay(decoded) => {
+                        decoded.consumed_size.or_else(|| {
+                            decoded
+                                .reconstructed
+                                .as_ref()
+                                .and_then(|evidence| evidence.evidence_for(&block))
+                                .map(|(size, _)| size)
+                        })
+                    }
                     _ => None,
                 });
             if size.is_some_and(|size| {
@@ -813,8 +844,16 @@ where
                     .map(|proposal| proposal.contextual.clone())
             });
 
-            // Cache hits already bind the Merkle root through exact bytes or the proposal key.
-            // On misses, bind the body before announcing early work and reuse these hashes below.
+            let reconstructed_hashes = match &request {
+                Request::CommitDecoded(decoded, _) | Request::CommitEarlyRelay(decoded) => decoded
+                    .reconstructed
+                    .as_ref()
+                    .and_then(|evidence| evidence.evidence_for(&block))
+                    .map(|(_, hashes)| hashes.clone()),
+                _ => None,
+            };
+            // Proposal and reconstruction evidence bind the exact body to the header's Merkle root.
+            // Other requests must compute and check it before announcing early work.
             let transaction_hashes = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
@@ -830,6 +869,14 @@ where
                             return Err(VerifyBlockError::OversizedBlock);
                         }
                     }
+                    if let Some(hashes) = reconstructed_hashes {
+                        block
+                            .check_transaction_network_upgrade_consistency(&network)
+                            .map_err(|_| BlockError::WrongTransactionConsensusBranchId)?;
+                        return Ok(hashes);
+                    }
+                    #[cfg(test)]
+                    transaction_hash_computations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let hashes: Arc<[_]> = block.transactions.iter().map(|t| t.hash()).collect();
                     check::merkle_root_validity(&network, &block, &hashes)?;
                     Ok::<_, VerifyBlockError>(hashes)

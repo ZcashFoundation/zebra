@@ -2195,6 +2195,47 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     })?;
     assert_eq!(reconstructed.block(), &block);
 
+    let mut wrong_branch = (*block).clone();
+    wrong_branch.transactions[0] = Arc::new(Transaction::test_v5(
+        NetworkUpgrade::Nu6,
+        block.transactions[0].inputs(),
+        block.transactions[0].outputs(),
+        LockTime::unlocked(),
+        Height(2),
+    ));
+    Arc::make_mut(&mut wrong_branch.header).merkle_root = wrong_branch
+        .transactions
+        .iter()
+        .map(|tx| tx.hash())
+        .collect();
+    let wrong_branch = Arc::new(CompactBlock::from_block(&wrong_branch, 0)?)
+        .reconstruct(
+            wrong_branch
+                .transactions
+                .iter()
+                .skip(1)
+                .cloned()
+                .map(Into::into)
+                .collect(),
+        )?
+        .finish(BlockTransactions {
+            block_hash: wrong_branch.hash(),
+            transactions: Vec::new(),
+        })?;
+    let error = timeout(
+        Duration::from_secs(5),
+        inbound.ready().await?.call(Request::CheckCompactBlock(
+            wrong_branch.block().clone(),
+            Some(wrong_branch),
+        )),
+    )
+    .await?
+    .expect_err("Merkle evidence must not bypass the network's consensus branch ID");
+    assert_eq!(
+        error.to_string(),
+        "transaction has wrong consensus branch id for block network upgrade"
+    );
+
     let ReadResponse::EarlyRelayCache(cache) =
         read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
     else {
@@ -2202,26 +2243,34 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     };
     let mut forged = (*block).clone();
     forged.transactions[1] = wrong.transaction;
-    assert!(timeout(
-        Duration::from_secs(5),
-        inbound
-            .ready()
-            .await?
-            .call(Request::CheckCompactBlock(Arc::new(forged), None))
-    )
-    .await?
-    .is_err());
-    assert_eq!(
-        timeout(
+    for evidence in [None, Some(reconstructed.clone())] {
+        assert!(timeout(
             Duration::from_secs(5),
             inbound.ready().await?.call(Request::CheckCompactBlock(
-                reconstructed.block().clone(),
-                Some(reconstructed.clone()),
+                Arc::new(forged.clone()),
+                evidence
             ))
         )
-        .await??,
-        Response::Nil
-    );
+        .await?
+        .is_err());
+    }
+    for (checked, evidence) in [
+        (block.clone(), None),
+        (reconstructed.block().clone(), Some(reconstructed.clone())),
+        (block.clone(), Some(reconstructed.clone())),
+    ] {
+        assert_eq!(
+            timeout(
+                Duration::from_secs(5),
+                inbound
+                    .ready()
+                    .await?
+                    .call(Request::CheckCompactBlock(checked, evidence))
+            )
+            .await??,
+            Response::Nil
+        );
+    }
     assert!(cache.get(&block.hash()).is_none());
     let zebra_state::Response::EarlyRelay(Some(guard)) = state
         .clone()

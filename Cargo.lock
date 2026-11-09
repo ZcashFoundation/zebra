@@ -7424,6 +7424,7 @@ dependencies = [
  "zcash_script",
  "zcash_transparent",
  "zebra-chain",
+ "zebra-network",
  "zebra-node-services",
  "zebra-script",
  "zebra-state",

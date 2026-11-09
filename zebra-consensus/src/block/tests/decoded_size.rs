@@ -1,10 +1,47 @@
-//! Consumed-size evidence must replace only the block-size serialization pass.
+//! Sealed reconstruction evidence replaces only size, hash, and transaction-Merkle work.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use zebra_chain::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};
 
 use super::*;
+
+fn reconstructed(block: &Block) -> zebra_network::compact::ReconstructedBlock {
+    Arc::new(zebra_network::compact::CompactBlock::from_block(block, 0).unwrap())
+        .reconstruct(block.transactions.iter().skip(1).map(Into::into).collect())
+        .unwrap()
+        .finish(zebra_network::compact::BlockTransactions {
+            block_hash: block.hash(),
+            transactions: Vec::new(),
+        })
+        .unwrap()
+}
+
+#[test]
+fn reconstructed_size_is_retained_as_decoded_evidence() {
+    let _init_guard = zebra_test::init();
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let decoded = DecodedBlock::from_reconstructed(reconstructed(&block));
+    let (size, hashes) = decoded
+        .reconstructed
+        .as_ref()
+        .unwrap()
+        .evidence_for(&decoded.block)
+        .unwrap();
+    assert_eq!(size, block.zcash_serialized_size());
+    assert_eq!(
+        hashes.as_ref(),
+        block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(*decoded.block, block);
+    assert!(decoded.matched.is_none());
+}
 
 #[test]
 fn decoded_size_matches_canonical_blocks_and_bundles() {
@@ -108,12 +145,23 @@ fn decoded_size_preserves_bounds_and_parse_errors() {
 
 #[tokio::test]
 async fn decoded_size_skips_only_size_serialization() {
+    check_decoded_evidence(false).await;
+}
+
+#[tokio::test]
+async fn reconstructed_evidence_skips_size_and_merkle_only_for_same_block() {
+    check_decoded_evidence(true).await;
+}
+
+async fn check_decoded_evidence(use_reconstruction: bool) {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(10), async {
         for constructed in [false, true] {
             for changed_body in [false, true] {
+                // Mismatched evidence must never hide a changed body under a valid header.
                 let bytes = &**zebra_test::vectors::BLOCK_MAINNET_1_BYTES;
                 let mut source: Block = bytes.zcash_deserialize_into().unwrap();
+                let evidence = use_reconstruction.then(|| reconstructed(&source));
                 if changed_body {
                     let transaction = &source.transactions[0];
                     let mut outputs = transaction.outputs();
@@ -125,8 +173,14 @@ async fn decoded_size_skips_only_size_serialization() {
                             .with_transparent_outputs(outputs),
                     );
                 }
-                let decoded =
-                    DecodedBlock::deserialize(&source.zcash_serialize_to_vec().unwrap()).unwrap();
+                let mut decoded = if let Some(evidence) = evidence {
+                    DecodedBlock::from_reconstructed(evidence)
+                } else {
+                    DecodedBlock::deserialize(&source.zcash_serialize_to_vec().unwrap()).unwrap()
+                };
+                if changed_body {
+                    decoded.block = Arc::new(source);
+                }
                 let decoded = if constructed {
                     DecodedBlock::from(decoded.block())
                 } else {
@@ -175,7 +229,13 @@ async fn decoded_size_skips_only_size_serialization() {
                 assert_eq!(calls.load(Ordering::SeqCst), usize::from(!changed_body));
                 assert_eq!(
                     verifier.block_size_serializations.load(Ordering::SeqCst),
-                    usize::from(constructed)
+                    usize::from(constructed || (use_reconstruction && changed_body))
+                );
+                assert_eq!(
+                    verifier
+                        .transaction_hash_computations
+                        .load(Ordering::SeqCst),
+                    usize::from(!use_reconstruction || constructed || changed_body)
                 );
                 assert_eq!(verifier.proposal_key_computations.load(Ordering::SeqCst), 0);
 
@@ -195,4 +255,69 @@ async fn decoded_size_skips_only_size_serialization() {
     })
     .await
     .expect("ordinary decoded block checks must not stall");
+}
+
+#[tokio::test]
+async fn reconstructed_evidence_rejects_wrong_consensus_branch() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let mut block: Block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into()
+            .unwrap();
+        block.transactions.push(Arc::new(Transaction::test_v5(
+            NetworkUpgrade::Nu6,
+            Vec::new(),
+            Vec::new(),
+            LockTime::unlocked(),
+            Height(1),
+        )));
+        Arc::make_mut(&mut block.header).merkle_root =
+            block.transactions.iter().map(|tx| tx.hash()).collect();
+        let evidence = reconstructed(&block);
+        let network = Network::new_regtest(
+            zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        let state = tower::service_fn(|request| async move {
+            match request {
+                zs::Request::KnownBlock(_) => Ok::<_, BoxError>(zs::Response::KnownBlock(None)),
+                zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
+                _ => panic!("wrong consensus branches must fail before contextual validation"),
+            }
+        });
+        let transactions = tower::service_fn(|_| {
+            std::future::ready(Err::<tx::BlockResponse, BoxError>(
+                TransactionError::BadBalance.into(),
+            ))
+        });
+        let mut verifier = SemanticBlockVerifier::new(&network, state, transactions);
+        let result = verifier
+            .ready()
+            .await
+            .unwrap()
+            .call(Request::CommitDecoded(
+                DecodedBlock::from_reconstructed(evidence),
+                None,
+            ))
+            .await;
+        assert!(matches!(
+            result,
+            Err(VerifyBlockError::Block {
+                source: BlockError::WrongTransactionConsensusBranchId
+            })
+        ));
+        assert_eq!(verifier.block_size_serializations.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            verifier
+                .transaction_hash_computations
+                .load(Ordering::SeqCst),
+            0
+        );
+    })
+    .await
+    .expect("network-specific reconstruction checks must not stall");
 }

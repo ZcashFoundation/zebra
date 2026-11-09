@@ -407,23 +407,25 @@ where
                 response,
                 zn::Response::EarlyBlocks(_) | zn::Response::ReconstructedBlock(..)
             );
-            let (block, advertiser_addr) = match response {
+            let (block, advertiser_addr, reconstructed) = match response {
                 zn::Response::Blocks(blocks) | zn::Response::EarlyBlocks(blocks) => {
                     assert_eq!(
                         blocks.len(),
                         1,
                         "wrong number of blocks in response to a single hash",
                     );
-                    blocks
+                    let (block, source) = blocks
                         .first()
                         .expect("just checked length")
                         .available()
                         .expect(
                         "unexpected missing block status: single block failures should be errors",
-                    )
+                    );
+                    (block, source, None)
                 }
-                zn::Response::ReconstructedBlock(reconstructed, source) => {
-                    (reconstructed.block().clone(), source)
+                zn::Response::ReconstructedBlock(block, source) => {
+                    let decoded = zebra_consensus::DecodedBlock::from_reconstructed(block);
+                    (decoded.block(), source, Some(decoded))
                 }
                 _ => unreachable!("wrong response to block request"),
             };
@@ -542,7 +544,9 @@ where
             }
 
             let request = if early_relay {
-                zebra_consensus::Request::CommitEarlyRelay(block)
+                zebra_consensus::Request::CommitEarlyRelay(
+                    reconstructed.unwrap_or_else(|| block.into()),
+                )
             } else {
                 zebra_consensus::Request::Commit(block)
             };

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added `DecodedBlock::from_reconstructed` to retain immutable compact-reconstruction size and transaction-Merkle evidence; verification still enforces network-specific transaction rules and all remaining consensus checks.
+time: 2026-11-09T01:20:50.931560949+01:00
