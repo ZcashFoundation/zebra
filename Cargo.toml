@@ -418,3 +418,5 @@ equihash = { git = "https://github.com/zcash/librustzcash", rev = "50cd69a35dd2b
 pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "b1f9cfc6c9109d580f2aa0742bc86e22f539236d" }
 sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "a88967c97e49ad11e6e674f58849622073393ba9" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "752298d32f9c97f8487becf6ead88c198dfe4762" }
+bellman = { git = "https://github.com/zkcrypto/bellman", rev = "666cc58cfef2404f8d8a971a72e5e2c3b8df1652" }
+groth16 = { git = "https://github.com/zkcrypto/bellman", rev = "666cc58cfef2404f8d8a971a72e5e2c3b8df1652" }
