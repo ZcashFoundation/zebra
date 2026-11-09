@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: Reduce cold submitblock latency by decoding large blocks in parallel.
+body: Decode large submitted blocks in parallel under shared admission for `submitblock` and proposal requests. Cancelled requests retain admission until their blocking decode finishes; inputs up to 4 KiB remain serial and inline ([#12308](https://github.com/ZcashFoundation/zebra/pull/12308)).
 time: 2026-11-06T15:22:09.424353958+01:00
