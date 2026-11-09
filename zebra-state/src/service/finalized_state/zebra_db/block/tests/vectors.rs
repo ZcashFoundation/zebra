@@ -180,6 +180,30 @@ fn test_block_db_round_trip_with(
         }
 
         assert_eq!(stored_block, original_block);
+
+        // The stored bytes must be identical to serializing the block and its transactions.
+        let serialized_block = state
+            .serialized_block(finalized.height.into())
+            .expect("stored block is complete")
+            .expect("block was stored at height");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+        let serialized_block = state
+            .serialized_block(original_block.hash().into())
+            .expect("stored block is complete")
+            .expect("block was stored with its hash");
+        assert_eq!(serialized_block.as_ref(), block_data.as_slice());
+
+        for tx in &original_block.transactions {
+            let serialized_tx = state
+                .serialized_transaction(tx.hash())
+                .expect("transaction was stored");
+            assert_eq!(
+                serialized_tx.as_ref(),
+                tx.zcash_serialize_to_vec()
+                    .expect("serialization to vec never fails")
+                    .as_slice(),
+            );
+        }
     }
 }
 
@@ -248,6 +272,7 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     ] {
         assert!(db.block(query).unwrap().is_none());
         assert!(db.raw_block(query).unwrap().is_none());
+        assert!(db.serialized_block(query).unwrap().is_none());
         assert!(db.block_and_size(query).unwrap().is_none());
     }
 
@@ -268,6 +293,7 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
         ] {
             assert_eq!(db.block(query).unwrap_err(), expected);
             assert_eq!(db.raw_block(query).unwrap_err(), expected);
+            assert_eq!(db.serialized_block(query).unwrap_err(), expected);
             assert_eq!(db.block_and_size(query).unwrap_err(), expected);
             assert!(db.block_header(query).is_some());
         }
@@ -282,6 +308,10 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     ] {
         assert_eq!(
             db.block(query).unwrap_err(),
+            BlockReadError::CorruptBlock { height }
+        );
+        assert_eq!(
+            db.serialized_block(query).unwrap_err(),
             BlockReadError::CorruptBlock { height }
         );
     }

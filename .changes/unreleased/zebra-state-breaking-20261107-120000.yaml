@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Add `ReadRequest::RawBlock` and `ReadRequest::AnyChainRawTransaction`, answered by the new `ReadResponse::RawBlock` and `ReadResponse::RawTransaction` variants, plus `ZebraDb::serialized_block`, `ZebraDb::serialized_transaction` and `RawBytes::into_raw_bytes`. Finalized blocks and transactions are served from their stored bytes without deserializing them. Code that matches on every `ReadRequest` or `ReadResponse` variant must handle the new ones.
+time: 2026-11-07T12:00:00.000000000Z

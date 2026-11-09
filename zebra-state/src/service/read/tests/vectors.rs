@@ -1,15 +1,17 @@
 //! Fixed test vectors for the ReadStateService.
 
-use std::sync::Arc;
+use std::{iter, sync::Arc};
 
 use tower::ServiceExt;
 use zebra_chain::{
     block::{Block, Hash, Height, MAX_BLOCK_LOCATOR_LENGTH},
     orchard,
+    parallel::tree::NoteCommitmentTrees,
     parameters::Network::*,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction,
+    value_balance::ValueBalance,
 };
 
 use zebra_test::{
@@ -18,13 +20,14 @@ use zebra_test::{
 };
 
 use crate::{
+    arbitrary::Prepare,
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     init_test_services, populated_state,
     response::MinedTx,
     service::{
         finalized_state::{DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
         non_finalized_state::Chain,
-        read::{orchard_subtrees, sapling_subtrees},
+        read::{self, orchard_subtrees, sapling_subtrees},
     },
     Config, ReadRequest, ReadResponse,
 };
@@ -104,6 +107,14 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
                 ReadRequest::Block(block.coinbase_height().unwrap().into()),
                 Ok(ReadResponse::Block(Some(block.clone()))),
             ),
+            (
+                ReadRequest::RawBlock(block.hash().into()),
+                Ok(ReadResponse::RawBlock(Some(block.as_ref().into()))),
+            ),
+            (
+                ReadRequest::RawBlock(block.coinbase_height().unwrap().into()),
+                Ok(ReadResponse::RawBlock(Some(block.as_ref().into()))),
+            ),
         ];
 
         let block_cases = Transcript::from(block_cases);
@@ -140,7 +151,80 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
             let transaction_cases = Transcript::from(transaction_cases);
             transaction_cases.check(read_state.clone()).await?;
+
+            let raw_transaction_cases = Transcript::from(vec![(
+                ReadRequest::AnyChainRawTransaction(transaction.hash()),
+                Ok(ReadResponse::RawTransaction(Some(
+                    transaction.as_ref().into(),
+                ))),
+            )]);
+            raw_transaction_cases.check(read_state.clone()).await?;
         }
+    }
+
+    Ok(())
+}
+
+/// Tests that raw block and transaction reads serialize non-finalized blocks identically.
+#[test]
+fn raw_reads_from_non_finalized_chain() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
+    let block_bytes = block.zcash_serialize_to_vec()?;
+
+    let chain = Chain::new(
+        &Mainnet,
+        Height(0),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    )
+    .push(block.clone().prepare().test_with_zero_spent_utxos())?;
+    let chain = Arc::new(chain);
+    let db = new_ephemeral_db();
+
+    for hash_or_height in [block.hash().into(), block.coinbase_height().unwrap().into()] {
+        let raw = read::raw_block(Some(chain.clone()), &db, hash_or_height)
+            .expect("stored block is complete")
+            .expect("block is in the chain");
+        assert_eq!(raw.as_ref(), block_bytes.as_slice());
+    }
+    assert_eq!(
+        read::raw_block(None::<Arc<Chain>>, &db, block.hash().into()).expect("empty db reads"),
+        None
+    );
+
+    for tx in &block.transactions {
+        let raw = read::any_raw_transaction(iter::once(&chain), &db, tx.hash())
+            .expect("transaction is in the chain");
+        assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
+    }
+
+    // A side chain: its block is not in the best chain, but its transactions are in some chain.
+    let side_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let side_chain = Arc::new(
+        Chain::new(
+            &Mainnet,
+            Height(0),
+            NoteCommitmentTrees::default(),
+            Default::default(),
+            ValueBalance::fake_populated_pool(),
+        )
+        .push(side_block.clone().prepare().test_with_zero_spent_utxos())?,
+    );
+    assert_eq!(
+        read::raw_block(Some(chain.clone()), &db, side_block.hash().into())
+            .expect("empty db reads"),
+        None,
+        "raw blocks are only read from the best chain"
+    );
+    for tx in &side_block.transactions {
+        let raw = read::any_raw_transaction([&chain, &side_chain].into_iter(), &db, tx.hash())
+            .expect("transaction is in a side chain");
+        assert_eq!(raw.as_ref(), tx.zcash_serialize_to_vec()?.as_slice());
     }
 
     Ok(())
@@ -395,6 +479,18 @@ fn empty_state_test_cases() -> Vec<(ReadRequest, Result<ReadResponse, ExpectedTr
         (
             ReadRequest::Block(block.coinbase_height().unwrap().into()),
             Ok(ReadResponse::Block(None)),
+        ),
+        (
+            ReadRequest::RawBlock(block.hash().into()),
+            Ok(ReadResponse::RawBlock(None)),
+        ),
+        (
+            ReadRequest::RawBlock(block.coinbase_height().unwrap().into()),
+            Ok(ReadResponse::RawBlock(None)),
+        ),
+        (
+            ReadRequest::AnyChainRawTransaction(transaction::Hash([0; 32])),
+            Ok(ReadResponse::RawTransaction(None)),
         ),
         (
             ReadRequest::FindForkPoint {
