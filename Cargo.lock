@@ -4378,8 +4378,7 @@ dependencies = [
 [[package]]
 name = "reddsa"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a70b6dbd7b3277cbd4d89ee750a30bebab3b9951ee4e166ce15c00975fe410f"
+source = "git+https://github.com/ZcashFoundation/reddsa?rev=7e610c3f8a63294975932bca901da95893aa895a#7e610c3f8a63294975932bca901da95893aa895a"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5520,7 +5519,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
