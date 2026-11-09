@@ -40,13 +40,20 @@ struct Entry {
     context: WatchReceiver<NonFinalizedState>,
 }
 
+#[derive(Debug)]
+struct Reservation {
+    parent: block::Hash,
+    deadline: tokio::time::Instant,
+    alive: watch::Receiver<()>,
+}
+
 /// Internal cache ownership does not enable publication; only external subscriptions do.
 #[derive(Debug)]
 pub(super) struct EarlyRelayState {
     snapshot: WatchReceiver<NonFinalizedState>,
     entry: Mutex<Option<Entry>>,
     changes: watch::Sender<Option<block::Hash>>,
-    slot: Arc<Semaphore>,
+    reservation: Mutex<Option<Reservation>>,
     computation: Arc<Semaphore>,
     rejection_computation: Arc<Semaphore>,
     recipients: Mutex<Option<watch::Receiver<bool>>>,
@@ -58,7 +65,7 @@ impl EarlyRelayState {
             snapshot,
             entry: Mutex::new(None),
             changes: watch::Sender::new(None),
-            slot: Arc::new(Semaphore::new(1)),
+            reservation: Mutex::new(None),
             computation: Arc::new(Semaphore::new(1)),
             rejection_computation: Arc::new(Semaphore::new(1)),
             recipients: Mutex::new(None),
@@ -135,6 +142,20 @@ impl EarlyRelayState {
         }
     }
 
+    /// Notify only while this publication still owns the retained body.
+    fn notify_published(&self, hash: block::Hash, alive: &watch::Receiver<()>) {
+        let slot = self
+            .entry
+            .lock()
+            .expect("early relay cache lock is not poisoned");
+        if slot.as_ref().is_some_and(|entry| {
+            entry.alive.same_channel(alive)
+                && self.best_tip_hash() == Some(entry.block.header.previous_block_hash)
+        }) {
+            self.changes.send_replace(Some(hash));
+        }
+    }
+
     fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
         if self.changes.receiver_count() == 0
             || !self.has_recipients()
@@ -145,13 +166,23 @@ impl EarlyRelayState {
         {
             return;
         }
-        let Ok(permit) = self.slot.clone().try_acquire_owned() else {
-            return;
-        };
         let hash = block.hash();
         let parent = block.header.previous_block_hash;
         let alive = guard.alive.subscribe();
         let deadline = tokio::time::Instant::now() + LIFETIME;
+        // Admission must follow the committed snapshot synchronously, rather than wait for
+        // the old cleanup task to observe a tip change and release a semaphore permit.
+        let mut reservation = self
+            .reservation
+            .lock()
+            .expect("early relay reservation lock is not poisoned");
+        if self.best_tip_hash() != Some(parent)
+            || reservation.as_ref().is_some_and(|reservation| {
+                reservation.parent == parent && tokio::time::Instant::now() < reservation.deadline
+            })
+        {
+            return;
+        }
         if !self.allows_early_relay(hash) {
             return;
         }
@@ -159,9 +190,6 @@ impl EarlyRelayState {
             .entry
             .lock()
             .expect("early relay cache lock is not poisoned");
-        if slot.is_some() {
-            return;
-        }
         *slot = Some(Entry {
             block,
             origin: guard.origin,
@@ -170,31 +198,38 @@ impl EarlyRelayState {
             deadline,
             context: guard.context.clone(),
         });
+        *reservation = Some(Reservation {
+            parent,
+            deadline,
+            alive: alive.clone(),
+        });
+        drop(reservation);
         drop(slot);
         // Recheck after storing without nesting the rejection and cache locks. Notifications
         // remain hints: serving checks rejection again, including a concurrent withdrawal.
         if !self.allows_early_relay(hash) {
             self.withdraw(Some(hash));
-            return;
         }
-        self.changes.send_replace(Some(hash));
+        self.notify_published(hash, &alive);
         let state = self.clone();
         tokio::spawn(async move {
-            let _permit = permit;
             let mut alive = alive;
             let mut snapshot = state.snapshot.clone();
             snapshot.mark_as_seen();
-            while state.best_tip_hash() == Some(parent) {
+            let withdrawn = loop {
+                if state.best_tip_hash() != Some(parent) {
+                    break false;
+                }
                 tokio::select! {
-                    _ = alive.changed() => break,
-                    _ = tokio::time::sleep_until(deadline) => break,
+                    _ = alive.changed() => break true,
+                    _ = tokio::time::sleep_until(deadline) => break false,
                     result = snapshot.changed() => {
                         if result.is_err() {
-                            break;
+                            break false;
                         }
                     }
                 }
-            }
+            };
             {
                 let mut slot = state
                     .entry
@@ -208,9 +243,9 @@ impl EarlyRelayState {
                     state.changes.send_replace(None);
                 }
             }
-            // A rejected body must not buy repeated fanout with the same proof of work.
-            // Keep the permit, but not the body, until the deadline or a new committed tip.
-            while state.best_tip_hash() == Some(parent) {
+            // Only withdrawal keeps replay admission reserved. A tip change observed above
+            // releases it even if that parent returns while entry cleanup waits for its lock.
+            while withdrawn && state.best_tip_hash() == Some(parent) {
                 tokio::select! {
                     _ = tokio::time::sleep_until(deadline) => break,
                     result = snapshot.changed() => {
@@ -219,6 +254,16 @@ impl EarlyRelayState {
                         }
                     }
                 }
+            }
+            let mut reservation = state
+                .reservation
+                .lock()
+                .expect("early relay reservation lock is not poisoned");
+            if reservation
+                .as_ref()
+                .is_some_and(|reservation| reservation.alive.same_channel(&alive))
+            {
+                *reservation = None;
             }
         });
     }

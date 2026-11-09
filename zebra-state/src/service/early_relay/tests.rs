@@ -83,8 +83,6 @@ async fn early_relay_cache_expires_and_cancels() {
     tokio::time::advance(LIFETIME / 2).await;
     assert!(cache.get(&block.hash()).is_none());
     assert_eq!(*changes.borrow_and_update(), None);
-    tokio::task::yield_now().await;
-    assert!(state.slot.clone().try_acquire_owned().is_ok());
     drop(lease);
 
     let lease = guard(&state, block.hash());
@@ -103,32 +101,109 @@ async fn early_relay_cache_expires_and_cancels() {
     );
 }
 
-/// Withdrawal cannot buy repeated fanout, but a new committed tip releases admission immediately.
+/// Withdrawal cannot buy repeated fanout before the reservation deadline.
 #[tokio::test(start_paused = true)]
-async fn early_relay_rejection_bounds_replay_until_deadline_or_tip_change() {
-    for advance_tip in [false, true] {
+async fn early_relay_rejection_bounds_replay_until_deadline() {
+    let (state, cache, _tip, block) = cache();
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    drop(lease);
+    assert!(cache.get(&block.hash()).is_none());
+    tokio::task::yield_now().await;
+    assert_eq!(Arc::strong_count(&block), 1, "withdrawal retains no body");
+
+    let retry = guard(&state, block.hash());
+    state.publish(block.clone(), &retry, 1);
+    assert!(
+        cache.get(&block.hash()).is_none(),
+        "replaying a rejected body must not immediately obtain another advertisement"
+    );
+    tokio::time::advance(LIFETIME).await;
+    state.publish(block.clone(), &retry, 1);
+    assert!(cache.get(&block.hash()).is_some());
+}
+
+/// A committed tip must release publication admission before the cleanup task is polled.
+#[tokio::test(start_paused = true)]
+async fn early_relay_new_tip_publishes_without_cleanup_task_wakeup() {
+    let (state, cache, tip, block) = cache();
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_some());
+
+    let (finalized, _, _) = crate::tests::setup::new_state_with_mainnet_genesis();
+    let mut snapshot = tip.borrow().clone();
+    snapshot
+        .commit_block(block.prepare(), &finalized.db)
+        .unwrap();
+    tip.send_replace(snapshot);
+    let next: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&3]
+        .zcash_deserialize_into()
+        .unwrap();
+    let next_lease = guard(&state, next.hash());
+    state.publish(next.clone(), &next_lease, 1);
+    assert!(
+        cache.get(&next.hash()).is_some(),
+        "the old task's reservation must not suppress the new committed tip's child"
+    );
+    // Let the old cleanup task run: it must not withdraw the replacement body.
+    tokio::task::yield_now().await;
+    assert!(cache.get(&next.hash()).is_some());
+}
+
+/// Observing a committed child releases admission even when the old parent is restored.
+#[tokio::test(start_paused = true)]
+async fn early_relay_returning_tip_releases_old_reservation() {
+    for withdraw in [false, true] {
         let (state, cache, tip, block) = cache();
         let lease = guard(&state, block.hash());
         state.publish(block.clone(), &lease, 1);
-        drop(lease);
-        assert!(cache.get(&block.hash()).is_none());
-        tokio::task::yield_now().await;
-        assert_eq!(Arc::strong_count(&block), 1, "withdrawal retains no body");
-        assert!(
-            state.slot.clone().try_acquire_owned().is_err(),
-            "replaying a rejected body must not immediately obtain another advertisement"
-        );
-        if advance_tip {
-            tip.send_replace(NonFinalizedState::new(&Network::Mainnet));
-        } else {
-            tokio::time::advance(LIFETIME).await;
+        if withdraw {
+            drop(lease);
         }
-        let _permit =
-            tokio::time::timeout(Duration::from_secs(1), state.slot.clone().acquire_owned())
-                .await
-                .expect("deadline or a new committed tip releases replay admission")
-                .unwrap();
+        tokio::task::yield_now().await;
+
+        let (finalized, _, _) = crate::tests::setup::new_state_with_mainnet_genesis();
+        let original = tip.borrow().clone();
+        let mut committed = original.clone();
+        committed
+            .commit_block(block.clone().prepare(), &finalized.db)
+            .unwrap();
+        tip.send_replace(committed);
+        tokio::task::yield_now().await;
+        assert!(state.reservation.lock().unwrap().is_none());
+
+        tip.send_replace(original);
+        let retry = guard(&state, block.hash());
+        state.publish(block.clone(), &retry, 1);
+        assert!(cache.get(&block.hash()).is_some());
     }
+}
+
+/// A delayed notification cannot overwrite a newer parent's live publication.
+#[tokio::test(start_paused = true)]
+async fn early_relay_stale_notification_preserves_replacement() {
+    let (state, cache, tip, block) = cache();
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    let old_publication = lease.alive.subscribe();
+
+    let (finalized, _, _) = crate::tests::setup::new_state_with_mainnet_genesis();
+    let mut snapshot = tip.borrow().clone();
+    snapshot
+        .commit_block(block.clone().prepare(), &finalized.db)
+        .unwrap();
+    tip.send_replace(snapshot);
+    let next: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&3]
+        .zcash_deserialize_into()
+        .unwrap();
+    let next_lease = guard(&state, next.hash());
+    state.publish(next.clone(), &next_lease, 1);
+
+    // Resume the old publisher at its notification step after the replacement is live.
+    state.notify_published(block.hash(), &old_publication);
+    assert_eq!(*cache.subscribe().borrow(), Some(next.hash()));
+    assert!(cache.get(&next.hash()).is_some());
 }
 
 #[tokio::test]
@@ -294,7 +369,7 @@ async fn early_relay_recipient_demand_controls_retention() {
     let lease = guard(&state, block.hash());
     state.publish(block.clone(), &lease, 1);
     assert!(cache.get(&block.hash()).is_none());
-    assert_eq!(state.slot.available_permits(), 1);
+    assert!(state.reservation.lock().unwrap().is_none());
 
     recipients.send_replace(true);
     state.publish(block.clone(), &lease, 1);
@@ -478,7 +553,7 @@ async fn rejection_authentication_accepts_a_retained_non_best_parent() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn early_relay_tip_change_releases_slot_with_live_verifier() {
+async fn early_relay_tip_change_withdraws_body_with_live_verifier() {
     let (state, cache, tip, block) = cache();
     let lease = guard(&state, block.hash());
     let mut changes = cache.subscribe();
@@ -491,7 +566,6 @@ async fn early_relay_tip_change_releases_slot_with_live_verifier() {
         .unwrap()
         .unwrap();
     assert_eq!(*changes.borrow(), None);
-    let _permit = state.slot.clone().try_acquire_owned().unwrap();
     drop(lease);
 }
 
