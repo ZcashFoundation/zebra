@@ -49,6 +49,12 @@ use super::super::TypedColumnFamily;
 /// The name of the transaction hash by spent outpoints column family.
 pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
 
+/// The name of the unspent output location by transparent address location column family.
+///
+/// Every spend deletes an entry, so addresses with long spent histories leave many deletion
+/// markers that each range scan of the address has to skip until a compaction drops them.
+pub const UTXO_LOC_BY_TRANSPARENT_ADDR_LOC: &str = "utxo_loc_by_transparent_addr_loc";
+
 /// The name of the [balance](AddressBalanceLocation) by transparent address column family.
 pub const BALANCE_BY_TRANSPARENT_ADDR: &str = "balance_by_transparent_addr";
 
@@ -243,6 +249,18 @@ impl ZebraDb {
             .collect()
     }
 
+    /// Compacts the address UTXO index keys from `from` to `to` (`None` leaves that end open),
+    /// dropping the deletion markers left by spent outputs.
+    pub(crate) fn compact_address_utxo_index_range(&self, from: Option<&[u8]>, to: Option<&[u8]>) {
+        self.db
+            .compact_cf_range(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, from, to);
+    }
+
+    /// Returns how many background errors RocksDB has seen, including failed compactions.
+    pub(crate) fn background_error_count(&self) -> u64 {
+        self.db.background_error_count()
+    }
+
     /// Returns the unspent transparent output locations for a [`transparent::Address`] in the
     /// finalized chain `query_height_range`, at most `limit` of them.
     pub fn address_utxo_locations(
@@ -251,10 +269,8 @@ impl ZebraDb {
         query_height_range: RangeInclusive<Height>,
         limit: Option<usize>,
     ) -> BTreeSet<AddressUnspentOutput> {
-        let utxo_loc_by_transparent_addr_loc = self
-            .db
-            .cf_handle("utxo_loc_by_transparent_addr_loc")
-            .unwrap();
+        let utxo_loc_by_transparent_addr_loc =
+            self.db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
 
         // A potentially invalid key representing the first UTXO sent to the address,
         // or the query start height.
@@ -665,7 +681,7 @@ impl DiskWriteBatch {
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
         let tx_loc_by_transparent_addr_loc =
             db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
@@ -737,7 +753,7 @@ impl DiskWriteBatch {
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
 
         // Mark all transparent inputs as spent.
         //

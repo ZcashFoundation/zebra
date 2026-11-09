@@ -27,6 +27,7 @@ pub(crate) mod add_ironwood_tree;
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
+pub(crate) mod compact_address_utxo_index;
 pub(crate) mod fix_tree_key_type;
 pub(crate) mod no_migration;
 pub(crate) mod prune_trees;
@@ -117,7 +118,8 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        Box::new(compact_address_utxo_index::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -895,4 +897,34 @@ fn format_upgrades_are_in_version_order() {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
     }
+}
+
+#[test]
+fn compact_address_utxo_index_runs_once_after_29_0_0() {
+    let versions: Vec<_> = format_upgrades(None)
+        .map(|upgrade| upgrade.version())
+        .collect();
+    let position = versions
+        .iter()
+        .position(|version| *version == Version::new(29, 1, 0))
+        .expect("the 29.1.0 upgrade is registered");
+    assert_eq!(versions[position - 1], Version::new(29, 0, 0));
+
+    let from_29: Vec<_> = format_upgrades(Some(Version::new(29, 0, 0))).collect();
+    assert_eq!(
+        from_29.len(),
+        1,
+        "only the compaction runs on a 29.0.0 database"
+    );
+    assert_eq!(from_29[0].version(), Version::new(29, 1, 0));
+    assert!(from_29[0].needs_migration());
+    assert!(!from_29[0].is_reusable_major_upgrade());
+
+    let mut in_code = crate::constants::state_database_format_version_in_code();
+    in_code.build = semver::BuildMetadata::EMPTY;
+    assert_eq!(
+        versions.last(),
+        Some(&in_code),
+        "the last upgrade is the version in code"
+    );
 }

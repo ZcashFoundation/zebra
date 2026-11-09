@@ -72,3 +72,104 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that compacting a column family drops entries that were written and then deleted.
+#[test]
+fn compact_cf_range_drops_deleted_entries() {
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{
+            zebra_db::transparent::UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let db = DiskDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &zebra_chain::parameters::Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    let cf = db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
+    let sst_size = || {
+        db.property_int_value_cf(&cf, "rocksdb.total-sst-files-size")
+            .unwrap()
+            .unwrap()
+    };
+
+    // Like an address whose outputs were all spent: every entry is created, then deleted.
+    for i in 0u32..1_000 {
+        db.put_cf(&cf, i.to_be_bytes(), []).unwrap();
+    }
+    db.flush_cf(&cf).unwrap();
+    for i in 0u32..1_000 {
+        db.delete_cf(&cf, i.to_be_bytes()).unwrap();
+    }
+    db.flush_cf(&cf).unwrap();
+    assert!(
+        sst_size() > 0,
+        "the entries and their deletion markers are on disk"
+    );
+
+    db.compact_cf_range(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, None, None);
+
+    assert_eq!(
+        sst_size(),
+        0,
+        "compaction drops both the entries and the deletion markers"
+    );
+}
+
+/// Check that the address UTXO index compacts a deletion-heavy file without a manual compaction.
+#[test]
+fn deletion_heavy_utxo_index_files_are_compacted_automatically() {
+    use std::time::{Duration, Instant};
+
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::{
+            zebra_db::transparent::UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let db = DiskDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &zebra_chain::parameters::Network::Mainnet,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    )
+    .expect("opening an ephemeral database should succeed");
+    let cf = db.cf_handle(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC).unwrap();
+    let level0_files = || {
+        db.property_int_value_cf(&cf, "rocksdb.num-files-at-level0")
+            .unwrap()
+            .unwrap()
+    };
+
+    // One flush of only deletion markers makes a single level-0 file, below Zebra's level-0
+    // compaction trigger of two files, so only the deletion-triggered collector compacts it.
+    for i in 0u32..20_000 {
+        db.delete_cf(&cf, i.to_be_bytes()).unwrap();
+    }
+    db.flush_cf(&cf).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while level0_files() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(level0_files(), 0, "the deletion-heavy file was compacted");
+}
