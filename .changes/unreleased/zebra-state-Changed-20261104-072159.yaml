@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Finalize blocks past the reorg limit without copying the published best chain. The newest finalized block stays in the published snapshot until the next non-finalized write removes it, which a commit extending the best chain does on the chain copy it already makes. Conflicting forks are removed before publication, and invalidation removes all forks sharing an invalid root.
+time: 2026-11-04T07:21:59.510670033+01:00
