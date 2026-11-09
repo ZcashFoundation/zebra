@@ -458,13 +458,23 @@ where
             // Sum up some block totals from the transaction responses.
             let mut sigops = 0;
             let mut block_miner_fees = Ok(Amount::zero());
+            let mut transaction_error = None;
 
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
-                    .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
+                let response = match result {
+                    Ok(response) if transaction_error.is_none() => response,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        // Dropping sibling futures would not stop their dispatched CPU work.
+                        // Keep the first error and drain the existing checks before returning it.
+                        if transaction_error.is_none() {
+                            transaction_error = Some(error);
+                        }
+                        continue;
+                    }
+                };
 
                 sigops += response.sigops;
 
@@ -473,6 +483,9 @@ where
                 if let Some(miner_fee) = response.miner_fee {
                     block_miner_fees += miner_fee;
                 }
+            }
+            if let Some(error) = transaction_error {
+                return Err(VerifyBlockError::Transaction(error.into()));
             }
 
             // Check the summed block totals

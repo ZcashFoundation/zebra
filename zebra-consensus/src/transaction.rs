@@ -380,11 +380,12 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Looks up UTXOs spent by `tx` from the best chain state, also checking
+    /// Looks up UTXOs spent by `tx` in one concurrent state batch, also checking
     /// `known_utxos` for UTXOs from earlier transactions in the same block.
     ///
     /// Returns an `OutPoint -> Utxo` map and a vec of `Output`s in the same
     /// order as the matching inputs in `tx`.
+    /// Returns on the first state lookup error, cancelling the remaining lookups in the batch.
     async fn block_spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -400,33 +401,46 @@ where
         let mut spent_utxos = HashMap::new();
         // Pre-allocate with None so we can fill each slot by input index, preserving input order.
         let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        let mut outpoints = Vec::new();
 
         for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
-                tracing::trace!("awaiting outpoint lookup");
-
-                let utxo = if let Some(output) = known_utxos.get(outpoint) {
-                    tracing::trace!("UTXO in known_utxos, discarding query");
-                    output.utxo.clone()
+                if let Some(output) = known_utxos.get(outpoint) {
+                    spent_outputs[input_idx] = Some(output.utxo.output.clone());
+                    spent_utxos.insert(*outpoint, output.utxo.clone());
                 } else {
-                    let response = state
-                        .clone()
-                        .oneshot(zebra_state::Request::AwaitUtxo(*outpoint))
-                        .await
-                        .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
-                            Ok(_) => TransactionError::TransparentInputNotFound,
-                            Err(boxed_error) => TransactionError::from(boxed_error),
-                        })?;
+                    outpoints.push(*outpoint);
+                }
+            }
+        }
 
-                    if let zebra_state::Response::Utxo(utxo) = response {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
-                    }
-                };
-                tracing::trace!(?utxo, "got UTXO");
-                spent_outputs[input_idx] = Some(utxo.output.clone());
-                spent_utxos.insert(*outpoint, utxo);
+        if !outpoints.is_empty() {
+            let response = tokio::time::timeout(
+                UTXO_LOOKUP_TIMEOUT,
+                state.oneshot(zs::Request::AwaitUtxos(outpoints)),
+            )
+            .await
+            .map_err(|_| TransactionError::TransparentInputNotFound)?
+            .map_err(|boxed_error| match boxed_error.downcast::<Elapsed>() {
+                Ok(_) => TransactionError::TransparentInputNotFound,
+                Err(boxed_error) => TransactionError::from(boxed_error),
+            })?;
+
+            let zs::Response::Utxos(utxos) = response else {
+                unreachable!("AwaitUtxos always responds with Utxos")
+            };
+            let mut utxos = utxos.into_iter();
+            for (input, output) in inputs.iter().zip(&mut spent_outputs) {
+                if output.is_some() {
+                    continue;
+                }
+                if let transparent::Input::PrevOut { outpoint, .. } = input {
+                    let utxo = utxos
+                        .next()
+                        .expect("AwaitUtxos returns one UTXO for each requested outpoint");
+                    *output = Some(utxo.output.clone());
+                    spent_utxos.insert(*outpoint, utxo);
+                }
             }
         }
 
@@ -548,14 +562,16 @@ where
                 tx_id,
             )?;
 
-            let check_anchors_and_revealed_nullifiers_query = state
-                .clone()
-                .oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
+            // Include service readiness in the state deadline while sibling CPU checks drain.
+            let check_anchors_and_revealed_nullifiers_query = tokio::time::timeout(
+                UTXO_LOOKUP_TIMEOUT,
+                state.clone().oneshot(zs::Request::CheckBestChainTipNullifiersAndAnchors(
                     unmined_tx.clone(),
-                ))
+                )),
+            )
                 .map(|res| {
                     assert!(
-                        res? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
+                        res?? == zs::Response::ValidBestChainTipNullifiersAndAnchors,
                         "unexpected response to CheckBestChainTipNullifiersAndAnchors request"
                     );
                     Ok(())
@@ -659,10 +675,11 @@ where
             .clone()
             .oneshot(zs::Request::BestChainNextMedianTimePast);
 
-        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = query
+        let response = tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
             .await
             .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?
-        {
+            .map_err(|e| TransactionError::ValidateMempoolLockTimeError(e.to_string()))?;
+        if let zebra_state::Response::BestChainNextMedianTimePast(median_time_past) = response {
             Ok(median_time_past)
         } else {
             unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
@@ -707,9 +724,11 @@ where
                     .clone()
                     .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                    .await
-                    .map_err(|_| TransactionError::TransparentInputNotFound)?
+                let zebra_state::Response::UnspentBestChainUtxo(utxo) =
+                    tokio::time::timeout(UTXO_LOOKUP_TIMEOUT, query)
+                        .await
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
                 else {
                     unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                 };
@@ -731,7 +750,10 @@ where
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
-                let output = match query.await {
+                let response = tokio::time::timeout(MEMPOOL_OUTPUT_LOOKUP_TIMEOUT, query)
+                    .await
+                    .map_err(|_| TransactionError::TransparentInputNotFound)?;
+                let output = match response {
                     Ok(mempool::Response::UnspentOutput(output)) => output,
                     Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
                     Err(err) => {
@@ -1544,17 +1566,17 @@ impl AsyncChecks {
 
     /// Wait until all checks in the set finish.
     ///
-    /// If any of the checks fail, this method immediately returns the error and cancels all other
-    /// checks by dropping them.
+    /// Preserve the first error, but drain dispatched siblings before releasing their work owner.
     async fn check(mut self) -> Result<(), BoxError> {
-        // Wait for all asynchronous checks to complete
-        // successfully, or fail verification if they error.
+        let mut first_error = None;
         while let Some(check) = self.0.next().await {
             tracing::trace!(?check, remaining = self.0.len());
-            check?;
+            if let Err(error) = check {
+                first_error.get_or_insert(error);
+            }
         }
 
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 }
 

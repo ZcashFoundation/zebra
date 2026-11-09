@@ -93,6 +93,9 @@ pub enum Response {
     /// pending unverified blocks, or blocks received after the request was sent.
     Utxo(transparent::Utxo),
 
+    /// Response to [`Request::AwaitUtxos`], in the same order as the requested outpoints.
+    Utxos(Vec<transparent::Utxo>),
+
     /// The response to a `FindBlockHashes` request.
     BlockHashes(Vec<block::Hash>),
 
