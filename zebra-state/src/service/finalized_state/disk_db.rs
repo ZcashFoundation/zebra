@@ -1182,12 +1182,23 @@ impl DiskDb {
     // Write methods
     // Low-level write methods are located in the WriteDisk trait
 
-    /// Compacts the whole `cf_name` column family, dropping obsolete entries and deletion markers.
-    pub(crate) fn compact_cf(&self, cf_name: &str) {
+    /// Compacts the keys of `cf_name` from `from` to `to`, where `None` leaves that end open,
+    /// dropping obsolete entries and deletion markers.
+    pub(crate) fn compact_cf_range(&self, cf_name: &str, from: Option<&[u8]>, to: Option<&[u8]>) {
         let cf = self
             .cf_handle(cf_name)
             .expect("column family was created when the database was opened");
-        self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+        self.db.compact_range_cf(&cf, from, to);
+    }
+
+    /// Returns how many background errors RocksDB has seen, which is how a failed manual
+    /// compaction is reported: `compact_range_cf` itself returns nothing.
+    pub(crate) fn background_error_count(&self) -> u64 {
+        self.db
+            .property_int_value("rocksdb.background-errors")
+            .ok()
+            .flatten()
+            .unwrap_or(0)
     }
 
     /// Writes `batch` to the database.

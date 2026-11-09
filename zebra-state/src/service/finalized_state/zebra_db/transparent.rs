@@ -249,9 +249,16 @@ impl ZebraDb {
             .collect()
     }
 
-    /// Compacts the address UTXO index, dropping the deletion markers left by spent outputs.
-    pub(crate) fn compact_address_utxo_index(&self) {
-        self.db.compact_cf(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC);
+    /// Compacts the address UTXO index keys from `from` to `to` (`None` leaves that end open),
+    /// dropping the deletion markers left by spent outputs.
+    pub(crate) fn compact_address_utxo_index_range(&self, from: Option<&[u8]>, to: Option<&[u8]>) {
+        self.db
+            .compact_cf_range(UTXO_LOC_BY_TRANSPARENT_ADDR_LOC, from, to);
+    }
+
+    /// Returns how many background errors RocksDB has seen, including failed compactions.
+    pub(crate) fn background_error_count(&self) -> u64 {
+        self.db.background_error_count()
     }
 
     /// Returns the unspent transparent output locations for a [`transparent::Address`] in the

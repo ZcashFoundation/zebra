@@ -30,12 +30,26 @@ impl DiskFormatUpgrade for Upgrade {
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
+        let errors_before = db.background_error_count();
+
+        // About a minute on Mainnet in total; RocksDB serves reads and writes while it runs.
+        // Chunks keyed by the first byte let shutdown cancel it between them.
+        for first_byte in 0..=u8::MAX {
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
+            let from = [first_byte];
+            let to = first_byte.checked_add(1).map(|next| [next]);
+            db.compact_address_utxo_index_range(Some(&from), to.as_ref().map(|to| to.as_slice()));
         }
 
-        // About a minute on Mainnet; RocksDB serves reads and writes while it runs.
-        db.compact_address_utxo_index();
+        // A failed compaction only shows up as a background error. Leave the format version
+        // unchanged so the next start runs the compaction again.
+        if db.background_error_count() > errors_before {
+            tracing::warn!("compacting the address UTXO index failed, retrying on the next start");
+            return Err(CancelFormatChange);
+        }
 
         Ok(())
     }
