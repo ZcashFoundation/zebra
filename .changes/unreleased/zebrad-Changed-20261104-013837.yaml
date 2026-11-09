@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Parse Sapling spend and output proofs in parallel when either list in a bundle contains at least four proofs.
+time: 2026-11-04T01:38:37.019597356+01:00

@@ -4794,8 +4794,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a2cbdcfeef20006adf72699cd466f21fe349674277cc05d3fc9b7302db7b182"
+source = "git+https://github.com/zcash/sapling-crypto?rev=752298d32f9c97f8487becf6ead88c198dfe4762#752298d32f9c97f8487becf6ead88c198dfe4762"
 dependencies = [
  "aes",
  "bellman",
@@ -4817,6 +4816,7 @@ dependencies = [
  "memuse",
  "rand 0.10.2",
  "rand_core 0.10.1",
+ "rayon",
  "redjubjub",
  "subtle",
  "tracing",
@@ -5516,7 +5516,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
