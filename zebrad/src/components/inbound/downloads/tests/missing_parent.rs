@@ -99,9 +99,11 @@ async fn out_of_order_child_recovers_parent_once() {
         let verifier = state
             .clone()
             .map_request(|request: zebra_consensus::Request| match request {
-                zebra_consensus::Request::Commit(block)
-                | zebra_consensus::Request::CommitEarlyRelay(block) => {
+                zebra_consensus::Request::Commit(block) => {
                     zs::Request::CommitCheckpointVerifiedBlock(block.into())
+                }
+                zebra_consensus::Request::CommitEarlyRelay(decoded) => {
+                    zs::Request::CommitCheckpointVerifiedBlock(decoded.block().into())
                 }
                 _ => panic!("the downloader only submits commit requests"),
             })
