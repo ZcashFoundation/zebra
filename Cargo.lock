@@ -7618,6 +7618,7 @@ dependencies = [
  "dirs",
  "futures",
  "halo2_proofs",
+ "hashbrown 0.16.1",
  "hex",
  "hex-literal",
  "howudoin",
