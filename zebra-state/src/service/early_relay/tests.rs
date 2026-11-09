@@ -37,6 +37,7 @@ fn guard(state: &Arc<EarlyRelayState>, hash: block::Hash) -> EarlyRelayGuard {
         state: state.clone(),
         hash,
         context,
+        height: block::Height(2),
     }
 }
 
@@ -221,35 +222,22 @@ fn early_relay_retains_large_small_transaction_blocks() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn early_relay_rejections_have_fixed_count_and_unextended_expiry() {
-    let state = EarlyRelayState::new(WatchReceiver::new(
-        watch::channel(NonFinalizedState::new(&Network::Mainnet)).1,
-    ));
-    let lease = |byte| guard(&state, block::Hash([byte; 32]));
-    let first = lease(0);
+async fn early_relay_rejections_survive_time_and_competing_hashes() {
+    let (state, cache, _snapshot, block) = cache();
+    let first = guard(&state, block.hash());
     first.reject();
-    tokio::time::advance(REJECTION_LIFETIME / 2).await;
-    first.reject();
-    tokio::time::advance(REJECTION_LIFETIME / 2).await;
-    assert!(!first.is_rejected(), "replay must not refresh a rejection");
-
-    first.reject();
-    for byte in 1..u8::try_from(MAX_REJECTIONS).unwrap() {
-        lease(byte).reject();
+    for byte in 0..9 {
+        guard(&state, block::Hash([byte; 32])).reject();
     }
-    assert!(first.is_rejected(), "all eight hashes fit");
-    lease(u8::try_from(MAX_REJECTIONS).unwrap()).reject();
-    assert!(!first.is_rejected(), "the ninth hash evicts the oldest");
-    for byte in 1..=u8::try_from(MAX_REJECTIONS).unwrap() {
-        assert!(lease(byte).is_rejected());
-    }
-    tokio::time::advance(REJECTION_LIFETIME).await;
-    for byte in 0..=u8::try_from(MAX_REJECTIONS).unwrap() {
-        assert!(!lease(byte).is_rejected());
-    }
+    tokio::time::advance(Duration::from_secs(61)).await;
+    assert!(first.is_rejected());
+    let replay = guard(&state, block.hash());
+    assert!(replay.is_rejected());
+    state.publish(block.clone(), &replay, 1);
+    assert!(cache.get(&block.hash()).is_none());
     assert!(
         state.entry.lock().unwrap().is_none(),
-        "hashes retain no bodies"
+        "rejections retain no bodies"
     );
 }
 
@@ -266,6 +254,109 @@ async fn early_relay_rejection_withdraws_live_body_and_prevents_republication() 
     assert!(cache.get(&block.hash()).is_none());
     assert_eq!(*cache.subscribe().borrow(), None);
     assert_eq!(Arc::strong_count(&block), 1);
+}
+
+#[tokio::test]
+async fn early_relay_rejection_capacity_fails_closed() {
+    use super::super::non_finalized_state::MAX_EARLY_RELAY_REJECTIONS;
+
+    let (state, cache, _snapshot, block) = cache();
+    let lease = guard(&state, block.hash());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_some());
+    for index in 0..=MAX_EARLY_RELAY_REJECTIONS {
+        let mut hash = block::Hash([0; 32]);
+        hash.0[..4].copy_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        guard(&state, hash).reject();
+    }
+    assert!(
+        !lease.is_rejected(),
+        "capacity must not reject ordinary full validation"
+    );
+    assert!(!state.allows_early_relay(block.hash()));
+    assert!(cache.get(&block.hash()).is_none());
+    state.publish(block.clone(), &lease, 1);
+    assert!(cache.get(&block.hash()).is_none());
+    assert_eq!(*cache.subscribe().borrow(), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rejection_authentication_does_not_share_normal_admission_or_repeat_known_hashes() {
+    let _init_guard = zebra_test::init();
+    let (_state, read, _, _) = crate::init(
+        crate::Config::ephemeral(),
+        &Network::Mainnet,
+        block::Height(0),
+        0,
+    )
+    .await;
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let _normal = read
+        .early_relay
+        .computation
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    assert!(!tokio::time::timeout(
+        Duration::from_secs(10),
+        read.clone().reject_block(block.clone()),
+    )
+    .await
+    .expect("rejection authentication must not wait for normal admission"));
+    read.early_relay.reject(block.hash(), block::Height(2));
+    let _rejection = read
+        .early_relay
+        .rejection_computation
+        .clone()
+        .acquire_owned()
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(10), read.reject_block(block),)
+            .await
+            .expect("known rejections must not wait for authentication")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rejection_authentication_accepts_a_retained_non_best_parent() {
+    let _init_guard = zebra_test::init();
+    let (finalized, mut snapshot, _) = crate::tests::setup::new_state_with_mainnet_genesis();
+    let parent: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    snapshot
+        .commit_new_chain(parent.prepare(), &finalized.db)
+        .unwrap();
+    let mut sibling = (*block).clone();
+    Arc::make_mut(&mut sibling.header).nonce = [7; 32].into();
+    snapshot
+        .commit_block(Arc::new(sibling).prepare(), &finalized.db)
+        .unwrap();
+    assert_ne!(
+        snapshot.best_tip().unwrap().1,
+        block.header.previous_block_hash
+    );
+    let (_sender, receiver) = watch::channel(snapshot);
+    let read = ReadStateService::new(&finalized, None, WatchReceiver::new(receiver));
+    assert!(tokio::time::timeout(
+        Duration::from_secs(10),
+        read.clone().reject_block(block.clone())
+    )
+    .await
+    .expect("retained-parent rejection authentication must finish"));
+    assert!(read
+        .early_relay
+        .rejections()
+        .lock()
+        .unwrap()
+        .contains(block.hash()));
 }
 
 #[tokio::test(start_paused = true)]

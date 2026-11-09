@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added verifier-only `Request::RejectBlock` and `Response::Rejected` to retain authenticated deterministic block rejections until finalization and suppress renewed speculative relay and mining ([#12190](https://github.com/ZcashFoundation/zebra/pull/12190)).
+time: 2026-11-05T08:51:52.900158479+01:00

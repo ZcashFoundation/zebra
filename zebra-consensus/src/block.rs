@@ -456,6 +456,7 @@ impl VerifyBlockError {
             Self::Block {
                 source:
                     BlockError::TooManyTransparentSignatureOperations { .. }
+                    | BlockError::TooManyShieldedActions { .. }
                     | BlockError::SummingMinerFees { .. },
             } => true,
             Self::Commit(zs::CommitBlockError::ValidateContextError(error)) => matches!(
@@ -732,6 +733,7 @@ where
             let mut early_relay_authenticated = false;
             let mut early_relay = None;
             let mut pending_authentication = None;
+            let mut rejection_candidate = None;
             let result = async {
             let phase_start = Instant::now();
             let hash = block.hash();
@@ -917,6 +919,7 @@ where
 
             // Quick field validity and structure checks
             let coinbase_tx = check::coinbase_is_first(&block)?;
+            rejection_candidate = (!request.is_proposal()).then(|| block.clone());
 
             // From the NSM reissuance height, the block subsidy depends on the
             // NSM value balance after the parent block, which is not committed yet while
@@ -971,9 +974,7 @@ where
                     _ => None,
                 }
             };
-            if require_authentication
-                && early_relay.as_ref().is_some_and(zs::EarlyRelayGuard::is_rejected)
-            {
+            if early_relay.as_ref().is_some_and(zs::EarlyRelayGuard::is_rejected) {
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
 
@@ -1009,7 +1010,7 @@ where
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
                 };
-                let result = state_service.oneshot(commit).await;
+                let result = state_service.clone().oneshot(commit).await;
                 metrics::histogram!(
                     "zebra.consensus.block.phase.duration_seconds",
                     "phase" => "state_commit"
@@ -1316,8 +1317,14 @@ where
                     }
                 }
             }
-            if let Some(guard) = early_relay.as_ref().filter(|_| error.is_deterministic_rejection()) {
-                guard.reject();
+            if error.is_deterministic_rejection() {
+                if let Some(guard) = early_relay.as_ref() {
+                    guard.reject();
+                } else if let Some(block) = rejection_candidate {
+                    // State independently authenticates the body before remembering the hash.
+                    // Failure to authenticate must not replace the original validation error.
+                    let _ = state_service.oneshot(zs::Request::RejectBlock(block)).await;
+                }
             }
             Err(error.for_early_relay(early_relay_authenticated))
         }

@@ -129,6 +129,7 @@ fn mock_state() -> State {
         ready(Ok(match request {
             zs::Request::KnownBlock(_) => zs::Response::KnownBlock(None),
             zs::Request::EarlyRelay { .. } => zs::Response::EarlyRelay(None),
+            zs::Request::RejectBlock(_) => zs::Response::Rejected(false),
             zs::Request::MiningCandidate(_) => zs::Response::MiningCandidate(None),
             zs::Request::AwaitUtxos(outpoints) => zs::Response::Utxos(
                 outpoints
