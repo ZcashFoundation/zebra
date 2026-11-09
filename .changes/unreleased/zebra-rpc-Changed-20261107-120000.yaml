@@ -1,4 +1,4 @@
 project: zebra-rpc
 kind: Changed
-body: '`getblock` with verbosity 0 and `getrawtransaction` with verbosity 0 return the stored bytes of finalized blocks and transactions instead of deserializing and re-serializing them. The responses are unchanged.'
+body: '`getblock` with verbosity 0 and `getrawtransaction` with verbosity 0 return the stored bytes of finalized blocks and transactions instead of deserializing and re-serializing them. The responses are unchanged. These requests now appear in the state request metrics as `raw_block` and `any_chain_raw_transaction` instead of `block` and `any_chain_transaction`.'
 time: 2026-11-07T12:00:00.000000000Z

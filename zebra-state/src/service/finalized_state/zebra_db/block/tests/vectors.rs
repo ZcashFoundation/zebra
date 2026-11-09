@@ -272,6 +272,7 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     ] {
         assert!(db.block(query).unwrap().is_none());
         assert!(db.raw_block(query).unwrap().is_none());
+        assert!(db.serialized_block(query).unwrap().is_none());
         assert!(db.block_and_size(query).unwrap().is_none());
     }
 
@@ -292,6 +293,7 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
         ] {
             assert_eq!(db.block(query).unwrap_err(), expected);
             assert_eq!(db.raw_block(query).unwrap_err(), expected);
+            assert_eq!(db.serialized_block(query).unwrap_err(), expected);
             assert_eq!(db.block_and_size(query).unwrap_err(), expected);
             assert!(db.block_header(query).is_some());
         }
@@ -306,6 +308,10 @@ fn incomplete_block_bodies_are_not_unknown_or_partial() {
     ] {
         assert_eq!(
             db.block(query).unwrap_err(),
+            BlockReadError::CorruptBlock { height }
+        );
+        assert_eq!(
+            db.serialized_block(query).unwrap_err(),
             BlockReadError::CorruptBlock { height }
         );
     }
