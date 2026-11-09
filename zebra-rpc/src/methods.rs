@@ -3236,6 +3236,10 @@ where
         HexData(block_bytes): HexData,
         _parameters: Option<SubmitBlockParameters>,
     ) -> Result<SubmitBlockResponse> {
+        // An owning submission normally commits promptly; bound only duplicate resolution so a
+        // stalled owner cannot hold a miner's RPC indefinitely or get a fresh deadline after verify.
+        const DUPLICATE_COMMIT_TIMEOUT: Duration = Duration::from_secs(10);
+        let duplicate_deadline = tokio::time::Instant::now() + DUPLICATE_COMMIT_TIMEOUT;
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
         // The input byte bound keeps ordinary small-block parsing cheaper than a worker hop.
@@ -3269,6 +3273,20 @@ where
             .coinbase_height()
             .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
+        // Preserve zcashd's duplicate result for blocks known before this verification starts.
+        let zebra_state::Response::KnownBlock(known) = self
+            .state
+            .clone()
+            .oneshot(zebra_state::Request::KnownBlock(block_hash))
+            .await
+            .map_misc_error()?
+        else {
+            unreachable!("unmatched response to a known block request");
+        };
+        if known.is_some() {
+            return Ok(SubmitBlockErrorResponse::Duplicate.into());
+        }
+
         let (request, validated) = match self.gbt.mined_block_notifications() {
             Some((notifications, validated)) => (
                 zebra_consensus::Request::CommitDecoded(decoded, Some(notifications)),
@@ -3396,7 +3414,53 @@ where
         };
 
         let response = match chain_error {
-            Ok(source) if source.is_duplicate_request() => SubmitBlockErrorResponse::Duplicate,
+            Ok(source) if source.is_duplicate_request() => {
+                // A queued owner can still fail contextual validation: only committed state
+                // confirms success, including side chains. Do not extend the submission's deadline.
+                return tokio::time::timeout_at(duplicate_deadline, async {
+                    let mut retry_delay = Duration::from_millis(2);
+                    loop {
+                        let zebra_state::Response::KnownBlock(known) = self
+                            .state
+                            .clone()
+                            .oneshot(zebra_state::Request::KnownBlock(block_hash))
+                            .await
+                            .map_misc_error()?
+                        else {
+                            unreachable!("unmatched response to a known block request");
+                        };
+                        match self
+                            .read_state
+                            .clone()
+                            .oneshot(ReadRequest::AnyChainBlock(block_hash.into()))
+                            .await
+                            .map_misc_error()?
+                        {
+                            ReadResponse::Block(Some(committed)) if committed == block => {
+                                return Ok(SubmitBlockResponse::Accepted);
+                            }
+                            ReadResponse::Block(None)
+                                if matches!(
+                                    known,
+                                    Some(
+                                        zebra_state::KnownBlock::Queue
+                                            | zebra_state::KnownBlock::WriteChannel
+                                    )
+                                ) =>
+                            {
+                                tokio::time::sleep(retry_delay).await;
+                                retry_delay = (retry_delay * 2).min(Duration::from_millis(50));
+                            }
+                            ReadResponse::Block(_) => {
+                                return Ok(SubmitBlockErrorResponse::Duplicate.into());
+                            }
+                            _ => unreachable!("unmatched response to an any-chain block request"),
+                        }
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| Ok(SubmitBlockErrorResponse::Duplicate.into()));
+            }
 
             // Currently, these match arms return Reject for the older duplicate in a queue,
             // but queued duplicates should be DuplicateInconclusive.
