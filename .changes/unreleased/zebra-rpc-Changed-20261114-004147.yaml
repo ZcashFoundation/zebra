@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Large block decoding for `submitblock` and proposal requests shares bounded blocking admission, retained until decoding finishes even after caller cancellation. Inputs up to 4 KiB remain serial and inline ([#12308](https://github.com/ZcashFoundation/zebra/pull/12308)).
+time: 2026-11-14T00:41:47.067989268+01:00

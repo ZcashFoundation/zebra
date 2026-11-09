@@ -34,7 +34,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, Duration32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, SerializationError},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
@@ -42,7 +42,9 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{
+    router::service_trait::BlockVerifierService, DecodedBlock, PreparedBlockCache, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -964,6 +966,37 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
     }
 }
 
+const BLOCK_DECODE_LIMIT: usize = 8;
+
+/// Bounds large RPC decodes independently of verifier readiness and response cancellation.
+static BLOCK_DECODES: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(BLOCK_DECODE_LIMIT);
+
+pub(crate) async fn decode_block(
+    bytes: Vec<u8>,
+    prepared: Option<PreparedBlockCache>,
+) -> RpcResult<Result<DecodedBlock, SerializationError>> {
+    let inline = bytes.len() <= 4 * 1024;
+    let decode = move || match prepared {
+        Some(cache) => cache.deserialize(&bytes),
+        None => DecodedBlock::deserialize(&bytes),
+    };
+    if inline {
+        return Ok(decode());
+    }
+    let admitted =
+        tokio::time::timeout(std::time::Duration::from_secs(10), BLOCK_DECODES.acquire())
+            .await
+            .map_misc_error()?
+            .map_misc_error()?;
+    Ok(tokio::task::spawn_blocking(move || {
+        let _admitted = admitted;
+        decode()
+    })
+    .await
+    .expect("malformed block bytes return a deserialization error rather than panicking"))
+}
+
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
@@ -1007,8 +1040,8 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
-        Ok(block) => block,
+    let block = match decode_block(block_proposal_bytes, None).await? {
+        Ok(decoded) => decoded.block().clone(),
         Err(parse_error) => {
             tracing::info!(
                 ?parse_error,
@@ -1061,7 +1094,7 @@ where
         .ready()
         .await
         .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-        .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
+        .call(zebra_consensus::Request::CheckProposal(block))
         .await;
 
     Ok(block_verifier_router_response
