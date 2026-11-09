@@ -1,6 +1,6 @@
-//! Benchmarks for the JSON-RPC compatibility middleware's response round trip.
+//! Benchmarks for the JSON-RPC compatibility middleware's request and response round trips.
 //!
-//! `HttpRequestMiddleware` parses every response body and serializes it again. These benches
+//! `HttpRequestMiddleware` can parse and re-serialize request and response bodies. These benches
 //! drive the real middleware over an inner service that returns a canned response, and compare
 //! it with calling that service directly.
 //!
@@ -10,6 +10,9 @@
 //! - `hex`: one long string, like `getblock` verbosity 0
 //! - `objects`: `getblock` verbosity 2 transaction objects from mainnet block 1,687,118,
 //!   repeated to the target size
+//!
+//! Responses are measured for a 2.0 request, and for a lightwalletd-style 1.0 request whose
+//! response is converted back. Requests are a `submitblock` call with a 4 MB hex block.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -30,6 +33,7 @@ use zebra_rpc::{
 const MB: usize = 1024 * 1024;
 
 const REQUEST: &str = r#"{"jsonrpc":"2.0","method":"getblock","params":["1",2],"id":1}"#;
+const REQUEST_1_0: &str = r#"{"jsonrpc":"1.0","method":"getblock","params":["1",2],"id":1}"#;
 
 /// Wraps `result` in a JSON-RPC 2.0 response.
 fn response(result: &str) -> Bytes {
@@ -94,7 +98,16 @@ fn inner_service(
 }
 
 /// Sends one request through `service` and collects the response body.
-async fn round_trip<S>(service: &mut S) -> Bytes
+async fn round_trip<S>(service: &mut S, request: &'static str) -> Bytes
+where
+    S: Service<HttpRequest, Response = HttpResponse>,
+    S::Error: std::fmt::Debug,
+{
+    send(service, Bytes::from_static(request.as_bytes())).await
+}
+
+/// Sends `request` through `service` and collects the response body.
+async fn send<S>(service: &mut S, request: Bytes) -> Bytes
 where
     S: Service<HttpRequest, Response = HttpResponse>,
     S::Error: std::fmt::Debug,
@@ -103,7 +116,7 @@ where
         .ready()
         .await
         .expect("service is ready")
-        .call(HttpRequest::new(HttpBody::from(REQUEST)))
+        .call(HttpRequest::new(HttpBody::new(Full::new(request))))
         .await
         .expect("service returns a response");
 
@@ -132,13 +145,16 @@ fn bench_response_round_trip(c: &mut Criterion) {
 
             let mut middleware = HttpRequestMiddleware::new(inner_service(body.clone()), None, MB);
             group.bench_function(BenchmarkId::new("middleware", &label), |b| {
-                b.iter(|| runtime.block_on(round_trip(&mut middleware)))
+                b.iter(|| runtime.block_on(round_trip(&mut middleware, REQUEST)))
+            });
+            group.bench_function(BenchmarkId::new("middleware 1.0", &label), |b| {
+                b.iter(|| runtime.block_on(round_trip(&mut middleware, REQUEST_1_0)))
             });
 
             // Baseline: the same inner service without the middleware.
             let mut direct = inner_service(body);
             group.bench_function(BenchmarkId::new("direct", &label), |b| {
-                b.iter(|| runtime.block_on(round_trip(&mut direct)))
+                b.iter(|| runtime.block_on(round_trip(&mut direct, REQUEST)))
             });
         }
     }
@@ -146,5 +162,37 @@ fn bench_response_round_trip(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_response_round_trip);
+/// A `submitblock` request with a hex block of `size` bytes, in JSON-RPC 1.0 or 2.0 form.
+fn submitblock_request(version: &str, size: usize) -> Bytes {
+    format!(
+        r#"{{"jsonrpc":"{version}","method":"submitblock","params":["{}"],"id":1}}"#,
+        "ab".repeat(size / 2)
+    )
+    .into()
+}
+
+fn bench_request_round_trip(c: &mut Criterion) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("runtime builds");
+    let mut group = c.benchmark_group("http compat request");
+    group.sample_size(10);
+
+    let response = response("null");
+    for version in ["2.0", "1.0"] {
+        let request = submitblock_request(version, 4 * MB);
+        let label = format!("submitblock {version} {} MB", request.len() / MB);
+        group.throughput(Throughput::Bytes(request.len() as u64));
+
+        let mut middleware =
+            HttpRequestMiddleware::new(inner_service(response.clone()), None, 8 * MB);
+        group.bench_function(BenchmarkId::new("middleware", &label), |b| {
+            b.iter(|| runtime.block_on(send(&mut middleware, request.clone())))
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_response_round_trip, bench_request_round_trip);
 criterion_main!(benches);

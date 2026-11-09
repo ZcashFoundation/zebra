@@ -7539,6 +7539,7 @@ dependencies = [
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
  "lazy_static",
+ "memchr",
  "metrics",
  "nix",
  "openrpsee",

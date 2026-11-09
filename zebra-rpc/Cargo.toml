@@ -49,6 +49,8 @@ jsonrpsee-types = { workspace = true }
 jsonrpsee-proc-macros = { workspace = true }
 hyper = { workspace = true }
 http-body-util = { workspace = true }
+bytes = { workspace = true }
+memchr = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = { workspace = true, features = ["hex"] }
@@ -125,7 +127,6 @@ tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-bytes = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
