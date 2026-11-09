@@ -2001,6 +2001,7 @@ impl Service<Request> for StateService {
             | Request::Block(_)
             | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
+            | Request::RawBlock(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }

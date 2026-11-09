@@ -1410,6 +1410,17 @@ pub enum Request {
     /// Returns `None` for torn secondary views, unless a known body is below the retained floor.
     BlockAndSize(HashOrHeight),
 
+    /// Looks up a serialized block by hash or height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::RawBlock(Some(SerializedBlock))`](Response::RawBlock) if the block is in the best chain;
+    /// * [`Response::RawBlock(None)`](Response::RawBlock) otherwise.
+    ///
+    /// Finalized blocks are served from their stored bytes, without deserializing them, so
+    /// this is the cheap way to send a block to a peer.
+    RawBlock(HashOrHeight),
+
     /// Looks up a block header by hash or height in the current best chain.
     ///
     /// Returns [`Response::BlockHeader`] with the header and its identity, or `None` for an
@@ -1619,6 +1630,7 @@ impl Request {
             Request::Block(_) => "block",
             Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
+            Request::RawBlock(_) => "raw_block",
             Request::BlockHeader(_) => "block_header",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
@@ -2315,6 +2327,7 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::AnyChainBlock(hash_or_height))
             }
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
+            Request::RawBlock(hash_or_height) => Ok(ReadRequest::RawBlock(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
             Request::KnownTransaction(tx_hash) => Ok(ReadRequest::KnownTransaction(tx_hash)),
