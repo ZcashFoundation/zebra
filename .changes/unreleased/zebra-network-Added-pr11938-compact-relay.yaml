@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Added
-body: Added compact-block encoding types and bounded block reconstruction using witnessed transaction identities ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).
+body: Added compact-block encoding types and bounded block reconstruction using witnessed transaction identities. Successful reconstruction returns an immutable `ReconstructedBlock` carrying its exact bounded serialized size and transaction-Merkle evidence, sealed to the same block allocation for later verification ([#11938](https://github.com/ZcashFoundation/zebra/pull/11938)).
 time: 2026-11-05T06:30:56.609332378+01:00
