@@ -256,8 +256,10 @@ pub struct SemanticallyVerifiedBlock {
     pub hash: block::Hash,
     /// The height of the block.
     pub height: block::Height,
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// New transparent outputs created in this block, indexed by
     /// [`OutPoint`](transparent::OutPoint).
+    /// Shared with contextual verification and cached proposal clones.
     ///
     /// Each output is tagged with its transaction index in the block.
     /// (The outputs of earlier transactions in a block can be spent by later
@@ -268,7 +270,7 @@ pub struct SemanticallyVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
@@ -468,6 +470,7 @@ impl FinalizedBlock {
         )
     }
 
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
@@ -478,7 +481,8 @@ impl FinalizedBlock {
             block: block.block,
             hash: block.hash,
             height: block.height,
-            new_outputs: block.new_outputs,
+            // Finalized database writes own their output map; reuse it when no shared owners remain.
+            new_outputs: Arc::unwrap_or_clone(block.new_outputs),
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
@@ -565,13 +569,13 @@ impl ContextuallyVerifiedBlock {
     /// Converts an exact successful proposal result, rebound to its solved block, into a mined commit.
     ///
     /// The caller must first verify solved proof of work, current time, serialized size, and exact
-    /// proposal equality except nonce and solution. Moves the output map into the queue metadata.
-    pub fn into_mined_request(mut self, notifications: MinedBlockNotifications) -> Request {
+    /// proposal equality except nonce and solution. Shares the output map with the queue metadata.
+    pub fn into_mined_request(self, notifications: MinedBlockNotifications) -> Request {
         let block = SemanticallyVerifiedBlock {
             block: self.block.clone(),
             hash: self.hash,
             height: self.height,
-            new_outputs: Arc::unwrap_or_clone(std::mem::take(&mut self.new_outputs)),
+            new_outputs: self.new_outputs.clone(),
             transaction_hashes: self.transaction_hashes.clone(),
             received_time: self.received_time,
         };
@@ -615,6 +619,7 @@ impl ContextuallyVerifiedBlock {
 
     // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
     // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Like [`Self::with_block_and_spent_utxos`], and also returns the block's gross transaction
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
@@ -645,7 +650,7 @@ impl ContextuallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs: Arc::new(new_outputs),
+                new_outputs,
                 spent_outputs: Arc::new(spent_outputs),
                 transaction_hashes,
                 chain_value_pool_change,
@@ -741,13 +746,17 @@ impl CheckpointVerifiedBlock {
 }
 
 impl SemanticallyVerifiedBlock {
+    // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
     /// Creates [`SemanticallyVerifiedBlock`] from [`Block`] and [`block::Hash`].
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         let height = block
             .coinbase_height()
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs = Arc::new(transparent::new_ordered_outputs(
+            &block,
+            &transaction_hashes,
+        ));
 
         Self {
             block,
@@ -777,6 +786,7 @@ impl From<SemanticallyVerifiedBlock> for CheckpointVerifiedBlock {
     }
 }
 
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<Arc<Block>> for SemanticallyVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
         let hash = block.hash();
@@ -784,7 +794,10 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             .coinbase_height()
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let new_outputs = Arc::new(transparent::new_ordered_outputs(
+            &block,
+            &transaction_hashes,
+        ));
 
         Self {
             block,
@@ -799,26 +812,28 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
 
 // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
 // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
         Self {
             block: valid.block,
             hash: valid.hash,
             height: valid.height,
-            new_outputs: Arc::unwrap_or_clone(valid.new_outputs),
+            new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
         }
     }
 }
 
+// Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
 impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
     fn from(finalized: FinalizedBlock) -> Self {
         Self {
             block: finalized.block,
             hash: finalized.hash,
             height: finalized.height,
-            new_outputs: finalized.new_outputs,
+            new_outputs: Arc::new(finalized.new_outputs),
             transaction_hashes: finalized.transaction_hashes,
             // The finalized state does not track receipt times, so there is no stamp.
             received_time: None,

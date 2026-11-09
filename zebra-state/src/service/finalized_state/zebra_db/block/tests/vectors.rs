@@ -139,7 +139,11 @@ fn test_block_db_round_trip_with(
                 block: original_block.clone(),
                 hash,
                 height: Height(0),
-                new_outputs,
+                // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license
+                // or the Apache License, Version 2.0, at your option.
+                // Adapted from zakura-core/zakura#1905
+                // (https://github.com/zakura-core/zakura/pull/1905).
+                new_outputs: Arc::new(new_outputs),
                 transaction_hashes,
                 received_time: None,
             })

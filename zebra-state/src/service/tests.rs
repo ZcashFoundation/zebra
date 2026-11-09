@@ -795,7 +795,11 @@ proptest! {
 
         let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
         for block in non_finalized_blocks {
-            let utxos = block.new_outputs.clone();
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or
+            // the Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura#1905
+            // (https://github.com/zakura-core/zakura/pull/1905).
+            let utxos = block.new_outputs.as_ref().clone();
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 

@@ -135,7 +135,10 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         block: block.clone(),
         hash: block::Hash([0x00; 32]),
         height,
-        new_outputs,
+        // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+        // Apache License, Version 2.0, at your option.
+        // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
+        new_outputs: Arc::new(new_outputs),
         transaction_hashes,
         received_time: None,
     };
@@ -291,7 +294,9 @@ fn coinbase_fees_preserve_finalized_balances_and_address_locations() {
             hash: block.hash(),
             block,
             height,
-            new_outputs,
+            // Adapted from zakura-core/zakura#1905
+            // (https://github.com/zakura-core/zakura/pull/1905).
+            new_outputs: Arc::new(new_outputs),
             transaction_hashes,
             received_time: None,
         }),

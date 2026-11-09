@@ -719,8 +719,9 @@ fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
             &network,
             ValueBalance::zero(),
         )?;
+        let prepared = block.clone().prepare();
         let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
-            block.clone().prepare(),
+            prepared.clone(),
             spent.clone(),
             DeferredPoolBalanceChange::zero(),
             &network,
@@ -728,6 +729,8 @@ fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
         )?;
         assert_eq!((contextual.chain_value_pool_change, fees), expected);
         assert_eq!(contextual.spent_outputs.as_ref(), &spent);
+        assert!(Arc::ptr_eq(&prepared.new_outputs, &contextual.new_outputs));
+        drop(prepared);
         assert_eq!(block.transaction_fees(&spent)?.zatoshis(), 2);
         let cloned = contextual.clone();
         assert_eq!(cloned, contextual);
@@ -737,12 +740,14 @@ fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
             &cloned.spent_outputs
         ));
         let semantic = SemanticallyVerifiedBlock::from(cloned);
-        assert_eq!(&semantic.new_outputs, contextual.new_outputs.as_ref());
+        // Adapted from zakura-core/zakura#1905 (https://github.com/zakura-core/zakura/pull/1905).
+        assert!(Arc::ptr_eq(&semantic.new_outputs, &contextual.new_outputs));
+        drop(semantic);
         let unique = contextual;
         let expected_outputs = unique.new_outputs.as_ref().clone();
         assert_eq!(Arc::strong_count(&unique.new_outputs), 1);
         assert_eq!(
-            SemanticallyVerifiedBlock::from(unique).new_outputs,
+            *SemanticallyVerifiedBlock::from(unique).new_outputs,
             expected_outputs
         );
     }
@@ -2038,12 +2043,12 @@ fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
     };
     let prepare_with_funding = |block: Arc<Block>, height: Height| {
         let mut prepared = block.prepare();
-        prepared
-            .new_outputs
-            .extend(funding_outpoints(height).map(|outpoint| {
+        Arc::make_mut(&mut prepared.new_outputs).extend(funding_outpoints(height).map(
+            |outpoint| {
                 let utxo = transparent::Utxo::new(funding_output(), height, false);
                 (outpoint, transparent::OrderedUtxo::from_utxo(utxo, 0))
-            }));
+            },
+        ));
         prepared
     };
 

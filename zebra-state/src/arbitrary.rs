@@ -108,7 +108,6 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             received_time,
         } = block.into();
-        let new_outputs = Arc::new(new_outputs);
 
         Self {
             block,
