@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Add `Request::RawBlocksByHash`, answered by the new `Response::RawBlocks` variant, and `PeerError::InboundOnlyRequest`. Legacy connections now decode a block `getdata` from a peer as `Request::RawBlocksByHash` and send each block from its stored bytes, so the inbound service must answer both block requests. The peer set rejects `RawBlocksByHash` instead of routing it to a peer. Code that matches on every `Request`, `Response` or `PeerError` variant must handle the new ones.
+time: 2026-11-09T20:00:00.000000000Z

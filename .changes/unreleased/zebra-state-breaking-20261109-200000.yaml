@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Add `Request::RawBlock`, answered by the new `Response::RawBlock` variant, which forwards to `ReadRequest::RawBlock` so state service users can read a block's serialized bytes. Code that matches on every `Request` or `Response` variant must handle the new ones.
+time: 2026-11-09T20:00:00.000000000Z

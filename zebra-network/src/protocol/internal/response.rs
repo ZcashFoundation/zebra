@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SerializedBlock},
     parallel::tree::TreeRootsProof,
     transaction::{UnminedTx, UnminedTxId},
 };
@@ -142,6 +142,13 @@ pub enum Response {
     /// Local-only response to [`super::Request::CompactBlockTransactions`], never sent on the wire.
     CompactBlockTransactions(Vec<UnminedTx>),
 
+    /// A list of found serialized blocks, and missing block hashes.
+    ///
+    /// The response to [`Request::RawBlocksByHash`](super::Request::RawBlocksByHash). Each
+    /// available block is sent to the peer as its stored bytes.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlocks(Vec<InventoryResponse<SerializedBlock, block::Hash>>),
+
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
@@ -211,6 +218,11 @@ impl fmt::Display for Response {
                 blocks.iter().filter(|r| r.is_available()).count(),
                 blocks.iter().filter(|r| r.is_missing()).count()
             ),
+            Response::RawBlocks(blocks) => format!(
+                "RawBlocks {{ blocks: {}, missing: {} }}",
+                blocks.iter().filter(|r| r.is_available()).count(),
+                blocks.iter().filter(|r| r.is_missing()).count()
+            ),
 
             Response::Transactions(transactions) => format!(
                 "Transactions {{ transactions: {}, missing: {} }}",
@@ -246,6 +258,7 @@ impl Response {
             Response::ReconstructedBlock(..) => "ReconstructedBlock",
             Response::AuthorizedBlocks { .. } => "AuthorizedBlocks",
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
+            Response::RawBlocks(_) => "RawBlocks",
             Response::Transactions(_) => "Transactions",
             Response::TreeRoots(_) | Response::TreeRootsFromPeer(..) => "TreeRoots",
         }

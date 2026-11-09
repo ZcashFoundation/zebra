@@ -1526,7 +1526,7 @@ where
             (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_, _)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
-            (AwaitingRequest, EarlyBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
+            (AwaitingRequest, EarlyBlocksByHash(_) | RawBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
                 Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
@@ -1627,6 +1627,11 @@ where
             }
             Message::Block(_) => {
                 debug!(%msg, "got block message unsolicited or from canceled request");
+                Unused
+            }
+            // Raw blocks are only ever sent by Zebra: peers' block messages decode as `Block`.
+            Message::RawBlock(_) => {
+                debug!(%msg, "got raw block message, which the codec never decodes");
                 Unused
             }
             Message::Headers(_) => {
@@ -1742,7 +1747,8 @@ where
                     if self.connection_info.early_block_relay {
                         Request::EarlyBlocksByHash(hashes)
                     } else {
-                        Request::BlocksByHash(hashes)
+                        // Serve stored block bytes, rather than deserializing and reserializing them.
+                        Request::RawBlocksByHash(hashes)
                     }
                     .into()
                 }
@@ -1931,6 +1937,29 @@ where
 
                 if !missing_ids.is_empty() {
                     if let Err(e) = self.peer_tx.send(Message::NotFound(missing_ids)).await {
+                        self.fail_with(e).await;
+                        return;
+                    }
+                }
+            }
+            Response::RawBlocks(blocks) => {
+                // Like `Blocks`, but each block is sent from its stored bytes.
+                let mut missing_hashes = Vec::new();
+
+                for block in blocks.into_iter() {
+                    match block {
+                        Available(block) => {
+                            if let Err(e) = self.peer_tx.send(Message::RawBlock(block)).await {
+                                self.fail_with(e).await;
+                                return;
+                            }
+                        }
+                        Missing(hash) => missing_hashes.push(hash.into()),
+                    }
+                }
+
+                if !missing_hashes.is_empty() {
+                    if let Err(e) = self.peer_tx.send(Message::NotFound(missing_hashes)).await {
                         self.fail_with(e).await;
                         return;
                     }

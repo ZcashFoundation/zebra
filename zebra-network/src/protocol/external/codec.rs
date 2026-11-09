@@ -182,7 +182,7 @@ impl Encoder<Message> for Codec {
             Reject { .. } => b"reject\0\0\0\0\0\0",
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
             GetAddr => b"getaddr\0\0\0\0\0",
-            Block { .. } => b"block\0\0\0\0\0\0\0",
+            Block { .. } | RawBlock { .. } => b"block\0\0\0\0\0\0\0",
             SendCompact { .. } => b"sendcmpct\0\0\0",
             CompactBlock { .. } => b"cmpctblock\0\0",
             GetBlockTransactions { .. } => b"getblocktxn\0",
@@ -333,6 +333,7 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
+            Message::RawBlock(block) => writer.write_all(block.as_ref())?,
             Message::SendCompact {
                 high_bandwidth,
                 version,

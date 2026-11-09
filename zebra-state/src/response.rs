@@ -186,6 +186,9 @@ pub enum Response {
     /// Response to [`Request::BlockAndSize`] with the specified block and size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`Request::RawBlock`] with the specified serialized block.
+    RawBlock(Option<SerializedBlock>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -770,6 +773,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
+            ReadResponse::RawBlock(block) => Ok(Response::RawBlock(block)),
             ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -801,7 +805,6 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
-            | ReadResponse::RawBlock(_)
             | ReadResponse::RawTransaction(_)
             | ReadResponse::SpentOutputs(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)

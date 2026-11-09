@@ -75,6 +75,18 @@ pub enum Request {
     /// evidence when a single-block download uses compact reconstruction.
     BlocksByHash(HashSet<block::Hash>),
 
+    /// Serve stored blocks to a legacy peer, by hash, as their serialized bytes.
+    ///
+    /// This inbound-only request is what a legacy connection decodes a block `getdata` into, so
+    /// the inbound service can send the stored block bytes without deserializing and
+    /// reserializing every block. It is never sent to peers or routed by the peer set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlocksByHash(HashSet<block::Hash>),
+
     /// Request blocks from this node on a connection that negotiated experimental early relay.
     ///
     /// Only the inbound connection creates this request, based on both peers' service bits.
@@ -363,6 +375,9 @@ impl fmt::Display for Request {
             Request::EarlyBlocksByHash(hashes) => {
                 format!("EarlyBlocksByHash({})", hashes.len())
             }
+            Request::RawBlocksByHash(hashes) => {
+                format!("RawBlocksByHash({})", hashes.len())
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
@@ -412,6 +427,7 @@ impl Request {
 
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
+            Request::RawBlocksByHash(_) => "RawBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",

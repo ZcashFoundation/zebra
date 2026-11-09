@@ -5,7 +5,7 @@ use std::{error::Error, fmt, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SerializedBlock},
     parallel::tree::TreeRootsProof,
     transaction::UnminedTx,
 };
@@ -251,6 +251,13 @@ pub enum Message {
     /// proofs, but never has more entries than requested. This capability remains draft.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     TreeRoots(Option<Vec<TreeRootsProof>>),
+
+    /// A `block` message, sent from a block's stored serialized bytes.
+    ///
+    /// Encodes exactly like [`Message::Block`]. Zebra only sends it, peers' `block` messages
+    /// are always decoded as [`Message::Block`].
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlock(SerializedBlock),
 
     /// A `tx` message.
     ///
@@ -568,6 +575,7 @@ impl fmt::Display for Message {
                     .unwrap_or_else(|| "None".into()),
                 block.hash(),
             ),
+            Message::RawBlock(block) => format!("block {{ bytes: {} }}", block.as_ref().len()),
             Message::Tx(_) => "tx".to_string(),
             Message::SendCompact { .. }
             | Message::CompactBlock(_)
@@ -610,7 +618,7 @@ impl Message {
             Message::GetHeaders { .. } => "getheaders",
             Message::Headers(_) => "headers",
             Message::GetData(_) => "getdata",
-            Message::Block(_) => "block",
+            Message::Block(_) | Message::RawBlock(_) => "block",
             Message::SendCompact { .. } => "sendcmpct",
             Message::CompactBlock(_) => "cmpctblock",
             Message::GetBlockTransactions(_) => "getblocktxn",
