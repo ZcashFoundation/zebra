@@ -2363,6 +2363,11 @@ where
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
 
+            // Only the inbound service answers this request: it is never routed to a peer.
+            Request::RawBlocksByHash(_) => {
+                future::ready(Err(PeerError::InboundOnlyRequest("RawBlocksByHash").into())).boxed()
+            }
+
             // Find requests rotate across serving peers with a bounded wait; others use P2C.
             _ => self.route_request(req),
         };

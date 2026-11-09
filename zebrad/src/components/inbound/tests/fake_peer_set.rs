@@ -122,6 +122,73 @@ async fn inbound_propagates_incomplete_block_body_errors() {
     .unwrap();
 }
 
+/// Raw block requests serve each committed block as exactly its serialized bytes, report unknown
+/// blocks as missing, and agree with the parsed block responses.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_raw_blocks_match_serialized_blocks() {
+    use zebra_chain::{
+        block::{Hash as BlockHash, SerializedBlock},
+        serialization::ZcashSerialize,
+    };
+
+    let (
+        inbound_service,
+        _mempool_guard,
+        committed_blocks,
+        _added_transactions,
+        _mock_tx_verifier,
+        mut peer_set,
+        _state_guard,
+        _chain_tip_change,
+        sync_gossip_task_handle,
+        tx_gossip_task_handle,
+    ) = setup(false).await;
+    assert!(!committed_blocks.is_empty(), "setup commits test blocks");
+
+    let missing_hash = BlockHash([0x11; 32]);
+
+    for block in &committed_blocks {
+        let response = inbound_service
+            .clone()
+            .oneshot(Request::RawBlocksByHash(HashSet::from([
+                block.hash(),
+                missing_hash,
+            ])))
+            .await
+            .expect("raw block requests succeed");
+        let Response::RawBlocks(items) = response else {
+            panic!("unexpected response to a raw block request: {response:?}");
+        };
+
+        let available: Vec<SerializedBlock> =
+            items.iter().filter_map(|item| item.available()).collect();
+        let missing: Vec<BlockHash> = items.iter().filter_map(|item| item.missing()).collect();
+        assert_eq!(
+            available,
+            vec![SerializedBlock::from(
+                block.zcash_serialize_to_vec().expect("blocks serialize")
+            )],
+            "a committed block is served as its exact serialized bytes"
+        );
+        assert_eq!(missing, vec![missing_hash], "unknown blocks are missing");
+
+        let parsed = inbound_service
+            .clone()
+            .oneshot(Request::BlocksByHash(HashSet::from([block.hash()])))
+            .await
+            .expect("block requests succeed");
+        assert_eq!(
+            parsed,
+            Response::Blocks(vec![InventoryResponse::Available((block.clone(), None))]),
+            "parsed block requests are unchanged"
+        );
+    }
+
+    peer_set.expect_no_requests().await;
+    sync_gossip_task_handle.abort();
+    tx_gossip_task_handle.abort();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn empty_mempool_requests_return_empty_inventory() {
     let (

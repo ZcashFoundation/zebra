@@ -228,6 +228,10 @@ fuzz_target!(|data: &[u8]| {
                             panic::catch_unwind(panic::AssertUnwindSafe(|| header.header.hash()));
                     }
                 }
+                // The codec never decodes raw blocks: Zebra only sends them.
+                Message::RawBlock(block) => {
+                    let _len = block.as_ref().len();
+                }
                 Message::Block(block) => {
                     // Deep fuzz the block — replicate block_deep_fuzz Layer 2
                     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| block.hash()));
@@ -395,6 +399,7 @@ fuzz_target!(|data: &[u8]| {
                 | Message::GetData(_)
                 | Message::NotFound(_)
                 | Message::Block(_)
+                | Message::RawBlock(_)
                 | Message::Headers(_)
                 | Message::GetHeaders { .. }
                 | Message::Tx(_)

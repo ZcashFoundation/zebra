@@ -1585,6 +1585,65 @@ async fn connection_is_randomly_disconnected_on_overload() {
     );
 }
 
+/// An inbound block `getdata` is answered from stored block bytes: the connection asks the inbound
+/// service for raw blocks, then sends each one as a `block` message, followed by a `notfound`
+/// for the missing blocks.
+#[tokio::test]
+async fn connection_serves_inbound_block_getdata_from_raw_bytes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .expect("test vector blocks are valid");
+    let missing_hash = block::Hash([0x11; 32]);
+    let raw = block::SerializedBlock::from(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec());
+
+    let (mut peer_tx, peer_rx) = mpsc::channel(1);
+    let (
+        connection,
+        _client_tx,
+        mut inbound_service,
+        mut peer_outbound_messages,
+        shared_error_slot,
+    ) = new_test_connection();
+    let connection_handle = tokio::spawn(connection.run(peer_rx));
+
+    peer_tx
+        .send(Ok(Message::GetData(vec![
+            InventoryHash::Block(block.hash()),
+            InventoryHash::Block(missing_hash),
+        ])))
+        .await
+        .expect("send to channel always succeeds");
+
+    inbound_service
+        .expect_request(Request::RawBlocksByHash(HashSet::from([
+            block.hash(),
+            missing_hash,
+        ])))
+        .await
+        .respond(Response::RawBlocks(vec![
+            InventoryResponse::Available(raw.clone()),
+            InventoryResponse::Missing(missing_hash),
+        ]));
+
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::RawBlock(raw)),
+        "the available block must be sent from its stored bytes"
+    );
+    assert_eq!(
+        peer_outbound_messages.next().await,
+        Some(Message::NotFound(vec![InventoryHash::Block(missing_hash)])),
+        "the missing block must be reported in a notfound message"
+    );
+
+    let error = shared_error_slot.try_get_error();
+    assert!(error.is_none(), "unexpected connection error: {error:?}");
+
+    connection_handle.abort();
+}
+
 #[tokio::test]
 async fn connection_ping_pong_round_trip() {
     let _init_guard = zebra_test::init();

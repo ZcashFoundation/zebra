@@ -72,6 +72,18 @@ pub enum Request {
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
 
+    /// Serve stored blocks to a legacy peer, by hash, as their serialized bytes.
+    ///
+    /// This inbound-only request is what a legacy connection decodes a block `getdata` into, so
+    /// the inbound service can send the stored block bytes without deserializing and
+    /// reserializing every block. It is never sent to peers or routed by the peer set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks).
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlocksByHash(HashSet<block::Hash>),
+
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
     /// This outbound-only request is used by sync and gossip downloaders. Unlike
@@ -268,6 +280,9 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::RawBlocksByHash(hashes) => {
+                format!("RawBlocksByHash({})", hashes.len())
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
@@ -303,6 +318,7 @@ impl Request {
             Request::Ping(_) => "Ping",
 
             Request::BlocksByHash(_) => "BlocksByHash",
+            Request::RawBlocksByHash(_) => "RawBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::TransactionsById(_) => "TransactionsById",
 
