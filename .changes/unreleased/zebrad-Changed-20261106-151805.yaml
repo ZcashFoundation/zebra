@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Avoid duplicate verification of authenticated compact-relay block bodies during sync, with bounded independent recovery if the first verification stalls or fails.
+time: 2026-11-06T15:18:05.650072816+01:00
