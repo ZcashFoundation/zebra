@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra now serves blocks to legacy peers from their stored bytes, instead of deserializing, sizing and reserializing each one. On full-size blocks from the 2022 spam period this cuts the CPU time to serve a block about 15–20 times, from roughly 150 ms to 8 ms per 2 MB block.
+time: 2026-11-09T20:00:00.000000000Z

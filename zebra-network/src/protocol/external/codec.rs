@@ -148,7 +148,7 @@ impl Encoder<Message> for Codec {
             Reject { .. } => b"reject\0\0\0\0\0\0",
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
             GetAddr => b"getaddr\0\0\0\0\0",
-            Block { .. } => b"block\0\0\0\0\0\0\0",
+            Block { .. } | RawBlock { .. } => b"block\0\0\0\0\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
             GetHeaders { .. } => b"getheaders\0\0",
@@ -290,6 +290,7 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
+            Message::RawBlock(block) => writer.write_all(block.as_ref())?,
             Message::GetBlocks { known_blocks, stop } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 known_blocks.zcash_serialize(&mut writer)?;
