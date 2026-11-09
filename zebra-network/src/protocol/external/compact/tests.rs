@@ -126,10 +126,12 @@ fn compact_reconstruction_complete_partial_and_prefilled() {
     candidates.push(candidates[0].clone());
     let reconstruction = compact.clone().reconstruct(candidates).unwrap();
     assert!(reconstruction.missing_indexes().is_empty());
-    assert_eq!(
-        *reconstruction.finish(response(&block, &[])).unwrap(),
-        block
-    );
+    let (reconstructed, size) = reconstruction
+        .finish(response(&block, &[]))
+        .unwrap()
+        .into_parts();
+    assert_eq!(size, block.zcash_serialize_to_vec().unwrap().len());
+    assert_eq!(*reconstructed, block);
 
     let reconstruction = compact
         .clone()
@@ -137,10 +139,12 @@ fn compact_reconstruction_complete_partial_and_prefilled() {
         .unwrap();
     assert_eq!(reconstruction.missing_indexes(), vec![1, 3]);
     assert_eq!(reconstruction.block_hash(), block.hash());
-    assert_eq!(
-        *reconstruction.finish(response(&block, &[1, 3])).unwrap(),
-        block
-    );
+    let (reconstructed, size) = reconstruction
+        .finish(response(&block, &[1, 3]))
+        .unwrap()
+        .into_parts();
+    assert_eq!(size, block.zcash_serialize_to_vec().unwrap().len());
+    assert_eq!(*reconstructed, block);
 
     let mut compact = (*compact).clone();
     compact.prefilled.push((2, block.transactions[2].clone()));
@@ -152,10 +156,130 @@ fn compact_reconstruction_complete_partial_and_prefilled() {
     );
     let reconstruction = Arc::new(compact).reconstruct(Vec::new()).unwrap();
     assert_eq!(reconstruction.missing_indexes(), vec![1, 3]);
+    let (reconstructed, size) = reconstruction
+        .finish(response(&block, &[1, 3]))
+        .unwrap()
+        .into_parts();
+    assert_eq!(size, block.zcash_serialize_to_vec().unwrap().len());
+    assert_eq!(*reconstructed, block);
+}
+
+#[test]
+fn reconstructed_evidence_is_bound_to_exact_block_and_header() {
+    let block = fixture();
+    let evidence = Arc::new(CompactBlock::from_block(&block, 42).unwrap())
+        .reconstruct(block.transactions.iter().skip(1).map(Into::into).collect())
+        .unwrap()
+        .finish(response(&block, &[]))
+        .unwrap();
+    let (size, hashes) = evidence.evidence_for(evidence.block()).unwrap();
+    assert_eq!(size, block.zcash_serialized_size());
     assert_eq!(
-        *reconstruction.finish(response(&block, &[1, 3])).unwrap(),
+        hashes.as_ref(),
         block
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<_>>()
     );
+    let identical = Arc::new(evidence.block().as_ref().clone());
+    assert!(evidence.evidence_for(&identical).is_none());
+    let mut changed_header = identical.as_ref().clone();
+    Arc::make_mut(&mut changed_header.header).merkle_root = block::merkle::Root([0; 32]);
+    assert!(evidence.evidence_for(&Arc::new(changed_header)).is_none());
+}
+
+#[test]
+fn compact_reconstruction_size_includes_compact_size_count() {
+    let mut block = fixture();
+    let transaction = block.transactions[1].as_ref().clone();
+    for count in [1, 252, 253] {
+        block.transactions.truncate(1);
+        block.transactions.extend((1..count).map(|index| {
+            Arc::new(
+                transaction
+                    .clone()
+                    .with_transparent_inputs(inputs(&u16::try_from(index).unwrap().to_le_bytes())),
+            )
+        }));
+        Arc::make_mut(&mut block.header).merkle_root = block.transactions.iter().collect();
+        let reconstruction = Arc::new(CompactBlock::from_block(&block, 42).unwrap())
+            .reconstruct(
+                block
+                    .transactions
+                    .iter()
+                    .skip(1)
+                    .step_by(2)
+                    .map(Into::into)
+                    .collect(),
+            )
+            .unwrap();
+        let missing = reconstruction.missing_indexes();
+        let (reconstructed, size) = reconstruction
+            .finish(response(&block, &missing))
+            .unwrap()
+            .into_parts();
+        assert_eq!(size, block.zcash_serialize_to_vec().unwrap().len());
+        assert_eq!(*reconstructed, block);
+    }
+}
+
+#[test]
+fn compact_reconstruction_exact_block_byte_limit() {
+    let limit = usize::try_from(MAX_BLOCK_BYTES).unwrap();
+    let mut block = fixture();
+    block.transactions.truncate(2);
+    let transaction = block.transactions[1].as_ref().clone();
+    // Keep the script length in the same CompactSize range for both boundary cases.
+    let transaction_overhead = transaction
+        .clone()
+        .with_transparent_inputs(inputs(&vec![0; 65_536]))
+        .zcash_serialized_size()
+        - 65_536;
+    let overhead = block.header.zcash_serialized_size()
+        + CompactSizeMessage::try_from(block.transactions.len())
+            .unwrap()
+            .zcash_serialized_size()
+        + block.transactions[0].zcash_serialized_size()
+        + transaction_overhead;
+    for size in [limit, limit + 1] {
+        block.transactions[1] = Arc::new(
+            transaction
+                .clone()
+                .with_transparent_inputs(inputs(&vec![0; size - overhead])),
+        );
+        Arc::make_mut(&mut block.header).merkle_root = block.transactions.iter().collect();
+        assert_eq!(block.zcash_serialize_to_vec().unwrap().len(), size);
+        // Construct the announcement directly so the oversized body reaches reconstruction.
+        let mut compact = CompactBlock {
+            header: block.header.clone(),
+            nonce: 42,
+            short_ids: Vec::new(),
+            prefilled: vec![(0, block.transactions[0].clone())],
+        };
+        compact.short_ids.push(short_id(
+            compact.keys(),
+            block.transactions[1].as_ref().into(),
+        ));
+        let compact = Arc::new(compact);
+        let recovered = compact
+            .clone()
+            .reconstruct(Vec::new())
+            .unwrap()
+            .finish(response(&block, &[1]));
+        let local = compact
+            .reconstruct(vec![(&block.transactions[1]).into()])
+            .and_then(|reconstruction| reconstruction.finish(response(&block, &[])));
+        for result in [recovered, local] {
+            if size == limit {
+                let (reconstructed, evidence) = result.unwrap().into_parts();
+                assert_eq!(evidence, size);
+                assert_eq!(*reconstructed, block);
+            } else {
+                assert!(result.is_err());
+            }
+        }
+    }
 }
 
 #[test]
