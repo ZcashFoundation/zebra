@@ -4045,8 +4045,8 @@ pub struct GetBlockchainInfoResponse {
     value_pools: BlockchainValuePoolBalances,
 
     /// The Network Sustainability Mechanism (NSM) value balance (NU7). It is not part of the
-    /// chain supply, so it is not in `valuePools`. It is absent in responses from nodes that
-    /// don't report it.
+    /// chain supply, so it is not in `valuePools`. It is `monitored` from NU7 activation. It is
+    /// absent in responses from nodes that don't report it.
     #[serde(
         rename = "nsmValueBalance",
         skip_serializing_if = "Option::is_none",
@@ -4656,6 +4656,17 @@ pub struct BlockObject {
 
     /// The Network Sustainability Mechanism (NSM) value balance (NU7) after this block, and the
     /// block's change to it. It is not part of the chain supply, so it is not in `valuePools`.
+    /// It is `monitored` from NU7 activation.
+    ///
+    /// At the NU7 activation block, the change includes `INITIAL_NSM_VALUE_BALANCE`: the block
+    /// subsidy and fees that coinbase transactions left unclaimed before NU6, when [ZIP 236] made
+    /// claiming them a consensus rule. [ZIP 237] credits this amount to the NSM value balance at
+    /// NU7 activation. On Mainnet it is 36,858,445,520 zatoshis (about 368.58 ZEC), so the change
+    /// at height 3,543,405 is this amount plus the block's other changes, and not fees burned in
+    /// that block.
+    ///
+    /// [ZIP 236]: https://zips.z.cash/zip-0236
+    /// [ZIP 237]: https://zips.z.cash/zip-0237
     #[serde(
         rename = "nsmValueBalance",
         skip_serializing_if = "Option::is_none",
