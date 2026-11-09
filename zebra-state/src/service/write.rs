@@ -506,9 +506,10 @@ impl WriteBlockWorkerTask {
                     parent_error_map.shift_remove_index(0);
                 }
 
-                // Failed commits leave the read snapshot unchanged. Release authentication
-                // before either notification can wake an immediate replay.
+                // Failed commits leave the read snapshot unchanged. Release authentication and
+                // relay capacity before either notification can wake an immediate replay.
                 drop(_context_update);
+                drop(committed_permit);
 
                 // Signal the StateService to drop this hash from
                 // `non_finalized_block_write_sent_hashes`, so a subsequent
