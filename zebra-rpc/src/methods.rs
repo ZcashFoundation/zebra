@@ -69,7 +69,7 @@ use zebra_chain::{
             block_subsidy, founders_reward, funding_stream_address, funding_stream_values,
             miner_subsidy, FundingStreamReceiver,
         },
-        ConsensusBranchId, Network, NetworkUpgrade,
+        ConsensusBranchId, Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::{
         BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
@@ -1801,12 +1801,18 @@ where
                 unreachable!("unmatched response to a BlockInfo request");
             };
 
+            // The balances before the genesis block are zero. For other blocks, the parent's
+            // balances can be missing if a reorg occurs between the two reads. In that case, the
+            // change is not known, so the response does not include it.
             let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
-                let prev_value_pools = prev_block_info
-                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
-                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
-                    .ok()?;
+                let prev_value_pools = match prev_block_info {
+                    Some(prev) => prev.value_pools().constrain::<NegativeAllowed>().ok()?,
+                    None if previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH => {
+                        ValueBalance::<NegativeAllowed>::zero()
+                    }
+                    None => return None,
+                };
                 (value_pools - prev_value_pools).ok()
             });
             let size = size.or(block_info.as_ref().map(|d| d.size() as usize));

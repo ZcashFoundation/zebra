@@ -1205,6 +1205,214 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     }
 }
 
+/// Returns a balance of `zat` zatoshis.
+fn balance_zat(zat: i64) -> Amount<NonNegative> {
+    Amount::try_from(zat).expect("test balances are valid")
+}
+
+/// Returns a change of `zat` zatoshis.
+fn change_zat(zat: i64) -> Amount<NegativeAllowed> {
+    Amount::try_from(zat).expect("test changes are valid")
+}
+
+/// Returns block balances with the given transparent, Orchard, and NSM amounts, in zatoshis.
+fn block_info_with_balances(transparent_zat: i64, orchard_zat: i64, nsm_zat: i64) -> BlockInfo {
+    let mut value_pools = ValueBalance::from_transparent_amount(balance_zat(transparent_zat));
+    value_pools
+        .set_orchard_value_balance(ValueBalance::from_orchard_amount(balance_zat(orchard_zat)));
+    value_pools.set_nsm_amount(balance_zat(nsm_zat));
+    BlockInfo::new(value_pools, 0)
+}
+
+/// Returns the entry with `id` in a `getblock` response's `valuePools`.
+fn value_pool<'a>(obj: &'a BlockObject, id: &str) -> &'a GetBlockchainInfoBalance {
+    obj.value_pools
+        .as_ref()
+        .expect("the response has value pools")
+        .iter()
+        .find(|pool| pool.id() == id)
+        .expect("the response has every value pool")
+}
+
+/// Calls verbose `getblock` for `block` on Mainnet, with a mock state that reports the block at
+/// `height` in the best chain, and the parent and block balances as `prev_block_info` and
+/// `block_info`.
+async fn getblock_with_block_info(
+    block: Arc<Block>,
+    verbosity: u8,
+    height: Height,
+    prev_block_info: Option<BlockInfo>,
+    block_info: BlockInfo,
+) -> BlockObject {
+    let block_hash = block.hash();
+    let block_size = block.zcash_serialized_size();
+    let previous_block_hash = block.header.previous_block_hash;
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc.get_block(hash_str, Some(verbosity)).await });
+
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block.header.clone(),
+            hash: block_hash,
+            height,
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::SaplingTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(Some(0)));
+
+    if verbosity == 3 {
+        read_state
+            .expect_request(ReadRequest::SpentOutputs(block_hash.into()))
+            .await
+            .respond(ReadResponse::SpentOutputs(None));
+    }
+
+    if verbosity == 1 {
+        let tx_ids: Arc<[transaction::Hash]> =
+            block.transactions.iter().map(|tx| tx.hash()).collect();
+        read_state
+            .expect_request(ReadRequest::TransactionIdsForBlock(block_hash.into()))
+            .await
+            .respond(ReadResponse::TransactionIdsForBlock(Some(tx_ids)));
+    } else {
+        read_state
+            .expect_request(ReadRequest::BlockAndSize(block_hash.into()))
+            .await
+            .respond(ReadResponse::BlockAndSize(Some((block, block_size))));
+    }
+    read_state
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::OrchardTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::IronwoodTree(Some(Default::default())));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(prev_block_info));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(Some(block_info)));
+
+    let GetBlockResponse::Object(obj) = block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed")
+    else {
+        panic!("verbose getblock returns an object");
+    };
+
+    *obj
+}
+
+/// If the parent block's balances are missing, for example after a reorg between the state
+/// reads, `getblock` reports the block's balances without changes, rather than reporting each
+/// whole balance as the block's change.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_omits_value_changes_without_parent_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(1),
+            None,
+            block_info_with_balances(500_000_000, 300_000_000, 200_000_000),
+        )
+        .await;
+
+        let pools = obj
+            .value_pools
+            .as_ref()
+            .expect("the response has value pools");
+        assert!(pools.iter().all(|pool| pool.value_delta_zat().is_none()));
+        assert!(pools.iter().all(|pool| pool.value_delta().is_none()));
+        assert_eq!(
+            value_pool(&obj, "transparent").chain_value_zat(),
+            balance_zat(500_000_000)
+        );
+
+        let nsm = obj
+            .nsm_value_balance
+            .as_ref()
+            .expect("the response has the NSM balance");
+        assert_eq!(nsm.chain_value_zat(), balance_zat(200_000_000));
+        assert_eq!(nsm.value_delta_zat(), None);
+    }
+}
+
+/// The balances before the genesis block are zero, so the genesis block's changes are its
+/// balances.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_genesis_value_changes_are_its_balances() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+
+    for verbosity in 1..=3 {
+        let obj = getblock_with_block_info(
+            block.clone(),
+            verbosity,
+            Height(0),
+            None,
+            block_info_with_balances(500_000_000, 0, 0),
+        )
+        .await;
+
+        assert_eq!(
+            value_pool(&obj, "transparent").value_delta_zat(),
+            Some(change_zat(500_000_000))
+        );
+        assert_eq!(
+            value_pool(&obj, "orchard").value_delta_zat(),
+            Some(Amount::zero())
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockheader() {
     let _init_guard = zebra_test::init();
