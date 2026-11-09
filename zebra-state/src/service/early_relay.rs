@@ -49,6 +49,7 @@ pub(super) struct EarlyRelayState {
     slot: Arc<Semaphore>,
     computation: Arc<Semaphore>,
     rejection_computation: Arc<Semaphore>,
+    recipients: Mutex<Option<watch::Receiver<bool>>>,
 }
 
 impl EarlyRelayState {
@@ -60,6 +61,7 @@ impl EarlyRelayState {
             slot: Arc::new(Semaphore::new(1)),
             computation: Arc::new(Semaphore::new(1)),
             rejection_computation: Arc::new(Semaphore::new(1)),
+            recipients: Mutex::new(None),
         })
     }
 
@@ -68,6 +70,14 @@ impl EarlyRelayState {
             state: self.clone(),
             changes: self.changes.subscribe(),
         }
+    }
+
+    fn has_recipients(&self) -> bool {
+        self.recipients
+            .lock()
+            .expect("early relay recipient lock is not poisoned")
+            .as_ref()
+            .is_none_or(|recipients| recipients.has_changed().is_ok() && *recipients.borrow())
     }
 
     pub(super) fn best_tip_hash(&self) -> Option<block::Hash> {
@@ -127,6 +137,7 @@ impl EarlyRelayState {
 
     fn publish(self: &Arc<Self>, block: Arc<Block>, guard: &EarlyRelayGuard, retained: usize) {
         if self.changes.receiver_count() == 0
+            || !self.has_recipients()
             || retained > MAX_RETAINED_BYTES
             || guard.alive.receiver_count() != 0
             || guard.context.has_changed().unwrap_or(true)
@@ -237,6 +248,20 @@ impl PartialEq for EarlyRelayCache {
 impl Eq for EarlyRelayCache {}
 
 impl EarlyRelayCache {
+    /// Restricts optional authentication and body retention to the supplied recipient demand.
+    ///
+    /// Without this restriction, holding this cache or a subscription enables optional work.
+    /// Required inbound authentication is never disabled. Demand is sampled when authentication
+    /// starts: a peer arriving after a skipped request receives the block through committed relay.
+    /// A closed channel disables optional work. All clones share this restriction.
+    pub fn set_recipients(&self, recipients: watch::Receiver<bool>) {
+        *self
+            .state
+            .recipients
+            .lock()
+            .expect("early relay recipient lock is not poisoned") = Some(recipients);
+    }
+
     /// Returns a live body only while its parent is still the published snapshot's best tip.
     ///
     /// Only serve this body on a bilaterally negotiated early-relay connection. Expired, cancelled,
@@ -422,7 +447,10 @@ impl ReadStateService {
         if NetworkUpgrade::current(&self.network, height) < NetworkUpgrade::Nu5 {
             return Ok(None);
         }
-        if !required && self.early_relay.changes.receiver_count() == 0 {
+        if !required
+            && (self.early_relay.changes.receiver_count() == 0
+                || !self.early_relay.has_recipients())
+        {
             return Ok(None);
         }
         let permit = self
@@ -432,6 +460,13 @@ impl ReadStateService {
             .acquire_owned()
             .await
             .expect("the authentication semaphore is never closed");
+        // Demand can disappear while optional requests wait behind another authentication.
+        if !required
+            && (self.early_relay.changes.receiver_count() == 0
+                || !self.early_relay.has_recipients())
+        {
+            return Ok(None);
+        }
         let state = self.clone();
         let candidate = block.clone();
         let admitted = tokio::task::spawn_blocking(move || {

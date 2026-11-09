@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Allow EarlyRelayCache::set_recipients to restrict optional authentication and retention without disabling required inbound authentication.
+time: 2026-11-06T16:19:08.880419954+01:00
