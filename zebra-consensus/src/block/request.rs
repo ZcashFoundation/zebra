@@ -17,7 +17,9 @@ pub enum Request {
     /// For later blocks, authenticate the header and entire body against a committed parent
     /// before exempting subsequent transaction/contextual failures from peer punishment.
     /// Unavailable parent context defers authentication until a later failure needs peer scoring.
-    CommitEarlyRelay(Arc<Block>),
+    /// Compact reconstructions retain their exact size and transaction-Merkle evidence; use
+    /// `.into()` for ordinary bodies without evidence, which retain the full semantic checks.
+    CommitEarlyRelay(DecodedBlock),
     /// Validates and commits a locally mined block, carrying notifications into the state writer.
     ///
     /// Exact successful proposals can reuse their semantic and contextual verdicts after
@@ -41,10 +43,11 @@ impl Request {
     pub fn block(&self) -> Arc<Block> {
         match self {
             Request::Commit(block)
-            | Request::CommitEarlyRelay(block)
             | Request::CommitMined(block, _)
             | Request::CheckProposal(block) => Arc::clone(block),
-            Request::CommitDecoded(decoded, _) => decoded.block(),
+            Request::CommitDecoded(decoded, _) | Request::CommitEarlyRelay(decoded) => {
+                decoded.block()
+            }
         }
     }
 

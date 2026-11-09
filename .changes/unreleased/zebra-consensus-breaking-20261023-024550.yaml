@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: breaking
-body: Added `Request::CommitEarlyRelay` and early-relay verification error variants. Negotiated downloads authenticate block commitments before exempting later validation failures from peer punishment and suppress repeated expensive verification of deterministic rejections; unavailable parent context permits verification to continue, with bounded authentication before scoring later failures. Handle the new variants in exhaustive matches.
+body: Added `Request::CommitEarlyRelay(DecodedBlock)` and early-relay verification error variants. Negotiated downloads authenticate block commitments before exempting later validation failures from peer punishment and suppress repeated expensive verification of deterministic rejections; unavailable parent context permits verification to continue, with bounded authentication before scoring later failures. Handle the new variants in exhaustive matches. Pass `.into()` for ordinary blocks or `DecodedBlock::from_reconstructed` to retain compact reconstruction evidence ([#11998](https://github.com/ZcashFoundation/zebra/pull/11998)).
 time: 2026-10-23T02:45:50.916190558+02:00
