@@ -344,11 +344,11 @@ impl SentHashes {
     /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
     pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
         let mut sent_hashes = Self::default();
-        for (_, block) in non_finalized_state
+        for block in non_finalized_state
             .chain_iter()
-            .flat_map(|c| c.blocks.clone())
+            .flat_map(|chain| chain.blocks.values())
         {
-            sent_hashes.add(&block.into());
+            sent_hashes.add_outputs(block.hash, block.height, &block.new_outputs);
         }
 
         if !sent_hashes.sent.is_empty() {
@@ -364,9 +364,21 @@ impl SentHashes {
     /// Assumes that blocks are added in the order of their height between `finish_batch` calls
     /// for efficient pruning.
     pub fn add(&mut self, block: &SemanticallyVerifiedBlock) {
+        self.add_outputs(block.hash, block.height, &block.new_outputs);
+    }
+
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
+    // License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
+    /// Stores borrowed block metadata without materializing another verified block.
+    fn add_outputs(
+        &mut self,
+        hash: block::Hash,
+        height: block::Height,
+        new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) {
         // Track known UTXOs in sent blocks.
-        let outpoints = block
-            .new_outputs
+        let outpoints = new_outputs
             .iter()
             .map(|(outpoint, ordered_utxo)| {
                 self.known_utxos
@@ -376,10 +388,10 @@ impl SentHashes {
             .cloned()
             .collect();
 
-        self.curr_buf.push_back((block.hash, block.height));
-        self.insert_sent(block.hash, outpoints);
+        self.curr_buf.push_back((hash, height));
+        self.insert_sent(hash, outpoints);
 
-        self.update_metrics_for_block(block.height);
+        self.update_metrics_for_block(height);
     }
 
     /// Stores the checkpoint verified `block`'s hash, height, and UTXOs, so they can be used to check if a

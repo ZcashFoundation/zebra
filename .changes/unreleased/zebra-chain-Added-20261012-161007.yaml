@@ -1,0 +1,5 @@
+project: zebra-chain
+kind: Added
+body: >-
+  `impl AsRef<transparent::Utxo> for transparent::Utxo`.
+time: 2026-10-12T16:10:07.000000000+02:00

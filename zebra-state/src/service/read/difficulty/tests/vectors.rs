@@ -185,12 +185,11 @@ fn mining_candidate_matches_committed_block() {
         let mut batch = DiskWriteBatch::new();
         let mut locations = HashMap::new();
         let prepared = candidate.clone().prepare();
-        for (index, (outpoint, utxo)) in prepared
-            .test_with_zero_spent_utxos()
-            .spent_outputs
-            .into_iter()
-            .filter(|(outpoint, _)| !prepared.new_outputs.contains_key(outpoint))
-            .enumerate()
+        for (index, (outpoint, utxo)) in
+            Arc::unwrap_or_clone(prepared.test_with_zero_spent_utxos().spent_outputs)
+                .into_iter()
+                .filter(|(outpoint, _)| !prepared.new_outputs.contains_key(outpoint))
+                .enumerate()
         {
             let location = *locations
                 .entry(outpoint.hash)

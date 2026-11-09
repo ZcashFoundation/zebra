@@ -33,8 +33,10 @@ use crate::{
     MinedBlockNotifications, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod address_transfers;
 mod backup;
 mod chain;
+mod created_utxos;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -42,7 +44,9 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 #[cfg(test)]
 mod tests;
 
+use address_transfers::AddressTransfers;
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use created_utxos::CreatedUtxos;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -320,6 +324,9 @@ impl NonFinalizedState {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1194 (https://github.com/zakura-core/zakura/pull/1194).
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
@@ -380,7 +387,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizableBlock::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(Arc::unwrap_or_clone(best_chain_root), root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -484,7 +491,11 @@ impl NonFinalizedState {
             }
 
             self.chain_set.remove(&chain);
-            chain.blocks.values().cloned().collect()
+            chain
+                .blocks
+                .values()
+                .map(|block| block.as_ref().clone())
+                .collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
                 .invalidate_block(block_hash)
@@ -492,7 +503,7 @@ impl NonFinalizedState {
 
             // Add the new chain fork or updated chain to the set of recent chains, and
             // remove the chain containing the hash of the block from chain set
-            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+            self.insert_with(Arc::new(new_chain), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
 
@@ -672,9 +683,11 @@ impl NonFinalizedState {
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
+        // Adapted from zakura-core/zakura#1153 (https://github.com/zakura-core/zakura/pull/1153).
+        // Adapted from zakura-core/zakura#779 (https://github.com/zakura-core/zakura/pull/779).
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &new_chain.unspent_utxos(),
+            &new_chain.created_utxos,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
@@ -707,6 +720,7 @@ impl NonFinalizedState {
             block_hash,
         })?;
 
+        // Adapted from zakura-core/zakura#780 (https://github.com/zakura-core/zakura/pull/780).
         let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
             prepared,
             spent_utxos,
