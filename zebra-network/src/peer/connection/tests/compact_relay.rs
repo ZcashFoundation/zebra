@@ -513,16 +513,13 @@ async fn connection_find_blocks_screened_compact_unblocks_reconstruction() {
                             .collect(),
                     ));
                 inbound
-                    .expect_request(Request::CheckCompactBlock(block.clone()))
+                    .expect_request_that(|request| {
+                        matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                            if **checked == *block && evidence.evidence_for(checked).is_some())
+                    })
                     .await
                     .respond(Response::Nil);
-                assert_eq!(
-                    download.await.unwrap().unwrap(),
-                    Response::EarlyBlocks(vec![InventoryResponse::Available((
-                        block.clone(),
-                        Some(source)
-                    ))])
-                );
+                assert_reconstructed(download.await.unwrap().unwrap(), &block, source);
                 assert!(
                     outbound.try_recv().is_err(),
                     "cached reconstruction needs neither getdata nor a committed inv"
