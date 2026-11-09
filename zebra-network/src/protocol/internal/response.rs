@@ -114,6 +114,14 @@ pub enum Response {
     /// Inbound handlers return [`Self::Blocks`] or [`Self::AuthorizedBlocks`], not this variant.
     EarlyBlocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// A compact-reconstructed download from a bilaterally negotiated early-relay connection.
+    ///
+    /// Carries exact serialized-size evidence without a full-block serialization pass. Like
+    /// [`Self::EarlyBlocks`], this preserves provenance, not a consensus validity verdict, and
+    /// is never returned by inbound handlers.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    ReconstructedBlock(crate::compact::ReconstructedBlock, Option<PeerSocketAddr>),
+
     /// Inbound block responses containing uncommitted bodies with revocable serving permission.
     ///
     /// Unlike [`Self::EarlyBlocks`], this is never returned by an outbound download.
@@ -156,6 +164,10 @@ impl fmt::Display for Response {
             Response::CompactBlockTransactions(transactions) => {
                 format!("CompactBlockTransactions({})", transactions.len())
             }
+            Response::ReconstructedBlock(reconstructed, _) => format!(
+                "ReconstructedBlock {{ hash: {} }}",
+                reconstructed.block().hash(),
+            ),
 
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks)
@@ -209,6 +221,7 @@ impl Response {
 
             Response::Blocks(_) => "Blocks",
             Response::EarlyBlocks(_) => "EarlyBlocks",
+            Response::ReconstructedBlock(..) => "ReconstructedBlock",
             Response::AuthorizedBlocks { .. } => "AuthorizedBlocks",
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
@@ -219,7 +232,10 @@ impl Response {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Response::Blocks(_) | Response::EarlyBlocks(_) | Response::Transactions(_)
+            Response::Blocks(_)
+                | Response::EarlyBlocks(_)
+                | Response::ReconstructedBlock(..)
+                | Response::Transactions(_)
         )
     }
 

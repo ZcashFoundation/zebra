@@ -12,8 +12,21 @@ use futures::{
     SinkExt, StreamExt,
 };
 use std::{sync::Arc, time::Duration};
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::Block,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+};
 use zebra_test::mock_service::PanicAssertion;
+
+fn assert_reconstructed(response: Response, block: &Arc<Block>, source: crate::PeerSocketAddr) {
+    let Response::ReconstructedBlock(reconstructed, actual_source) = response else {
+        panic!("a compact download must retain its size evidence");
+    };
+    let (actual_block, size) = reconstructed.into_parts();
+    assert_eq!(actual_block, *block);
+    assert_eq!(size, block.zcash_serialized_size());
+    assert_eq!(actual_source, Some(source));
+}
 
 #[tokio::test]
 async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
@@ -92,7 +105,10 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 .unwrap();
                 if failure != "missing" {
                     let check = inbound
-                        .expect_request(Request::CheckCompactBlock(block.clone()))
+                        .expect_request_that(|request| {
+                            matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                                if **checked == *block && evidence.evidence_for(checked).is_some())
+                        })
                         .await;
                     if failure == "commitments" {
                         check.respond_error("authorization commitment mismatch".into());
@@ -108,13 +124,18 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 );
                 peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
             }
-            assert_eq!(
-                rx.await.unwrap().unwrap(),
-                Response::EarlyBlocks(vec![InventoryResponse::Available((
-                    block.clone(),
-                    Some(source)
-                ))])
-            );
+            let response = rx.await.unwrap().unwrap();
+            if failure == "none" {
+                assert_reconstructed(response, &block, source);
+            } else {
+                assert_eq!(
+                    response,
+                    Response::EarlyBlocks(vec![InventoryResponse::Available((
+                        block.clone(),
+                        Some(source)
+                    ))])
+                );
+            }
             if failure == "none" {
                 let (tx, rx) = oneshot::channel();
                 client
@@ -127,13 +148,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                     })
                     .await
                     .unwrap();
-                assert_eq!(
-                    rx.await.unwrap().unwrap(),
-                    Response::EarlyBlocks(vec![InventoryResponse::Available((
-                        block.clone(),
-                        Some(source)
-                    )),])
-                );
+                assert_reconstructed(rx.await.unwrap().unwrap(), &block, source);
                 assert!(
                     outbound.try_recv().is_err(),
                     "a racing sync request reuses reconstructed bytes"

@@ -445,20 +445,38 @@ fn mock_downloads(
 #[tokio::test]
 async fn early_relay_download_preserves_validation_and_source() {
     let _init_guard = zebra_test::init();
-    for (early, admitted) in [(false, false), (true, false), (true, true)] {
+    for (early, compact, admitted) in [
+        (false, false, false),
+        (true, false, false),
+        (true, false, true),
+        (true, true, false),
+        (true, true, true),
+    ] {
         let (mut downloads, mut network, mut verifier, _) = mock_downloads(Height(0));
         let block = block_1();
         let hash = block.hash();
         let peer: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
         downloads.download_and_verify(hash).await.unwrap();
         let blocks = vec![Available((block.clone(), Some(peer)))];
+        let reconstructed = compact.then(|| {
+            Arc::new(zn::compact::CompactBlock::from_block(&block, 42).unwrap())
+                .reconstruct(Vec::new())
+                .unwrap()
+                .finish(zn::compact::BlockTransactions {
+                    block_hash: hash,
+                    transactions: Vec::new(),
+                })
+                .unwrap()
+        });
         network
             .expect_request(zn::Request::BlockDownload {
                 hash,
                 advertiser: None,
             })
             .await
-            .respond(if early {
+            .respond(if let Some(block) = reconstructed {
+                zn::Response::ReconstructedBlock(block, Some(peer))
+            } else if early {
                 zn::Response::EarlyBlocks(blocks)
             } else {
                 zn::Response::Blocks(blocks)

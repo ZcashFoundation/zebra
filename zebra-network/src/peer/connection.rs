@@ -1345,7 +1345,7 @@ where
             (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
-            (AwaitingRequest, EarlyBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(_)) => {
+            (AwaitingRequest, EarlyBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
                 Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
@@ -1696,7 +1696,9 @@ where
         // TODO: split response handler into its own method
         match rsp.clone() {
             Response::Nil => { /* generic success, do nothing */ }
-            Response::EarlyBlocks(_) | Response::CompactBlockTransactions(_) => {
+            Response::EarlyBlocks(_)
+            | Response::ReconstructedBlock(..)
+            | Response::CompactBlockTransactions(_) => {
                 error!("inbound service returned an outbound-only early block response");
                 return;
             }

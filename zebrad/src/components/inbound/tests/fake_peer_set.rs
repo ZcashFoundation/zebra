@@ -2193,7 +2193,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
         block_hash: block.hash(),
         transactions: Vec::new(),
     })?;
-    assert_eq!(reconstructed, block);
+    assert_eq!(reconstructed.block(), &block);
 
     let ReadResponse::EarlyRelayCache(cache) =
         read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
@@ -2207,17 +2207,17 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
         inbound
             .ready()
             .await?
-            .call(Request::CheckCompactBlock(Arc::new(forged)),)
+            .call(Request::CheckCompactBlock(Arc::new(forged), None))
     )
     .await?
     .is_err());
     assert_eq!(
         timeout(
             Duration::from_secs(5),
-            inbound
-                .ready()
-                .await?
-                .call(Request::CheckCompactBlock(reconstructed),)
+            inbound.ready().await?.call(Request::CheckCompactBlock(
+                reconstructed.block().clone(),
+                Some(reconstructed.clone()),
+            ))
         )
         .await??,
         Response::Nil
@@ -2237,7 +2237,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
     for request in [
         Request::CheckCompactHeader(compact.clone()),
         Request::CompactBlockTransactions(compact),
-        Request::CheckCompactBlock(block.clone()),
+        Request::CheckCompactBlock(block.clone(), Some(reconstructed)),
     ] {
         assert!(
             timeout(Duration::from_secs(5), inbound.ready().await?.call(request),)

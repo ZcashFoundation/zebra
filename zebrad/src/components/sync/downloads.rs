@@ -427,22 +427,27 @@ where
                         .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let early_relay = matches!(rsp, zn::Response::EarlyBlocks(_));
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
-                    | zn::Response::EarlyBlocks(blocks) = rsp {
-                    assert_eq!(
-                        blocks.len(),
-                        1,
-                        "wrong number of blocks in response to a single hash"
-                    );
-
-                    blocks
-                        .first()
-                        .expect("just checked length")
-                        .available()
-                        .expect("unexpected missing block status: single block failures should be errors")
-                } else {
-                    unreachable!("wrong response to block request");
+                let early_relay = matches!(
+                    rsp,
+                    zn::Response::EarlyBlocks(_) | zn::Response::ReconstructedBlock(..)
+                );
+                let (block, advertiser_addr) = match rsp {
+                    zn::Response::Blocks(blocks) | zn::Response::EarlyBlocks(blocks) => {
+                        assert_eq!(
+                            blocks.len(),
+                            1,
+                            "wrong number of blocks in response to a single hash"
+                        );
+                        blocks
+                            .first()
+                            .expect("just checked length")
+                            .available()
+                            .expect("unexpected missing block status: single block failures should be errors")
+                    }
+                    zn::Response::ReconstructedBlock(reconstructed, source) => {
+                        (reconstructed.block().clone(), source)
+                    }
+                    _ => unreachable!("wrong response to block request"),
                 };
                 metrics::counter!("sync.downloaded.block.count").increment(1);
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")

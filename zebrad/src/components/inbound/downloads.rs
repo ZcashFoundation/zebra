@@ -403,25 +403,29 @@ where
             .await
             .map_err(|e| (BoxError::from(e), None))?
             .map_err(|e| (e, None))?;
-            let early_relay = matches!(response, zn::Response::EarlyBlocks(_));
-            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
-            | zn::Response::EarlyBlocks(blocks) = response
-            {
-                assert_eq!(
-                    blocks.len(),
-                    1,
-                    "wrong number of blocks in response to a single hash",
-                );
-
-                blocks
-                    .first()
-                    .expect("just checked length")
-                    .available()
-                    .expect(
+            let early_relay = matches!(
+                response,
+                zn::Response::EarlyBlocks(_) | zn::Response::ReconstructedBlock(..)
+            );
+            let (block, advertiser_addr) = match response {
+                zn::Response::Blocks(blocks) | zn::Response::EarlyBlocks(blocks) => {
+                    assert_eq!(
+                        blocks.len(),
+                        1,
+                        "wrong number of blocks in response to a single hash",
+                    );
+                    blocks
+                        .first()
+                        .expect("just checked length")
+                        .available()
+                        .expect(
                         "unexpected missing block status: single block failures should be errors",
                     )
-            } else {
-                unreachable!("wrong response to block request");
+                }
+                zn::Response::ReconstructedBlock(reconstructed, source) => {
+                    (reconstructed.block().clone(), source)
+                }
+                _ => unreachable!("wrong response to block request"),
             };
             metrics::counter!("gossip.downloaded.block.count").increment(1);
 
