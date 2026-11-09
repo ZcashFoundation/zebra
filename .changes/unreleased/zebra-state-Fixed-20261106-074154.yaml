@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Preserved transparent address balances and indexes through fee transfers and rollback ([#11658](https://github.com/ZcashFoundation/zebra/pull/11658)).
+time: 2026-11-06T07:41:54.677709854+01:00
