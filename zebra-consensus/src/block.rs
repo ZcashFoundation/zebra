@@ -742,10 +742,26 @@ where
                 &block,
                 &transaction_hashes,
             ));
+            let mut batch_flush = None;
 
             for (&transaction_hash, transaction) in
                 transaction_hashes.iter().zip(block.transactions.iter())
             {
+                if transaction.has_shielded_data() && batch_flush.is_none() {
+                    let shielded_transactions = block
+                        .transactions
+                        .iter()
+                        .filter(|tx| tx.has_shielded_data())
+                        .count();
+                    batch_flush = Some(crate::primitives::flush::BlockFlush::register(
+                        &known_utxos,
+                        shielded_transactions,
+                    ));
+                    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT
+                    // license or the Apache License, Version 2.0, at your option.
+                    // Adapted from zakura-core/zakura#417
+                    // (https://github.com/zakura-core/zakura/pull/417).
+                }
                 let rsp = transaction_verifier
                     .ready()
                     .await
@@ -792,6 +808,8 @@ where
                     block_miner_fees += miner_fee;
                 }
             }
+            // Remove the address-keyed registration before releasing the shared UTXO allocation.
+            drop(batch_flush);
             if let Some(error) = transaction_error {
                 return Err(VerifyBlockError::Transaction(error.into()));
             }
