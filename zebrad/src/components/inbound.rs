@@ -814,23 +814,31 @@ async fn compact_request(
             }
             Ok(zn::Response::CompactBlockTransactions(transactions))
         }
-        zn::Request::CheckCompactBlock(block, _reconstructed) => {
+        zn::Request::CheckCompactBlock(block, reconstructed) => {
             let checked = block.clone();
             let worker_permit = permit.clone();
             tokio::task::spawn_blocking(move || {
                 let _permit = worker_permit;
-                if u64::try_from(checked.zcash_serialized_size()).unwrap_or(u64::MAX)
-                    > block::MAX_BLOCK_BYTES
+                let evidence = reconstructed
+                    .as_ref()
+                    .and_then(|evidence| evidence.evidence_for(&checked));
+                if evidence.is_none()
+                    && u64::try_from(checked.zcash_serialized_size()).unwrap_or(u64::MAX)
+                        > block::MAX_BLOCK_BYTES
                 {
                     return Err("compact body exceeds the block byte limit".into());
                 }
                 zebra_consensus::coinbase_is_first(&checked)?;
-                let hashes = checked
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.hash())
-                    .collect::<Vec<_>>();
-                zebra_consensus::merkle_root_validity(&network, &checked, &hashes)?;
+                if evidence.is_some() {
+                    checked.check_transaction_network_upgrade_consistency(&network)?;
+                } else {
+                    let hashes = checked
+                        .transactions
+                        .iter()
+                        .map(|tx| tx.hash())
+                        .collect::<Vec<_>>();
+                    zebra_consensus::merkle_root_validity(&network, &checked, &hashes)?;
+                }
                 Ok::<_, BoxError>(())
             })
             .await??;

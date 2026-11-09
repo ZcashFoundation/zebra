@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reuse sealed compact reconstruction size and transaction-Merkle evidence during inbound screening and block verification, while retaining network-specific consensus checks.
+time: 2026-11-06T00:00:00Z

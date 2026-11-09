@@ -114,6 +114,9 @@ async fn early_relay_download_preserves_validation_and_source() {
                 })
                 .unwrap()
         });
+        let decoded = reconstructed
+            .clone()
+            .map(zebra_consensus::DecodedBlock::from_reconstructed);
         network
             .expect_request(zn::Request::BlockDownload {
                 hash,
@@ -128,7 +131,7 @@ async fn early_relay_download_preserves_validation_and_source() {
                 zn::Response::Blocks(blocks)
             });
         let request = if early {
-            zebra_consensus::Request::CommitEarlyRelay(block)
+            zebra_consensus::Request::CommitEarlyRelay(decoded.unwrap_or_else(|| block.into()))
         } else {
             zebra_consensus::Request::Commit(block)
         };

@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: breaking
+body: '`Request::CommitEarlyRelay` now takes `DecodedBlock` instead of `Arc<Block>`; use `.into()` for ordinary blocks or `DecodedBlock::from_reconstructed` for network-sealed compact evidence.'
+time: 2026-11-09T01:20:50.927548519+01:00
