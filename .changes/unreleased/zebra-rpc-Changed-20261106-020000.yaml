@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: The block template updater rebuilds 50 ms after steady mempool additions instead of 1 s, and keeps the 1 s pause once 50 additions arrive in the pending window or notifications are lost.
+time: 2026-11-06T02:00:00.000000000+01:00
