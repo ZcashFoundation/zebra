@@ -50,7 +50,7 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
         });
 
         let error = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
-            .oneshot(Request::CommitEarlyRelay(block.clone()))
+            .oneshot(Request::CommitEarlyRelay(block.clone().into()))
             .await
             .unwrap_err();
         assert!(
@@ -88,7 +88,7 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
         assert!(guard.is_rejected());
         drop(guard);
         let error = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
-            .oneshot(Request::CommitEarlyRelay(block.clone()))
+            .oneshot(Request::CommitEarlyRelay(block.clone().into()))
             .await
             .unwrap_err();
         assert!(matches!(error, VerifyBlockError::EarlyRelayRejected));
@@ -108,7 +108,7 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
         assert_eq!(forged.transactions[1].hash(), block.transactions[1].hash());
         assert_ne!(forged.auth_data_root(), block.auth_data_root());
         let error = SemanticBlockVerifier::new(&network, state, transactions)
-            .oneshot(Request::CommitEarlyRelay(Arc::new(forged)))
+            .oneshot(Request::CommitEarlyRelay(Arc::new(forged).into()))
             .await
             .unwrap_err();
         assert!(error.is_auth_commitment_mismatch());
@@ -154,7 +154,7 @@ async fn early_relay_transient_failures_retry_without_recording_rejection() {
             for delivery in 1..=2 {
                 let error =
                     SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
-                        .oneshot(Request::CommitEarlyRelay(block.clone()))
+                        .oneshot(Request::CommitEarlyRelay(block.clone().into()))
                         .await
                         .unwrap_err();
                 assert!(matches!(
@@ -239,7 +239,7 @@ async fn early_relay_fee_and_contextual_spend_failures_suppress_replay() {
                 }
             });
             let error = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone())
-                .oneshot(Request::CommitEarlyRelay(block.clone())).await.unwrap_err();
+                .oneshot(Request::CommitEarlyRelay(block.clone().into())).await.unwrap_err();
             if incorrect_fee {
                 assert!(matches!(&error, VerifyBlockError::EarlyRelay(source)
                     if matches!(**source, VerifyBlockError::Transaction(TransactionError::IncorrectFee))));
@@ -251,7 +251,7 @@ async fn early_relay_fee_and_contextual_spend_failures_suppress_replay() {
             }
             assert_eq!(dispatches.load(Ordering::SeqCst), block.transactions.len());
             let error = SemanticBlockVerifier::new(&network, state, transactions)
-                .oneshot(Request::CommitEarlyRelay(block.clone())).await.unwrap_err();
+                .oneshot(Request::CommitEarlyRelay(block.clone().into())).await.unwrap_err();
             assert!(matches!(error, VerifyBlockError::EarlyRelayRejected),
                 "incorrect_fee={incorrect_fee}: replay returned {error:?}, transaction dispatches={}",
                 dispatches.load(Ordering::SeqCst));

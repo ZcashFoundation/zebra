@@ -1,4 +1,4 @@
 project: zebra-consensus
 kind: Added
-body: Added authenticated early-relay block verification through `Request::CommitEarlyRelay`, including rejection classification for negotiated downloads. Threshold-only checks and bodies with a trusted wire size up to 4 KiB run inline; proof-of-work verification and larger or unknown-size body checks retain bounded blocking admission ([#11932](https://github.com/ZcashFoundation/zebra/pull/11932)).
+body: Added authenticated early-relay verification through `Request::CommitEarlyRelay` and `VerifyBlockError::{EarlyRelay, EarlyRelayAdmission, EarlyRelayRejected, EarlyRelayUnavailable}`. The request takes `DecodedBlock` so callers can retain compact reconstruction evidence; unavailable parent context does not authenticate a body or establish invalidity ([#12289](https://github.com/ZcashFoundation/zebra/pull/12289)).
 time: 2026-11-05T06:30:40.214783469+01:00
