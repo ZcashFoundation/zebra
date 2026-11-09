@@ -12,8 +12,21 @@ use futures::{
     SinkExt, StreamExt,
 };
 use std::{sync::Arc, time::Duration};
-use zebra_chain::{block::Block, serialization::ZcashDeserializeInto};
+use zebra_chain::{
+    block::Block,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+};
 use zebra_test::mock_service::PanicAssertion;
+
+fn assert_reconstructed(response: Response, block: &Arc<Block>, source: crate::PeerSocketAddr) {
+    let Response::ReconstructedBlock(reconstructed, actual_source) = response else {
+        panic!("a compact download must retain its size evidence");
+    };
+    let (actual_block, size) = reconstructed.into_parts();
+    assert_eq!(actual_block, *block);
+    assert_eq!(size, block.zcash_serialized_size());
+    assert_eq!(actual_source, Some(source));
+}
 
 #[tokio::test]
 async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
@@ -31,6 +44,7 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
             let info = Arc::make_mut(&mut connection.connection_info);
             info.early_block_relay = true;
             info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+            let advertiser = Some(connection.connection_info.clone());
             let (mut peer, peer_rx) = mpsc::channel(1);
             let task = tokio::spawn(connection.run(peer_rx));
             assert_eq!(
@@ -49,7 +63,10 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 .await
                 .respond(Response::Nil);
             inbound
-                .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+                .expect_request(Request::AdvertiseCompactBlock(
+                    block.hash(),
+                    advertiser.clone(),
+                ))
                 .await
                 .respond(Response::Nil);
             let (tx, rx) = oneshot::channel();
@@ -57,11 +74,9 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 .send(ClientRequest {
                     request: Request::BlockDownload {
                         hash: block.hash(),
-                        advertiser: Some(source),
+                        advertiser: Some(crate::test_support::connection_info(source)),
                     },
                     tx,
-                    inv_collector: None,
-                    transient_addr: Some(source),
                     span: tracing::Span::none(),
                 })
                 .await
@@ -92,7 +107,10 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 .unwrap();
                 if failure != "missing" {
                     let check = inbound
-                        .expect_request(Request::CheckCompactBlock(block.clone()))
+                        .expect_request_that(|request| {
+                            matches!(request, Request::CheckCompactBlock(checked, Some(evidence))
+                                if **checked == *block && evidence.evidence_for(checked).is_some())
+                        })
                         .await;
                     if failure == "commitments" {
                         check.respond_error("authorization commitment mismatch".into());
@@ -108,32 +126,29 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
                 );
                 peer.send(Ok(Message::Block(block.clone()))).await.unwrap();
             }
-            assert_eq!(
-                rx.await.unwrap().unwrap(),
-                Response::EarlyBlocks(vec![InventoryResponse::Available((
-                    block.clone(),
-                    Some(source)
-                ))])
-            );
+            let response = rx.await.unwrap().unwrap();
+            if failure == "none" {
+                assert_reconstructed(response, &block, source);
+            } else {
+                assert_eq!(
+                    response,
+                    Response::EarlyBlocks(vec![InventoryResponse::Available((
+                        block.clone(),
+                        Some(source)
+                    ))])
+                );
+            }
             if failure == "none" {
                 let (tx, rx) = oneshot::channel();
                 client
                     .send(ClientRequest {
                         request: Request::BlocksByHash([block.hash()].into()),
                         tx,
-                        inv_collector: None,
-                        transient_addr: Some(source),
                         span: tracing::Span::none(),
                     })
                     .await
                     .unwrap();
-                assert_eq!(
-                    rx.await.unwrap().unwrap(),
-                    Response::EarlyBlocks(vec![InventoryResponse::Available((
-                        block.clone(),
-                        Some(source)
-                    )),])
-                );
+                assert_reconstructed(rx.await.unwrap().unwrap(), &block, source);
                 assert!(
                     outbound.try_recv().is_err(),
                     "a racing sync request reuses reconstructed bytes"
@@ -193,10 +208,11 @@ async fn unadmitted_compacts_do_not_retain_global_slots() {
         let (mut connection, _client, mut inbound, _outbound, _errors) =
             new_test_connection::<PanicAssertion>();
         Arc::make_mut(&mut connection.connection_info).early_block_relay = true;
-        let source = connection
+        let advertiser = connection
             .connection_info
             .connected_addr
-            .get_transient_addr();
+            .get_transient_addr()
+            .map(|_| connection.connection_info.clone());
         for valid_header in [false, true] {
             for _ in 0..6 {
                 let receive = connection.receive_compact(compact.clone());
@@ -207,13 +223,19 @@ async fn unadmitted_compacts_do_not_retain_global_slots() {
                     if valid_header {
                         check.respond(Response::Nil);
                         inbound
-                            .expect_request(Request::AdvertiseCompactBlock(block.hash(), source))
+                            .expect_request(Request::AdvertiseCompactBlock(
+                                block.hash(),
+                                advertiser.clone(),
+                            ))
                             .await
                             .respond_error("duplicate or over-capacity download".into());
                     } else {
                         check.respond_error("known header does not extend the best tip".into());
                         inbound
-                            .expect_request(Request::AdvertiseBlock(block.hash(), source))
+                            .expect_request(Request::AdvertiseBlock(
+                                block.hash(),
+                                advertiser.clone(),
+                            ))
                             .await
                             .respond(Response::Nil);
                     }

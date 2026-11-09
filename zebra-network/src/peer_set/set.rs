@@ -2561,7 +2561,7 @@ where
             | Request::AdvertiseCompactBlock(..)
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
-            | Request::CheckCompactBlock(_) => {
+            | Request::CheckCompactBlock(..) => {
                 future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 

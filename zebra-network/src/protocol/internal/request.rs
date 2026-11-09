@@ -73,8 +73,10 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks), or
-    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source.
+    /// Returns [`Response::Blocks`](super::Response::Blocks),
+    /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source,
+    /// or [`Response::ReconstructedBlock`](super::Response::ReconstructedBlock) with exact size
+    /// evidence when a single-block download uses compact reconstruction.
     BlocksByHash(HashSet<block::Hash>),
 
     /// Request blocks from this node on a connection that negotiated experimental early relay.
@@ -91,9 +93,16 @@ pub enum Request {
 
     /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
     ///
+    /// The second field is the advertising connection's metadata, as in
+    /// [`Request::AdvertiseBlock`].
+    ///
     /// Returns [`super::Response::Nil`] only when a new download was queued. Duplicate hashes,
     /// exhausted global capacity, and the per-IP cap return errors; no compact body may be retained.
-    AdvertiseCompactBlock(block::Hash, Option<PeerSocketAddr>),
+    AdvertiseCompactBlock(
+        block::Hash,
+        #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = "None"))]
+        Option<Arc<ConnectionInfo>>,
+    ),
 
     /// Screens a compact header before retaining its body, without querying the mempool.
     ///
@@ -115,8 +124,12 @@ pub enum Request {
     ///
     /// Returns [`super::Response::Nil`] on success. Errors require full-block fallback and must
     /// not enter the block rejection cache. Success does not replace normal block verification.
+    /// Optional sealed reconstruction evidence applies only to the same immutable block allocation.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    CheckCompactBlock(Arc<block::Block>),
+    CheckCompactBlock(
+        Arc<block::Block>,
+        Option<crate::compact::ReconstructedBlock>,
+    ),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.
     ///
@@ -138,9 +151,10 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks), or
+    /// Returns [`Response::Blocks`](super::Response::Blocks),
     /// [`Response::EarlyBlocks`](super::Response::EarlyBlocks) for a negotiated early-relay source,
-    /// containing the requested block, or an error if the download fails.
+    /// or [`Response::ReconstructedBlock`](super::Response::ReconstructedBlock) with exact size
+    /// evidence after compact reconstruction, or an error if the download fails.
     BlockDownload {
         /// The hash of the block to download.
         hash: block::Hash,
@@ -342,7 +356,7 @@ impl fmt::Display for Request {
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions".to_string(),
-            Request::CheckCompactBlock(_) => "CheckCompactBlock".to_string(),
+            Request::CheckCompactBlock(..) => "CheckCompactBlock".to_string(),
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -383,7 +397,7 @@ impl Request {
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",
             Request::CompactBlockTransactions(_) => "CompactBlockTransactions",
-            Request::CheckCompactBlock(_) => "CheckCompactBlock",
+            Request::CheckCompactBlock(..) => "CheckCompactBlock",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
