@@ -930,8 +930,12 @@ pub enum Request {
     /// Performs contextual validation of the given semantically verified block,
     /// committing it to the state if successful.
     ///
-    /// This request can be made out-of-order; the state service will queue it
-    /// until its parent is ready.
+    /// This request can be made out-of-order; the state service queues it until its parent is ready.
+    /// The orphan queue retains at most [`crate::MAX_BLOCK_REORG_HEIGHT`] payloads and a 320 MiB
+    /// content/metadata resource charge, including cached spent outputs, not exact allocator RSS.
+    /// Highest-height orphans are evicted with [`crate::CommitBlockError::OrphanQueueFull`].
+    /// Commit-ready parents and descendants are dispatched before eviction, so a full queue cannot
+    /// prevent their progress. One incoming payload can temporarily exceed the limits during dispatch.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if

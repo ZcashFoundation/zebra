@@ -134,6 +134,22 @@ impl From<VerifyBlockError> for RouterError {
 }
 
 impl RouterError {
+    /// Returns `true` when local retention pressure permits retrying the same body
+    /// without downloading it again.
+    ///
+    /// These operational failures do not establish that the block or its serving peer is invalid.
+    pub fn is_resource_pressure(&self) -> bool {
+        match self {
+            RouterError::Checkpoint { source } => {
+                matches!(**source, VerifyCheckpointError::QueuedLimit)
+            }
+            RouterError::Block { source } => matches!(
+                **source,
+                VerifyBlockError::Commit(zebra_state::CommitBlockError::OrphanQueueFull)
+            ),
+        }
+    }
+
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
@@ -160,8 +176,7 @@ impl RouterError {
     /// See [`zebra_state::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
     pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
         match self {
-            // The finalized state drops the descendants of a failed block instead of
-            // rejecting them with an error.
+            // The checkpoint verifier requeues unchecked children itself.
             RouterError::Checkpoint { .. } => false,
             RouterError::Block { source, .. } => source.is_descendant_of_auth_commitment_mismatch(),
         }
