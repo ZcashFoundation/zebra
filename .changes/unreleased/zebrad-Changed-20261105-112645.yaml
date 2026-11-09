@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce compact block download delays while block discovery is pending.
+time: 2026-11-05T11:26:45.893007908+01:00

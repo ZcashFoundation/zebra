@@ -25,7 +25,7 @@ use crate::{
         Reconstruction,
     },
     constants,
-    protocol::external::Message,
+    protocol::external::{InventoryHash, Message},
     BlockAuthorization, BoxError, PeerError, Request, Response,
 };
 
@@ -61,6 +61,9 @@ pub(super) struct CompactRelay {
     /// Gossip and sync can request the same body before either verifier commits it.
     reconstructed: Option<(ReconstructedBlock, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
+    /// Original wire deadlines, oldest first. The 15-second compact cooldown and 20-second request
+    /// timeout allow at most two live retired replies; fixed slots avoid allocating a queue.
+    retired_discovery: [Option<Instant>; 2],
 }
 
 impl CompactRelay {
@@ -87,6 +90,7 @@ impl CompactRelay {
 
     pub(super) fn expire(&mut self) {
         let now = Instant::now();
+        self.expire_retired_discovery(now);
         if self
             .received
             .as_ref()
@@ -107,6 +111,34 @@ impl CompactRelay {
             .is_some_and(|(_, until, _)| *until <= now)
         {
             self.reconstructed = None;
+        }
+    }
+
+    /// Reuse only a screened, retained announcement that directly extends the requester's tip.
+    pub(super) fn next_block_hash(&self, tip: &block::Hash) -> Option<block::Hash> {
+        let (compact, until, _) = self.received.as_ref()?;
+        (Instant::now() < *until && compact.header.previous_block_hash == *tip)
+            .then(|| compact.header.hash())
+    }
+
+    fn expire_retired_discovery(&mut self, now: Instant) {
+        while self.retired_discovery[0].is_some_and(|until| until <= now) {
+            self.retired_discovery[0] = self.retired_discovery[1].take();
+        }
+    }
+
+    /// Route one reply to a synthetically completed wire request through unsolicited inventory.
+    pub(super) fn take_retired_discovery(&mut self, message: &Message) -> bool {
+        self.expire_retired_discovery(Instant::now());
+        if self.retired_discovery[0].is_some()
+            && matches!(message, Message::Inv(items)
+                if !items.is_empty()
+                    && items.iter().all(|item| matches!(item, InventoryHash::Block(_))))
+        {
+            self.retired_discovery[0] = self.retired_discovery[1].take();
+            true
+        } else {
+            false
         }
     }
 
@@ -211,6 +243,28 @@ where
                     .await,
                 Some(Response::Nil)
             ) {
+                self.compact.expire();
+                if let State::AwaitingResponse { handler, .. } = &mut self.state {
+                    if self.compact.retired_discovery[1].is_none()
+                        && matches!(
+                            handler,
+                            Handler::FindBlocks {
+                                first_locator: Some(tip),
+                                has_stop: false,
+                            } if *tip == block.header.previous_block_hash
+                        )
+                    {
+                        // Like a singleton inv, keep both discovery and gossip paths available.
+                        let slot = usize::from(self.compact.retired_discovery[0].is_some());
+                        self.compact.retired_discovery[slot] = Some(
+                            self.request_timer
+                                .as_ref()
+                                .expect("an outstanding wire request has a response timer")
+                                .deadline(),
+                        );
+                        *handler = Handler::Finished(Ok(Response::BlockHashes(vec![hash])));
+                    }
+                }
                 if let Ok(permit) = SLOTS.clone().try_acquire_owned() {
                     if matches!(
                         self.compact_query(Request::AdvertiseCompactBlock(hash, advertiser))
