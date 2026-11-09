@@ -5,7 +5,9 @@ use std::sync::Arc;
 use chrono::Duration;
 
 use zebra_chain::{
-    block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
+    block::{
+        self, merkle::AuthDataRoot, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError,
+    },
     history_tree::HistoryTree,
     parameters::{Network, NetworkUpgrade},
     work::difficulty::CompactDifficulty,
@@ -133,11 +135,14 @@ pub(crate) fn block_is_valid_for_recent_chain(
 
 /// Check that `block` is contextually valid for `network`, using
 /// the `history_tree` up to and including the previous block.
+///
+/// Any precomputed root must come from the same immutable checkpoint block body.
 #[tracing::instrument(skip(block, history_tree))]
 pub(crate) fn block_commitment_is_valid_for_chain_history(
     block: Arc<Block>,
     network: &Network,
     history_tree: &HistoryTree,
+    precomputed_auth_data_root: Option<AuthDataRoot>,
 ) -> Result<(), ValidateContextError> {
     match block.commitment(network)? {
         block::Commitment::PreSaplingReserved(_)
@@ -200,7 +205,14 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
                     "the history tree of the previous block must exist \
                  since the current block has a ChainHistoryBlockTxAuthCommitment",
                 );
-            let auth_data_root = block.auth_data_root();
+            // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or
+            // the Apache License, Version 2.0, at your option.
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/3482b607a4008da9d2a6833243959d88f28a0659).
+            // Adapted from zakura-core/zakura
+            // (https://github.com/zakura-core/zakura/commit/21107f19f7a3dd3f125cff4d565bc45d8ca91be4).
+            let auth_data_root =
+                precomputed_auth_data_root.unwrap_or_else(|| block.auth_data_root());
 
             let hash_block_commitments = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                 &history_tree_root,
