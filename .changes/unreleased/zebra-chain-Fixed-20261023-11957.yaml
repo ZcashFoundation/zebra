@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: 'Reduce reallocations when deserializing V4 transactions by reserving the initial recording buffer ([#11957](https://github.com/ZcashFoundation/zebra/issues/11957)).'
+time: 2026-10-23T00:00:00+00:00
