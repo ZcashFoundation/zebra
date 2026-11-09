@@ -511,6 +511,9 @@ impl Storage {
         result
     }
 
+    // Copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
     /// Remove transactions from the mempool via exact [`UnminedTxId`].
     ///
     /// For v5 transactions, transactions are matched by WTXID, using both the:
@@ -527,9 +530,16 @@ impl Storage {
     /// Does not add or remove from the 'rejected' tracking set.
     #[allow(dead_code)]
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
-        self.verified
-            .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
-            .len()
+        let tx_ids: Vec<_> = exact_wtxids
+            .iter()
+            .filter(|id| {
+                self.transactions()
+                    .get(&id.mined_id())
+                    .is_some_and(|tx| tx.transaction.id == **id)
+            })
+            .map(UnminedTxId::mined_id)
+            .collect();
+        self.verified.remove_all(tx_ids).len()
     }
 
     /// Clears a list of mined transaction ids from the verified set's tracked transaction dependencies.
@@ -556,9 +566,8 @@ impl Storage {
         mined_ids: &HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
     ) -> RemovedTransactionIds {
-        let removed_mined = self
-            .verified
-            .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()));
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
+        let removed_mined = self.verified.remove_all(mined_ids.iter().copied());
 
         let spent_outpoints: HashSet<_> = transactions
             .iter()
@@ -605,9 +614,10 @@ impl Storage {
             })
             .collect();
 
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         let removed_duplicate_spend = self
             .verified
-            .remove_all_that(|tx| duplicate_spend_ids.contains(&tx.transaction.id));
+            .remove_all(duplicate_spend_ids.iter().map(UnminedTxId::mined_id));
 
         for &mined_id in mined_ids {
             self.reject(
@@ -925,9 +935,9 @@ impl Storage {
             return unmined_tx_ids;
         }
 
+        // Adapted from zakura-core/zakura (https://github.com/zakura-core/zakura/pull/2048).
         // expiry height is effecting data, so we match by non-malleable TXID
-        self.verified
-            .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id.mined_id()));
+        self.verified.remove_all(tx_ids.iter().copied());
 
         // also reject it
         for id in tx_ids {

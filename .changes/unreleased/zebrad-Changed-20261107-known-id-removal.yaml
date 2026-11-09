@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Remove known mined, conflicting, and expired mempool transaction IDs by direct lookup instead of rescanning the pool, while preserving descendant removal and rejection tracking.
+time: 2026-11-07T12:00:00Z
