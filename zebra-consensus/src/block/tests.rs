@@ -27,6 +27,7 @@ use crate::transaction;
 use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
+mod early_relay;
 mod nu7;
 
 /// Shielded transactions must reach the transaction verifier before transparent transactions.
@@ -1282,6 +1283,13 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .await
             .respond(zs::Response::KnownBlock(None));
         state
+            .expect_request(zs::Request::EarlyRelay {
+                block: block.clone(),
+                require_authentication: false,
+            })
+            .await
+            .respond(zs::Response::EarlyRelay(None));
+        state
             .expect_request(zs::Request::MiningCandidate(block.clone()))
             .await
             .respond_error("early mining is disabled in this fixture".into());
@@ -2310,6 +2318,7 @@ async fn changed_proposals_require_transaction_verification() {
                 match request {
                     zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
                     zs::Request::MiningCandidate(_) => Ok(zs::Response::MiningCandidate(None)),
+                    zs::Request::EarlyRelay { .. } => Ok(zs::Response::EarlyRelay(None)),
                     zs::Request::CommitSemanticallyVerifiedBlock(_) => {
                         Err::<_, BoxError>("fully verified".into())
                     }

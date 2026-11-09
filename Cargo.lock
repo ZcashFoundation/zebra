@@ -7410,6 +7410,7 @@ dependencies = [
  "spandoc",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tower-batch-control",
  "tower-fallback",
