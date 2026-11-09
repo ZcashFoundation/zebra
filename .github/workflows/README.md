@@ -229,6 +229,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
   The local builder is cleaned up on self-hosted runners; hosted VMs discard it with the job.
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
+  The library MSRV matrix excludes `zebrad`; the lint workflow checks the binary's own MSRV.
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
