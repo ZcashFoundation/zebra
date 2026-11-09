@@ -52,23 +52,21 @@ pub struct Config {
     /// Applies only if [`Self::miner_address`] contains a shielded component.
     pub miner_memo: Option<String>,
 
-    /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
+    /// Mine blocks with Zebra's internal Equihash solver.
     ///
-    /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
-    /// for a valid Proof of Work.
+    /// Public networks require synchronization and recently live peers. After a locally accepted
+    /// block, the miner waits for a different committed parent. Regtest and configured Testnet may
+    /// extend their own accepted blocks.
     ///
-    /// The internal miner is off by default.
+    /// Disabled by default.
     #[serde(default)]
     pub internal_miner: bool,
 }
 
 impl Config {
-    /// Is the internal miner enabled using at least one thread?
+    /// Returns whether internal mining is configured.
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {
-        // TODO: Changed to return always false so internal miner is never started. Part of https://github.com/ZcashFoundation/zebra/issues/8180
-        // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L83
-        // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
         self.internal_miner
     }
 }
