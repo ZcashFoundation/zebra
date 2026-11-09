@@ -1174,7 +1174,7 @@ where
             return Ok(None);
         };
 
-        if cache.is_empty() && !cache.updater_is_running() {
+        if cache.is_uninitialized() && !cache.updater_is_running() {
             return Ok(None);
         }
 
@@ -1285,10 +1285,10 @@ where
         }
     }
 
-    /// Returns the precomputed template, if it extends the tip the state has committed.
+    /// Returns work extending the committed tip or the current proof-of-work checked parent.
     ///
     /// Waits up to [`precompute::new_tip_timeout()`] for the updater task to catch up with a recent
-    /// tip change, re-reading the tip every time it publishes.
+    /// tip change, re-reading the tip on cache publications and committed-tip changes.
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
@@ -1296,6 +1296,10 @@ where
         // Subscribe before the first read below, so a template published while this call is
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
+        // Commitment can withdraw a candidate between the two state reads below while its cached
+        // child remains usable. Observe tip changes too, without requiring another publication.
+        let mut tip_change = self.latest_chain_tip.clone();
+        tip_change.mark_best_tip_seen();
 
         // This bounds each cache/state wait. A live updater keeps ownership across timeouts;
         // if it has stopped, requests may use the serialized fallback instead.
@@ -1334,7 +1338,40 @@ where
                     return Some(template);
                 }
 
-                template_changes.changed().await;
+                if let Some(candidate) = precompute::mining_candidate(self.read_state.clone()).await
+                {
+                    if let Some(template) = cache.template_for_tip(
+                        candidate.tip_hash,
+                        &self.network,
+                        self.template_clock_now(),
+                    ) {
+                        // A detached state response can outlive its verifier. Check the live
+                        // subscription after cloning cached work, without waiting for the updater.
+                        let ReadResponse::MiningCandidateChanges(candidates) = self
+                            .read_state
+                            .clone()
+                            .oneshot(ReadRequest::MiningCandidateChanges)
+                            .await
+                            .ok()?
+                        else {
+                            return None;
+                        };
+                        if candidates.is_current(candidate.tip_hash) {
+                            types::get_block_template::check_synced_to_tip(
+                                &self.network,
+                                self.latest_chain_tip.clone(),
+                                self.gbt.sync_status(),
+                            )
+                            .ok()?;
+                            return Some(template);
+                        }
+                    }
+                }
+
+                tokio::select! {
+                    () = template_changes.changed() => {}
+                    result = tip_change.best_tip_changed() => result.ok()?,
+                }
             }
         })
         .await

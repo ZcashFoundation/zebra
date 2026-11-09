@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: 'Types `MiningCandidateGuard` and `MiningCandidateChanges` support early mining work on a block before verification finishes. Candidates must satisfy contextual difficulty and median-time-past rules before publication. Admission remains reserved until the verifier guard drops, even after work expires; `MiningCandidateChanges::is_current` checks live ownership, expiry, and the committed best-tip parent before cached work is served.'
+time: 2026-10-11T00:00:00Z
