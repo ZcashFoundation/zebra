@@ -18,8 +18,9 @@ use std::{
     path::Path,
     sync::{
         atomic::{self, AtomicBool},
-        Arc,
+        Arc, Mutex, PoisonError,
     },
+    time::{Duration, Instant},
 };
 
 use itertools::Itertools;
@@ -95,6 +96,9 @@ pub struct DiskDb {
     /// A boolean flag indicating whether the db format change task has finished
     /// applying any format changes that may have been required.
     finished_format_upgrades: Arc<AtomicBool>,
+
+    /// The last [`DiskDb::size`] result and when it was measured, shared by all clones.
+    size_cache: Arc<Mutex<Option<(Instant, u64)>>>,
 
     // Owned State
     //
@@ -585,6 +589,9 @@ impl DiskWriteBatch {
 }
 
 impl DiskDb {
+    /// How long [`DiskDb::cached_size`] reuses a measurement.
+    pub const SIZE_CACHE_TTL: Duration = Duration::from_secs(30);
+
     /// Prints rocksdb metrics for each column family along with total database disk size, live data disk size and database memory size.
     pub fn print_db_metrics(&self) {
         let mut total_size_on_disk = 0;
@@ -730,6 +737,25 @@ impl DiskDb {
         }
 
         total_size_on_disk
+    }
+
+    /// Returns [`DiskDb::size`], measured at most [`DiskDb::SIZE_CACHE_TTL`] ago.
+    ///
+    /// Measuring re-reads the MANIFEST file, which takes milliseconds on a mainnet database.
+    pub fn cached_size(&self) -> u64 {
+        let mut cache = self
+            .size_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+
+        match *cache {
+            Some((measured_at, size)) if measured_at.elapsed() < Self::SIZE_CACHE_TTL => size,
+            _ => {
+                let size = self.size();
+                *cache = Some((Instant::now(), size));
+                size
+            }
+        }
     }
 
     /// Sets `finished_format_upgrades` to true to indicate that Zebra has
@@ -1079,6 +1105,7 @@ impl DiskDb {
                     mode,
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    size_cache: Arc::new(Mutex::new(None)),
                 };
 
                 db.assert_default_cf_is_empty();

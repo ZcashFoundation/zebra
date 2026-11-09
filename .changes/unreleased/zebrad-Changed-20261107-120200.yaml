@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblockchaininfo` reuses a `size_on_disk` estimate measured in the last 30 seconds instead of re-reading the RocksDB MANIFEST on every call, which took milliseconds on mainnet.'
+time: 2026-11-07T12:02:00.000000000Z
