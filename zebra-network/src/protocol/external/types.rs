@@ -180,15 +180,12 @@ bitflags! {
         /// does not provide network services.
         const NODE_NETWORK = 1;
 
-        /// Opt in to authenticated next-tip block relay before full transaction validation.
+        /// Support compact blocks and authenticated next-tip relay before full transaction validation.
         ///
-        /// Both ends must advertise this bit. This is a temporary experiment, not a production
-        /// allocation: bits 24–31 are [reserved for temporary experiments][experimental-bits].
-        /// Bit 25 avoids bit 24, which another implementation already uses for a different
-        /// capability. A production allocation is pending.
+        /// Both ends must advertise this bit, assigned by the [draft Compact Block Relay ZIP].
         ///
-        /// [experimental-bits]: https://github.com/zcash/zcash/blob/16ac743/src/protocol.h#L77-L83
-        const NODE_EARLY_BLOCK_RELAY = 1 << 25;
+        /// [draft Compact Block Relay ZIP]: https://github.com/zcash/zips/pull/1429
+        const NODE_COMPACT_BLOCKS = 1 << 16;
     }
 }
 
