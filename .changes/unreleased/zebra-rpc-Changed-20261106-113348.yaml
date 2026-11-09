@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Mining requests share freshness checks and the existing template updater, waiting at most 5 ms before returning cached work. Steady mempool arrivals use a 10 ms background pause extended by build cost, while bursts remain coalesced. Known membership changes rebuild directly without a separate membership scan. Coinbase-only first work is served without a mempool refresh wait, while empty full snapshots still refresh on later admissions. Collateral mempool evictions also invalidate cached membership.
+time: 2026-11-06T11:33:48.491192494+01:00

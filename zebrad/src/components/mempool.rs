@@ -742,8 +742,12 @@ impl Service<Request> for Mempool {
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
                             let tx_id = tx.transaction.id;
-                            let insert_result =
-                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
+                            let insert_result = storage.insert(
+                                tx,
+                                spent_mempool_outpoints,
+                                best_tip_height,
+                                &mut invalidated_ids,
+                            );
 
                             tracing::trace!(
                                 ?insert_result,
