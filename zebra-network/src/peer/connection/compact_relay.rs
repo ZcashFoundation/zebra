@@ -20,7 +20,10 @@ use zebra_chain::{
 
 use super::{Connection, Handler, InventoryResponse, State};
 use crate::{
-    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock, Reconstruction},
+    compact::{
+        BlockTransactions, BlockTransactionsRequest, CompactBlock, ReconstructedBlock,
+        Reconstruction,
+    },
     constants,
     protocol::external::Message,
     BlockAuthorization, BoxError, PeerError, Request, Response,
@@ -52,7 +55,7 @@ pub(super) struct CompactRelay {
     received: Option<(Arc<CompactBlock>, Instant, OwnedSemaphorePermit)>,
     sent: Option<(ServingBlock, Instant, OwnedSemaphorePermit)>,
     /// Gossip and sync can request the same body before either verifier commits it.
-    reconstructed: Option<(Arc<Block>, Instant, OwnedSemaphorePermit)>,
+    reconstructed: Option<(ReconstructedBlock, Instant, OwnedSemaphorePermit)>,
     last_received: Option<Instant>,
 }
 
@@ -210,7 +213,7 @@ where
     pub(super) async fn download_block(&mut self, hash: block::Hash) -> Result<Handler, PeerError> {
         self.compact.expire();
         if let Some((block, _, _)) = &self.compact.reconstructed {
-            if block.hash() == hash {
+            if block.block().hash() == hash {
                 return Ok(self.compact_response(block.clone()));
             }
         }
@@ -291,11 +294,11 @@ where
             .await
     }
 
-    fn compact_response(&self, block: Arc<Block>) -> Handler {
-        Handler::Finished(Ok(Response::Blocks(vec![InventoryResponse::Available((
+    fn compact_response(&self, block: ReconstructedBlock) -> Handler {
+        Handler::Finished(Ok(Response::ReconstructedBlock(
             block,
             self.connection_info.connected_addr.get_transient_addr(),
-        ))])))
+        )))
     }
 
     async fn finish_compact(
@@ -303,7 +306,7 @@ where
         reconstruction: Reconstruction,
         response: BlockTransactions,
         permit: OwnedSemaphorePermit,
-    ) -> Option<Arc<Block>> {
+    ) -> Option<ReconstructedBlock> {
         let (block, permit) =
             tokio::task::spawn_blocking(move || (reconstruction.finish(response), permit))
                 .await
@@ -312,8 +315,11 @@ where
         // A txid Merkle root does not bind v5/v6 proofs or signatures. Authenticate the ordered
         // authorization root before giving these probabilistically reconstructed bytes to consensus.
         if !matches!(
-            self.compact_query(Request::CheckCompactBlock(block.clone()))
-                .await,
+            self.compact_query(Request::CheckCompactBlock(
+                block.block().clone(),
+                Some(block.clone())
+            ))
+            .await,
             Some(Response::Nil)
         ) {
             return None;

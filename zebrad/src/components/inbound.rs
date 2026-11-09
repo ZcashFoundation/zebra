@@ -488,7 +488,7 @@ impl Service<zn::Request> for Inbound {
 
         let early_relay = matches!(req, zn::Request::EarlyBlocksByHash(_));
         match req {
-            req @ (zn::Request::CheckCompactHeader(_) | zn::Request::CompactBlockTransactions(_) | zn::Request::CheckCompactBlock(_)) => {
+            req @ (zn::Request::CheckCompactHeader(_) | zn::Request::CompactBlockTransactions(_) | zn::Request::CheckCompactBlock(..)) => {
                 let Some((network, read_state)) = self.compact_relay.clone() else {
                     return async { Err("compact relay context is unavailable".into()) }.boxed();
                 };
@@ -814,7 +814,7 @@ async fn compact_request(
             }
             Ok(zn::Response::CompactBlockTransactions(transactions))
         }
-        zn::Request::CheckCompactBlock(block) => {
+        zn::Request::CheckCompactBlock(block, _reconstructed) => {
             let checked = block.clone();
             let worker_permit = permit.clone();
             tokio::task::spawn_blocking(move || {
