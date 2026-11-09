@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Checkpoint sync now updates note commitment trees for queued blocks on a separate thread, ahead of the block writer. New `state.block_writer.phase.duration_seconds` phases `checkpoint_trees_ahead` and `checkpoint_trees_wait` show the worker's time and the writer's wait for it.
+time: 2026-11-07T22:30:00.000000000+00:00
