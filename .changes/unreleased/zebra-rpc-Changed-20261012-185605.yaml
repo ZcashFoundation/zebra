@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Block template transaction selection reserves coinbase space from the coinbase's fee-independent outputs instead of building and proving a zero-fee coinbase.
+time: 2026-10-12T18:56:05.908386079+02:00
