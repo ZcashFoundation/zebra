@@ -1024,6 +1024,7 @@ async fn abandoned_block_advert_preserves_request_deadline() {
     advert_tx
         .try_send(crate::peer_set::BlockAdvert {
             hash: block::Hash([1; 32]),
+            compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
             result,
         })
         .unwrap();
@@ -1104,6 +1105,7 @@ async fn ping_deadline_closes_connection_with_or_without_stalled_block_advert() 
             advert_tx
                 .try_send(crate::peer_set::BlockAdvert {
                     hash: block::Hash([1; 32]),
+                    compact_slots: Arc::new(tokio::sync::Semaphore::new(0)),
                     result,
                 })
                 .unwrap();

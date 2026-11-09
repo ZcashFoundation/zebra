@@ -539,8 +539,9 @@ async fn connection_block_error_attribution(not_found: bool) {
         connection_info,
         Vec::new(),
     );
-    let remote_rx = remote_rx
-        .then(move |msg| register_inventory_status(msg, connected_addr, inv_collector.clone()));
+    let remote_rx = remote_rx.then(move |msg| {
+        register_inventory_status(msg, connected_addr, false, inv_collector.clone())
+    });
     let connection_task = tokio::spawn(connection.run(remote_rx.boxed()));
     client_tx
         .try_send(client_request)
