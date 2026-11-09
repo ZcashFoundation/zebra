@@ -492,10 +492,6 @@ impl WriteBlockWorkerTask {
                 result
             };
 
-            // TODO: fix the test timing bugs that require the result to be sent
-            //       after `update_latest_chain_channels()`,
-            //       and send the result on rsp_tx here
-
             if let Err(ref error) = result {
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
@@ -533,26 +529,6 @@ impl WriteBlockWorkerTask {
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
             let phase_start = Instant::now();
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
-            {
-                tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees = non_finalized_state.finalize();
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
-            }
-            metrics::histogram!(
-                "state.block_writer.phase.duration_seconds",
-                "phase" => "finalization"
-            )
-            .record(phase_start.elapsed().as_secs_f64());
-
-            let phase_start = Instant::now();
             let tip_block_height = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
@@ -574,8 +550,39 @@ impl WriteBlockWorkerTask {
                 permit.send((child_hash, child_height));
             }
 
-            // Update the caller with the result.
+            // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+
+            // Finish retention before receiving another block; finalization errors remain fatal.
+            let phase_start = Instant::now();
+            while non_finalized_state
+                .best_chain_len()
+                .expect("just successfully inserted a non-finalized block above")
+                > MAX_BLOCK_REORG_HEIGHT
+            {
+                let _context_update = early_relay.updating_context();
+                tracing::trace!("finalizing block past the reorg limit");
+                let contextually_verified_with_trees = non_finalized_state.finalize();
+                prev_finalized_note_commitment_trees = finalized_state
+                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
+                            .expect(
+                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
+                            ).1.into();
+
+                // Keep the old snapshot's root visible until the database contains it.
+                update_latest_chain_channels(
+                    non_finalized_state,
+                    &finalized_state.db,
+                    chain_tip_sender,
+                    non_finalized_state_sender,
+                    backup_dir_path.as_deref(),
+                );
+            }
+            metrics::histogram!(
+                "state.block_writer.phase.duration_seconds",
+                "phase" => "finalization"
+            )
+            .record(phase_start.elapsed().as_secs_f64());
 
             // Update the metrics if semantic and contextual validation passes
             //
