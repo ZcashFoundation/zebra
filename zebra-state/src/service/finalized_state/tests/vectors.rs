@@ -911,3 +911,47 @@ fn orchard_checks(
         "(de)serialization should not modify subtree value"
     );
 }
+
+/// Test that the finalized tip cache carried between checkpoint commits of the continuous
+/// Mainnet test vectors matches the database after every block.
+#[test]
+fn checkpoint_tip_cache_matches_database_for_mainnet_vectors() {
+    use std::sync::Arc;
+
+    use zebra_chain::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+
+    use crate::{service::finalized_state::FinalizedState, CheckpointVerifiedBlock, Config};
+
+    let _init_guard = zebra_test::init();
+
+    let mut state =
+        FinalizedState::new_with_debug(&Config::ephemeral(), &Network::Mainnet, true, false)
+            .expect("opening an ephemeral database should succeed");
+    state.db.mark_finished_format_upgrades();
+
+    let mut note_commitment_trees = None;
+    let mut tip_cache = None;
+
+    for (&height, block) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let block: Arc<Block> = block.zcash_deserialize_into().expect("valid test vector");
+        let hash = block.hash();
+
+        let (_tip, trees, new_tip_cache) = state
+            .commit_checkpoint_verified(
+                CheckpointVerifiedBlock::from(block),
+                note_commitment_trees.take(),
+                tip_cache.take(),
+            )
+            .expect("test vectors are valid");
+        note_commitment_trees = Some(trees);
+
+        let new_tip_cache = new_tip_cache.expect("format upgrades have finished");
+        assert_eq!(new_tip_cache.tip, (Height(height), hash));
+        new_tip_cache.assert_matches_db(&state.db);
+        tip_cache = Some(new_tip_cache);
+    }
+
+    let tip_cache = tip_cache.expect("there are continuous test vectors");
+    assert!(tip_cache.tip.0 > Height(0));
+    assert!(!tip_cache.value_pool.transparent_amount().is_zero());
+}
