@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: The `MiningCandidateChanges::block` method returns a live candidate body for speculative transaction selection without waiting for commitment.
+time: 2026-10-23T02:43:08.15004791+02:00
