@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Use the GLV multiscalar multiplication support proposed in zcash/pasta_curves#182; batch normalization and portable squaring are not included.
+time: 2026-10-20T04:55:38.792650446+02:00
