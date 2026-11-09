@@ -163,9 +163,6 @@ fn state(input_count: usize) -> BoxCloneService<zs::ReadRequest, zs::ReadRespons
                 zs::ReadRequest::UnspentBestChainUtxo(outpoint) => Ok(
                     zs::ReadResponse::UnspentBestChainUtxo(utxos.get(&outpoint).cloned()),
                 ),
-                zs::ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
-                    Ok(zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors)
-                }
                 other => Err(format!("unexpected state request: {other:?}").into()),
             }
         }
