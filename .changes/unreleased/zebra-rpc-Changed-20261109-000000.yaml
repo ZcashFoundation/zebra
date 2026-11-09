@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: 'Verbose `getblock` and `getrawtransaction` hex-encode ciphertexts, proofs, commitments and scripts with the table-driven encoder, instead of the `hex` crate. The output is unchanged.'
+time: 2026-11-09T00:00:00.000000000Z
