@@ -52,8 +52,14 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                         response
                     }
                 });
-                let mut transactions: MockService<tx::BlockRequest, tx::BlockResponse, _, BoxError> =
-                    MockService::build().for_unit_tests();
+                // This mock only needs the ID. Drop request-owned UTXOs before a response can
+                // wake verification, rather than retaining them in a pending mock responder.
+                let mut transactions: MockService<
+                    zebra_chain::transaction::UnminedTxId,
+                    tx::BlockResponse,
+                    _,
+                    BoxError,
+                > = MockService::build().for_unit_tests();
 
                 // Each initial source is replayed through both the ordinary and RPC-equivalent path.
                 for (delivery, mined) in [initially_mined, false, true].into_iter().enumerate() {
@@ -70,7 +76,9 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                     let verifier = SemanticBlockVerifier::new(
                         &network,
                         observed_state.clone(),
-                        transactions.clone(),
+                        transactions.clone().map_request(|request: tx::BlockRequest| {
+                            request.transaction.unmined_id()
+                        }),
                     );
                     let verification = tokio::spawn(verifier.oneshot(request));
                     let mut pending = Vec::new();
@@ -100,8 +108,8 @@ async fn ordinary_and_mined_rejections_suppress_mining_replay() {
                     for request in pending {
                         if contextual_failure {
                             // Let the real state reject the fixture's missing transparent spend.
-                            request.respond_with(|request| tx::BlockResponse {
-                                tx_id: request.transaction.unmined_id(),
+                            request.respond_with(|tx_id| tx::BlockResponse {
+                                tx_id: *tx_id,
                                 miner_fee: None,
                                 sigops: 0,
                             });
