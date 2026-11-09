@@ -534,6 +534,8 @@ async fn rpc_getblock() {
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
                 nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 )),
@@ -593,6 +595,8 @@ async fn rpc_getblock() {
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 )),
@@ -680,6 +684,8 @@ async fn rpc_getblock() {
             assert_eq!(
                 *nsm_value_balance,
                 block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 ))
@@ -788,6 +794,8 @@ async fn rpc_getblock() {
             assert_eq!(
                 *nsm_value_balance,
                 block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 ))
@@ -899,6 +907,8 @@ async fn rpc_getblock() {
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 )),
@@ -960,6 +970,8 @@ async fn rpc_getblock() {
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 nsm_value_balance: block_info.as_ref().map(|d| GetBlockchainInfoBalance::nsm(
+                    &Mainnet,
+                    Height(i.try_into().expect("valid u32")),
                     d.value_pools().nsm_amount(),
                     delta.map(|delta| delta.nsm_amount())
                 )),
@@ -5949,4 +5961,23 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
         .expect("RPC task should not panic")
         .expect("RPC should succeed");
     assert_eq!(response.connections, 0);
+}
+
+/// The NSM value balance is monitored from NU7 activation, also when it is zero, and not before.
+#[test]
+fn nsm_value_balance_is_monitored_from_nu7_activation() {
+    let nu7 = NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet");
+    let before_nu7 = nu7.previous().expect("NU7 does not activate at genesis");
+
+    let monitored = |height, zat| {
+        GetBlockchainInfoBalance::nsm(&Mainnet, height, balance_zat(zat), None).monitored()
+    };
+
+    assert!(monitored(nu7, 0));
+    assert!(monitored(nu7, 36_858_445_520));
+    assert!(monitored((nu7 + 1).expect("valid height"), 0));
+    assert!(!monitored(before_nu7, 0));
+    assert!(!monitored(before_nu7, 100));
 }

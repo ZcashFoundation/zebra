@@ -512,7 +512,7 @@ proptest! {
                     // The NSM value balance is reported on its own, and is not part of the supply.
                     prop_assert_eq!(
                         info.nsm_value_balance,
-                        Some(GetBlockchainInfoBalance::nsm(nsm, None))
+                        Some(GetBlockchainInfoBalance::nsm(&network, block_height, nsm, None))
                     );
                     prop_assert_eq!(info.chain_supply.chain_value_zat(), orchard);
                     prop_assert!(info.value_pools.iter().all(|pool| pool.id() != "nsm"));

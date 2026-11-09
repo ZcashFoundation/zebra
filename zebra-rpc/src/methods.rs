@@ -1465,6 +1465,8 @@ where
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
             nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                network,
+                tip_height,
                 value_balance.nsm_amount(),
                 None,
             )),
@@ -1836,6 +1838,8 @@ where
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
                 nsm_value_balance: block_info.as_ref().map(|d| {
                     GetBlockchainInfoBalance::nsm(
+                        &network,
+                        height,
                         d.value_pools().nsm_amount(),
                         delta.map(|delta| delta.nsm_amount()),
                     )
@@ -4067,7 +4071,12 @@ impl Default for GetBlockchainInfoResponse {
             estimated_height: Height(1),
             chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
             value_pools: GetBlockchainInfoBalance::zero_pools(),
-            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(Amount::zero(), None)),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                &Network::Mainnet,
+                Height(1),
+                Amount::zero(),
+                None,
+            )),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
