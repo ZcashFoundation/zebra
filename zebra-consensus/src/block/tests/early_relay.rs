@@ -160,7 +160,8 @@ async fn early_relay_authenticated_tx_failure_is_nonpunitive() {
         let mut transactions: MockService<tx::BlockRequest, tx::BlockResponse, _, BoxError> =
             MockService::build().for_unit_tests();
         let verifier = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone());
-        let verification = tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(block.clone())));
+        let verification =
+            tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(block.clone().into())));
         let first = transactions.expect_request_that(|_| true).await;
         let second = transactions.expect_request_that(|_| true).await;
         assert_eq!(*changes.borrow(), Some(block.hash()));
@@ -225,7 +226,7 @@ async fn early_relay_rejects_forged_authorizing_data_before_transactions() {
             },
         );
         let error = SemanticBlockVerifier::new(&network, state.clone(), transactions)
-            .oneshot(Request::CommitEarlyRelay(forged))
+            .oneshot(Request::CommitEarlyRelay(forged.into()))
             .await
             .unwrap_err();
         assert!(error.is_auth_commitment_mismatch());
@@ -369,7 +370,7 @@ async fn early_relay_pre_nu5_keeps_ordinary_scoring() {
             Err::<tx::BlockResponse, BoxError>(TransactionError::BadBalance.into())
         });
         let error = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
-            .oneshot(Request::CommitEarlyRelay(block))
+            .oneshot(Request::CommitEarlyRelay(block.into()))
             .await
             .unwrap_err();
         assert!(matches!(error, VerifyBlockError::Transaction(_)));
@@ -409,7 +410,7 @@ async fn early_relay_bad_pow_and_malformed_bodies_still_score() {
                 std::future::pending::<Result<tx::BlockResponse, BoxError>>()
             });
             let error = SemanticBlockVerifier::new(&Network::Mainnet, state, transactions)
-                .oneshot(Request::CommitEarlyRelay(Arc::new(block)))
+                .oneshot(Request::CommitEarlyRelay(Arc::new(block).into()))
                 .await
                 .unwrap_err();
             assert_eq!(error.misbehavior_score(), 100);
@@ -430,7 +431,8 @@ async fn early_relay_cancelled_verifier_withdraws_body() {
         let mut transactions: MockService<tx::BlockRequest, tx::BlockResponse, _, BoxError> =
             MockService::build().for_unit_tests();
         let verifier = SemanticBlockVerifier::new(&network, state.clone(), transactions.clone());
-        let verification = tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(block.clone())));
+        let verification =
+            tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(block.clone().into())));
         let pending = transactions.expect_request_that(|_| true).await;
         assert!(cache.get(&block.hash()).is_some());
         verification.abort();
@@ -541,7 +543,7 @@ async fn early_relay_missing_parent_uses_ordinary_verification() {
             })
         });
         let result = SemanticBlockVerifier::new(&network, state, transactions)
-            .oneshot(Request::CommitEarlyRelay(block.clone()))
+            .oneshot(Request::CommitEarlyRelay(block.clone().into()))
             .await
             .unwrap();
         assert_eq!(result, block.hash());
@@ -604,7 +606,7 @@ async fn early_relay_pipelined_failure_authenticates_before_scoring() {
                 MockService::build().for_unit_tests();
             let verifier = SemanticBlockVerifier::new(&network, state, transactions.clone());
             let verification =
-                tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(child.clone())));
+                tokio::spawn(verifier.oneshot(Request::CommitEarlyRelay(child.clone().into())));
             let first = transactions.expect_request_that(|_| true).await;
             let second = transactions.expect_request_that(|_| true).await;
             first.respond_error(TransactionError::BadBalance.into());
