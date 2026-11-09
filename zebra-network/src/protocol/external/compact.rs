@@ -21,7 +21,7 @@ use zebra_chain::{
         CompactSizeMessage, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
     },
-    transaction::{Transaction, UnminedTx, UnminedTxId, MIN_TRANSPARENT_TX_SIZE},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId, MIN_TRANSPARENT_TX_SIZE},
 };
 
 #[cfg(test)]
@@ -63,6 +63,39 @@ pub struct BlockTransactions {
 pub struct Reconstruction {
     compact: Arc<CompactBlock>,
     transactions: Vec<Option<Arc<Transaction>>>,
+    /// Header, transaction-count prefix, and transaction bytes already placed in the block.
+    consumed_size: usize,
+}
+
+/// An immutable reconstructed block with exact size and checked transaction-Merkle evidence.
+///
+/// Only compact reconstruction creates this evidence, after checking the size bound, transaction
+/// uniqueness, and Merkle root against this exact header. This does not validate authorizing data
+/// or network-specific consensus rules.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReconstructedBlock {
+    block: Arc<Block>,
+    consumed_size: usize,
+    transaction_hashes: Arc<[transaction::Hash]>,
+}
+
+impl ReconstructedBlock {
+    /// Returns the immutable body whose serialized size was checked during reconstruction.
+    pub fn block(&self) -> &Arc<Block> {
+        &self.block
+    }
+
+    /// Returns bounded size and Merkle-checked hashes only for the exact immutable block.
+    ///
+    /// A different allocation, even with identical bytes or a shared header, must be checked again.
+    pub fn evidence_for(&self, block: &Arc<Block>) -> Option<(usize, &Arc<[transaction::Hash]>)> {
+        Arc::ptr_eq(&self.block, block).then_some((self.consumed_size, &self.transaction_hashes))
+    }
+
+    /// Consumes the reconstruction, returning its body and exact serialized-size evidence.
+    pub fn into_parts(self) -> (Arc<Block>, usize) {
+        (self.block, self.consumed_size)
+    }
 }
 
 impl CompactBlock {
@@ -96,6 +129,11 @@ impl CompactBlock {
 
     /// Checks count, prefilled ordering, coinbase, and retained transaction byte bounds.
     pub fn validate(&self) -> Result<(), SerializationError> {
+        self.validated_size().map(|_| ())
+    }
+
+    /// Validates the announcement and measures the header, count prefix, and prefills once.
+    fn validated_size(&self) -> Result<usize, SerializationError> {
         let count = self
             .short_ids
             .len()
@@ -115,8 +153,7 @@ impl CompactBlock {
         }
         let mut next = 0;
         let mut bytes = self.header.zcash_serialized_size()
-            + CompactSizeMessage::try_from(count)?.zcash_serialized_size()
-            + self.short_ids.len() * usize::try_from(MIN_TRANSPARENT_TX_SIZE)?;
+            + CompactSizeMessage::try_from(count)?.zcash_serialized_size();
         for (index, tx) in &self.prefilled {
             if *index < next || *index >= count || (*index != 0 && tx.is_coinbase()) {
                 return Err(SerializationError::Parse(
@@ -126,7 +163,11 @@ impl CompactBlock {
             next = index + 1;
             bytes = add_bytes(bytes, tx.zcash_serialized_size())?;
         }
-        check_bytes(bytes)
+        add_bytes(
+            bytes,
+            self.short_ids.len() * usize::try_from(MIN_TRANSPARENT_TX_SIZE)?,
+        )?;
+        Ok(bytes)
     }
 
     /// Returns the block identity committed to by the full header.
@@ -181,11 +222,12 @@ impl CompactBlock {
 
     /// Places bounded candidate bodies without accepting ambiguous short-ID matches.
     /// Candidate cached identities and sizes must come from locally constructed [`UnminedTx`]s.
+    /// Retains their sizes, measuring only the header, count prefix, and prefilled transactions.
     pub fn reconstruct(
         self: Arc<Self>,
         candidates: Vec<UnminedTx>,
     ) -> Result<Reconstruction, SerializationError> {
-        self.validate()?;
+        let mut consumed_size = self.validated_size()?;
         check_count(candidates.len())?;
         candidates
             .iter()
@@ -196,7 +238,7 @@ impl CompactBlock {
         let mut bodies: HashMap<_, _> = candidates
             .into_iter()
             .filter(|tx| matching.remove(&tx.id))
-            .map(|tx| (short_id(keys, tx.id), tx.transaction))
+            .map(|tx| (short_id(keys, tx.id), tx))
             .collect();
         let mut transactions = vec![None; self.short_ids.len() + self.prefilled.len()];
         for (index, tx) in &self.prefilled {
@@ -205,21 +247,20 @@ impl CompactBlock {
         let mut short_ids = self.short_ids.iter();
         for slot in &mut transactions {
             if slot.is_none() {
-                *slot = bodies.remove(
+                if let Some(tx) = bodies.remove(
                     short_ids
                         .next()
                         .expect("each non-prefilled slot has a short ID"),
-                );
+                ) {
+                    consumed_size = add_bytes(consumed_size, tx.size)?;
+                    *slot = Some(tx.transaction);
+                }
             }
         }
-        let bytes = self.header.zcash_serialized_size()
-            + CompactSizeMessage::try_from(transactions.len())?.zcash_serialized_size();
-        transactions.iter().flatten().try_fold(bytes, |bytes, tx| {
-            add_bytes(bytes, tx.zcash_serialized_size())
-        })?;
         Ok(Reconstruction {
             compact: self,
             transactions,
+            consumed_size,
         })
     }
 
@@ -255,7 +296,12 @@ impl Reconstruction {
     /// Completes reconstruction with exactly the requested bodies, including an empty response
     /// when all transactions were available locally. Errors require full-block fallback, not a ban.
     /// Authorizing-data commitments and normal consensus verification are still required.
-    pub fn finish(mut self, response: BlockTransactions) -> Result<Arc<Block>, SerializationError> {
+    /// Returns an immutable block and exact serialized-size evidence without serializing the
+    /// complete block. Only recovered transactions are measured here; all other sizes are retained.
+    pub fn finish(
+        mut self,
+        response: BlockTransactions,
+    ) -> Result<ReconstructedBlock, SerializationError> {
         if response.block_hash != self.block_hash()
             || response.transactions.len()
                 != self.transactions.iter().filter(|tx| tx.is_none()).count()
@@ -264,13 +310,10 @@ impl Reconstruction {
                 "compact recovery hash or count mismatch",
             ));
         }
-        let bytes = self.compact.header.zcash_serialized_size()
-            + CompactSizeMessage::try_from(self.transactions.len())?.zcash_serialized_size();
-        self.transactions
+        let consumed_size = response
+            .transactions
             .iter()
-            .flatten()
-            .chain(response.transactions.iter())
-            .try_fold(bytes, |bytes, tx| {
+            .try_fold(self.consumed_size, |bytes, tx| {
                 add_bytes(bytes, tx.zcash_serialized_size())
             })?;
         let keys = self.compact.keys();
@@ -308,16 +351,24 @@ impl Reconstruction {
                 .map(|tx| tx.expect("every missing slot was filled by the exact response count"))
                 .collect(),
         });
-        let mut seen = HashSet::with_capacity(block.transactions.len());
-        if block.transactions.iter().any(|tx| !seen.insert(tx.hash()))
-            || block.transactions.iter().collect::<block::merkle::Root>()
+        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
+        let mut seen = HashSet::with_capacity(transaction_hashes.len());
+        if transaction_hashes.iter().any(|hash| !seen.insert(*hash))
+            || transaction_hashes
+                .iter()
+                .copied()
+                .collect::<block::merkle::Root>()
                 != block.header.merkle_root
         {
             return Err(SerializationError::Parse(
                 "compact block duplicate transaction or Merkle mismatch",
             ));
         }
-        Ok(block)
+        Ok(ReconstructedBlock {
+            block,
+            consumed_size,
+            transaction_hashes,
+        })
     }
 }
 
