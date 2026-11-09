@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Fixed
+body: Avoid hashing submitted block bodies for proposal cache lookups when no normalized cached header can match ([#12001](https://github.com/ZcashFoundation/zebra/issues/12001)).
+time: 2026-10-24T07:08:25.657702074+02:00
