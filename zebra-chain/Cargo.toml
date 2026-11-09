@@ -67,10 +67,8 @@ group = { workspace = true }
 incrementalmerkletree.workspace = true
 jubjub = { workspace = true }
 dirs = { workspace = true }
-num-integer = { workspace = true }
 primitive-types = { workspace = true }
 rand_core = { workspace = true }
-ripemd = { workspace = true }
 # Matches version used by hdwallet
 secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
@@ -84,7 +82,6 @@ zcash_script.workspace = true
 halo2 = { workspace = true }
 orchard.workspace = true
 nonempty = { workspace = true, optional = true }
-zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
@@ -95,11 +92,10 @@ zcash_transparent = { workspace = true }
 sinsemilla = { workspace = true }
 
 # Time
-chrono = { workspace = true, features = ["clock", "std", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
 humantime = { workspace = true }
 
 # Error Handling & Formatting
-static_assertions = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
@@ -143,7 +139,6 @@ criterion = { workspace = true, features = ["html_reports"] }
 # Error Handling & Formatting
 color-eyre = { workspace = true }
 spandoc = { workspace = true }
-tracing = { workspace = true }
 
 # Make the optional testing dependencies required
 proptest = { workspace = true }
@@ -153,6 +148,7 @@ serde_json = { workspace = true }
 
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+ripemd = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 

@@ -47,21 +47,18 @@ fuzzing = []
 bitflags = { workspace = true }
 byteorder = { workspace = true }
 bytes = { workspace = true }
-chrono = { workspace = true, features = ["clock", "std"] }
-dirs = { workspace = true }
+chrono = { workspace = true }
 hex = { workspace = true }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
-num-integer = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 futures = { workspace = true }
@@ -71,7 +68,6 @@ tokio-util = { workspace = true, features = ["codec", "rt"] }
 tower = { workspace = true, features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer", "limit"] }
 
 metrics = { workspace = true }
-tracing-futures = { workspace = true }
 tracing-error = { workspace = true, features = ["traced-error"] }
 tracing = { workspace = true }
 
@@ -92,8 +88,8 @@ zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-
 [dev-dependencies]
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
+tempfile = { workspace = true }
 
-static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 toml = { workspace = true }
 

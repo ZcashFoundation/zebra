@@ -36,8 +36,7 @@ proptest-impl = [
 
 [dependencies]
 bincode = { workspace = true }
-chrono = { workspace = true, features = ["clock", "std"] }
-dirs = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
@@ -92,7 +91,6 @@ proptest-derive = { workspace = true }
 rand = { workspace = true }
 
 halo2 = { workspace = true }
-jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 

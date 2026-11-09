@@ -224,7 +224,9 @@ impl TrustedPreallocate for Action {
         // This acts as nActionsOrchard and is therefore subject to the rule.
         // The maximum value is actually smaller due to the block size limit,
         // but we ensure the 2^16 limit with a static assertion.
-        static_assertions::const_assert!(MAX < (1 << 16));
+        const {
+            assert!(MAX < (1 << 16));
+        };
         MAX
     }
 }

@@ -13,7 +13,7 @@ use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Block},

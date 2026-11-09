@@ -7,7 +7,6 @@ use std::{
 };
 
 use chrono::{DateTime, TimeDelta, Utc};
-use num_integer::div_ceil;
 
 use tokio::sync::watch;
 use zebra_chain::{
@@ -105,15 +104,13 @@ pub async fn show_block_chain_progress(
         .expect("hard-coded checkpoint height is far below Height::MAX");
 
     // The blocks after a checkpoint update are mined just above the highest checkpoint.
-    let min_minutes_after_checkpoint_update = div_ceil(
-        i64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE)
-            * NetworkUpgrade::target_spacing_for_height(
-                &network,
-                network.checkpoint_list().max_height(),
-            )
+    let target_spacing_seconds = u64::try_from(
+        NetworkUpgrade::target_spacing_for_height(&network, network.checkpoint_list().max_height())
             .num_seconds(),
-        60,
-    );
+    )
+    .expect("target spacings are positive");
+    let min_minutes_after_checkpoint_update =
+        (u64::from(MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE) * target_spacing_seconds).div_ceil(60);
 
     // The last time we downloaded and verified at least one block.
     //

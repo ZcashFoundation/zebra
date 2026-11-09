@@ -24,8 +24,7 @@ use tokio::{
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::{codec::Framed, task::AbortOnDropHandle};
 use tower::Service;
-use tracing::{span, Level, Span};
-use tracing_futures::Instrument;
+use tracing::{span, Instrument, Level, Span};
 
 use zebra_chain::{
     block,
