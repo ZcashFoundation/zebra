@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added ordered batch block-location lookups with `Request::KnownBlocks` ([#11710](https://github.com/ZcashFoundation/zebra/pull/11710)).
+time: 2026-11-07T06:12:21.523595057+01:00
