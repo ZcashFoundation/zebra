@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     block::{serialize::MAX_BLOCK_BYTES, Block, Header},
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{CompactSizeMessage, ZcashDeserialize, ZcashSerialize},
     transaction::{LockTime, Transaction},
     transparent,
 };
@@ -40,6 +40,37 @@ pub fn transaction() -> (Transaction, Vec<u8>) {
     let transaction_bytes = transaction.zcash_serialize_to_vec().unwrap();
 
     (transaction, transaction_bytes)
+}
+
+/// Serialized synthetic V4 block with unique one-input/one-output transactions.
+///
+/// Each transaction has a 107-byte scriptSig and 25-byte scriptPubKey, matching the
+/// signed P2PKH decode workload. Scripts are placeholders, not valid signatures:
+/// this fixture measures parsing and transaction IDs, not script verification.
+/// 9,000 transactions produce a roughly 1.9 MB block.
+pub fn many_transaction_v4_block(count: usize) -> Vec<u8> {
+    let (_, mut bytes) = block_header();
+    CompactSizeMessage::try_from(count)
+        .unwrap()
+        .zcash_serialize(&mut bytes)
+        .unwrap();
+    for index in 0..count {
+        bytes.extend_from_slice(&0x8000_0004_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x892f_2085_u32.to_le_bytes());
+        bytes.push(1); // nInputs
+        bytes.extend_from_slice(&[1; 32]); // prevout hash
+        bytes.extend_from_slice(&u32::try_from(index).unwrap().to_le_bytes());
+        bytes.push(107);
+        bytes.extend_from_slice(&[0; 107]);
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes()); // nSequence
+        bytes.push(1); // nOutputs
+        bytes.extend_from_slice(&1_u64.to_le_bytes());
+        bytes.push(25);
+        bytes.extend_from_slice(&[0; 25]);
+        bytes.extend_from_slice(&[0; 4 + 4 + 8]); // lock time, expiry, value balance
+        bytes.extend_from_slice(&[0; 3]); // Sapling spends/outputs, JoinSplits
+    }
+    bytes
 }
 
 /// Returns a generated transparent input, and its canonical serialized bytes.
