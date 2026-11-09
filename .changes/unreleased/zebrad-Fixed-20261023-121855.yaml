@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Large hex payloads in `submitblock`, `getblocktemplate` and raw block and transaction RPCs convert several times faster ([#11935](https://github.com/ZcashFoundation/zebra/issues/11935)).'
+time: 2026-10-23T12:18:55.046251512+02:00
