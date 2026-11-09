@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Mempool transaction verification and downloads read state directly instead of waiting in the
+  state write queue, and mempool metrics are updated incrementally.
+time: 2026-10-12T16:10:11.000000000+02:00
