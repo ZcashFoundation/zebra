@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Add `EarlyRelayOrigin` and `EarlyRelayCache::get_with_origin` to retain explicit body provenance through early advertisement ([#12301](https://github.com/ZcashFoundation/zebra/pull/12301)).
+time: 2026-11-08T01:41:28.510895554+01:00

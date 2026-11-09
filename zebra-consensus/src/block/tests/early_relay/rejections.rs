@@ -86,6 +86,7 @@ fn early_relay_rejected_proof_skips_redispatch_but_still_authenticates() {
             .oneshot(zs::Request::EarlyRelay {
                 block: block.clone(),
                 require_authentication: true,
+                origin: zs::EarlyRelayOrigin::Peer,
             })
             .await
             .unwrap()
@@ -195,6 +196,7 @@ async fn block_transient_failures_retry_without_recording_rejection() {
                     .oneshot(zs::Request::EarlyRelay {
                         block: block.clone(),
                         require_authentication: true,
+                        origin: zs::EarlyRelayOrigin::Peer,
                     })
                     .await
                     .unwrap()

@@ -1076,7 +1076,7 @@ async fn early_block_advert_restricts_delivery_to_negotiated_peers() {
             .ready()
             .await
             .unwrap()
-            .call(Request::AdvertiseEarlyBlock(hash));
+            .call(Request::AdvertiseEarlyBlock(hash, None));
         let (result, message) = tokio::join!(advert, early_messages.next());
         assert_eq!(result.unwrap(), Response::Nil);
         assert_eq!(

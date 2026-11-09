@@ -27,7 +27,7 @@ pub enum Request {
     /// publishing a validated notification, and publishes committed notifications before replying.
     /// Checkpoint-routed blocks publish only committed notifications.
     CommitMined(Arc<Block>, zebra_state::MinedBlockNotifications),
-    /// Validates and commits a decoded submission, optionally carrying mined-block notifications.
+    /// Validates and commits a decoded local submission, optionally carrying mined notifications.
     ///
     /// Exact decoder matches avoid recomputing proposal identity while their cache entry is live.
     /// All submitted-header and live-state checks still run. Misses use ordinary verification.

@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Preserve authenticated early fanout for local submissions before verification completes, exclude each peer body's exact supplier, skip fanout when canceled downloads lose provenance, and skip redundant downloads of authenticated early-relay blocks and validated pending submissions.
+time: 2026-11-06T11:45:21.929332697+01:00

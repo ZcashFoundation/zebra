@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Set the new `origin` field on `Request::EarlyRelay` to distinguish local submissions from peer downloads; missing download ownership no longer implies local provenance ([#12301](https://github.com/ZcashFoundation/zebra/pull/12301)).
+time: 2026-11-08T01:41:28.505925947+01:00

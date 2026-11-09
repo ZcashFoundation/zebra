@@ -954,6 +954,12 @@ where
                 match state_service.clone().oneshot(zs::Request::EarlyRelay {
                     block: block.clone(),
                     require_authentication,
+                    origin: match &request {
+                        Request::CommitMined(_, _) | Request::CommitDecoded(_, _) => {
+                            zs::EarlyRelayOrigin::Local
+                        }
+                        _ => zs::EarlyRelayOrigin::Peer,
+                    },
                 }).await {
                     Ok(zs::Response::EarlyRelay(guard)) => {
                         // Negotiation identifies capability, not whether this body was committed.

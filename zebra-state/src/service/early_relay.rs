@@ -21,9 +21,19 @@ const LIFETIME: Duration = Duration::from_secs(15);
 // Includes wire contents and decoded metadata, using the shared conservative retention charge.
 const MAX_RETAINED_BYTES: usize = 64 * 1024 * 1024;
 
+/// Provenance of an authenticated body, independent of a download task's lifetime.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum EarlyRelayOrigin {
+    /// A body explicitly submitted through a local mined-block or decoded-submission request.
+    Local,
+    /// A downloaded body, whose exact supplying peer must still be known before fanout.
+    Peer,
+}
+
 #[derive(Debug)]
 struct Entry {
     block: Arc<Block>,
+    origin: EarlyRelayOrigin,
     hash: block::Hash,
     alive: watch::Receiver<()>,
     deadline: tokio::time::Instant,
@@ -143,6 +153,7 @@ impl EarlyRelayState {
         }
         *slot = Some(Entry {
             block,
+            origin: guard.origin,
             hash,
             alive: alive.clone(),
             deadline,
@@ -231,6 +242,13 @@ impl EarlyRelayCache {
     /// Only serve this body on a bilaterally negotiated early-relay connection. Expired, cancelled,
     /// or stale entries are removed before returning; callers must fall back to committed state.
     pub fn get(&self, hash: &block::Hash) -> Option<Arc<Block>> {
+        self.get_with_origin(hash).map(|(block, _)| block)
+    }
+
+    /// Returns a live body and its explicit provenance under the same checks as [`Self::get`].
+    ///
+    /// Peer bodies still require exact, live supplier provenance before early advertisement.
+    pub fn get_with_origin(&self, hash: &block::Hash) -> Option<(Arc<Block>, EarlyRelayOrigin)> {
         let mut slot = self
             .state
             .entry
@@ -246,13 +264,13 @@ impl EarlyRelayCache {
             self.state.changes.send_replace(None);
             return None;
         }
-        let block = (entry.hash == *hash).then(|| entry.block.clone())?;
+        let body = (entry.hash == *hash).then(|| (entry.block.clone(), entry.origin))?;
         drop(slot);
         if !self.state.allows_early_relay(*hash) {
             self.state.withdraw(Some(*hash));
             return None;
         }
-        Some(block)
+        Some(body)
     }
 
     /// Subscribes to the current candidate hash and withdrawals (`None`).
@@ -274,6 +292,7 @@ pub struct EarlyRelayGuard {
     hash: block::Hash,
     context: WatchReceiver<NonFinalizedState>,
     height: block::Height,
+    origin: EarlyRelayOrigin,
 }
 
 impl EarlyRelayGuard {
@@ -394,6 +413,7 @@ impl ReadStateService {
         block: Arc<Block>,
         required: bool,
         publish: bool,
+        origin: EarlyRelayOrigin,
     ) -> Result<Option<EarlyRelayGuard>, BoxError> {
         let Some(height) = block.coinbase_height() else {
             return Ok(None);
@@ -451,6 +471,7 @@ impl ReadStateService {
             hash: block.hash(),
             context,
             height,
+            origin,
         };
         if guard.is_rejected() {
             return Ok(Some(guard));

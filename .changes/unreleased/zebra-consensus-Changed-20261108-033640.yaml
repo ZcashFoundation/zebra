@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Locally mined and decoded submissions retain explicit local origin in authenticated early-relay requests, preserving fanout before verification completes without treating canceled peer downloads as local submissions ([#12301](https://github.com/ZcashFoundation/zebra/pull/12301)).
+time: 2026-11-08T03:36:40.417925231+01:00

@@ -81,6 +81,299 @@ fn mock_downloads(
     (downloads, network, verifier, state)
 }
 
+/// Overlapping sync and inbound holders keep provenance for their exact bodies and release only
+/// their own record, even if a mock reuses the same Arc for different supplying peers.
+#[test]
+fn concurrent_download_sources_follow_exact_bodies_and_guard_lifetimes() {
+    let _init_guard = zebra_test::init();
+    let registry = crate::components::sync::InFlightDownloads::default();
+    let first_body = block_1();
+    let second_body = Arc::new((*first_body).clone());
+    let hash = first_body.hash();
+    let first_peer = ADVERTISER.parse().unwrap();
+    let second_peer = "127.0.0.2:8233".parse().unwrap();
+    let third_peer = "127.0.0.3:8233".parse().unwrap();
+    let mut inbound = registry.claim(hash).unwrap();
+    inbound.set_source(&first_body, Some(first_peer));
+    let mut sync = registry.hold(hash);
+    sync.set_source(&second_body, Some(second_peer));
+    let mut replacement = registry.hold(hash);
+    replacement.set_source(&second_body, Some(third_peer));
+    assert_eq!(registry.source(&hash, &first_body), Some(first_peer));
+    assert_eq!(registry.source(&hash, &second_body), Some(second_peer));
+    drop(sync);
+    assert_eq!(registry.source(&hash, &first_body), Some(first_peer));
+    assert_eq!(registry.source(&hash, &second_body), Some(third_peer));
+    drop(inbound);
+    assert_eq!(registry.source(&hash, &first_body), None);
+    assert_eq!(registry.source(&hash, &second_body), Some(third_peer));
+    assert!(
+        registry.contains(&hash),
+        "the replacement owner is still alive"
+    );
+    drop(replacement);
+    assert!(!registry.contains(&hash));
+}
+
+/// Locally authenticated bodies reject echoed inventory only while their verifier is alive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn early_relay_cache_skips_echo_download_until_withdrawn() {
+    early_relay_provenance(false).await;
+}
+
+/// Cold local submissions overlap authenticated fanout with full transaction verification.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cold_local_submission_is_early_advertised_before_verification() {
+    early_relay_provenance(true).await;
+}
+
+async fn early_relay_provenance(local: bool) {
+    use tower::{Service, ServiceExt};
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash},
+        parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
+        transaction::{LockTime, Transaction},
+        transparent,
+    };
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        let (mut state, read, _, _) =
+            zs::init(zs::Config::ephemeral(), &network, Height(0), 0).await;
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .ready()
+            .await
+            .unwrap()
+            .call(zs::Request::CommitCheckpointVerifiedBlock(
+                genesis.clone().into(),
+            ))
+            .await
+            .unwrap();
+        let zs::ReadResponse::EarlyRelayCache(cache) = read
+            .clone()
+            .oneshot(zs::ReadRequest::EarlyRelayCache)
+            .await
+            .unwrap()
+        else {
+            panic!("requested the early relay cache");
+        };
+        let mut candidate = genesis;
+        for height in [Height(1), Height(2)] {
+            let zs::ReadResponse::ChainInfo(info) = read
+                .clone()
+                .oneshot(zs::ReadRequest::ChainInfo)
+                .await
+                .unwrap()
+            else {
+                panic!("requested chain info");
+            };
+            let transactions = vec![Arc::new(Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    zebra_chain::parameters::subsidy::block_subsidy(height, &network).unwrap(),
+                    transparent::Script::new(&[0x51]),
+                )],
+                LockTime::unlocked(),
+                height,
+            ))];
+            let mut block = Block {
+                header: Arc::new(block::Header {
+                    version: 4,
+                    previous_block_hash: info.tip_hash,
+                    merkle_root: transactions.iter().map(|tx| tx.hash()).collect(),
+                    commitment_bytes: [0; 32].into(),
+                    time: info.cur_time.into(),
+                    difficulty_threshold: info.expected_difficulty,
+                    nonce: [0; 32].into(),
+                    solution: zebra_chain::work::equihash::Solution::Regtest([0; 36]),
+                }),
+                transactions,
+            };
+            Arc::make_mut(&mut block.header).commitment_bytes =
+                <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    &info
+                        .chain_history_root
+                        .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+                    &block.auth_data_root(),
+                ))
+                .into();
+            (0u32..100_000)
+                .find(|nonce| {
+                    let mut bytes = [0; 32];
+                    bytes[..4].copy_from_slice(&nonce.to_le_bytes());
+                    Arc::make_mut(&mut block.header).nonce = bytes.into();
+                    zebra_consensus::difficulty_is_valid(
+                        &block.header,
+                        &network,
+                        &height,
+                        &block.hash(),
+                    )
+                    .is_ok()
+                })
+                .expect("the regtest target is reached within the bounded nonce search");
+            candidate = Arc::new(block);
+            if height == Height(1) {
+                state
+                    .ready()
+                    .await
+                    .unwrap()
+                    .call(zs::Request::CommitSemanticallyVerifiedBlock(
+                        zs::CheckpointVerifiedBlock::from(candidate.clone()).into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+        }
+        let mut transactions: MockService<
+            zebra_consensus::transaction::BlockRequest,
+            zebra_consensus::transaction::BlockResponse,
+            _,
+            crate::BoxError,
+        > = MockService::build().for_unit_tests();
+        let state = tower::buffer::Buffer::new(state, 10);
+        let verifier = zebra_consensus::SemanticBlockVerifier::new(
+            &network,
+            state.clone(),
+            transactions.clone(),
+        );
+        let (committed, _committed_receiver) = tokio::sync::mpsc::channel(1);
+        let (validated, validated_receiver) = tokio::sync::watch::channel(None);
+        let request = if local {
+            // This fresh verifier has no successful proposal to reuse.
+            zebra_consensus::Request::CommitDecoded(
+                candidate.clone().into(),
+                Some(zs::MinedBlockNotifications::new(committed, validated)),
+            )
+        } else {
+            zebra_consensus::Request::CommitEarlyRelay(candidate.clone().into())
+        };
+        let verification = tokio::spawn(verifier.oneshot(request));
+        let pending_transaction = transactions.expect_request_that(|_| true).await;
+        let state_lifetime = (state, read);
+        // Real state work uses the multithreaded runtime; no-request observations use a paused
+        // clock so the supplier-cancellation window is deterministic under host load.
+        tokio::task::spawn_blocking(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .start_paused(true)
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let _state_lifetime = state_lifetime;
+                    let _pending_transaction = pending_transaction;
+                    tokio::time::advance(Duration::from_secs(1)).await;
+                    assert!(cache.get(&candidate.hash()).is_some());
+                    let (downloads, _network, _verifier, mut state) = mock_downloads(Height(1));
+                    let mut downloads =
+                        downloads.with_cached_blocks(Default::default(), Some(cache.clone()));
+                    let peer = ADVERTISER.parse().unwrap();
+                    let in_flight = crate::components::sync::InFlightDownloads::default();
+                    let ownership = (!local).then(|| {
+                        let mut ownership = in_flight.claim(candidate.hash()).unwrap();
+                        ownership.set_source(&candidate, Some(peer));
+                        ownership
+                    });
+                    let competing_body = Arc::new((*candidate).clone());
+                    let _competing = (!local).then(|| {
+                        let mut competing = in_flight.hold(candidate.hash());
+                        competing
+                            .set_source(&competing_body, Some("127.0.0.2:8233".parse().unwrap()));
+                        competing
+                    });
+                    assert_eq!(in_flight.contains(&candidate.hash()), !local);
+                    let mut gossip_network: MockNetwork = MockService::build()
+                        .with_max_request_delay(MAX_SERVICE_REQUEST_DELAY)
+                        .for_unit_tests();
+        {
+            let gossip = crate::components::sync::gossip_early_blocks(
+                Some(cache.clone()),
+                gossip_network.clone(),
+                in_flight.clone(),
+            );
+            tokio::pin!(gossip);
+            // Keep polling the producer when watch/readiness yields to Tokio's cooperative budget.
+            tokio::select! {
+                biased;
+                result = &mut gossip => panic!("gossip must remain active: {result:?}"),
+                request = gossip_network.expect_request(zn::Request::AdvertiseEarlyBlock(
+                    candidate.hash(),
+                    (!local).then_some(peer),
+                )) => {
+                    request.respond(zn::Response::Nil);
+                }
+            }
+        }
+        assert!(
+            !verification.is_finished(),
+            "the early advertisement precedes full transaction verification",
+        );
+        assert!(
+            validated_receiver.borrow().is_none(),
+            "cold submissions do not use the successful-proposal notification",
+        );
+        drop(ownership);
+        assert!(cache.get(&candidate.hash()).is_some());
+        if !local {
+            assert_eq!(
+                in_flight.early_relay_source(&candidate.hash(), &cache),
+                None,
+                "a surviving verifier must not turn a canceled download into a local submission",
+            );
+            let gossip = crate::components::sync::gossip_early_blocks(
+                Some(cache.clone()),
+                gossip_network.clone(),
+                in_flight.clone(),
+            );
+            tokio::pin!(gossip);
+            tokio::select! {
+                biased;
+                result = &mut gossip => panic!("gossip must remain active: {result:?}"),
+                _ = gossip_network.expect_no_requests() => {}
+            }
+        }
+        assert!(matches!(
+            downloads.download_and_verify(candidate.hash(), Some(peer)),
+            DownloadAction::AlreadyQueued,
+        ));
+        assert!(
+            downloads.pending.is_empty(),
+            "cached bodies must not spawn a download",
+        );
+        verification.abort();
+        assert!(verification.await.unwrap_err().is_cancelled());
+        assert!(cache.get(&candidate.hash()).is_none());
+        assert!(matches!(
+            downloads.download_and_verify(candidate.hash(), Some(peer)),
+            DownloadAction::AddedToQueue,
+        ));
+        state
+            .expect_request(zs::Request::KnownBlock(candidate.hash()))
+            .await
+            .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+        assert!(downloads.next().await.unwrap().is_err());
+                })
+        })
+        .await
+        .expect("paused cache regression must not panic");
+    })
+    .await
+    .expect("cache admission and withdrawal complete within the deadline");
+}
+
 /// Negotiated downloads preserve both the verification contract and the actual serving address.
 #[tokio::test]
 async fn early_relay_download_preserves_validation_and_source() {
@@ -93,9 +386,12 @@ async fn early_relay_download_preserves_validation_and_source() {
         (true, true, true),
     ] {
         let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+        let in_flight = crate::components::sync::InFlightDownloads::default();
+        downloads = downloads.with_sync_downloads(in_flight.clone());
         let block = block_1();
         let hash = block.hash();
         let peer: PeerSocketAddr = ADVERTISER.parse().unwrap();
+        let supplier: PeerSocketAddr = "127.0.0.2:8233".parse().unwrap();
         assert!(matches!(
             downloads.download_and_verify(hash, Some(peer)),
             DownloadAction::AddedToQueue
@@ -104,7 +400,7 @@ async fn early_relay_download_preserves_validation_and_source() {
             .expect_request(zs::Request::KnownBlock(hash))
             .await
             .respond(zs::Response::KnownBlock(None));
-        let blocks = vec![Available((block.clone(), Some(peer)))];
+        let blocks = vec![Available((block.clone(), Some(supplier)))];
         let reconstructed = compact.then(|| {
             Arc::new(zn::compact::CompactBlock::from_block(&block, 42).unwrap())
                 .reconstruct(Vec::new())
@@ -125,7 +421,7 @@ async fn early_relay_download_preserves_validation_and_source() {
             })
             .await
             .respond(if let Some(block) = reconstructed {
-                zn::Response::ReconstructedBlock(block, Some(peer))
+                zn::Response::ReconstructedBlock(block, Some(supplier))
             } else if early {
                 zn::Response::EarlyBlocks(blocks)
             } else {
@@ -136,9 +432,11 @@ async fn early_relay_download_preserves_validation_and_source() {
             .await
             .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
         let request = if early {
-            zebra_consensus::Request::CommitEarlyRelay(decoded.unwrap_or_else(|| block.into()))
+            zebra_consensus::Request::CommitEarlyRelay(
+                decoded.unwrap_or_else(|| block.clone().into()),
+            )
         } else {
-            zebra_consensus::Request::Commit(block)
+            zebra_consensus::Request::Commit(block.clone())
         };
         let error = zebra_consensus::VerifyBlockError::Transaction(
             zebra_consensus::error::TransactionError::Groth16("invalid proof".into()),
@@ -148,12 +446,22 @@ async fn early_relay_download_preserves_validation_and_source() {
         } else {
             error
         };
-        verifier
-            .expect_request(request)
-            .await
-            .respond_error(zebra_consensus::RouterError::from(error).into());
+        let verification = verifier.expect_request(request).await;
+        // Sources are keyed by the exact verified body, and reconstruction allocates a new one.
+        let body = verification.request().block();
+        assert_eq!(
+            in_flight.source(&hash, &body),
+            Some(supplier),
+            "early fanout must exclude the actual supplier, not merely the announcing peer",
+        );
+        verification.respond_error(zebra_consensus::RouterError::from(error).into());
         let (error, source) = downloads.next().await.unwrap().unwrap_err();
-        assert_eq!(source, Some(peer));
+        assert_eq!(source, Some(supplier));
+        assert_eq!(
+            in_flight.source(&hash, &body),
+            None,
+            "completion releases source attribution",
+        );
         assert_eq!(
             error
                 .downcast_ref::<zebra_consensus::RouterError>()
