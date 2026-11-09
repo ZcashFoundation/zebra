@@ -1,6 +1,6 @@
 //! Transactions and transaction-related structures.
 
-use std::fmt;
+use std::{fmt, sync::OnceLock};
 
 pub use zcash_primitives::transaction::TxVersion;
 
@@ -55,8 +55,8 @@ use crate::{
 };
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
-#[derive(Debug)]
-pub struct Transaction(pub(crate) zp_tx::Transaction);
+#[derive(Clone)]
+pub struct Transaction(zp_tx::Transaction, OnceLock<AuthDigest>);
 
 impl std::ops::Deref for Transaction {
     type Target = zp_tx::TransactionData<zp_tx::Authorized>;
@@ -67,6 +67,11 @@ impl std::ops::Deref for Transaction {
 }
 
 impl Transaction {
+    /// Starts with an empty digest cache whenever a transaction body is built or decoded.
+    fn from_inner(inner: zp_tx::Transaction) -> Self {
+        Self(inner, OnceLock::new())
+    }
+
     /// Access the inner `zcash_primitives::transaction::Transaction`.
     pub(crate) fn inner(&self) -> &zp_tx::Transaction {
         &self.0
@@ -282,18 +287,20 @@ impl Transaction {
         Hash(txid_bytes)
     }
 
-    /// Compute the authorizing data commitment for this transaction.
+    /// Return the authorizing data commitment, computing it once per immutable transaction body.
     ///
     /// Returns `None` for pre-V5 transactions (which don't have auth digests).
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self.tx_version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
-            _ => {
+            _ => Some(*self.1.get_or_init(|| {
                 let hash = self.0.auth_commitment();
-                let bytes: &[u8] = hash.as_ref();
-                let digest_bytes: [u8; 32] = bytes.try_into().ok()?;
-                Some(AuthDigest(digest_bytes))
-            }
+                AuthDigest(
+                    hash.as_ref()
+                        .try_into()
+                        .expect("authorizing data commitments are 32 bytes"),
+                )
+            })),
         }
     }
 
@@ -819,6 +826,12 @@ impl PartialEq for Transaction {
 
 impl Eq for Transaction {}
 
+impl fmt::Debug for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Transaction").field(&self.0).finish()
+    }
+}
+
 impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut fmter = f.debug_struct("Transaction");
@@ -1058,7 +1071,7 @@ fn deserialize_and_check<R: std::io::Read>(
         }
     }
 
-    Ok(Transaction(inner))
+    Ok(Transaction::from_inner(inner))
 }
 
 /// Reads the `valueBalanceSapling` field of a V4 transaction that has no Sapling spends or
@@ -1147,12 +1160,6 @@ impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
         let n = self.inner.read(buf)?;
         self.recorded.extend_from_slice(&buf[..n]);
         Ok(n)
-    }
-}
-
-impl Clone for Transaction {
-    fn clone(&self) -> Self {
-        Transaction(self.0.clone())
     }
 }
 
@@ -1380,7 +1387,7 @@ impl Transaction {
             None,
             None,
         );
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V5 transaction with an Orchard bundle, for tests.
@@ -1412,7 +1419,7 @@ impl Transaction {
             orchard_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V6 transaction with Orchard and Ironwood bundles, for tests.
@@ -1445,7 +1452,7 @@ impl Transaction {
             ironwood_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Self::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Converts Zebra transparent inputs and outputs into a librustzcash bundle,
@@ -1531,7 +1538,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Rebuild this transaction with a different expiry height (recomputes txid).
@@ -1548,7 +1555,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Rebuild this transaction with a different network upgrade / branch ID (recomputes txid).
@@ -1569,7 +1576,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Replace all transparent outputs (recomputes txid).
@@ -1599,7 +1606,7 @@ impl Transaction {
             bundle,
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Self::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
