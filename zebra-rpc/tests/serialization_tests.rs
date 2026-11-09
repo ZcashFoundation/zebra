@@ -148,6 +148,13 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let chain_supply = obj.chain_supply();
     let value_pools = obj.value_pools();
     let nsm_value_balance = obj.nsm_value_balance();
+    let nsm = nsm_value_balance
+        .as_ref()
+        .expect("the response has `nsmValueBalance`");
+    assert_eq!(nsm.id(), "nsm");
+    assert_eq!(nsm.chain_value_zat().zatoshis(), 36_858_445_520);
+    assert!(nsm.monitored());
+    assert_eq!(nsm.value_delta_zat(), None);
     let upgrades = obj.upgrades();
     let consensus = obj.consensus();
 
@@ -362,6 +369,21 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let chain_supply = block.chain_supply().clone();
     let value_pools = block.value_pools().clone();
     let nsm_value_balance = block.nsm_value_balance().clone();
+    let nsm = nsm_value_balance
+        .as_ref()
+        .expect("the response has `nsmValueBalance`");
+    assert_eq!(nsm.id(), "nsm");
+    assert_eq!(nsm.chain_value_zat().zatoshis(), 36_845_945_520);
+    assert!(nsm.monitored());
+    assert_eq!(
+        nsm.value_delta_zat().map(|delta| delta.zatoshis()),
+        Some(-12_500_000)
+    );
+    assert_eq!(
+        nsm.value_delta().map(f64::from),
+        Some(-0.125),
+        "the change in ZEC parses as a signed amount"
+    );
     let trees = block.trees();
     let previous_block_hash = block.previous_block_hash();
     let next_block_hash = block.next_block_hash();
@@ -395,6 +417,33 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     )));
 
     assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+/// Responses from nodes that do not report `nsmValueBalance` parse with no NSM value balance.
+#[test]
+fn test_responses_without_nsm_value_balance() -> Result<(), Box<dyn std::error::Error>> {
+    let without_nsm_value_balance = |json: &str| -> Result<serde_json::Value, serde_json::Error> {
+        let mut value: serde_json::Value = serde_json::from_str(json)?;
+        value
+            .as_object_mut()
+            .expect("the response is a JSON object")
+            .remove("nsmValueBalance")
+            .expect("the test vector has `nsmValueBalance`");
+        Ok(value)
+    };
+
+    let info: GetBlockchainInfoResponse =
+        serde_json::from_value(without_nsm_value_balance(GET_BLOCKCHAIN_INFO_RESPONSE)?)?;
+    assert_eq!(*info.nsm_value_balance(), None);
+
+    let GetBlockResponse::Object(block) =
+        serde_json::from_value(without_nsm_value_balance(GET_BLOCK_RESPONSE_2)?)?
+    else {
+        panic!("a verbose getblock response is an object");
+    };
+    assert_eq!(*block.nsm_value_balance(), None);
 
     Ok(())
 }

@@ -932,6 +932,14 @@
             "valueDeltaZat": 0
         }
     ],
+    "nsmValueBalance": {
+        "id": "nsm",
+        "monitored": true,
+        "chainValue": 368.45945520,
+        "chainValueZat": 36845945520,
+        "valueDelta": -0.12500000,
+        "valueDeltaZat": -12500000
+    },
     "trees": {
         "sapling": {
             "size": 72999499

@@ -5981,3 +5981,78 @@ fn nsm_value_balance_is_monitored_from_nu7_activation() {
     assert!(!monitored(before_nu7, 0));
     assert!(!monitored(before_nu7, 100));
 }
+
+/// Verbose `getblock` reports the block's NSM value balance and its signed change to it, separately
+/// from the value pools' changes, for increases and decreases.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_reports_nonzero_nsm_changes() {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let after_nu7 = (NetworkUpgrade::Nu7
+        .activation_height(&Mainnet)
+        .expect("NU7 is scheduled on Mainnet")
+        + 1)
+    .expect("valid height");
+
+    // (parent Orchard, parent NSM, block Orchard, block NSM, NSM change in ZEC), in zatoshis.
+    let cases = [
+        // The NSM value balance increases, and the Orchard pool increases by a different amount.
+        (700_000_000, 100_000_000, 1_000_000_000, 350_000_000, 2.5),
+        // The NSM value balance decreases, and the Orchard pool decreases by a different amount.
+        (1_000_000_000, 350_000_000, 950_000_000, 125_000_000, -2.25),
+    ];
+
+    for (parent_orchard, parent_nsm, orchard, nsm, nsm_change_zec) in cases {
+        for verbosity in 1..=3 {
+            let obj = getblock_with_block_info(
+                block.clone(),
+                verbosity,
+                after_nu7,
+                Some(block_info_with_balances(0, parent_orchard, parent_nsm)),
+                block_info_with_balances(0, orchard, nsm),
+            )
+            .await;
+
+            let nsm_balance = obj
+                .nsm_value_balance
+                .as_ref()
+                .expect("the response has the NSM balance");
+            assert_eq!(nsm_balance.id(), "nsm");
+            assert!(nsm_balance.monitored());
+            assert_eq!(nsm_balance.chain_value_zat(), balance_zat(nsm));
+            assert_eq!(
+                nsm_balance.value_delta_zat(),
+                Some(change_zat(nsm - parent_nsm))
+            );
+
+            let orchard_pool = value_pool(&obj, "orchard");
+            assert_eq!(orchard_pool.chain_value_zat(), balance_zat(orchard));
+            assert_eq!(
+                orchard_pool.value_delta_zat(),
+                Some(change_zat(orchard - parent_orchard))
+            );
+
+            // The NSM value balance is not part of the supply.
+            assert_eq!(
+                obj.chain_supply
+                    .as_ref()
+                    .expect("the response has the chain supply")
+                    .chain_value_zat(),
+                balance_zat(orchard)
+            );
+
+            let json = serde_json::to_value(&obj).expect("the response serializes");
+            let nsm_json = &json["nsmValueBalance"];
+            assert_eq!(nsm_json["chainValueZat"], serde_json::json!(nsm));
+            assert_eq!(
+                nsm_json["valueDeltaZat"],
+                serde_json::json!(nsm - parent_nsm)
+            );
+            assert_eq!(nsm_json["valueDelta"], serde_json::json!(nsm_change_zec));
+            assert_eq!(nsm_json["monitored"], serde_json::json!(true));
+        }
+    }
+}
