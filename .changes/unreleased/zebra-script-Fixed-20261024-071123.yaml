@@ -1,0 +1,4 @@
+project: zebra-script
+kind: Fixed
+body: Count transparent sigops from borrowed scripts and recognize P2SH without allocating an opcode vector ([#12000](https://github.com/ZcashFoundation/zebra/issues/12000)).
+time: 2026-10-24T07:11:23.739000404+02:00
