@@ -1,0 +1,6 @@
+project: zebra-chain
+kind: Changed
+body: >-
+  Orchard Merkle node hashing reuses one Sinsemilla hash domain, and
+  `NoteCommitmentTrees::update_trees_parallel` appends each block's commitments as a batch.
+time: 2026-10-12T16:00:01.000000000+02:00
