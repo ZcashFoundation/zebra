@@ -162,7 +162,11 @@ impl ZcashDeserialize for Block {
             // The stored `consensus_branch_id` may be wrong for pre-Canopy transactions.
             // This field is not used in production (sighash computation provides the
             // correct branch ID explicitly via the NetworkUpgrade parameter).
-            transactions: limited_reader.zcash_deserialize_into()?,
+            transactions: limited_reader
+                .zcash_deserialize_into::<Vec<crate::transaction::BlockTransaction>>()?
+                .into_iter()
+                .map(|transaction| transaction.0)
+                .collect(),
         })
     }
 }

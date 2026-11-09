@@ -1,6 +1,9 @@
 //! Transactions and transaction-related structures.
 
-use std::{fmt, sync::OnceLock};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 pub use zcash_primitives::transaction::TxVersion;
 
@@ -55,8 +58,11 @@ use crate::{
 };
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
+///
+/// Transactions parsed as part of a block keep their wire bytes, so writing them to the state
+/// doesn't re-encode every Jubjub point (one field inversion each).
 #[derive(Clone)]
-pub struct Transaction(zp_tx::Transaction, OnceLock<AuthDigest>);
+pub struct Transaction(zp_tx::Transaction, OnceLock<AuthDigest>, Option<Arc<[u8]>>);
 
 impl std::ops::Deref for Transaction {
     type Target = zp_tx::TransactionData<zp_tx::Authorized>;
@@ -69,7 +75,7 @@ impl std::ops::Deref for Transaction {
 impl Transaction {
     /// Starts with an empty digest cache whenever a transaction body is built or decoded.
     fn from_inner(inner: zp_tx::Transaction) -> Self {
-        Self(inner, OnceLock::new())
+        Self(inner, OnceLock::new(), None)
     }
 
     /// Access the inner `zcash_primitives::transaction::Transaction`.
@@ -902,8 +908,11 @@ impl TryFrom<&Transaction> for AuthDigest {
 }
 
 impl crate::serialization::ZcashSerialize for Transaction {
-    fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
-        self.0.write(writer)
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        match &self.2 {
+            Some(raw_bytes) => writer.write_all(raw_bytes),
+            None => self.0.write(writer),
+        }
     }
 }
 
@@ -918,7 +927,7 @@ impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus
         reader: R,
         &branch_id: &zcash_protocol::consensus::BranchId,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        deserialize_and_check(reader, branch_id)
+        deserialize_and_check(reader, branch_id, false)
     }
 }
 
@@ -944,7 +953,28 @@ impl crate::serialization::ZcashDeserialize for Transaction {
     fn zcash_deserialize<R: std::io::Read>(
         reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
-        deserialize_and_check(reader, zcash_protocol::consensus::BranchId::Canopy)
+        deserialize_and_check(reader, zcash_protocol::consensus::BranchId::Canopy, false)
+    }
+}
+
+/// A transaction parsed inside a block, which keeps its wire bytes.
+///
+/// Only blocks keep them: their transactions are written to the state, while mempool
+/// transactions and state reads would only pay the extra memory.
+pub(crate) struct BlockTransaction(pub(crate) std::sync::Arc<Transaction>);
+
+impl crate::serialization::ZcashDeserialize for BlockTransaction {
+    fn zcash_deserialize<R: std::io::Read>(
+        reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        deserialize_and_check(reader, zcash_protocol::consensus::BranchId::Canopy, true)
+            .map(|transaction| Self(std::sync::Arc::new(transaction)))
+    }
+}
+
+impl crate::serialization::TrustedPreallocate for BlockTransaction {
+    fn max_allocation() -> u64 {
+        <Transaction as crate::serialization::TrustedPreallocate>::max_allocation()
     }
 }
 
@@ -954,16 +984,15 @@ impl crate::serialization::ZcashDeserialize for Transaction {
 fn deserialize_and_check<R: std::io::Read>(
     reader: R,
     branch_id: zcash_protocol::consensus::BranchId,
+    keep_wire_bytes: bool,
 ) -> Result<Transaction, crate::serialization::SerializationError> {
     use std::io::Read as _;
 
     // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
     let mut limited = reader.take(crate::block::MAX_BLOCK_BYTES);
 
-    // Only V4 transactions need their bytes recorded, for the `valueBalanceSapling` check
-    // below. Reading the 4-byte header up front and putting it back lets every other
-    // version parse without copying the transaction a second time, which matters during
-    // the initial block download.
+    // V4 transactions need their bytes for the `valueBalanceSapling` check below. Other
+    // versions skip the copy unless the caller keeps the bytes.
     let mut header = [0u8; 4];
     limited.read_exact(&mut header)?;
     let is_v4 = {
@@ -973,7 +1002,7 @@ fn deserialize_and_check<R: std::io::Read>(
     };
     let with_header = std::io::Read::chain(&header[..], limited);
 
-    let (inner, raw_bytes) = if is_v4 {
+    let (inner, raw_bytes) = if is_v4 || keep_wire_bytes {
         let mut recording = RecordingReader::new(with_header);
         let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
         (inner, recording.into_recorded())
@@ -1071,7 +1100,24 @@ fn deserialize_and_check<R: std::io::Read>(
         }
     }
 
-    Ok(Transaction::from_inner(inner))
+    // Tests check that kept bytes match what the writer produces, so serializing either way is
+    // the same (CI runs them in release mode, where a `debug_assert` would be compiled out).
+    #[cfg(test)]
+    if keep_wire_bytes {
+        let mut reencoded = Vec::with_capacity(raw_bytes.len());
+        if inner.write(&mut reencoded).is_ok() {
+            assert_eq!(
+                reencoded, raw_bytes,
+                "a parsed transaction re-encodes to its wire bytes"
+            );
+        }
+    }
+
+    let mut transaction = Transaction::from_inner(inner);
+    if keep_wire_bytes {
+        transaction.2 = Some(raw_bytes.into());
+    }
+    Ok(transaction)
 }
 
 /// Reads the `valueBalanceSapling` field of a V4 transaction that has no Sapling spends or

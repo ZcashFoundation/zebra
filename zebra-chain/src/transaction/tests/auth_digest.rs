@@ -91,12 +91,14 @@ fn auth_digest_cache_matches_native_all_versions() {
     }
     assert_eq!(versions, (1..=6).collect());
 
-    // Only a digest and cell state are retained, rounded up to the wrapper's alignment.
+    // Only a digest, cell state and the wire-bytes pointer are retained, rounded up to the
+    // wrapper's alignment.
     let overhead = std::mem::size_of::<Transaction>()
         - std::mem::size_of::<zcash_primitives::transaction::Transaction>();
     assert!(
         overhead
             <= std::mem::size_of::<std::sync::OnceLock<AuthDigest>>()
+                + std::mem::size_of::<Option<Arc<[u8]>>>()
                 + std::mem::align_of::<Transaction>()
     );
 }

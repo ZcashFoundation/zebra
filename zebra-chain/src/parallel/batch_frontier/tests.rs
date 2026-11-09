@@ -4,6 +4,8 @@ use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Node(u64);
 
+impl TreeHash for Node {}
+
 impl Hashable for Node {
     fn empty_leaf() -> Self {
         Self(0)

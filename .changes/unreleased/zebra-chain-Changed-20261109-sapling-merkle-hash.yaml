@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: 'Sapling note commitment tree appends use a faster Merkle hash with the same output, and transactions parsed inside a block keep their serialized bytes, so writing them to the state no longer re-encodes them.'
+time: 2026-11-09T21:00:00.000000000Z

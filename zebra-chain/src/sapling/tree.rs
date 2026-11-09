@@ -18,7 +18,10 @@ use std::{
 };
 
 use hex::ToHex;
-use incrementalmerkletree::frontier::{Frontier, NonEmptyFrontier};
+use incrementalmerkletree::{
+    frontier::{Frontier, NonEmptyFrontier},
+    Hashable,
+};
 
 use thiserror::Error;
 
@@ -31,6 +34,8 @@ use crate::{
 
 pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
+
+mod merkle_hash;
 
 #[cfg(test)]
 mod tests;
@@ -447,7 +452,11 @@ impl NoteCommitmentTree {
 
     /// Calculates and returns the current root of the tree, ignoring any caching.
     pub fn recalculate_root(&self) -> Root {
-        Root::try_from(self.inner.root().to_bytes()).unwrap()
+        let root = self.inner.value().map_or_else(
+            || <sapling_crypto::Node as Hashable>::empty_root(MERKLE_DEPTH.into()),
+            |frontier| crate::parallel::batch_frontier::frontier_root(frontier, MERKLE_DEPTH),
+        );
+        Root::try_from(root.to_bytes()).unwrap()
     }
 
     /// Gets the Jubjub-based Pedersen hash of root node of this merkle tree of

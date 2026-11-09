@@ -693,6 +693,30 @@ fn zip244_round_trip() -> Result<()> {
 }
 
 #[test]
+fn only_block_transactions_keep_wire_bytes() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
+        let block: Block = bytes.zcash_deserialize_into()?;
+        for transaction in &block.transactions {
+            let wire_bytes = transaction
+                .2
+                .as_deref()
+                .expect("block transactions keep their bytes");
+            assert_eq!(transaction.zcash_serialize_to_vec()?, wire_bytes);
+
+            let standalone: Transaction = wire_bytes.zcash_deserialize_into()?;
+            assert!(
+                standalone.2.is_none(),
+                "standalone transactions don't keep their bytes"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
 fn zip244_txid() -> Result<()> {
     let _init_guard = zebra_test::init();
 
