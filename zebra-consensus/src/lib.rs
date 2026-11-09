@@ -64,7 +64,8 @@ pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECK
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{
-    ed25519, groth16, halo2, redjubjub, redpallas, sapling::prover as sapling_prover,
+    ed25519, groth16, halo2, redjubjub, redpallas,
+    sapling::{prover as sapling_prover, CoinbaseProver as SaplingCoinbaseProver},
 };
 pub use router::RouterError;
 
