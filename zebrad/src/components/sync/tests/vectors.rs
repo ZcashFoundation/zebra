@@ -3221,28 +3221,42 @@ async fn obtain_tips_tolerates_commits_during_fanout() {
     );
 }
 
-/// A singleton racing discovery remains available to both sync and inbound gossip.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sync_singleton_race_returns_hash_to_sync() {
-    singleton_discovery_downloads(false).await;
+/// How inbound gossip handles a singleton that also answers block discovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SingletonGossip {
+    /// The advertisement reaches gossip after the syncer has queued the block.
+    AfterSync,
+    /// Gossip drops the advertisement because its advertiser already has a download in flight.
+    Busy,
+    /// Gossip claimed the block before discovery, but its download never completes.
+    Stalled,
 }
 
-/// A singleton ignored during inbound setup is fetched in the same discovery round.
+/// Gossip skips a discovered singleton that the syncer is already downloading.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sync_singleton_race_recovers_after_inbound_setup() {
-    singleton_discovery_downloads(true).await;
+async fn sync_singleton_race_downloads_once() {
+    singleton_discovery_downloads_once(SingletonGossip::AfterSync).await;
 }
 
-async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
+/// A singleton dropped by per-IP admission is downloaded in the same discovery round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_singleton_race_recovers_from_busy_inbound() {
+    singleton_discovery_downloads_once(SingletonGossip::Busy).await;
+}
+
+/// A stalled gossip claim does not stop the syncer fetching the block in the same round.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sync_singleton_race_ignores_stalled_gossip_claim() {
+    singleton_discovery_downloads_once(SingletonGossip::Stalled).await;
+}
+
+async fn singleton_discovery_downloads_once(gossip: SingletonGossip) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use futures::StreamExt;
-    use tower::{buffer::Buffer, ServiceExt};
+    use tower::buffer::Buffer;
 
-    use crate::components::inbound::{
-        downloads::{DownloadAction, Downloads},
-        Inbound,
-    };
+    use crate::components::inbound::downloads::{DownloadAction, Downloads};
 
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -3291,9 +3305,13 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
         );
         let network = Buffer::new(local.unwrap(), 10);
         let _remote = remote.unwrap();
-        let state = tower::service_fn(move |request| {
+        let busy_hash = block::Hash([0x55; 32]);
+        let state = tower::service_fn(move |request| async move {
             let response = match request {
                 zs::Request::BlockLocator => zs::Response::BlockLocator(vec![parent]),
+                zs::Request::KnownBlock(requested) if requested == busy_hash => {
+                    std::future::pending().await
+                }
                 zs::Request::KnownBlock(requested) if requested == parent => {
                     zs::Response::KnownBlock(Some(zs::KnownBlock::Finalized))
                 }
@@ -3307,7 +3325,7 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
                 }
                 request => panic!("unexpected state request: {request:?}"),
             };
-            std::future::ready(Ok::<_, zs::BoxError>(response))
+            Ok::<_, zs::BoxError>(response)
         });
         let mut verifier = MockService::build().for_unit_tests();
         let (tip, tip_sender) = MockChainTip::new();
@@ -3316,7 +3334,7 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
         let (mut sync, _status) = ChainSync::new(
             &config,
             Height(0),
-            network.clone(),
+            network,
             verifier.clone(),
             state,
             MockService::build().for_unit_tests(),
@@ -3324,8 +3342,11 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
             misbehavior,
         );
         let mut inbound = Downloads::new(
-            1,
-            network,
+            2,
+            // Gossip downloads never complete, so only the syncer can fetch the block.
+            tower::service_fn(|_: zn::Request| {
+                std::future::pending::<Result<zn::Response, zn::BoxError>>()
+            }),
             verifier.clone(),
             state,
             tip,
@@ -3333,54 +3354,62 @@ async fn singleton_discovery_downloads(drop_inbound_advert: bool) {
         )
         .with_sync_downloads(sync.in_flight_downloads());
 
-        let (_setup_tx, setup_rx) = tokio::sync::oneshot::channel();
-        let mut pending_inbound = Inbound::new(1, setup_rx);
+        let advertiser = Some("127.0.0.1:8233".parse().unwrap());
+        match gossip {
+            SingletonGossip::AfterSync => {}
+            SingletonGossip::Busy => assert!(matches!(
+                inbound.download_and_verify(busy_hash, advertiser),
+                DownloadAction::AddedToQueue
+            )),
+            SingletonGossip::Stalled => {
+                assert!(matches!(
+                    inbound.download_and_verify(hash, advertiser),
+                    DownloadAction::AddedToQueue
+                ));
+                assert!(sync.in_flight_downloads().contains(&hash));
+            }
+        }
+
         let (result, ()) = tokio::join!(sync.try_to_sync(), async {
-            for index in 0..sync::FANOUT {
+            for _ in 0..sync::FANOUT {
                 let advert = adverts
                     .expect_request(zn::Request::AdvertiseBlock(hash, None))
                     .await;
-                let response = if drop_inbound_advert {
-                    pending_inbound
-                        .ready()
-                        .await
-                        .unwrap()
-                        .oneshot(zn::Request::AdvertiseBlock(hash, None))
-                        .await
-                        .unwrap()
-                } else {
-                    let action = inbound.download_and_verify(hash, None);
-                    if index == 0 {
-                        assert!(matches!(action, DownloadAction::AddedToQueue));
-                    } else {
-                        assert!(matches!(action, DownloadAction::AlreadyQueued));
-                    }
-                    zn::Response::Nil
-                };
-                advert.respond(response);
+                match gossip {
+                    SingletonGossip::AfterSync => {}
+                    SingletonGossip::Busy => assert!(matches!(
+                        inbound.download_and_verify(hash, advertiser),
+                        DownloadAction::TooManyFromPeer
+                    )),
+                    SingletonGossip::Stalled => assert!(matches!(
+                        inbound.download_and_verify(hash, advertiser),
+                        DownloadAction::AlreadyQueued
+                    )),
+                }
+                advert.respond(zn::Response::Nil);
             }
         });
         result.unwrap();
+        if gossip == SingletonGossip::AfterSync {
+            assert!(matches!(
+                inbound.download_and_verify(hash, advertiser),
+                DownloadAction::AlreadyQueued
+            ));
+        }
 
         // Hold verification across discovery completion so a duplicate cannot hide behind state.
-        let expected_downloads = if drop_inbound_advert { 1 } else { 2 };
-        for _ in 0..expected_downloads {
-            verifier
-                .expect_request_that(|request| {
-                    matches!(
-                        request,
-                        zebra_consensus::Request::Commit(block) if block.hash() == hash
-                    )
-                })
-                .await
-                .respond(hash);
-        }
+        let verification = verifier
+            .expect_request_that(|request| {
+                matches!(
+                    request,
+                    zebra_consensus::Request::Commit(block) if block.hash() == hash
+                )
+            })
+            .await;
         verifier.expect_no_requests().await;
-        assert_eq!(downloads.load(Ordering::SeqCst), expected_downloads);
+        assert_eq!(downloads.load(Ordering::SeqCst), 1);
+        verification.respond(hash);
         assert_eq!(sync.downloads.next().await.unwrap().unwrap().1, hash);
-        if !drop_inbound_advert {
-            assert_eq!(inbound.next().await.unwrap().unwrap(), hash);
-        }
     })
     .await
     .expect("singleton discovery and recovery must complete promptly");
