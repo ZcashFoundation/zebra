@@ -230,7 +230,7 @@ fuzz_target!(|data: &[u8]| {
                 }
                 // The codec never decodes raw blocks: Zebra only sends them.
                 Message::RawBlock(block) => {
-                    let _len = block.as_ref().len();
+                    let _len = (**block).as_ref().len();
                 }
                 Message::Block(block) => {
                     // Deep fuzz the block — replicate block_deep_fuzz Layer 2

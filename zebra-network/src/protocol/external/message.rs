@@ -205,7 +205,7 @@ pub enum Message {
     /// Encodes exactly like [`Message::Block`]. Zebra only sends it, peers' `block` messages
     /// are always decoded as [`Message::Block`].
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    RawBlock(SerializedBlock),
+    RawBlock(Arc<SerializedBlock>),
 
     /// A `tx` message.
     ///
@@ -523,7 +523,7 @@ impl fmt::Display for Message {
                     .unwrap_or_else(|| "None".into()),
                 block.hash(),
             ),
-            Message::RawBlock(block) => format!("block {{ bytes: {} }}", block.as_ref().len()),
+            Message::RawBlock(block) => format!("block {{ bytes: {} }}", (**block).as_ref().len()),
             Message::Tx(_) => "tx".to_string(),
             Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
 
