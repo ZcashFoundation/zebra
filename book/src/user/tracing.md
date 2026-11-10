@@ -185,6 +185,14 @@ started, so queries can leave out the values recorded just after a restart.
 | `SENTRY_ENVIRONMENT` | Sets the environment attached to reports and sessions. |
 | `SENTRY_RELEASE` | Overrides the release name; otherwise Zebra uses the build version printed by `zebrad --version`. |
 
+Errors and panics include stack traces, with Zebra's own frames marked in-app.
+In the official Docker images, Zebra's source files appear under `/zebra/`.
+Sentry doesn't create code mappings for Rust, so to show suspect commits, connect
+Sentry to GitHub and add a code mapping with the stack trace root `/zebra/`, an
+empty source code root, the `ZcashFoundation/zebra` repository, and the `main`
+branch. The release binaries on GitHub are stripped, so their stack frames have
+no function names or source locations.
+
 Review the destination and access controls before enabling reporting: error
 context and panic reports leave the node. For deployment metadata, see
 [GCP deployment operations](../dev/gcp-deployment-operations.md); for event

@@ -124,7 +124,7 @@ use tower::{
     util::BoxService,
     Service, ServiceExt,
 };
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 

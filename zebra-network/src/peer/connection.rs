@@ -13,7 +13,7 @@ use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
 use tokio::time::{sleep, Sleep};
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Block},
@@ -627,7 +627,7 @@ where
     pub(super) compact_recovery:
         Option<tokio::sync::watch::Sender<Option<(block::Hash, tokio::time::Instant)>>>,
 
-    /// Live authorization, rechecked immediately before advert writes.
+    /// Live authorization, rechecked immediately before request and advert writes.
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
 
@@ -1165,12 +1165,17 @@ where
         let delivery = self
             .peer_tx
             .send_authorized(message, || {
-                version >= minimum.current()
-                    && !address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
-                    && {
-                        serving_authorized = !is_compact || compact.advert_is_authorized();
-                        serving_authorized
-                    }
+                if version < minimum.current()
+                    || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+                {
+                    return Err(PeerError::AdvertAuthorizationRevoked);
+                }
+                serving_authorized = !is_compact || compact.advert_is_authorized();
+                if serving_authorized {
+                    Ok(())
+                } else {
+                    Err(PeerError::AdvertAuthorizationRevoked)
+                }
             })
             .await;
         match delivery {
@@ -1237,6 +1242,20 @@ where
         // response sender until the send finishes. See `sending_request_tx` for details.
         self.sending_request_tx = Some(tx);
 
+        let address = self.connection_info.connected_addr.get_transient_addr();
+        let version = self.connection_info.remote.version;
+        let minimum = &mut self.minimum_peer_version;
+        let bans = &self.bans_receiver;
+        let authorized = || {
+            if version < minimum.current()
+                || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+            {
+                Err(PeerError::ConnectionDropped)
+            } else {
+                Ok(())
+            }
+        };
+
         let new_handler = match (&self.state, request) {
             (Failed, request) => panic!(
                 "failed connection cannot handle new request: {:?}, client_receiver: {:?}",
@@ -1268,7 +1287,7 @@ where
             }
             (AwaitingRequest, Peers) => self
                 .peer_tx
-                .send(Message::GetAddr)
+                .send_authorized(Message::GetAddr, authorized)
                 .await
                 .map(|()| Handler::Peers),
 
@@ -1277,7 +1296,7 @@ where
 
                 self
                     .peer_tx
-                    .send(Message::Ping(nonce))
+                    .send_authorized(Message::Ping(nonce), authorized)
                     .await
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
@@ -1290,9 +1309,9 @@ where
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
                     .peer_tx
-                    .send(Message::GetData(
+                    .send_authorized(Message::GetData(
                         hashes.iter().map(|h| (*h).into()).collect(),
-                    ))
+                    ), authorized)
                     .await
                     .map(|()|
                          Handler::BlocksByHash {
@@ -1304,9 +1323,9 @@ where
             (AwaitingRequest, TransactionsById(ids)) => {
                 self
                     .peer_tx
-                    .send(Message::GetData(
+                    .send_authorized(Message::GetData(
                         ids.iter().map(Into::into).collect(),
-                    ))
+                    ), authorized)
                     .await
                     .map(|()|
                          Handler::TransactionsById {
@@ -1318,7 +1337,7 @@ where
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
                 self
                     .peer_tx
-                    .send(Message::GetBlocks { known_blocks, stop })
+                    .send_authorized(Message::GetBlocks { known_blocks, stop }, authorized)
                     .await
                     .map(|()|
                          Handler::FindBlocks
@@ -1327,7 +1346,7 @@ where
             (AwaitingRequest, FindHeaders { known_blocks, stop }) => {
                 self
                     .peer_tx
-                    .send(Message::GetHeaders { known_blocks, stop })
+                    .send_authorized(Message::GetHeaders { known_blocks, stop }, authorized)
                     .await
                     .map(|()|
                          Handler::FindHeaders
@@ -1337,7 +1356,7 @@ where
             (AwaitingRequest, MempoolTransactionIds) => {
                 self
                     .peer_tx
-                    .send(Message::Mempool)
+                    .send_authorized(Message::Mempool, authorized)
                     .await
                     .map(|()|
                          Handler::MempoolTransactionIds
@@ -1347,7 +1366,7 @@ where
             (AwaitingRequest, PushTransaction(transaction, _)) => {
                 self
                     .peer_tx
-                    .send(Message::Tx(transaction))
+                    .send_authorized(Message::Tx(transaction), authorized)
                     .await
                     .map(|()|
                          Handler::Finished(Ok(Response::Nil))
@@ -1378,7 +1397,7 @@ where
 
                 self
                     .peer_tx
-                    .send(Message::Inv(hashes))
+                    .send_authorized(Message::Inv(hashes), authorized)
                     .await
                     .map(|()|
                          Handler::Finished(Ok(Response::Nil))
@@ -1792,7 +1811,11 @@ where
                                 let result = self
                                     .peer_tx
                                     .send_authorized(Message::Block(block), || {
-                                        authorization.is_authorized(&snapshot)
+                                        if authorization.is_authorized(&snapshot) {
+                                            Ok(())
+                                        } else {
+                                            Err(PeerError::AdvertAuthorizationRevoked)
+                                        }
                                     })
                                     .await;
                                 if matches!(result, Err(PeerError::AdvertAuthorizationRevoked)) {

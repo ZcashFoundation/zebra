@@ -10,10 +10,14 @@
 //! v6 / Ironwood decode branches. Each candidate is self-checked to round-trip
 //! through `zcash_deserialize` before it is written.
 //!
+//! Any skipped candidate makes the run fail; partial output must not be used
+//! as a complete corpus.
+//!
 //! Usage: `generate_v6_seeds <output_dir>`
 
 use std::fs;
 use std::io::Cursor;
+use std::process::ExitCode;
 
 use orchard::bundle::{Authorized, BundleVersion, Flags};
 use orchard::Bundle;
@@ -56,7 +60,7 @@ fn build_bundle(
     fake_orchard_bundle(flags, value_balance, action_count, seed, bundle_version)
 }
 
-fn main() {
+fn main() -> ExitCode {
     let out_dir = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "v6_seeds".to_string());
@@ -139,4 +143,12 @@ fn main() {
     }
 
     println!("wrote {written} v6/Ironwood seeds to {out_dir} ({skipped} skipped)");
+    if skipped != 0 {
+        eprintln!(
+            "seed generation incomplete: discard the partial corpus and fix the skipped candidates"
+        );
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

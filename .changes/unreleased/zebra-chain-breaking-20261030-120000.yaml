@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: breaking
+body: 'Added `parameters::network::error::ParametersBuilderError::MissingBranchId`. `ParametersBuilder::with_activation_heights` now returns it when a configured network upgrade from Overwinter on has no consensus branch ID in this build, so `zebrad` stops at config load instead of panicking in the history tree at that upgrade''s activation block ([#11482](https://github.com/ZcashFoundation/zebra/issues/11482)).'
+time: 2026-10-30T12:00:00.000000+05:30

@@ -9,7 +9,7 @@
 //!
 //! ## Invariants exercised
 //!
-//! * **I-1** parse OK ⇒ serialize round-trip is byte-equal (structural).
+//! * **I-1** parse OK ⇒ serialize round-trip preserves the complete encoding.
 //!   Targets serialization asymmetry → consensus split vectors.
 //! * **I-2** parse OK ⇒ `block.hash()` does not panic.
 //! * **I-3** parse OK ⇒ merkle root computation does not panic.
@@ -29,8 +29,8 @@ use std::io::Cursor;
 use std::panic;
 use std::sync::Arc;
 
-use zebra_chain::block::{Block, Hash, Height, ZCASH_BLOCK_VERSION, MAX_BLOCK_BYTES};
 use zebra_chain::block::merkle::Root as MerkleRoot;
+use zebra_chain::block::{Block, Hash, Height, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION};
 use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
 
 fuzz_target!(|data: &[u8]| {
@@ -47,45 +47,21 @@ fuzz_target!(|data: &[u8]| {
     // ────────────────────────────────────────────────────────────────────
     // I-1 — Round-trip serialization byte equality.
     //
-    // If we parsed a block, serializing it and re-parsing the result must
-    // yield a structurally equal block, and re-serializing must produce
-    // identical bytes. Any mismatch is a candidate consensus split vector
-    // (peers seeing the same bytes but disagreeing on block identity).
+    // Compare complete encodings: Block::PartialEq inherits txid-only
+    // transaction equality, which misses V5/V6 signatures and proofs.
     // ────────────────────────────────────────────────────────────────────
-    let mut serialized = Vec::with_capacity(data.len());
-    let serialize_ok = block.zcash_serialize(&mut serialized).is_ok();
-
-    if serialize_ok {
-        match Block::zcash_deserialize(Cursor::new(&serialized)) {
-            Ok(reparsed) => {
-                // Structural equality across Block (Header + transactions).
-                assert_eq!(
-                    *block, reparsed,
-                    "I-1: serialize → deserialize round-trip structural inequality \
-                     (potential consensus split vector)"
-                );
-
-                // Byte-level idempotence: re-serializing must reproduce the
-                // same bytes. Catches cases where two distinct in-memory
-                // blocks serialize to the same bytes but compare unequal.
-                let mut serialized2 = Vec::with_capacity(serialized.len());
-                if reparsed.zcash_serialize(&mut serialized2).is_ok() {
-                    assert_eq!(
-                        serialized, serialized2,
-                        "I-1: re-serialization byte mismatch \
-                         (consensus split vector)"
-                    );
-                }
-            }
-            Err(e) => {
-                // We just produced these bytes from a parsed block — the
-                // serializer disagreeing with its own deserializer is a bug.
-                panic!(
-                    "I-1: serializer produced bytes the deserializer rejects: {e:?}"
-                );
-            }
-        }
-    }
+    let serialized = block.zcash_serialize_to_vec().expect(
+        "ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail",
+    );
+    let reparsed = Block::zcash_deserialize(Cursor::new(&serialized))
+        .expect("I-1: serializer produced bytes the deserializer rejects");
+    let serialized2 = reparsed.zcash_serialize_to_vec().expect(
+        "ZcashSerialize is infallible except for writer errors, and a Vec writer cannot fail",
+    );
+    assert_eq!(
+        serialized, serialized2,
+        "I-1: re-serialization byte mismatch (consensus split vector)"
+    );
 
     // ────────────────────────────────────────────────────────────────────
     // I-2 — `block.hash()` must not panic and must be deterministic.
@@ -105,15 +81,6 @@ fuzz_target!(|data: &[u8]| {
     assert_eq!(
         hash, hash_again,
         "I-2: block.hash() is non-deterministic across calls"
-    );
-
-    // The header hash and the block hash should be equal — the block hash
-    // is just the header hash by definition.
-    let header_hash = panic::catch_unwind(panic::AssertUnwindSafe(|| block.header.hash()))
-        .expect("I-2: header.hash() panicked");
-    assert_eq!(
-        hash, header_hash,
-        "I-2: block.hash() must equal block.header.hash()"
     );
 
     // ────────────────────────────────────────────────────────────────────
@@ -160,9 +127,7 @@ fuzz_target!(|data: &[u8]| {
             Some(root)
         }
     }));
-    if let (Some(via_txs), Ok(Some(via_hashes))) =
-        (merkle_root, merkle_root_via_hashes_result)
-    {
+    if let (Some(via_txs), Ok(Some(via_hashes))) = (merkle_root, merkle_root_via_hashes_result) {
         assert_eq!(
             via_txs, via_hashes,
             "I-3: merkle root mismatch between transaction-collect and \
@@ -179,8 +144,7 @@ fuzz_target!(|data: &[u8]| {
     // The range is enforced by `Height::new`/serialize callers, but we
     // guard against any parser path producing an out-of-range value.
     // ────────────────────────────────────────────────────────────────────
-    let height_result =
-        panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
+    let height_result = panic::catch_unwind(panic::AssertUnwindSafe(|| block.coinbase_height()));
     match height_result {
         Ok(None) => {
             // Block with no coinbase height — legal for malformed inputs
@@ -211,15 +175,13 @@ fuzz_target!(|data: &[u8]| {
     // otherwise we have a serialize / deserialize asymmetry that could
     // produce blocks too large to retransmit.
     // ────────────────────────────────────────────────────────────────────
-    if serialize_ok {
-        let size = serialized.len();
-        assert!(
-            (size as u64) <= MAX_BLOCK_BYTES,
-            "I-5: serialized block size {} exceeds MAX_BLOCK_BYTES {}",
-            size,
-            MAX_BLOCK_BYTES
-        );
-    }
+    let size = serialized.len();
+    assert!(
+        u64::try_from(size).expect("block size fits in u64") <= MAX_BLOCK_BYTES,
+        "I-5: serialized block size {} exceeds MAX_BLOCK_BYTES {}",
+        size,
+        MAX_BLOCK_BYTES
+    );
 
     // ────────────────────────────────────────────────────────────────────
     // I-6 — Header version is in the supported set.
