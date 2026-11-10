@@ -61,7 +61,8 @@ flowchart TD
     script --> chain
 ```
 
-The fuzz targets, in their own workspace, depend on `zebra-chain`,
+The fuzz targets, a root workspace member outside the default members,
+depend on `zebra-chain`,
 `zebra-consensus`, `zebra-network`, `zebra-node-services`, `zebra-rpc`,
 `zebra-script`, and `zebra-state`.
 
