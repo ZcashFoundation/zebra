@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Mining templates are served as soon as they are built and checked as block proposals in the background. Solved templates reuse successful checks; a failed check restores the last valid work for that parent. RPC block proposal checks are limited to two at a time and 30 seconds each.
+time: 2026-11-10T04:26:48.320821202+01:00

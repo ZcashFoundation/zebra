@@ -1140,6 +1140,37 @@ where
         .map_misc_error()?
     }
 
+    /// Validates a transaction-bearing fallback template as a block proposal in the background,
+    /// so a block solved from it reuses the verdict in `submitblock`.
+    ///
+    /// The updater validates its own builds, so this only runs without a live updater. A failed
+    /// check is logged: the template is already served, as the updater's first build for a tip is.
+    fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
+        let network = self.network.clone();
+        let template = template.clone();
+        let verifier = self.gbt.block_verifier_router();
+        tokio::spawn(async move {
+            let proposal = tokio::task::spawn_blocking(move || {
+                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+            })
+            .await;
+            let result = match proposal {
+                Ok(Ok(proposal)) => tokio::time::timeout(
+                    types::get_block_template::PROPOSAL_CHECK_TIMEOUT,
+                    verifier.oneshot(zebra_consensus::Request::CheckProposal(Arc::new(proposal))),
+                )
+                .await
+                .map_err(|elapsed| elapsed.to_string())
+                .and_then(|result| result.map(|_| ()).map_err(|error| error.to_string())),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = result {
+                tracing::debug!(%error, "fallback block template failed validation");
+            }
+        });
+    }
+
     /// Spawns a task that keeps a block template for the current chain tip precomputed, so
     /// `getblocktemplate` calls only validate the tip against the state instead of reading the
     /// mempool, selecting transactions, and building a coinbase transaction.
@@ -1263,7 +1294,14 @@ where
 
             if !freshness_checked && cache.updater_is_running() && !cache.is_first_work(&template) {
                 freshness_checked = true;
-                cache.refresh_if_changed(&template).await;
+                tokio::select! {
+                    () = cache.refresh_if_changed(&template) => {}
+                    changed = tip_change.best_tip_changed() => {
+                        if changed.is_err() {
+                            return Ok(None);
+                        }
+                    }
+                }
                 // Even an unchanged snapshot can cross a publication or parent change.
                 continue;
             }
@@ -1273,7 +1311,7 @@ where
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
-                let mut template = Arc::unwrap_or_clone(template);
+                let mut template = Arc::unwrap_or_clone(template).response;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -1325,7 +1363,7 @@ where
     async fn precomputed_template_for_state_tip(
         &self,
         cache: &precompute::TemplateCache,
-    ) -> Option<Arc<BlockTemplateResponse>> {
+    ) -> Option<Arc<precompute::CachedTemplate>> {
         // Subscribe before the first read below, so a template published while this call is
         // deciding what to do with the previous one still wakes it.
         let mut template_changes = cache.subscribe();
@@ -2969,6 +3007,7 @@ where
                 &self.network,
                 latest_chain_tip,
                 sync_status,
+                self.gbt.proposal_checks(),
             )
             .await;
         }
@@ -3133,6 +3172,11 @@ where
                     template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
                     )?;
+                // Validate the served work in the background, so a solve of it reuses the
+                // verdict in `submitblock`. The proposal carries the served `cur_time`.
+                if !template.transactions.is_empty() {
+                    self.validate_fallback_template(&template);
+                }
                 if let Some(cache) = self.gbt.template_cache() {
                     cache.preserve_work_identity(&mut template);
                 }
@@ -3248,19 +3292,24 @@ where
         let duplicate_deadline = tokio::time::Instant::now() + DUPLICATE_COMMIT_TIMEOUT;
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
-        // The input byte bound keeps ordinary small-block parsing cheaper than a worker hop.
-        let inline = block_bytes.len() <= 4 * 1024;
-        let prepared_blocks = self.prepared_blocks.clone();
-        let decode = move || match prepared_blocks {
-            Some(cache) => cache.deserialize(&block_bytes),
-            None => zebra_consensus::DecodedBlock::deserialize(&block_bytes),
-        };
-        let decoded = if inline {
-            decode()
-        } else {
-            tokio::task::spawn_blocking(decode).await.expect(
+        // A solved template match only parses its header and compares its bytes. Ordinary inputs
+        // up to 4 KiB also decode inline; larger cache misses stay off the executor.
+        let decoded = match self
+            .prepared_blocks
+            .as_ref()
+            .and_then(|cache| cache.reuse(&block_bytes))
+        {
+            Some(decoded) => Ok(decoded),
+            None if block_bytes.len() <= 4 * 1024 => {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            }
+            None => tokio::task::spawn_blocking(move || {
+                zebra_consensus::DecodedBlock::deserialize(&block_bytes)
+            })
+            .await
+            .expect(
                 "block deserialization reports malformed input as an error rather than panicking",
-            )
+            ),
         };
         let decoded = match decoded {
             Ok(decoded) => decoded,
