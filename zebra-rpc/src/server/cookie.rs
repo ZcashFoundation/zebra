@@ -22,6 +22,14 @@ const FILE: &str = ".cookie";
 pub struct Cookie(String);
 
 impl Cookie {
+    /// Creates a cookie holding an operator-supplied secret instead of a random one.
+    ///
+    /// Used for static user/password authentication, where the secret comes
+    /// from the config and is never written to disk.
+    pub fn from_secret(secret: String) -> Self {
+        Self(secret)
+    }
+
     /// Constant-time comparison to prevent timing side-channels.
     pub fn authenticate(&self, passwd: String) -> bool {
         if passwd.len() != self.0.len() {

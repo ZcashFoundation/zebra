@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: '`server::http_request_compatibility::RpcAuth`, with `Cookie` and `Static` variants, `server::cookie::Cookie::from_secret`, `config::rpc::RedactedString`, which keeps the password out of `Debug` output, `config::rpc::StaticCredentialsError`, and `config::rpc::Config::static_credentials` and `uses_static_auth`, which resolve the new static credential fields ([#10404](https://github.com/ZcashFoundation/zebra/issues/10404)).'
+time: 2026-11-10T12:00:00.000000+00:00

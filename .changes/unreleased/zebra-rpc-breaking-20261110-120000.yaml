@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`config::rpc::Config` gains the public fields `rpc_user: Option<String>`, `rpc_password: Option<RedactedString>` and `rpc_password_file: Option<PathBuf>`, and `server::http_request_compatibility::HttpRequestMiddleware::new` and `HttpRequestMiddlewareLayer::new` take an `Option<RpcAuth>` instead of an `Option<Cookie>`. Code constructing the config literally must add the fields; the default `None` keeps cookie authentication ([#10404](https://github.com/ZcashFoundation/zebra/issues/10404)).'
+time: 2026-11-10T12:00:00.000000+00:00
