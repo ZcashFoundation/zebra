@@ -73,8 +73,11 @@ against the new block headers:
 - **The history tree** ([ZIP-221](https://zips.z.cash/zip-0221)). The first new
   block's header commits to it, so a wrong history tree is caught at that block.
 - **The Sapling, Orchard, and Ironwood note commitment frontiers at the tip.**
-  Their roots go into the history tree, so a wrong frontier is caught when the
-  second new block is committed.
+  Their roots go into the history tree, and the next block's header commits to
+  that tree. The stored frontier keeps a cached copy of its root, which `zebrad`
+  reuses until a block adds a note commitment to that pool. So a damaged
+  frontier with a correct cached root goes unnoticed until such a block
+  arrives, and is caught at the block after it.
 
 A mismatch rejects the block with `InvalidBlockCommitment`. The node doesn't
 panic. It stops making progress, and the sync stalls.
@@ -181,13 +184,30 @@ login.
    rpc=http://127.0.0.1:8232/    # 18232 is the usual Testnet port
    cookie=~/.cache/zebra/.cookie
 
+   rpc_call() {
+     curl -sS -u "$(cat "$cookie")" -H 'Content-type: application/json' \
+       --data-binary "{\"jsonrpc\":\"1.0\",\"id\":\"snapshot\",\"method\":\"$1\",\"params\":[$2]}" \
+       "$rpc" | jq -er .result
+   }
+
    last=$(curl -fsSL "https://raw.githubusercontent.com/ZcashFoundation/zebra/$tag/zebra-chain/src/parameters/checkpoint/$file" | tail -n 1)
    height=${last% *} hash=${last#* }
-   node_hash=$(curl -sS -u "$(cat "$cookie")" -H 'Content-type: application/json' \
-     --data-binary "{\"jsonrpc\":\"1.0\",\"id\":\"snapshot\",\"method\":\"getblockhash\",\"params\":[$height]}" \
-     "$rpc" | jq -r .result)
-   [ "$node_hash" = "$hash" ] && echo match || echo MISMATCH
+   if ! tip=$(rpc_call getblockcount); then
+     echo "RPC call failed: check rpc and cookie"
+   elif [ "$tip" -lt "$height" ]; then
+     echo "tip $tip is below checkpoint $height: run this again once the node passes it"
+   elif ! node_hash=$(rpc_call getblockhash "$height"); then
+     echo "RPC call failed: check rpc and cookie"
+   elif [ "$node_hash" = "$hash" ]; then
+     echo match
+   else
+     echo MISMATCH
+   fi
    ```
+
+   A snapshot can be older than your release's last checkpoint. The node
+   doesn't have that block yet, so the script waits for the sync instead of
+   reporting a mismatch. Only `MISMATCH` means the hashes differ.
 
    This confirms that the chain your node follows contains your release's
    highest checkpoint. `zebrad` runs the same comparison for every compiled
