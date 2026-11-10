@@ -160,8 +160,23 @@ async fn inbound_raw_blocks_match_serialized_blocks() {
             panic!("unexpected response to a raw block request: {response:?}");
         };
 
-        let available: Vec<SerializedBlock> =
-            items.iter().filter_map(|item| item.available()).collect();
+        // The connection clones each response before sending it, so the clone must share the
+        // block bytes instead of copying them.
+        let cloned = items.clone();
+        for (item, clone) in items.iter().zip(&cloned) {
+            if let (Some(block), Some(clone)) = (item.available(), clone.available()) {
+                assert!(
+                    Arc::ptr_eq(&block, &clone),
+                    "cloned raw block responses share the block bytes"
+                );
+            }
+        }
+
+        let available: Vec<SerializedBlock> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|block| SerializedBlock::clone(&block))
+            .collect();
         let missing: Vec<BlockHash> = items.iter().filter_map(|item| item.missing()).collect();
         assert_eq!(
             available,
