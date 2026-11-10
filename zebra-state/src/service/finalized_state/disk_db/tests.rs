@@ -134,23 +134,27 @@ fn open_errors_distinguish_lock_holders_from_io_errors() {
     let mut opts = rocksdb::Options::default();
     opts.create_if_missing(true);
 
-    // RocksDB on Windows has no per-process lock table, so a second open in this
-    // process fails like an open in another process.
-    let expected_holder = if cfg!(windows) {
-        LockHolder::OtherProcess
-    } else {
-        LockHolder::ThisProcess
-    };
-
     let db_path = dir.path().join("db");
     let _db = DB::open(&opts, &db_path).expect("new database opens in an empty directory");
     let lock_error = DB::open(&opts, &db_path)
         .expect_err("second open fails because the first instance holds the lock");
-    assert_eq!(
-        DiskDb::lock_holder(lock_error.as_ref()),
-        Some(expected_holder),
-        "{lock_error}"
-    );
+    let holder = DiskDb::lock_holder(lock_error.as_ref());
+
+    if cfg!(windows) {
+        // RocksDB on Windows has no per-process lock table, so a second open in this
+        // process fails like an open in another process. The system message is
+        // localized, so only English installations are classified as a held lock.
+        assert!(
+            lock_error.as_ref().contains("Failed to create lock file"),
+            "{lock_error}"
+        );
+        assert!(
+            matches!(holder, Some(LockHolder::OtherProcess) | None),
+            "{lock_error}"
+        );
+    } else {
+        assert_eq!(holder, Some(LockHolder::ThisProcess), "{lock_error}");
+    }
 
     let blocked_path = dir.path().join("blocked");
     std::fs::create_dir_all(blocked_path.join("LOCK")).expect("temporary directory is writable");
