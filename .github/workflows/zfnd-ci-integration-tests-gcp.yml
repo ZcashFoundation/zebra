@@ -627,8 +627,9 @@ jobs:
       ]
     # Only report failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
-    # A cancelled run was stopped on purpose or superseded by a newer push, so it reports nothing.
-    if: failure() && github.event.pull_request == null
+    # A cancelled run was stopped on purpose or superseded by a newer push, so it reports nothing,
+    # even if a job failed before the cancellation. A job that times out does not cancel the run.
+    if: failure() && !cancelled() && github.event.pull_request == null
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
@@ -642,6 +643,8 @@ jobs:
       # and the roll-ups only repeat the failures of the jobs they summarize.
       - name: Classify the failure
         id: classify
+        # `bash` sets `pipefail`, so a failed job query stops the step instead of classifying as `infra`.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
