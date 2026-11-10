@@ -627,8 +627,10 @@ jobs:
       ]
     # Only report failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
-    # A cancelled run was stopped on purpose or superseded by a newer push, so it reports nothing,
-    # even if a job failed before the cancellation. A job that times out does not cancel the run.
+    # A cancelled run was stopped on purpose or superseded by a newer push, so a run cancelled
+    # before this job starts reports nothing, even if a job failed before the cancellation.
+    # This job does not wait for the testnet jobs, so a report of a mainnet failure stays if the
+    # run is cancelled later. A job that times out does not cancel the run.
     if: failure() && !cancelled() && github.event.pull_request == null
     runs-on: ubuntu-26.04
     timeout-minutes: 5
