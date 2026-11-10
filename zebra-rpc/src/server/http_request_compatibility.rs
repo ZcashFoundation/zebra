@@ -532,7 +532,7 @@ mod tests {
         let inner = service_fn(|_request: HttpRequest| async {
             Ok::<_, BoxError>(HttpResponse::new(HttpBody::from(INNER_BODY)))
         });
-        let mut middleware = HttpRequestMiddleware::new(inner, Some(cookie), 1024);
+        let mut middleware = HttpRequestMiddleware::new(inner, Some(cookie), 1024, 1024);
 
         let mut request = HttpRequest::new(HttpBody::from(
             r#"{"jsonrpc":"2.0","method":"getinfo","params":[],"id":1}"#,
