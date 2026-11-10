@@ -47,6 +47,7 @@ if $downloaded; then
   sha256sum -c "$(basename "$url").sha256"
 else
   echo "download incomplete: run this block again to resume" >&2
+  false
 fi
 ```
 
