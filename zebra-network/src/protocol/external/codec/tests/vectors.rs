@@ -704,7 +704,7 @@ fn raw_block_message_encodes_like_block_message() {
         let block: Arc<Block> = (*block_bytes)
             .zcash_deserialize_into()
             .expect("test vector blocks are valid");
-        let raw = block::SerializedBlock::from(block_bytes.to_vec());
+        let raw = Arc::new(block::SerializedBlock::from(block_bytes.to_vec()));
 
         let mut codec = Codec::builder().finish();
         codec.reconfigure_full_body_len();

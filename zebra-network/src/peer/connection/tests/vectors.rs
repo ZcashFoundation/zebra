@@ -1596,7 +1596,9 @@ async fn connection_serves_inbound_block_getdata_from_raw_bytes() {
         .zcash_deserialize_into()
         .expect("test vector blocks are valid");
     let missing_hash = block::Hash([0x11; 32]);
-    let raw = block::SerializedBlock::from(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec());
+    let raw = Arc::new(block::SerializedBlock::from(
+        zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec(),
+    ));
 
     let (mut peer_tx, peer_rx) = mpsc::channel(1);
     let (

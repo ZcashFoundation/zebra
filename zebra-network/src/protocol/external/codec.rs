@@ -290,7 +290,7 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
-            Message::RawBlock(block) => writer.write_all(block.as_ref())?,
+            Message::RawBlock(block) => writer.write_all((**block).as_ref())?,
             Message::GetBlocks { known_blocks, stop } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 known_blocks.zcash_serialize(&mut writer)?;

@@ -78,8 +78,11 @@ pub enum Response {
     ///
     /// The response to [`Request::RawBlocksByHash`](super::Request::RawBlocksByHash). Each
     /// available block is sent to the peer as its stored bytes.
+    ///
+    /// The bytes are shared, like the blocks in [`Response::Blocks`], so cloning a response
+    /// doesn't copy them.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    RawBlocks(Vec<InventoryResponse<SerializedBlock, block::Hash>>),
+    RawBlocks(Vec<InventoryResponse<Arc<SerializedBlock>, block::Hash>>),
 
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///

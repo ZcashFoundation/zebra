@@ -523,7 +523,7 @@ impl Service<zn::Request> for Inbound {
                 let state = state.clone();
 
                 async move {
-                    let mut blocks: Vec<InventoryResponse<SerializedBlock, block::Hash>> = Vec::new();
+                    let mut blocks: Vec<InventoryResponse<Arc<SerializedBlock>, block::Hash>> = Vec::new();
                     let mut total_size = 0;
 
                     for &hash in hashes.iter().take(GETDATA_MAX_BLOCK_COUNT) {
@@ -538,7 +538,9 @@ impl Service<zn::Request> for Inbound {
                             zs::Response::RawBlock(Some(block)) => {
                                 total_size += block.as_ref().len();
 
-                                blocks.push(Available(block))
+                                // Share the bytes, so the connection's copy of the response
+                                // doesn't duplicate them.
+                                blocks.push(Available(Arc::new(block)))
                             },
                             zs::Response::RawBlock(None) => blocks.push(Missing(hash)),
                             _ => unreachable!("wrong response from state"),
