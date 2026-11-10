@@ -38,17 +38,23 @@ Then download the checksum and the archive, and check the archive:
 
 ```sh
 curl --fail -O "$url.sha256"
+downloaded=false
 for attempt in $(seq 10); do
-  curl --fail -C - -O "$url" && break
+  curl --fail -C - -O "$url" && { downloaded=true; break; }
   sleep 10
 done
-sha256sum -c "$(basename "$url").sha256"
+if $downloaded; then
+  sha256sum -c "$(basename "$url").sha256"
+else
+  echo "download incomplete: run this block again to resume" >&2
+fi
 ```
 
 A Mainnet download can take hours, and the connection can drop partway. The
-loop resumes from the bytes already on disk, and so does running it again after
-it gives up. It avoids `curl --retry` because `curl` releases before 8.17
-restart a retried download from the beginning. Don't use an archive that fails
+loop resumes from the bytes already on disk. If all ten attempts fail, keep the
+partial file and run the block again: it resumes from where it stopped. The
+loop avoids `curl --retry` because `curl` releases before 8.17 restart a
+retried download from the beginning. Don't use a completed archive that fails
 `sha256sum -c`: delete it and download it again.
 
 Each entry also carries `height`, `db_major`, `sha256`, `zebrad_version`, and
@@ -169,6 +175,11 @@ height equals `chain_tip.height`. If it is `null`, as in older manifests, the
 logged height is about 1,000 blocks lower: those manifests record the source
 node's tip, and up to 1,000 of its newest blocks aren't finalized, so they
 aren't in the archive. `zebrad` downloads them again within minutes.
+
+These height checks assume a fresh `cache_dir`. If it already holds a
+`non_finalized_state/<network>` directory from an earlier run, `zebrad`
+restores those blocks on top of the archive before it logs the tip, so the
+logged height can be higher. That is still a valid restore.
 
 ```text
 zebra_state::service: loaded Zebra state cache chain_tip=Some((block::Hash("0000..."), Height(3459525)))
