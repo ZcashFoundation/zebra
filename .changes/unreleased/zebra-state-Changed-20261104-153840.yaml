@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Changed `constants::LOCK_FILE_ERROR` to match only the panic raised when another process holds the state database lock, instead of RocksDB lock error text.
+time: 2026-11-04T15:38:40.751014234Z
