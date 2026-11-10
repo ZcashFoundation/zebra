@@ -6,11 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use zebra_chain::common::default_cache_dir;
 
-/// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
-/// are not written to logs by types that derive `Debug`.
+/// A [`String`] whose `Debug` output is redacted, so secrets do not reach the logs.
 ///
-/// Serialization is unaffected, so the value still round-trips through the config file. Use
-/// [`RedactedString::as_str()`] to reach the contents deliberately.
+/// Serialization is unaffected. Use [`RedactedString::as_str()`] to read the contents.
 #[derive(Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct RedactedString(String);
@@ -22,7 +20,7 @@ impl fmt::Debug for RedactedString {
 }
 
 impl RedactedString {
-    /// Return the wrapped string, which exposes its sensitive contents.
+    /// Returns the secret contents.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -159,33 +157,18 @@ pub struct Config {
 
     /// Username for static HTTP Basic RPC authentication.
     ///
-    /// When `rpc_user` and one of `rpc_password` or `rpc_password_file` are set,
-    /// every request must carry `Authorization: Basic base64(rpc_user:password)`.
-    /// No cookie is generated or written to disk. Static credentials take
-    /// precedence over [`Self::enable_cookie_auth`].
-    ///
-    /// `rpc_user` must be set together with a password, and vice versa.
-    /// Zebra refuses to start on a partial configuration.
-    ///
-    /// ```toml
-    /// [rpc]
-    /// rpc_user = "user"
-    /// rpc_password_file = "/run/secrets/rpc_password"
-    /// ```
+    /// Must be set together with `rpc_password` or `rpc_password_file`. When set,
+    /// every request needs these credentials, and no cookie is written.
     pub rpc_user: Option<String>,
 
     /// Password for static HTTP Basic RPC authentication.
     ///
-    /// Prefer [`Self::rpc_password_file`], which keeps the secret out of the
-    /// config file. Cannot be set through environment variables, and is
-    /// redacted from the config's `Debug` output.
+    /// Prefer `rpc_password_file`, which keeps the secret out of the config file.
     pub rpc_password: Option<RedactedString>,
 
-    /// Path to a file containing the password for static HTTP Basic RPC
-    /// authentication (the Docker and Kubernetes secrets pattern).
+    /// Path to a file containing the password for static HTTP Basic RPC authentication.
     ///
-    /// The file is read once at startup. Trailing newlines are trimmed.
-    /// Takes precedence over [`Self::rpc_password`] when both are set.
+    /// Read once at startup with trailing newlines trimmed. Takes precedence over `rpc_password`.
     pub rpc_password_file: Option<PathBuf>,
 
     /// The maximum size of the response body in bytes.
@@ -193,11 +176,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns `true` if static user/password authentication is configured.
-    ///
-    /// Any of the static credential fields being set counts: a partial
-    /// configuration is still a request for static authentication, and
-    /// [`Self::static_credentials`] rejects it with an error.
+    /// Returns `true` if any static credential field is set.
     pub fn uses_static_auth(&self) -> bool {
         self.rpc_user.is_some() || self.rpc_password.is_some() || self.rpc_password_file.is_some()
     }
