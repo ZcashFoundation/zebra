@@ -6,8 +6,9 @@ use crate::block;
 use crate::parameters::{Network, Network::*};
 use crate::serialization::BytesInDisplayOrder;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::LazyLock;
 
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
@@ -119,6 +120,11 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU7, Nu7),
     ]
 };
+
+/// Mainnet activation heights as a map, built once instead of on every lookup.
+static MAINNET_ACTIVATION_MAP: LazyLock<BTreeMap<block::Height, NetworkUpgrade>> =
+    LazyLock::new(|| MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect());
+
 /// Testnet network upgrade activation heights.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
@@ -327,9 +333,14 @@ impl Network {
     /// Note: This skips implicit network upgrade activations, use [`Network::full_activation_list`]
     ///       to get an explicit list of all network upgrade activations.
     pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
+        self.activation_map().clone()
+    }
+
+    /// Returns the map behind [`Network::activation_list`] without copying it.
+    fn activation_map(&self) -> &BTreeMap<block::Height, NetworkUpgrade> {
         match self {
-            Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
-            Testnet(params) => params.activation_heights().clone(),
+            Mainnet => &MAINNET_ACTIVATION_MAP,
+            Testnet(params) => params.activation_heights(),
         }
     }
 
@@ -349,7 +360,7 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> (NetworkUpgrade, block::Height) {
         network
-            .activation_list()
+            .activation_map()
             .range(..=height)
             .map(|(&h, &nu)| (nu, h))
             .next_back()
@@ -359,7 +370,7 @@ impl NetworkUpgrade {
     /// Returns the current network upgrade for `network` and `height`.
     pub fn current(network: &Network, height: block::Height) -> NetworkUpgrade {
         network
-            .activation_list()
+            .activation_map()
             .range(..=height)
             .map(|(_, nu)| *nu)
             .next_back()
@@ -385,7 +396,7 @@ impl NetworkUpgrade {
         use std::ops::Bound::*;
 
         network
-            .activation_list()
+            .activation_map()
             .range((Excluded(height), Unbounded))
             .map(|(_, nu)| *nu)
             .next()
@@ -404,7 +415,7 @@ impl NetworkUpgrade {
     /// Returns None if this network upgrade has not been configured on a Testnet or Regtest.
     pub fn activation_height(&self, network: &Network) -> Option<block::Height> {
         network
-            .activation_list()
+            .activation_map()
             .iter()
             .find(|(_, nu)| nu == &self)
             .map(|(height, _)| *height)
@@ -420,7 +431,7 @@ impl NetworkUpgrade {
     /// Use [`NetworkUpgrade::activation_height`] to get the specific network
     /// upgrade.
     pub fn is_activation_height(network: &Network, height: block::Height) -> bool {
-        network.activation_list().contains_key(&height)
+        network.activation_map().contains_key(&height)
     }
 
     /// Returns an unordered mapping between NetworkUpgrades and their ConsensusBranchIds.
@@ -431,7 +442,8 @@ impl NetworkUpgrade {
     /// not appear in the list.
     ///
     /// This is actually a bijective map.
-    pub(crate) fn branch_id_list() -> HashMap<NetworkUpgrade, ConsensusBranchId> {
+    #[cfg(test)]
+    pub(crate) fn branch_id_list() -> std::collections::HashMap<NetworkUpgrade, ConsensusBranchId> {
         CONSENSUS_BRANCH_IDS.iter().cloned().collect()
     }
 
@@ -439,7 +451,10 @@ impl NetworkUpgrade {
     ///
     /// Returns None if this network upgrade has no consensus branch id.
     pub fn branch_id(&self) -> Option<ConsensusBranchId> {
-        NetworkUpgrade::branch_id_list().get(self).cloned()
+        CONSENSUS_BRANCH_IDS
+            .iter()
+            .find(|(network_upgrade, _)| network_upgrade == self)
+            .map(|&(_, branch_id)| branch_id)
     }
 
     /// Returns the target block spacing for the network upgrade.

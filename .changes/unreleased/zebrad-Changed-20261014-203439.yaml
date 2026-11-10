@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Checkpoint submissions retain bounded work while preserving ordinary prefetch and accepted commits after caller cancellation. Unchecked children are requeued after failed commits without releasing their reservations. Ordinary duplicates preserve healthy mined observers without depending on notification capacity. Synchronization retries local admission pressure with the downloaded body within the original verification deadline.
+time: 2026-10-14T20:34:39.515118675+02:00

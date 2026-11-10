@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Fixed
+body: 'Reduce transparent-output conversion overhead during address-index updates ([#11955](https://github.com/ZcashFoundation/zebra/issues/11955)).'
+time: 2026-10-23T00:00:00Z

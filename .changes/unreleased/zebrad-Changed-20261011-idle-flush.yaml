@@ -1,0 +1,6 @@
+project: zebrad
+kind: Changed
+body: >-
+  Lowered block and transaction verification latency by flushing proof and signature
+  batches after 5 ms of idle input, while retaining the 100 ms maximum batch latency.
+time: 2026-10-11T00:00:00Z

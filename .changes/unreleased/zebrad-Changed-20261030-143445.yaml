@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Commit transparent blocks faster by hashing each output and address key once in the non-finalized state's indexes.
+time: 2026-10-30T14:34:45.322945151-05:00

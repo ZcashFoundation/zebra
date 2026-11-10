@@ -1,0 +1,4 @@
+project: zebra-node-services
+kind: breaking
+body: Added `VerifiedTransactionsForBlock` variants to mempool requests and responses, a bounded lookup of verified block-transaction candidates against a specified mempool tip; exhaustive matches must handle them.
+time: 2026-10-23T09:18:47.751805834+02:00

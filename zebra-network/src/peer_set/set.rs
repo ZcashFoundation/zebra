@@ -981,6 +981,10 @@ where
                         self.serving_peer_keys.remove(&key);
                     }
                     self.inventory_registry.clear_peer_failures(key);
+                    if svc.connection_info().early_block_relay {
+                        self.inventory_registry
+                            .add_compact_source(key, svc.compact_receive_tx.clone());
+                    }
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
@@ -990,6 +994,7 @@ where
                             (
                                 svc.remote_version(),
                                 is_sidecar,
+                                svc.connection_info().early_block_relay,
                                 svc.block_advert_tx.clone(),
                             ),
                         );
@@ -2245,6 +2250,12 @@ where
         self.drain_inv_failures(&mut peer_cx);
 
         let ready_peers = self.poll_peers(&mut peer_cx)?;
+        let advert_peers = self.block_advert_senders.borrow();
+        self.inventory_registry.select_compact_sources(
+            self.minimum_peer_version.chain_tip().best_tip_hash(),
+            |peer| advert_peers.contains_key(peer),
+        );
+        drop(advert_peers);
 
         self.prune_disconnected_sidecar_keys();
         Self::retain_connected_keys(
@@ -2271,7 +2282,7 @@ where
                 self.block_advert_senders
                     .borrow()
                     .iter()
-                    .any(|(addr, (version, _, sender))| {
+                    .any(|(addr, (version, _, _, sender))| {
                         *version >= minimum && !bans.is_banned(addr.ip()) && !sender.is_closed()
                     })
             })
@@ -2353,8 +2364,17 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
-            Request::AdvertiseBlockToAll(_) | Request::AdvertiseBlock(_, _) => {
+            Request::AdvertiseBlockToAll(_)
+            | Request::AdvertiseBlock(_, _)
+            | Request::AdvertiseEarlyBlock(_) => {
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
+            }
+            Request::EarlyBlocksByHash(_)
+            | Request::AdvertiseCompactBlock(..)
+            | Request::CheckCompactHeader(_)
+            | Request::CompactBlockTransactions(_)
+            | Request::CheckCompactBlock(_) => {
+                future::ready(Err(PeerError::InboundOnlyRequest.into())).boxed()
             }
 
             // Broadcasts that must always reach the configured zcashd-compat sidecar peers

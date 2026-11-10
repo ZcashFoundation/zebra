@@ -2,7 +2,11 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::{collections::HashSet, net::SocketAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -47,6 +51,19 @@ pub enum Request {
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
+
+    /// Query verified candidates for a block by their mined hashes.
+    ///
+    /// Returns no candidates if the mempool is disabled, its last seen tip differs from
+    /// the parent, or the request exceeds the block transaction allocation limit.
+    /// Callers must check full [`UnminedTxId`]s, the verification epoch, and block-specific
+    /// consensus rules before reuse. Missing verification heights are not reusable.
+    VerifiedTransactionsForBlock {
+        /// Mined hashes of the candidate block's transactions.
+        transaction_hashes: Arc<[transaction::Hash]>,
+        /// Parent hash of the candidate block.
+        parent_hash: block::Hash,
+    },
 
     /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
     /// waiting until it becomes available if it is unknown.
@@ -144,6 +161,11 @@ pub enum Response {
     /// [`Request::TransactionsByMinedId`] requests, since the mempool does not allow
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
+
+    /// Verified candidates for [`Request::VerifiedTransactionsForBlock`].
+    ///
+    /// Contains only requested mined hashes, with their original verification metadata.
+    VerifiedTransactionsForBlock(HashMap<transaction::Hash, VerifiedUnminedTx>),
 
     /// Response to [`Request::AwaitOutput`] with the transparent output
     UnspentOutput(transparent::Output),

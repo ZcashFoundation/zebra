@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Added `RpcImpl::with_prepared_blocks` to connect submission decoding to the consensus verifier’s shared proposal cache ([#11738](https://github.com/ZcashFoundation/zebra/issues/11738)).
+time: 2026-10-15T01:29:18.478162112+02:00
