@@ -60,15 +60,11 @@ pub struct HttpRequestMiddleware<S> {
     max_request_body_size: usize,
 }
 
-/// The credentials the RPC server requires on every request.
-///
-/// Both variants are checked against the HTTP Basic `Authorization` header,
-/// `base64(user:password)`, using constant-time comparisons.
+/// The credentials the RPC server requires in the HTTP Basic `Authorization` header.
 #[derive(Clone)]
 pub enum RpcAuth {
-    /// A random per-start cookie. Only the password half of the header is
-    /// checked, for compatibility with `zcash-cli`, which sends `__cookie__`
-    /// as the username.
+    /// A random per-start cookie. Only the password half is checked, because
+    /// `zcash-cli` sends `__cookie__` as the username.
     Cookie(Cookie),
 
     /// Static credentials from the config. Both halves are checked.
@@ -80,8 +76,7 @@ pub enum RpcAuth {
     },
 }
 
-// Written by hand because the middleware and its layer derive `Debug`, which
-// would otherwise print the secret.
+// Manual impl so the derived `Debug` of the middleware never prints the secret.
 impl fmt::Debug for RpcAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -95,7 +90,7 @@ impl fmt::Debug for RpcAuth {
 }
 
 impl RpcAuth {
-    /// Checks the decoded `user:password` pair from a request.
+    /// Checks a decoded `user:password` pair.
     fn authenticate(&self, user: &str, password: String) -> bool {
         match self {
             RpcAuth::Cookie(cookie) => cookie.authenticate(password),

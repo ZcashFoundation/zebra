@@ -181,11 +181,8 @@ impl Config {
         self.rpc_user.is_some() || self.rpc_password.is_some() || self.rpc_password_file.is_some()
     }
 
-    /// Resolves the static user/password credentials.
-    ///
-    /// Returns `Ok(None)` when no static credentials are configured, and an
-    /// error when the configuration is partial or the password file cannot be
-    /// read.
+    /// Returns the static user and password, `None` if they are not configured,
+    /// or an error if the configuration is partial or the password file is unreadable.
     pub fn static_credentials(&self) -> Result<Option<(String, String)>, StaticCredentialsError> {
         if !self.uses_static_auth() {
             return Ok(None);
