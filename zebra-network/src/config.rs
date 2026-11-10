@@ -899,13 +899,17 @@ impl<'de> Deserialize<'de> for Config {
             }
         };
 
-        // Only the configured network's list is resolved, so an unused list
-        // with stale entries still loads, as it did before this check existed.
+        // Only check the peers that `initial_peer_hostnames()` resolves, so the
+        // unused list and public seeds on Regtest still load as they did before.
         let (field_name, peers) = match &network {
             Network::Mainnet => ("initial_mainnet_peers", &initial_mainnet_peers),
             Network::Testnet(_) => ("initial_testnet_peers", &initial_testnet_peers),
         };
-        if let Some(peer) = peers.iter().find(|peer| !is_valid_peer_addr(peer)) {
+        if let Some(peer) = peers
+            .iter()
+            .filter(|peer| !(network.is_regtest() && is_default_initial_peer(peer)))
+            .find(|peer| !is_valid_peer_addr(peer))
+        {
             return Err(de::Error::custom(format!(
                 "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
                  IPv6 address (with brackets), or DNS name, followed by a port"

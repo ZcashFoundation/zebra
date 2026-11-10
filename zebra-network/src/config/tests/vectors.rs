@@ -211,6 +211,22 @@ fn parse_config_ignores_unused_initial_peers() {
          initial_mainnet_peers = ['seeder.example.com']",
     )
     .expect("the mainnet peer list is unused on Testnet");
+
+    let config: Config = toml::from_str(
+        "network = 'Regtest'\n\
+         initial_testnet_peers = ['dnsseed.testnet.z.cash', '127.0.0.1:18233']",
+    )
+    .expect("public seeds are ignored on Regtest");
+    assert_eq!(
+        config.initial_peer_hostnames().iter().collect::<Vec<_>>(),
+        vec!["127.0.0.1:18233"]
+    );
+
+    toml::from_str::<Config>(
+        "network = 'Regtest'\n\
+         initial_testnet_peers = ['127.0.0.1']",
+    )
+    .expect_err("a local Regtest peer without a port is rejected");
 }
 
 #[test]
