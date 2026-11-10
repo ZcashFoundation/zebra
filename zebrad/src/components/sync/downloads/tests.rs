@@ -22,7 +22,7 @@ use zebra_chain::{
         NetworkUpgrade,
     },
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction as chain_transaction,
+    transaction as chain_transaction, transparent,
     work::difficulty::U256,
     LedgerState,
 };
@@ -43,7 +43,7 @@ use crate::components::{
     },
 };
 
-use super::{BlockDownloadVerifyError, Downloads};
+use super::{BlockDownloadVerifyError, Downloads, VERIFICATION_PIPELINE_DROP_LIMIT};
 
 use InventoryResponse::*;
 
@@ -826,6 +826,248 @@ async fn behind_tip_parent_lookup_timeout_is_not_attributed() {
     );
 
     verifier.expect_no_requests().await;
+}
+
+/// Returns a copy of the V5 or later `block` with its coinbase height rewritten to
+/// `claimed_height`.
+///
+/// From V5 on, the coinbase input script that holds the height is authorizing data, which the
+/// transaction ID doesn't commit to (ZIP 244), so the Merkle root and the block hash don't change.
+fn rewrite_v5_coinbase_height(block: &Block, claimed_height: Height) -> Arc<Block> {
+    let mut coinbase = block.transactions[0].as_ref().clone();
+    assert!(
+        coinbase.version() >= 5,
+        "only V5 and later transaction IDs leave out the coinbase height"
+    );
+
+    let mut inputs = coinbase.inputs();
+    let transparent::Input::Coinbase { height, .. } = &mut inputs[0] else {
+        unreachable!("the first transaction of a test vector has a coinbase input");
+    };
+    *height = claimed_height;
+    coinbase = coinbase.with_transparent_inputs(inputs);
+
+    let mut rewritten = block.clone();
+    rewritten.transactions[0] = Arc::new(coinbase);
+    let rewritten: Arc<Block> = rewritten
+        .zcash_serialize_to_vec()
+        .expect("test blocks serialize")
+        .zcash_deserialize_into()
+        .expect("serialized test blocks deserialize");
+
+    assert_eq!(rewritten.hash(), block.hash());
+    assert_eq!(rewritten.coinbase_height(), Some(claimed_height));
+
+    rewritten
+}
+
+/// Returns `block` with the transactions of `other`, so the body claims `other`'s height, and
+/// doesn't match the header.
+fn with_transactions_of(block: &Block, other: &Block) -> Arc<Block> {
+    Arc::new(Block {
+        header: block.header.clone(),
+        transactions: other.transactions.clone(),
+    })
+}
+
+/// Serves `block` from `ADVERTISER` for a downloader with its state tip at `tip_height`, and
+/// returns the download error.
+///
+/// Answers a parent lookup with "not found", so a parent never proves a rewrite, and checks that
+/// the block never reaches the verifier.
+async fn drop_error_for(tip_height: Height, block: Arc<Block>) -> BlockDownloadVerifyError {
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(tip_height);
+    let hash = block.hash();
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    downloads
+        .download_and_verify(hash)
+        .await
+        .expect("download is queued");
+
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block.clone(),
+            Some(advertiser),
+        ))]));
+
+    let mut next = downloads.next();
+    let error = tokio::select! {
+        result = &mut next => result,
+        request = state.expect_request(zs::ReadRequest::BlockHeader(
+            block.header.previous_block_hash.into(),
+        )) => {
+            request.respond(Err(zn::BoxError::from("block not found in any chain")));
+            next.await
+        }
+    }
+    .expect("downloads is non-empty")
+    .expect_err("the block is dropped before verification");
+
+    verifier.expect_no_requests().await;
+
+    error
+}
+
+/// Returns `true` if `error` is a body that doesn't match its header, reported for the block hash
+/// and the peer that served it.
+fn is_attributed_body_header_mismatch(
+    error: &BlockDownloadVerifyError,
+    block: &Block,
+    expected: fn(&zebra_consensus::BlockError) -> bool,
+) -> bool {
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    matches!(
+        error,
+        BlockDownloadVerifyError::BodyHeaderMismatch {
+            error,
+            hash,
+            advertiser_addr: Some(addr),
+        } if expected(error) && *hash == block.hash() && *addr == advertiser
+    )
+}
+
+fn is_bad_merkle_root(error: &zebra_consensus::BlockError) -> bool {
+    matches!(error, zebra_consensus::BlockError::BadMerkleRoot { .. })
+}
+
+fn is_coinbase_expiry_mismatch(error: &zebra_consensus::BlockError) -> bool {
+    matches!(
+        error,
+        zebra_consensus::BlockError::Transaction(
+            zebra_consensus::error::TransactionError::CoinbaseExpiryBlockHeight { .. }
+        )
+    )
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: a body that claims a height far ahead of the tip is
+/// only dropped without scoring if it matches its header.
+///
+/// A peer can serve a requested block hash with a body that claims any height. If the body
+/// doesn't match its header, the peer is scored and the hash re-requested. A genuine block that
+/// far ahead is still dropped anonymously: the peer that served it didn't choose its height
+/// (GHSA-qhr3-cvch-5fh2).
+#[tokio::test(start_paused = true)]
+async fn far_ahead_height_is_only_trusted_from_a_body_that_matches_its_header() {
+    let _init_guard = zebra_test::init();
+
+    let v4_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1046401_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+    let v5_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+    let v5_height = v5_block
+        .coinbase_height()
+        .expect("test vectors have a height");
+    let v5_parent_height = (v5_height - 1).expect("test vector is above genesis");
+    let far_ahead =
+        (v5_parent_height + (VERIFICATION_PIPELINE_DROP_LIMIT + 1)).expect("height is valid");
+
+    // Before V5, a body from another block changes the transaction IDs.
+    let forged = with_transactions_of(&block_1(), &v4_block);
+    let error = drop_error_for(Height(0), forged.clone()).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_bad_merkle_root),
+        "{error:?}"
+    );
+
+    // From V5 on, a rewritten height keeps the transaction IDs, but not the expiry height.
+    let forged = rewrite_v5_coinbase_height(&v5_block, far_ahead);
+    let error = drop_error_for(v5_parent_height, forged.clone()).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_coinbase_expiry_mismatch),
+        "{error:?}"
+    );
+
+    // Control: the genuine block is that far ahead of an earlier tip.
+    let error = drop_error_for(Height(0), v5_block.clone()).await;
+    assert!(
+        matches!(
+            error,
+            BlockDownloadVerifyError::AboveLookaheadHeightLimit { height, hash }
+                if height == v5_height && hash == v5_block.hash()
+        ),
+        "a genuine far-ahead block must be dropped anonymously, but was: {error:?}"
+    );
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: a body that claims a height behind the tip, for a
+/// block whose parent Zebra doesn't hold, is attributed if it doesn't match its header.
+///
+/// During checkpoint sync, Zebra only holds the parent of the first block in each checkpoint range,
+/// so the parent check from GHSA-g95h-hw6g-pvgv can't prove the rewrite for the others.
+#[tokio::test(start_paused = true)]
+async fn behind_tip_height_with_unknown_parent_is_only_trusted_from_a_body_that_matches_its_header()
+{
+    let _init_guard = zebra_test::init();
+
+    let v5_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+    let v5_height = v5_block
+        .coinbase_height()
+        .expect("test vectors have a height");
+    let v5_parent_height = (v5_height - 1).expect("test vector is above genesis");
+    let tip_far_ahead = Height(2 * MAX_BLOCK_REORG_HEIGHT);
+
+    // Before V5, a body from another block changes the transaction IDs.
+    let forged = with_transactions_of(&block_2(), &block_1());
+    let error = drop_error_for(tip_far_ahead, forged.clone()).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_bad_merkle_root),
+        "{error:?}"
+    );
+
+    // From V5 on, a rewritten height keeps the transaction IDs, but not the expiry height.
+    let forged = rewrite_v5_coinbase_height(&v5_block, Height(1));
+    let error = drop_error_for(v5_parent_height, forged.clone()).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_coinbase_expiry_mismatch),
+        "{error:?}"
+    );
+
+    // Control: a genuine old block is still dropped anonymously.
+    let error = drop_error_for(tip_far_ahead, block_1()).await;
+    assert!(
+        matches!(
+            error,
+            BlockDownloadVerifyError::BehindTipHeightLimit {
+                advertiser_addr: None,
+                ..
+            }
+        ),
+        "a genuine old block must be dropped anonymously, but was: {error:?}"
+    );
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: a body without a coinbase height, served for a block
+/// hash, is reported as not matching its header, so the hash is re-requested.
+///
+/// Every valid block has a coinbase height, and a peer can send a body with no transactions at all,
+/// which doesn't have a Merkle root.
+#[tokio::test(start_paused = true)]
+async fn body_without_height_is_reported_as_not_matching_its_header() {
+    let _init_guard = zebra_test::init();
+
+    let forged = Arc::new(Block {
+        header: block_1().header.clone(),
+        transactions: Vec::new(),
+    });
+    let error = drop_error_for(Height(0), forged.clone()).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, |error| matches!(
+            error,
+            zebra_consensus::BlockError::NoTransactions
+        )),
+        "{error:?}"
+    );
 }
 
 /// A block at the oldest height the syncer can legitimately be served is verified, not dropped.

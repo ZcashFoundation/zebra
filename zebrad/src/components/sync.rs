@@ -1360,6 +1360,21 @@ where
                 ));
             }
 
+            // The downloader checked the served body against the header of the requested block
+            // hash, so it is a forgery whatever block the peer has (GHSA-g9rc-89v4-hhvf).
+            Err(
+                ref verify_error @ BlockDownloadVerifyError::BodyHeaderMismatch {
+                    advertiser_addr: Some(advertiser_addr),
+                    ..
+                },
+            ) => {
+                let _ = self.misbehavior_sender.try_send(zn::MisbehaviorReport::new(
+                    advertiser_addr,
+                    100,
+                    verify_error.to_string(),
+                ));
+            }
+
             // The downloader only sets `advertiser_addr` here when Zebra already holds the parent
             // header and it proves the body's claimed height wrong. A peer can answer with a
             // canonical header and a rewritten coinbase height because the initial hash check does
@@ -1403,13 +1418,18 @@ where
         // - UTXO races (#11168): the block was never rejected, and the state parks its
         //   children until it arrives, so re-request it instead of waiting for a tip walk.
         // - `Invalid` with a mismatched authorizing data commitment: the block itself is fine, only
-        //   the served body was forged, so the hash is still valid and still wanted. Misbehavior
-        //   reports are flushed to the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so the first
-        //   re-request can briefly land on the same peer again; `MAX_BLOCK_REOBTAIN_RETRIES` bounds
+        //   the served body was forged, so the hash is still valid and still wanted. The ban for
+        //   the serving peer is sent to the address book right away, but the first re-request can
+        //   still reach the same peer before the ban does; `MAX_BLOCK_REOBTAIN_RETRIES` bounds
         //   that.
         // - `Invalid` because an ancestor had a mismatched authorizing data commitment: the state
         //   rejects queued descendants along with the forged ancestor, but their hashes are still
         //   wanted, and the peers that served them are not scored.
+        // - `Invalid` because a block verifier found that the body doesn't match its header, such
+        //   as a rewritten coinbase height (GHSA-g9rc-89v4-hhvf): like a mismatched authorizing
+        //   data commitment, only the served body was forged, and the serving peer is scored.
+        // - `BodyHeaderMismatch`: the downloader was going to drop the block for its height, but
+        //   found that the body doesn't match its header, so the same applies.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1420,6 +1440,7 @@ where
             }
             Err(BlockDownloadVerifyError::DownloadTimedOut { hash }) => Some(*hash),
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
+            Err(BlockDownloadVerifyError::BodyHeaderMismatch { hash, .. }) => Some(*hash),
             Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
                 if Self::is_utxo_lookup_timeout(e) =>
             {
@@ -1427,7 +1448,8 @@ where
             }
             Err(BlockDownloadVerifyError::Invalid { error, hash, .. })
                 if error.is_auth_commitment_mismatch()
-                    || error.is_descendant_of_auth_commitment_mismatch() =>
+                    || error.is_descendant_of_auth_commitment_mismatch()
+                    || error.is_body_header_mismatch() =>
             {
                 Some(*hash)
             }
@@ -1516,6 +1538,7 @@ where
             {
                 "auth_commitment_mismatch"
             }
+            Invalid { error, .. } if error.is_body_header_mismatch() => "body_header_mismatch",
             e if Self::is_utxo_lookup_timeout(e) => "utxo_lookup_timeout",
             e if Self::is_post_checkpoint_verify_timeout(e) => "final_checkpoint_verify_timeout",
             Invalid { .. } => "invalid",
@@ -1531,6 +1554,7 @@ where
             AboveLookaheadHeightLimit { .. } => "above_lookahead_limit",
             BehindTipHeightLimit { .. } => "behind_tip",
             InvalidHeight { .. } => "invalid_height",
+            BodyHeaderMismatch { .. } => "body_header_mismatch",
             DuplicateBlockQueuedForDownload { .. } => "duplicate_queued",
             CancelledDuringDownload { .. }
             | CancelledAwaitingVerifierReadiness { .. }
@@ -1732,6 +1756,14 @@ where
                 );
                 false
             }
+            BlockDownloadVerifyError::Invalid { error, .. } if error.is_body_header_mismatch() => {
+                debug!(
+                    error = ?e,
+                    "served block body did not match its header: the block hash is still valid \
+                     and is re-requested, and the serving peer is scored, continuing"
+                );
+                false
+            }
             // An `AwaitUtxo` timeout: the spent output is usually in a recent block whose
             // commit a restart would cancel, looping near the tip (#11168, #11132).
             e if Self::is_utxo_lookup_timeout(e) => {
@@ -1766,6 +1798,14 @@ where
                     error = ?e,
                     "block has no valid height, \
                      dropping the block and continuing sync"
+                );
+                false
+            }
+            BlockDownloadVerifyError::BodyHeaderMismatch { .. } => {
+                debug!(
+                    error = ?e,
+                    "served block body did not match its header: the block hash is still valid \
+                     and is re-requested, and the serving peer is scored, continuing"
                 );
                 false
             }

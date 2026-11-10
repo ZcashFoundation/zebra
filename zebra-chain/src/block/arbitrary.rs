@@ -457,6 +457,11 @@ impl Block {
                 for (tx_index_in_block, transaction) in block.transactions.drain(..).enumerate() {
                     let mut transaction = (*transaction).clone();
                     if transaction.is_coinbase() {
+                        if NetworkUpgrade::current(&current.network, *height) >= NetworkUpgrade::Nu5
+                        {
+                            transaction.set_expiry_height(*height);
+                        }
+
                         // Arbitrary output values must not mint more than scheduled issuance.
                         // Generated shielded bundles have zero value balance; leave fees unclaimed.
                         let mut remaining_subsidy =

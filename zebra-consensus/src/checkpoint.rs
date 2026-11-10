@@ -52,7 +52,7 @@ use crate::{
 mod types;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 
@@ -624,7 +624,8 @@ where
         }
     }
 
-    /// Check that the block height, proof of work, and Merkle root are valid.
+    /// Check that the proof of work, Merkle root, coinbase height commitment, and block height are
+    /// valid.
     ///
     /// Returns a [`CheckpointVerifiedBlock`] with precalculated block data.
     ///
@@ -636,6 +637,17 @@ where
     /// Checking the Merkle root ensures that the block hash binds the block
     /// contents. To prevent malleability (CVE-2012-2459), we also need to check
     /// whether the transaction hashes are unique.
+    ///
+    /// The block hash only commits to the header, so a peer can answer a request for a block hash
+    /// with the requested header and any body. The height is checked last, after the checks that
+    /// bind it to the header. Otherwise a body that claims an already verified height would get the
+    /// requested block dropped as a duplicate, and its range would never verify
+    /// (GHSA-g9rc-89v4-hhvf). A body could also claim an unverified height, and take queue slots
+    /// at heights that aren't its own.
+    ///
+    /// The coinbase height commitment is checked before the Merkle root, because
+    /// `merkle_root_validity()` uses the height to pick the network upgrade for its consensus
+    /// branch ID check.
     fn check_block(
         &self,
         block: Arc<Block>,
@@ -644,7 +656,6 @@ where
         let height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
-        self.check_height(height)?;
 
         if self.network.disable_pow() {
             crate::block::check::difficulty_threshold_is_valid(
@@ -658,6 +669,8 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
+        crate::block::check::coinbase_height_is_committed(&block, height)?;
+
         // don't do precalculation until the block passes basic difficulty checks
         let block = CheckpointVerifiedBlock::new(block, Some(hash));
 
@@ -666,6 +679,8 @@ where
             &block.block,
             &block.transaction_hashes,
         )?;
+
+        self.check_height(height)?;
 
         Ok(block)
     }
@@ -1163,6 +1178,17 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns `true` if the block's transactions don't match its header.
+    ///
+    /// The checkpoint verifier checks this before it uses the block's height.
+    /// See [`VerifyBlockError::is_body_header_mismatch()`].
+    pub fn is_body_header_mismatch(&self) -> bool {
+        match self {
+            VerifyCheckpointError::VerifyBlock(source) => source.is_body_header_mismatch(),
+            _ => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
@@ -1224,11 +1250,12 @@ where
             self.process_checkpoint_range();
         }
 
-        // Immediately reject all incoming blocks that arrive after we've finished.
-        if let FinalCheckpoint = self.previous_checkpoint_height() {
-            return async { Err(VerifyCheckpointError::Finished) }.boxed();
-        }
-
+        // # Security
+        //
+        // Once the final checkpoint is verified, `queue_block()` rejects every block as
+        // `Finished`. Don't reject them before it checks them: a peer can rewrite the coinbase
+        // height of the block it was asked for to route it here, and `Finished` would drop that
+        // block without showing that its body was forged (GHSA-g9rc-89v4-hhvf).
         let req_block = match self.queue_block(block) {
             Ok(req_block) => req_block,
             Err(e) => return async { Err(e) }.boxed(),

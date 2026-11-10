@@ -609,12 +609,22 @@ async fn limit_initial_peers(
 /// Senders use `try_send()`, so this task keeps receiving while a flush is waiting for the
 /// address book updater. Otherwise the channel could fill up during the flush, and new
 /// reports would be dropped.
+///
+/// # Security
+///
+/// A report that bans a peer is sent right away, not at the next flush. A peer that serves a
+/// forged body for a block that only it advertised would otherwise keep getting the requests for
+/// that block until its ban landed, and the requester gives up after a few retries
+/// (GHSA-g9rc-89v4-hhvf). Each peer address gets at most one early ban per `flush_interval`, and
+/// banned peers are disconnected, so peers still can't keep the address book busy.
 async fn batch_misbehavior_updates(
     mut misbehavior_rx: mpsc::Receiver<MisbehaviorReport>,
     address_book_updater: AddressBookChangeSender,
     flush_interval: Duration,
 ) {
     let mut misbehaviors: HashMap<PeerSocketAddr, MisbehaviorReport> = HashMap::new();
+    // The peers whose ban was sent early during this flush interval.
+    let mut early_bans: HashSet<PeerSocketAddr> = HashSet::new();
     let mut flush_timer = IntervalStream::new(tokio::time::interval(flush_interval));
 
     loop {
@@ -625,30 +635,68 @@ async fn batch_misbehavior_updates(
             },
 
             _ = flush_timer.next() => {
-                for (_, report) in std::mem::take(&mut misbehaviors) {
-                    let update = address_book_updater.send(MetaAddr::new_misbehavior(
-                        report.addr,
-                        report.score,
-                        report.reason,
-                    ));
-                    tokio::pin!(update);
+                early_bans.clear();
 
-                    // Keep receiving while the address book updater is busy.
-                    // Reports received here are sent in the next flush.
-                    loop {
-                        tokio::select! {
-                            _ = &mut update => break,
-                            Some(report) = misbehavior_rx.recv() => {
-                                batch_misbehavior_report(&mut misbehaviors, report);
-                            }
-                        }
-                    }
+                for (_, report) in std::mem::take(&mut misbehaviors) {
+                    send_misbehavior_update(
+                        &address_book_updater,
+                        report,
+                        &mut misbehaviors,
+                        &mut misbehavior_rx,
+                    )
+                    .await;
                 }
             },
         };
+
+        while let Some(addr) = misbehaviors
+            .iter()
+            .find(|(addr, report)| {
+                report.score >= constants::MAX_PEER_MISBEHAVIOR_SCORE && !early_bans.contains(*addr)
+            })
+            .map(|(addr, _)| *addr)
+        {
+            let report = misbehaviors
+                .remove(&addr)
+                .expect("address was just found in the batch");
+            early_bans.insert(addr);
+
+            send_misbehavior_update(
+                &address_book_updater,
+                report,
+                &mut misbehaviors,
+                &mut misbehavior_rx,
+            )
+            .await;
+        }
     }
 
     tracing::warn!("exiting misbehavior update batch task");
+}
+
+/// Sends `report` to the address book, and batches the reports received while the address book
+/// updater is busy, which are sent later.
+async fn send_misbehavior_update(
+    address_book_updater: &AddressBookChangeSender,
+    report: MisbehaviorReport,
+    misbehaviors: &mut HashMap<PeerSocketAddr, MisbehaviorReport>,
+    misbehavior_rx: &mut mpsc::Receiver<MisbehaviorReport>,
+) {
+    let update = address_book_updater.send(MetaAddr::new_misbehavior(
+        report.addr,
+        report.score,
+        report.reason,
+    ));
+    tokio::pin!(update);
+
+    loop {
+        tokio::select! {
+            _ = &mut update => break,
+            Some(report) = misbehavior_rx.recv() => {
+                batch_misbehavior_report(misbehaviors, report);
+            }
+        }
+    }
 }
 
 /// Adds `report` to the batched `misbehaviors`, summing the scores for the same peer.

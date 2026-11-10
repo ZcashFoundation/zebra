@@ -14,7 +14,8 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_consensus::{
-    error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+    error::TransactionError, BlockError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+    VerifyCheckpointError,
 };
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
@@ -1955,11 +1956,84 @@ async fn descendant_of_auth_commitment_mismatch_is_requeued_without_scoring() {
     );
 }
 
+/// A block body that doesn't match its header must score the serving peer and re-request the
+/// hash, without cancelling the sync round, whichever component found the mismatch.
+///
+/// A peer can serve a requested hash with the requested header and a rewritten coinbase height
+/// (GHSA-g9rc-89v4-hhvf). Before the block verifiers and the downloader checked that the header
+/// commits to that height, the claimed height could get the block dropped as a duplicate, as
+/// `Finished`, or as too far ahead or behind, unscored and not re-requested, so its checkpoint
+/// range never verified. The errors are wrapped as the router and the downloader wrap them.
+#[tokio::test]
+async fn body_header_mismatch_scores_peer_and_requeues_hash_without_restart() {
+    let advertiser: PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let hash = block::Hash::from([0x9C; 32]);
+
+    for source in [
+        // A rewritten coinbase height in a V5 or later coinbase.
+        BlockError::Transaction(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(Height(43)),
+            block_height: Height(42),
+            transaction_hash: [3; 32].into(),
+        }),
+        // Any rewritten transaction ID, including a coinbase height before V5.
+        BlockError::BadMerkleRoot {
+            actual: block::merkle::Root([1; 32]),
+            expected: block::merkle::Root([2; 32]),
+        },
+        BlockError::DuplicateTransaction,
+    ] {
+        let invalid = |error| BlockDownloadVerifyError::Invalid {
+            error,
+            height: Height(42),
+            hash,
+            advertiser_addr: Some(advertiser),
+        };
+        let errors = [
+            // The checkpoint verifier.
+            invalid(RouterError::from(VerifyCheckpointError::from(
+                source.clone(),
+            ))),
+            // The semantic verifier, for a claimed height above the final checkpoint.
+            invalid(RouterError::from(VerifyBlockError::from(source.clone()))),
+            // The downloader, for a claimed height that would get the block dropped.
+            BlockDownloadVerifyError::BodyHeaderMismatch {
+                error: source.clone(),
+                hash,
+                advertiser_addr: Some(advertiser),
+            },
+        ];
+
+        for error in errors {
+            let (mut chain_sync, mut misbehavior_rx) = new_chain_sync_with_misbehavior();
+            let description = format!("{error:?}");
+
+            chain_sync
+                .handle_block_response(Err(error))
+                .expect("a forged body is non-fatal and must not restart the syncer");
+
+            assert_eq!(
+                misbehavior_rx
+                    .try_recv()
+                    .ok()
+                    .map(|report| (report.addr, report.score)),
+                Some((advertiser, 100)),
+                "the peer that served the forged body must be scored at the ban threshold: \
+                 {description}"
+            );
+            assert!(
+                chain_sync.reobtain_hashes.contains(&hash),
+                "the hash is still wanted, so it must be re-requested: {description}"
+            );
+        }
+    }
+}
+
 /// The forged-body re-request is bounded, so a peer cannot turn it into an unbounded
 /// download loop.
 ///
-/// Misbehaviour reports only reach the address book on `MISBEHAVIOR_FLUSH_INTERVAL`, so
-/// the first re-request can briefly land on the same peer again. This bound is what makes
+/// The ban for the serving peer is sent to the address book right away, but the first
+/// re-request can still reach the same peer before the ban does. This bound is what makes
 /// that acceptable.
 #[tokio::test]
 async fn auth_commitment_mismatch_requeue_is_bounded() {

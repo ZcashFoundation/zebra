@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Security
+body: Check that a block's header commits to its coinbase height before the checkpoint and semantic verifiers use that height, so a body with a rewritten height is rejected as not matching its header, instead of being dropped as already verified or finished, or checked or queued at another height. Adds `body_matches_header()`, and `is_body_header_mismatch()` on `VerifyBlockError`, `VerifyCheckpointError` and `RouterError`.
+time: 2026-11-06T12:00:00.000000000+00:00

@@ -9,8 +9,13 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
+use zebra_chain::{
+    parameters::{Network::*, NetworkUpgrade},
+    serialization::{ZcashDeserialize, ZcashSerialize},
+};
 use zebra_test::mock_service::MockService;
+
+use crate::{error::TransactionError, router::RouterError};
 
 use super::*;
 
@@ -23,6 +28,177 @@ use super::*;
 /// This value is set to a large value, to avoid spurious failures due to
 /// high system load.
 const VERIFY_TIMEOUT_SECONDS: u64 = 10;
+
+/// Returns `block` with its coinbase height rewritten to `claimed_height`, and its coinbase expiry
+/// height rewritten to `expiry_height` if that is set. The header, and so the block hash, are
+/// unchanged.
+///
+/// Round-trips through serialization, so the result has no hashes cached from `block`.
+pub(crate) fn rewrite_coinbase_height(
+    block: &Block,
+    claimed_height: block::Height,
+    expiry_height: Option<block::Height>,
+) -> Result<Arc<Block>, Report> {
+    let mut coinbase = block.transactions[0].as_ref().clone();
+    let mut inputs = coinbase.inputs();
+    let transparent::Input::Coinbase { height, .. } = &mut inputs[0] else {
+        unreachable!("the first transaction of a test vector has a coinbase input");
+    };
+    *height = claimed_height;
+    coinbase = coinbase.with_transparent_inputs(inputs);
+    if let Some(expiry_height) = expiry_height {
+        coinbase.set_expiry_height(expiry_height);
+    }
+
+    let mut rewritten = block.clone();
+    rewritten.transactions[0] = Arc::new(coinbase);
+    let rewritten =
+        Arc::<Block>::zcash_deserialize(rewritten.zcash_serialize_to_vec()?.as_slice())?;
+
+    assert_eq!(rewritten.hash(), block.hash());
+    assert_eq!(rewritten.coinbase_height(), Some(claimed_height));
+
+    Ok(rewritten)
+}
+
+/// A peer can answer a request for a block hash with the requested header and a rewritten
+/// coinbase height. The checkpoint verifier must reject that body as not matching its header
+/// before it uses the height, whatever height the body claims:
+/// - an already verified height must not get the block dropped as a duplicate
+///   (GHSA-g9rc-89v4-hhvf),
+/// - after the final checkpoint, the block must not be dropped as `Finished`, which `call()` used
+///   to return before checking the block, and
+/// - an unverified height must not take a queue slot at a height that isn't the block's own.
+///
+/// Before V5 the coinbase height is part of the transaction ID, so the Merkle root catches the
+/// rewrite. From V5 on it isn't, so the coinbase expiry height must catch it, even for a claimed
+/// height before NU5.
+#[tokio::test]
+async fn rewritten_coinbase_heights_are_rejected_before_the_height_check() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let nu5_height = NetworkUpgrade::Nu5
+        .activation_height(&Mainnet)
+        .expect("NU5 is active on Mainnet");
+    let final_checkpoint_height = Mainnet.checkpoint_list().max_height();
+
+    for (bytes, coinbase_version) in [
+        (&zebra_test::vectors::BLOCK_MAINNET_1046401_BYTES[..], 4),
+        (&zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES[..], 5),
+    ] {
+        let block = Arc::<Block>::zcash_deserialize(bytes)?;
+        let block_height = block.coinbase_height().expect("test vectors have a height");
+        let coinbase = &block.transactions[0];
+        assert_eq!(coinbase.version(), coinbase_version);
+
+        let parent = (block_height.previous()?, block.header.previous_block_hash);
+        // Already verified, including a pre-NU5 height for the V5 block, then not yet verified.
+        let claimed_heights = [
+            block::Height(block_height.0 - 3),
+            parent.0,
+            block::Height(block_height.0 + 1),
+        ];
+        if coinbase_version == 5 {
+            assert!(claimed_heights[0] < nu5_height);
+        }
+
+        for initial_tip in [parent, (final_checkpoint_height, block::Hash([0; 32]))] {
+            let state_service = MockService::build().for_unit_tests();
+            let mut checkpoint_verifier =
+                CheckpointVerifier::new(&Mainnet, Some(initial_tip), state_service);
+
+            for claimed_height in claimed_heights {
+                // Rewriting only the height keeps the V5 transaction ID, but not the V4 one.
+                // Also rewriting the expiry height changes the V5 transaction ID too.
+                let mut forgeries = vec![(
+                    rewrite_coinbase_height(&block, claimed_height, None)?,
+                    coinbase_version == 4,
+                )];
+                if coinbase_version == 5 {
+                    forgeries.push((
+                        rewrite_coinbase_height(&block, claimed_height, Some(claimed_height))?,
+                        true,
+                    ));
+                }
+
+                for (forged, changes_transaction_id) in forgeries {
+                    let error = checkpoint_verifier
+                        .ready()
+                        .await?
+                        .call(forged)
+                        .await
+                        .expect_err("a rewritten coinbase height must be rejected");
+
+                    if changes_transaction_id {
+                        assert!(
+                            matches!(
+                                error,
+                                VerifyCheckpointError::VerifyBlock(VerifyBlockError::Block {
+                                    source: BlockError::BadMerkleRoot { .. },
+                                })
+                            ),
+                            "unexpected error for claimed height {claimed_height:?}: {error:?}"
+                        );
+                    } else {
+                        assert!(
+                            matches!(
+                                error,
+                                VerifyCheckpointError::VerifyBlock(VerifyBlockError::Block {
+                                    source: BlockError::Transaction(
+                                        TransactionError::CoinbaseExpiryBlockHeight {
+                                            expiry_height: Some(expiry_height),
+                                            block_height: rejected_height,
+                                            ..
+                                        }
+                                    ),
+                                }) if expiry_height == block_height && rejected_height == claimed_height
+                            ),
+                            "unexpected error for claimed height {claimed_height:?}: {error:?}"
+                        );
+                    }
+
+                    assert!(error.is_body_header_mismatch());
+                    assert!(!error.is_duplicate_request());
+                    let error = RouterError::from(error);
+                    assert!(error.is_body_header_mismatch());
+                    assert_eq!(error.misbehavior_score(), 100);
+                    assert!(checkpoint_verifier.queued.is_empty());
+                }
+            }
+
+            // Control: the genuine body is queued, or gets `Finished` after the final checkpoint.
+            if initial_tip.0 == final_checkpoint_height {
+                let error = checkpoint_verifier
+                    .ready()
+                    .await?
+                    .call(block.clone())
+                    .await
+                    .expect_err("checkpoint verification has finished");
+                assert!(matches!(error, VerifyCheckpointError::Finished));
+                assert!(!error.is_body_header_mismatch());
+            } else {
+                let _request = checkpoint_verifier.queue_block(block.clone())?;
+                assert_eq!(checkpoint_verifier.queued[&block_height].len(), 1);
+            }
+        }
+
+        // Control: a genuine block that is already verified is still a benign duplicate.
+        let state_service = MockService::build().for_unit_tests();
+        let checkpoint_verifier =
+            CheckpointVerifier::new(&Mainnet, Some((block_height, block.hash())), state_service);
+        let error = checkpoint_verifier
+            .check_block(block.clone())
+            .expect_err("the block is already verified");
+        assert!(matches!(
+            error,
+            VerifyCheckpointError::AlreadyVerified { .. }
+        ));
+        assert!(error.is_duplicate_request());
+        assert!(!error.is_body_header_mismatch());
+    }
+
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn single_item_checkpoint_list_test() -> Result<(), Report> {
