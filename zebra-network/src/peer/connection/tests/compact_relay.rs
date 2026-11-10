@@ -257,6 +257,45 @@ async fn banned_peer_receives_no_compact_recovery_or_fallback_request() {
 }
 
 #[tokio::test]
+async fn banned_peer_receives_no_compact_negotiation() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let source: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        let (mut connection, _client, _inbound, mut outbound, errors) =
+            new_test_connection::<PanicAssertion>();
+        let slots = Arc::new(tokio::sync::Semaphore::new(1));
+        let (_slots_tx, slots_rx) = tokio::sync::watch::channel(Some(slots.clone()));
+        connection.compact_receive_rx = slots_rx;
+        let mut bans = crate::BanList::default();
+        bans.ban(source.ip());
+        let (_bans_tx, bans_rx) = tokio::sync::watch::channel(bans);
+        connection.bans_receiver = bans_rx;
+        let info = Arc::make_mut(&mut connection.connection_info);
+        info.early_block_relay = true;
+        info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+        let (_peer, peer_rx) = mpsc::channel(1);
+        let task = tokio::spawn(connection.run(peer_rx));
+        assert_eq!(
+            outbound.next().await,
+            None,
+            "a banned peer must receive no compact block negotiation",
+        );
+        task.await.unwrap();
+        let error = errors
+            .try_get_error()
+            .expect("the revoked negotiation fails the connection");
+        assert_eq!(error.inner_debug(), "ConnectionDropped");
+        assert_eq!(
+            slots.available_permits(),
+            1,
+            "the failed negotiation releases its receive slot",
+        );
+    })
+    .await
+    .expect("revocation must not wait for the wire response timeout");
+}
+
+#[tokio::test]
 async fn compact_negotiation_never_overrides_early_relay_consent() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(2), async {
