@@ -442,7 +442,6 @@ impl NetworkUpgrade {
     /// not appear in the list.
     ///
     /// This is actually a bijective map.
-    #[cfg(test)]
     pub(crate) fn branch_id_list() -> std::collections::HashMap<NetworkUpgrade, ConsensusBranchId> {
         CONSENSUS_BRANCH_IDS.iter().cloned().collect()
     }
