@@ -1110,8 +1110,7 @@ where
     async fn set_compact_receive(&mut self, permit: Option<tokio::sync::OwnedSemaphorePermit>) {
         self.compact_receive_permit = permit;
         let result = self
-            .peer_tx
-            .send(Message::SendCompact {
+            .send_request(Message::SendCompact {
                 high_bandwidth: self.compact_receive_permit.is_some(),
                 version: 1,
             })
@@ -1120,6 +1119,22 @@ where
             self.compact_receive_permit = None;
             self.fail_with(error).await;
         }
+    }
+
+    /// Writes a locally started message after rechecking [`request_authorization`].
+    async fn send_request(&mut self, msg: Message) -> Result<(), PeerError> {
+        let Self {
+            peer_tx,
+            connection_info,
+            minimum_peer_version,
+            bans_receiver,
+            ..
+        } = self;
+        peer_tx
+            .send_authorized(msg, || {
+                request_authorization(connection_info, minimum_peer_version, bans_receiver)
+            })
+            .await
     }
 
     /// Acknowledge only completed local writes, after rechecking live authorization.
@@ -1242,18 +1257,12 @@ where
         // response sender until the send finishes. See `sending_request_tx` for details.
         self.sending_request_tx = Some(tx);
 
-        let address = self.connection_info.connected_addr.get_transient_addr();
-        let version = self.connection_info.remote.version;
-        let minimum = &mut self.minimum_peer_version;
-        let bans = &self.bans_receiver;
         let authorized = || {
-            if version < minimum.current()
-                || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
-            {
-                Err(PeerError::ConnectionDropped)
-            } else {
-                Ok(())
-            }
+            request_authorization(
+                &self.connection_info,
+                &mut self.minimum_peer_version,
+                &self.bans_receiver,
+            )
         };
 
         let new_handler = match (&self.state, request) {
@@ -2017,6 +2026,24 @@ fn overload_drop_connection_probability(now: Instant, prev: Option<Instant>) -> 
         MAX_OVERLOAD_DROP_PROBABILITY - (overload_fraction * probability_range);
 
     raw_drop_probability.clamp(MIN_OVERLOAD_DROP_PROBABILITY, MAX_OVERLOAD_DROP_PROBABILITY)
+}
+
+/// Rejects a request write to a peer that was banned or became obsolete after peer set readiness.
+///
+/// Takes the connection's fields separately, so a write can borrow `peer_tx` alongside them.
+fn request_authorization<C: ChainTip>(
+    connection_info: &ConnectionInfo,
+    minimum_peer_version: &mut MinimumPeerVersion<C>,
+    bans: &tokio::sync::watch::Receiver<crate::BanList>,
+) -> Result<(), PeerError> {
+    let address = connection_info.connected_addr.get_transient_addr();
+    if connection_info.remote.version < minimum_peer_version.current()
+        || address.is_some_and(|addr| bans.borrow().is_banned(addr.ip()))
+    {
+        Err(PeerError::ConnectionDropped)
+    } else {
+        Ok(())
+    }
 }
 
 impl<S, Tx, C> Connection<S, Tx, C>

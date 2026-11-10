@@ -169,6 +169,94 @@ async fn compact_recovery_and_collision_safe_fallback_preserve_source() {
 }
 
 #[tokio::test]
+async fn banned_peer_receives_no_compact_recovery_or_fallback_request() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let source: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+        for ban_before_recovery in [true, false] {
+            let (mut connection, mut client, mut inbound, mut outbound, _errors) =
+                new_test_connection::<PanicAssertion>();
+            let (bans, bans_rx) = tokio::sync::watch::channel(crate::BanList::default());
+            connection.bans_receiver = bans_rx;
+            let info = Arc::make_mut(&mut connection.connection_info);
+            info.early_block_relay = true;
+            info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+            let (mut peer, peer_rx) = mpsc::channel(1);
+            let task = tokio::spawn(connection.run(peer_rx));
+            assert!(matches!(
+                outbound.next().await,
+                Some(Message::SendCompact { .. })
+            ));
+            let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+            peer.send(Ok(Message::CompactBlock(compact.clone())))
+                .await
+                .unwrap();
+            inbound
+                .expect_request(Request::CheckCompactHeader(compact.clone()))
+                .await
+                .respond(Response::Nil);
+            inbound
+                .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+                .await
+                .respond(Response::Nil);
+            let (tx, rx) = oneshot::channel();
+            client
+                .send(ClientRequest {
+                    request: Request::BlockDownload {
+                        hash: block.hash(),
+                        advertiser: Some(source),
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: Some(source),
+                    span: tracing::Span::none(),
+                })
+                .await
+                .unwrap();
+            let candidates = inbound
+                .expect_request(Request::CompactBlockTransactions(compact))
+                .await;
+            let ban = || bans.send_modify(|bans| bans.ban(source.ip()));
+            if ban_before_recovery {
+                ban();
+                candidates.respond(Response::CompactBlockTransactions(Vec::new()));
+            } else {
+                candidates.respond(Response::CompactBlockTransactions(Vec::new()));
+                assert!(matches!(
+                    outbound.next().await,
+                    Some(Message::GetBlockTransactions(_))
+                ));
+                ban();
+                // Missing transactions fail reconstruction, which falls back to `getdata`.
+                peer.send(Ok(Message::BlockTransactions(BlockTransactions {
+                    block_hash: block.hash(),
+                    transactions: Vec::new(),
+                })))
+                .await
+                .unwrap();
+            }
+            assert_eq!(
+                outbound.next().await,
+                None,
+                "a banned peer must receive no compact recovery or fallback request",
+            );
+            let error = rx
+                .await
+                .unwrap()
+                .expect_err("the revoked download must fail");
+            assert_eq!(error.inner_debug(), "ConnectionDropped");
+            task.await.unwrap();
+        }
+    })
+    .await
+    .expect("revocation must not wait for the wire response timeout");
+}
+
+#[tokio::test]
 async fn compact_negotiation_never_overrides_early_relay_consent() {
     let _init_guard = zebra_test::init();
     tokio::time::timeout(Duration::from_secs(2), async {

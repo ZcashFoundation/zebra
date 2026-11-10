@@ -265,12 +265,13 @@ where
                             return Ok(self.compact_response(block));
                         }
                     } else {
-                        self.peer_tx
-                            .send(Message::GetBlockTransactions(BlockTransactionsRequest {
+                        self.send_request(Message::GetBlockTransactions(
+                            BlockTransactionsRequest {
                                 block_hash: hash,
                                 indexes,
-                            }))
-                            .await?;
+                            },
+                        ))
+                        .await?;
                         return Ok(Handler::CompactBlock {
                             reconstruction,
                             permit,
@@ -279,8 +280,7 @@ where
                 }
             }
         }
-        self.peer_tx
-            .send(Message::GetData(vec![hash.into()]))
+        self.send_request(Message::GetData(vec![hash.into()]))
             .await?;
         Ok(Handler::BlocksByHash {
             pending_hashes: HashSet::from([hash]),
@@ -350,7 +350,7 @@ where
 
     pub(super) async fn fallback_compact(&mut self, hash: block::Hash) {
         self.clear_compact_recovery();
-        if let Err(error) = self.peer_tx.send(Message::GetData(vec![hash.into()])).await {
+        if let Err(error) = self.send_request(Message::GetData(vec![hash.into()])).await {
             self.fail_with(error).await;
             return;
         }

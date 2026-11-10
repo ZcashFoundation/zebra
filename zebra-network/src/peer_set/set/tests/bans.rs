@@ -7,6 +7,7 @@ use futures::{channel::mpsc, stream, FutureExt, Sink, SinkExt, StreamExt};
 use tokio::{sync::watch, time::timeout};
 use tower::{discover::Change, Service, ServiceExt};
 use zebra_chain::{
+    block,
     parameters::{Network, NetworkUpgrade},
     serialization::SerializationError,
 };
@@ -24,7 +25,7 @@ use super::PeerSetBuilder;
 /// Exercise the real peer set, client, connection loop, and bounded outbound sink.
 ///
 /// Revokes the peer with a ban, or with an upgrade that raises the minimum peer version above it.
-async fn reject_revoked_request(upgrade: bool, delayed_sink: bool) {
+async fn reject_revoked_request(request: Request, upgrade: bool, delayed_sink: bool) {
     let _init_guard = zebra_test::init();
     timeout(Duration::from_secs(1), async {
         let network = Network::Mainnet;
@@ -96,7 +97,7 @@ async fn reject_revoked_request(upgrade: bool, delayed_sink: bool) {
             // Revoke after peer-set readiness, before dispatch, without another readiness poll.
             revoke();
         }
-        let response = peers.call(Request::Peers);
+        let response = peers.call(request);
         if delayed_sink {
             // Dispatch while eligible, then revoke while the connection waits for sink readiness.
             assert!(connection.as_mut().now_or_never().is_none());
@@ -126,15 +127,48 @@ async fn reject_revoked_request(upgrade: bool, delayed_sink: bool) {
 
 #[tokio::test(start_paused = true)]
 async fn ban_after_peer_set_readiness_rejects_request_before_write() {
-    reject_revoked_request(false, false).await;
+    reject_revoked_request(Request::Peers, false, false).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn ban_during_sink_readiness_rejects_request_before_write() {
-    reject_revoked_request(false, true).await;
+    reject_revoked_request(Request::Peers, false, true).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn upgrade_during_sink_readiness_rejects_obsolete_request_before_write() {
-    reject_revoked_request(true, true).await;
+    reject_revoked_request(Request::Peers, true, true).await;
+}
+
+/// Both requests write their `getdata` through the connection's compact relay download path.
+fn block_downloads() -> [Request; 2] {
+    let hash = block::Hash([1; 32]);
+    [
+        Request::BlockDownload {
+            hash,
+            advertiser: None,
+        },
+        Request::BlocksByHash([hash].into()),
+    ]
+}
+
+#[tokio::test(start_paused = true)]
+async fn ban_after_peer_set_readiness_rejects_block_download_before_write() {
+    for request in block_downloads() {
+        reject_revoked_request(request, false, false).await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn ban_during_sink_readiness_rejects_block_download_before_write() {
+    for request in block_downloads() {
+        reject_revoked_request(request, false, true).await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn upgrade_during_sink_readiness_rejects_obsolete_block_download_before_write() {
+    for request in block_downloads() {
+        reject_revoked_request(request, true, true).await;
+    }
 }
