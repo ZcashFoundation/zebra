@@ -293,6 +293,7 @@ fn read_only_secondary_removes_its_directory_on_drop() {
 
     use crate::{
         constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        service::finalized_state::STATE_COLUMN_FAMILIES_IN_CODE,
         Config,
     };
 
@@ -312,7 +313,9 @@ fn read_only_secondary_removes_its_directory_on_drop() {
             STATE_DATABASE_KIND,
             &version,
             &network,
-            [],
+            STATE_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
             read_only,
         )
         .expect("database opens in a fresh cache directory")
