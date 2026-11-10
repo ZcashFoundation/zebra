@@ -3,7 +3,8 @@
 # This script finds a cached Google Cloud Compute image based on specific criteria.
 #
 # If there are multiple disks:
-# - try to find a cached disk image from the current branch (or PR),
+# - try to find a cached disk image from the current cache scope: the branch (or PR)
+#   in ZcashFoundation/zebra, or the repository in a copy of it,
 # - if no image was found, try to find an image from the `main` branch,
 # - if no image was found, try to find an image from any branch.
 #
@@ -52,8 +53,9 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
-    # Try to find one from the current branch (or PR).
-    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${CACHE_SCOPE}" "branch")
+    # Try to find one from the current cache scope.
+    # Images are named `<prefix>-<cache scope>-<short sha>-v<state version>-...`.
+    CACHED_DISK_NAME=$(find_cached_disk_image "${CACHE_SCOPE}-[0-9a-f]+" "cache scope")
     # If no image was found, try to find an image based on the `main` branch.
     CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch")}
     # If we still have no image, try to find one from any branch.
