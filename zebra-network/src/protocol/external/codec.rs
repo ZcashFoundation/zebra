@@ -333,7 +333,7 @@ impl Codec {
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
             Message::Block(block) => block.zcash_serialize(&mut writer)?,
-            Message::RawBlock(block) => writer.write_all(block.as_ref())?,
+            Message::RawBlock(block) => writer.write_all((**block).as_ref())?,
             Message::SendCompact {
                 high_bandwidth,
                 version,
