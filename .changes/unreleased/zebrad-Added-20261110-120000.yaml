@@ -1,4 +1,4 @@
 project: zebrad
 kind: Added
-body: 'Static user/password RPC authentication as an alternative to the cookie. Set `rpc.rpc_user` and either `rpc.rpc_password` or `rpc.rpc_password_file` to require fixed HTTP Basic credentials that survive restarts and need no shared cookie file. They take precedence over `rpc.enable_cookie_auth`, Zebra refuses to start on a partial configuration, and passwords may contain colons ([#10404](https://github.com/ZcashFoundation/zebra/issues/10404)).'
+body: 'Static user/password RPC authentication: set `rpc.rpc_user` and `rpc.rpc_password` or `rpc.rpc_password_file` to require fixed HTTP Basic credentials instead of the cookie ([#10404](https://github.com/ZcashFoundation/zebra/issues/10404)).'
 time: 2026-11-10T12:00:00.000000+00:00
