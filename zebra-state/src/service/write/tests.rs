@@ -276,13 +276,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         }
         .into(),
     );
-    let mut finalized = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .unwrap();
+    let mut finalized = FinalizedState::new(&Config::ephemeral(), &network).unwrap();
     let genesis = block::genesis::regtest_genesis_block();
     finalized
         .commit_finalized(genesis.clone().into(), None)
@@ -451,7 +445,8 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
                     [block.hash().into(), block.coinbase_height().unwrap().into()]
                         .into_iter()
                         .all(|key| {
-                            read::block(snapshot.best_chain(), &self.db, key) == Some(block.clone())
+                            read::block(snapshot.best_chain(), &self.db, key)
+                                == Ok(Some(block.clone()))
                         })
                 })
         }
@@ -483,7 +478,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
                 observation.readable()
                     && observation.wakes.load(Ordering::SeqCst) == 2
                     && observation.db.block(observation.root.hash().into())
-                        == Some(observation.root.clone())
+                        == Ok(Some(observation.root.clone()))
                     && observation
                         .snapshot
                         .borrow()
@@ -632,7 +627,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         for chain in [snapshot.borrow().best_chain(), retained.best_chain()] {
             assert_eq!(
                 read::block(chain, &db, observation.root.hash().into()),
-                Some(observation.root.clone()),
+                Ok(Some(observation.root.clone())),
             );
         }
         assert!(retained.any_chain_contains(&observation.root.hash()));
