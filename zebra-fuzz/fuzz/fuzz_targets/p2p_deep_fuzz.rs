@@ -243,6 +243,32 @@ fuzz_target!(|data: &[u8]| {
                         deep_fuzz_transaction(tx);
                     }
                 }
+                Message::SendCompact {
+                    high_bandwidth,
+                    version,
+                } => {
+                    let _hb = *high_bandwidth;
+                    let _v = *version;
+                }
+                Message::CompactBlock(compact) => {
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| compact.header.hash()));
+                    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| compact.validate()));
+                    let _count = compact.short_ids.len();
+                    for (_position, tx) in &compact.prefilled {
+                        deep_fuzz_transaction(tx);
+                    }
+                }
+                Message::GetBlockTransactions(request) => {
+                    let _hash = request.block_hash;
+                    let _count = request.indexes.len();
+                    for _index in &request.indexes {}
+                }
+                Message::BlockTransactions(response) => {
+                    let _hash = response.block_hash;
+                    for tx in &response.transactions {
+                        deep_fuzz_transaction(tx);
+                    }
+                }
                 Message::Tx(unmined_tx) => {
                     // Deep fuzz the transaction
                     deep_fuzz_transaction(&unmined_tx.transaction);
@@ -395,6 +421,10 @@ fuzz_target!(|data: &[u8]| {
                 | Message::GetData(_)
                 | Message::NotFound(_)
                 | Message::Block(_)
+                | Message::SendCompact { .. }
+                | Message::CompactBlock(_)
+                | Message::GetBlockTransactions(_)
+                | Message::BlockTransactions(_)
                 | Message::Headers(_)
                 | Message::GetHeaders { .. }
                 | Message::Tx(_)
