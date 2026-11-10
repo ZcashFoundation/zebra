@@ -1744,3 +1744,56 @@ fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
 
     Ok(())
 }
+
+/// A backup file that can't be parsed is deleted at restore, so the backup task writes the
+/// block again and the next restore gets past it.
+#[test]
+fn restore_deletes_unreadable_backup_file() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child();
+    let block3 = block2.make_fake_child();
+    let block4 = block3.make_fake_child();
+    let blocks = [&block1, &block2, &block3, &block4];
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in &blocks[1..] {
+        state.commit_block((*block).clone().prepare(), &finalized_state)?;
+    }
+
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+    let backup_file = |block: &Block| backup_dir.path().join(block.hash().to_string());
+    std::fs::write(backup_file(&block3), [])?;
+    let stale_temp_file = backup_dir.path().join(format!(".tmp.{}", block4.hash()));
+    std::fs::write(&stale_temp_file, [])?;
+
+    let restore = || {
+        super::super::backup::restore_backup(
+            NonFinalizedState::new(&network),
+            backup_dir.path(),
+            &finalized_state.db,
+        )
+    };
+
+    let mut state = restore();
+    assert!(state.any_chain_contains(&block2.hash()));
+    assert!(!state.any_chain_contains(&block3.hash()));
+    assert!(!backup_file(&block3).exists());
+    assert!(!stale_temp_file.exists());
+    assert!(backup_file(&block4).exists());
+
+    for block in &blocks[2..] {
+        state.commit_block((*block).clone().prepare(), &finalized_state)?;
+    }
+    state.write_to_backup(backup_dir.path());
+
+    let state = restore();
+    for block in blocks {
+        assert!(state.any_chain_contains(&block.hash()));
+    }
+
+    Ok(())
+}
