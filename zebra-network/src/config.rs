@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     fmt,
     io::{self, ErrorKind},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -744,7 +744,15 @@ where
         where
             A: de::SeqAccess<'de>,
         {
-            IndexSet::deserialize(de::value::SeqAccessDeserializer::new(peers))
+            let peers: Vec<String> =
+                Vec::deserialize(de::value::SeqAccessDeserializer::new(peers))?;
+
+            Ok(peers
+                .iter()
+                .map(|peer| peer.trim())
+                .filter(|peer| !peer.is_empty())
+                .map(String::from)
+                .collect())
         }
     }
 
@@ -863,18 +871,6 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        for (field_name, peers) in [
-            ("initial_mainnet_peers", &initial_mainnet_peers),
-            ("initial_testnet_peers", &initial_testnet_peers),
-        ] {
-            if let Some(peer) = peers.iter().find(|peer| !is_valid_peer_addr(peer)) {
-                return Err(de::Error::custom(format!(
-                    "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
-                     IPv6 address (with brackets), or DNS name, followed by a port"
-                )));
-            }
-        }
-
         let network = match (dnetwork, testnet_parameters) {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
@@ -902,6 +898,19 @@ impl<'de> Deserialize<'de> for Config {
                 Network::new_regtest(Default::default())
             }
         };
+
+        // Only the configured network's list is resolved, so an unused list
+        // with stale entries still loads, as it did before this check existed.
+        let (field_name, peers) = match &network {
+            Network::Mainnet => ("initial_mainnet_peers", &initial_mainnet_peers),
+            Network::Testnet(_) => ("initial_testnet_peers", &initial_testnet_peers),
+        };
+        if let Some(peer) = peers.iter().find(|peer| !is_valid_peer_addr(peer)) {
+            return Err(de::Error::custom(format!(
+                "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
+                 IPv6 address (with brackets), or DNS name, followed by a port"
+            )));
+        }
 
         let listen_addr = match listen_addr.parse::<SocketAddr>().or_else(|_| format!("{listen_addr}:{}", network.default_port()).parse()) {
             Ok(socket) => Ok(socket),
@@ -962,10 +971,18 @@ impl<'de> Deserialize<'de> for Config {
 ///
 /// This doesn't resolve DNS names, so a well-formed name can still fail to resolve.
 fn is_valid_peer_addr(peer: &str) -> bool {
+    // The resolver splits at the last `:`, so it accepts an unbracketed IPv6
+    // address followed by a port, which older configs use. A portless IPv6
+    // address leaves a host that isn't a complete address, so it's rejected.
     peer.parse::<SocketAddr>().is_ok()
-        || peer
-            .rsplit_once(':')
-            .is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok())
+        || peer.rsplit_once(':').is_some_and(|(host, port)| {
+            let is_dns_name = !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'));
+
+            (is_dns_name || host.parse::<Ipv6Addr>().is_ok()) && port.parse::<u16>().is_ok()
+        })
 }
 
 /// Returns true for a public DNS seed hostname, regardless of case, trailing dot, or port.
