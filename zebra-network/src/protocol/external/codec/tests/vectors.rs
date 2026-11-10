@@ -693,3 +693,43 @@ fn message_with_wrong_network_magic_returns_error() {
         .decode(&mut bytes)
         .expect_err("decoding message with mismatching network magic should return an error");
 }
+
+/// A raw block message must encode exactly like the parsed block's message, and decode as a
+/// parsed block message.
+#[test]
+fn raw_block_message_encodes_like_block_message() {
+    let _init_guard = zebra_test::init();
+
+    for (height, block_bytes) in zebra_test::vectors::MAINNET_BLOCKS.iter() {
+        let block: Arc<Block> = (*block_bytes)
+            .zcash_deserialize_into()
+            .expect("test vector blocks are valid");
+        let raw = Arc::new(block::SerializedBlock::from(block_bytes.to_vec()));
+
+        let mut codec = Codec::builder().finish();
+        codec.reconfigure_full_body_len();
+
+        let mut expected = BytesMut::new();
+        codec
+            .encode(Message::Block(block.clone()), &mut expected)
+            .expect("block encodes");
+        let mut actual = BytesMut::new();
+        codec
+            .encode(Message::RawBlock(raw), &mut actual)
+            .expect("raw block encodes");
+        assert_eq!(
+            actual, expected,
+            "raw and parsed block messages must match at height {height}"
+        );
+
+        let decoded = codec
+            .decode(&mut actual)
+            .expect("raw block message decodes")
+            .expect("raw block message is complete");
+        assert_eq!(
+            decoded,
+            Message::Block(block),
+            "raw block messages decode as parsed block messages"
+        );
+    }
+}

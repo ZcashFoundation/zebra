@@ -25,7 +25,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state::{self as zs};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SerializedBlock},
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
@@ -511,6 +511,43 @@ impl Service<zn::Request> for Inbound {
                     // The network layer handles splitting this response into multiple `block`
                     // messages, and a `notfound` message if needed.
                     Ok(zn::Response::Blocks(blocks))
+                }.boxed()
+            }
+            zn::Request::RawBlocksByHash(hashes) => {
+                // The same limits as `BlocksByHash`, but each block is read and sent as its
+                // stored bytes, so serving it doesn't deserialize, size and reserialize it.
+                if hashes.is_empty() {
+                    return async { Ok(zn::Response::Nil) }.boxed();
+                }
+
+                let state = state.clone();
+
+                async move {
+                    let mut blocks: Vec<InventoryResponse<Arc<SerializedBlock>, block::Hash>> = Vec::new();
+                    let mut total_size = 0;
+
+                    for &hash in hashes.iter().take(GETDATA_MAX_BLOCK_COUNT) {
+                        // As above, check the limit after including at least one block.
+                        if total_size >= GETDATA_SENT_BYTES_LIMIT {
+                            break;
+                        }
+
+                        let response = state.clone().ready().await?.call(zs::Request::RawBlock(hash.into())).await?;
+
+                        match response {
+                            zs::Response::RawBlock(Some(block)) => {
+                                total_size += block.as_ref().len();
+
+                                // Share the bytes, so the connection's copy of the response
+                                // doesn't duplicate them.
+                                blocks.push(Available(Arc::new(block)))
+                            },
+                            zs::Response::RawBlock(None) => blocks.push(Missing(hash)),
+                            _ => unreachable!("wrong response from state"),
+                        }
+                    }
+
+                    Ok(zn::Response::RawBlocks(blocks))
                 }.boxed()
             }
             zn::Request::TransactionsById(req_tx_ids) => {

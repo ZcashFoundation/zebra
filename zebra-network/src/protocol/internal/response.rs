@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, SerializedBlock},
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -74,6 +74,16 @@ pub enum Response {
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
     Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
+    /// A list of found serialized blocks, and missing block hashes.
+    ///
+    /// The response to [`Request::RawBlocksByHash`](super::Request::RawBlocksByHash). Each
+    /// available block is sent to the peer as its stored bytes.
+    ///
+    /// The bytes are shared, like the blocks in [`Response::Blocks`], so cloning a response
+    /// doesn't copy them.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    RawBlocks(Vec<InventoryResponse<Arc<SerializedBlock>, block::Hash>>),
+
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
@@ -118,6 +128,11 @@ impl fmt::Display for Response {
                 blocks.iter().filter(|r| r.is_available()).count(),
                 blocks.iter().filter(|r| r.is_missing()).count()
             ),
+            Response::RawBlocks(blocks) => format!(
+                "RawBlocks {{ blocks: {}, missing: {} }}",
+                blocks.iter().filter(|r| r.is_available()).count(),
+                blocks.iter().filter(|r| r.is_missing()).count()
+            ),
 
             Response::Transactions(transactions) => format!(
                 "Transactions {{ transactions: {}, missing: {} }}",
@@ -143,6 +158,7 @@ impl Response {
             Response::TransactionIds(_) => "TransactionIds",
 
             Response::Blocks(_) => "Blocks",
+            Response::RawBlocks(_) => "RawBlocks",
             Response::Transactions(_) => "Transactions",
         }
     }
