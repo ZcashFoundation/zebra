@@ -163,14 +163,12 @@ INFO zebrad::components::sync::progress: finished initial sync to chain tip, usi
 
 ## Reusing proposal validation
 
-Zebra validates every transaction-bearing template as a block proposal. When the chain tip changes,
-it serves a coinbase-only template immediately, then serves the first template with mempool
-transactions as soon as it is built and validates it in the background, so miners are not left on
-coinbase-only work. A later rebuild for the same tip, after mempool changes, replaces the served
-template only once it has been validated too. So a solved block that changes only the nonce and
-Equihash solution of a served template reuses the cached verdict in `submitblock`, which then
-checks proof of work and commits the block without repeating transaction and contextual
-validation, as long as the check finished before the solve. The state applies such a block by
+Zebra serves every template as soon as it is built and validates transaction-bearing work as a block
+proposal in the background. When the chain tip changes, it serves coinbase-only work first rather
+than waiting for mempool selection. A failed check restores the last valid template for that parent.
+A solved block that changes only the nonce and Equihash solution reuses the cached verdict in
+`submitblock`, as long as the check finished before the solve. It then checks proof of work and
+commits without repeating transaction and contextual validation. The state applies such a block by
 rebinding the chain it prepared while validating the template, so the commit does not depend on
 the number of transactions in the block.
 If you change the coinbase, transactions, timestamp or another header

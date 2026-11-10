@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: 'Mining templates with mempool transactions are validated as block proposals in the background. The first such template for a chain tip is served as soon as it is built; a later rebuild for the same tip replaces it only after it has been validated too, so miners keep work whose solved block `submitblock` commits after checking only its proof of work. Block proposal checks requested over the RPC are limited to two at a time and 30 seconds each.'
-time: 2026-11-03T00:00:00Z

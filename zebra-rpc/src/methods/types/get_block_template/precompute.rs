@@ -6,14 +6,11 @@
 //! component. So [`run()`] keeps current work ready in a [`TemplateCache`], and the RPC checks
 //! that its parent is still the tip or the current proof-of-work checked candidate.
 //!
-//! Every transaction-bearing template is validated as a block proposal, so a solved block that
-//! changes only the nonce and Equihash solution reuses the cached verdict in `submitblock`,
-//! instead of waiting for transaction and contextual verification. The first such template for a
-//! tip is served while its check runs, rather than leaving miners on coinbase-only work; a later
-//! build for the same tip waits in the cache's second slot until [`validate_templates()`] accepts
-//! it, so the work miners already hold stays served until its replacement is as ready. A build
-//! whose check finishes after newer work was served is not served, so long polls never move back,
-//! but it is kept as the work to serve again if that newer work fails its own check.
+//! Every transaction-bearing template is served immediately and validated as a block proposal in
+//! the background, so a solved block that changes only the nonce and Equihash solution can reuse
+//! the cached verdict in `submitblock`. A build whose check finishes after newer work was served
+//! does not replace it, so long polls never move back, but it is kept as the work to serve again
+//! if that newer work fails its own check.
 //!
 //! Mempool changes trigger a throttled rebuild; the periodic refresh remains a backstop. The RPC
 //! only serves the current tip or a proof-of-work checked parent under verification. Early work
@@ -105,7 +102,7 @@ const MEMPOOL_SHORT_PAUSE: Duration = Duration::from_millis(10);
 
 /// Bounds a request's mempool freshness check and wait for the sole updater.
 ///
-/// Slow refreshes leave cached work usable without starting a competing foreground build.
+/// Slow builds leave served work usable without starting a competing foreground build.
 pub(crate) const DEMAND_REFRESH_TIMEOUT: Duration = Duration::from_millis(5);
 
 /// Additions in the pending window that extend the short pause to the burst deadline.
@@ -121,15 +118,14 @@ const BUILD_STARTED: u8 = 2;
 /// A block template for the current mining parent, shared between [`run()`] and the
 /// `getblocktemplate` RPC.
 ///
-/// Served work is coinbase-only, a build that passed proposal validation, or the first
-/// transaction-bearing build for a parent while its check runs, so a solved block that changes
-/// only the nonce and Equihash solution almost always reuses a verdict in `submitblock`. If that
-/// first build fails its check, the last valid work for its parent is served again.
+/// Every build is served immediately, with transaction-bearing work checked in the background.
+/// A solved block that changes only the nonce and Equihash solution can reuse a completed verdict
+/// in `submitblock`. If a build fails its check, the last valid work for its parent is served again.
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
 pub(crate) struct TemplateCache {
-    /// The work `getblocktemplate` serves, and the work waiting to replace it.
+    /// The work `getblocktemplate` serves, its pending check, and its last valid fallback.
     served: Arc<watch::Sender<Option<TemplateState>>>,
     /// Wakes [`validate_templates()`] when work is queued for validation, without waking long
     /// polls, which only wait for served work.
@@ -165,13 +161,12 @@ struct TemplateState {
     template: Option<Arc<CachedTemplate>>,
     /// Served new-parent work built without reading the mempool, not an empty full snapshot.
     first_work: bool,
-    /// The newest transaction-bearing work for the served template's parent, queued for
-    /// [`validate_templates()`]: the served template itself when it was served ahead of its
-    /// check, or a later build that replaces it once accepted. The worker remembers the last
-    /// build it checked, so the slot keeps work after its check.
+    /// The newest transaction-bearing work queued for [`validate_templates()`]: the served build,
+    /// or its clock-narrowed response. The worker remembers the last work it checked, so the slot
+    /// keeps work after its check.
     ///
-    /// Both slots change under the same lock, so a validated build can be served only if the
-    /// work it was checked against is still served.
+    /// Both slots change under the same lock, so an accepted clock-narrowed response can replace
+    /// only the work it was checked against.
     next: Option<Arc<CachedTemplate>>,
     /// The newest work for the served template's parent that is known to be valid: coinbase-only
     /// work, or a build that passed its check. Served again if the served template fails its
@@ -313,17 +308,6 @@ impl TemplateCache {
             .is_some_and(|template| template.previous_block_hash == tip_hash)
     }
 
-    /// Returns `true` if the served template extends `tip_hash` and has transactions.
-    fn holds_full_tip(&self, tip_hash: block::Hash) -> bool {
-        self.served
-            .borrow()
-            .as_ref()
-            .and_then(|state| state.template.as_ref())
-            .is_some_and(|template| {
-                template.previous_block_hash == tip_hash && !template.transactions.is_empty()
-            })
-    }
-
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
         self.served.borrow().is_none()
@@ -376,47 +360,15 @@ impl TemplateCache {
         TemplateChanges(self.served.subscribe())
     }
 
-    /// Serves new work from [`run()`], or keeps it as the next work for the served template.
+    /// Records a successful check, preserving newer served work and its fallback.
     ///
-    /// A transaction-bearing build for the parent of served transaction-bearing work waits in the
-    /// second slot until [`validate_templates()`] accepts it, so a solve of the served work keeps
-    /// reusing its verdict until its replacement can too. Other work is served at once:
-    /// coinbase-only work needs no validation, and the first transaction-bearing build for a
-    /// parent is better than coinbase-only work while its check runs.
-    ///
-    /// Returns the build's exact generation, including for staged work.
-    fn update(&self, template: BlockTemplateResponse) -> u64 {
-        if !template.transactions.is_empty() && self.holds_full_tip(template.previous_block_hash) {
-            self.stage(template)
-        } else {
-            self.publish(template)
-        }
-    }
-
-    /// Queues a transaction-bearing build as the next work for the served template, replacing
-    /// any older build that is still waiting.
-    fn stage(&self, template: BlockTemplateResponse) -> u64 {
-        debug_assert!(
-            !template.transactions.is_empty(),
-            "coinbase-only work needs no validation and is published directly"
-        );
-        let template = self.cached_template(template);
-        let generation = template.generation;
-        self.served.send_if_modified(|state| {
-            state.get_or_insert_with(|| TemplateState::new(None)).next = Some(template);
-            false
-        });
-        self.queued.notify_one();
-        generation
-    }
-
-    /// Serves `validated` if the work it was checked against, `base`, is still served.
-    ///
-    /// Work served since then is newer, so the validated build must not replace it: long polls
-    /// would move back to older work. It is kept as the work to serve again if that newer work
-    /// fails its check. Returns whether `validated` is served, including when it was served ahead
-    /// of its validation.
-    fn promote(&self, validated: &Arc<CachedTemplate>, base: Option<&Arc<CachedTemplate>>) -> bool {
+    /// Builds are already served. Only a clock-narrowed response can replace `base` after its check.
+    /// Returns whether `validated` is served.
+    fn accept_validated(
+        &self,
+        validated: &Arc<CachedTemplate>,
+        base: Option<&Arc<CachedTemplate>>,
+    ) -> bool {
         let mut served = false;
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
@@ -468,9 +420,8 @@ impl TemplateCache {
 
     /// Serves the last valid work again if `failed`, which failed its check, is served.
     ///
-    /// Only the first transaction-bearing build for a parent is served ahead of its check, so the
-    /// last valid work is usually that parent's coinbase-only work. Returns whether the served
-    /// work changed.
+    /// The fallback can be coinbase-only work or an earlier build whose check passed.
+    /// Returns whether the served work changed.
     fn reject(&self, failed: &Arc<CachedTemplate>) -> bool {
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
@@ -509,9 +460,8 @@ impl TemplateCache {
     /// Publishes `template` without cancelling still-valid work after a clock-cap expansion.
     ///
     /// Transaction-bearing work is also queued for the updater's validation worker, so a solve of
-    /// it can reuse the verdict. Publishing drops any older build that was waiting to replace the
-    /// served work. Without a running updater nothing reads the queue: the RPC validates the
-    /// work it builds itself.
+    /// it can reuse the verdict. Publishing replaces any queued check with the newest work.
+    /// Without a running updater nothing reads the queue: the RPC validates the work it builds.
     ///
     /// Returns the published build's exact internal generation.
     pub(crate) fn publish(&self, template: BlockTemplateResponse) -> u64 {
@@ -606,27 +556,27 @@ impl TemplateCache {
         let template = Arc::new(template);
 
         // The header time is part of a proposal's identity, so a narrowed time has no cached
-        // verdict yet. Queue the narrowed work for validation once, so its validation replaces
-        // the served work, unless the served work changed or a newer build is already waiting.
+        // verdict yet. Queue the narrowed response once; after its check it can replace only
+        // its served source, never a newer build.
         if !template.transactions.is_empty() {
-            let mut restage = false;
+            let mut requeue = false;
             self.served.send_if_modified(|state| {
                 let Some(state) = state.as_mut() else {
                     return false;
                 };
-                restage = state
+                requeue = state
                     .template
                     .as_ref()
                     .is_some_and(|served| Arc::ptr_eq(served, &source))
                     && state.next.as_ref().is_none_or(|next| {
                         next.generation == template.generation && next.cur_time != cur_time
                     });
-                if restage {
+                if requeue {
                     state.next = Some(Arc::clone(&template));
                 }
                 false
             });
-            if restage {
+            if requeue {
                 self.queued.notify_one();
             }
         }
@@ -941,7 +891,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     was_failing = false;
                 }
 
-                let generation = cache.update(template);
+                let generation = cache.publish(template);
                 Some((mempool_tx_ids, generation))
             }
             // The state and the mempool disagreed about the tip, so retry with fresh data.
@@ -1110,8 +1060,8 @@ impl MempoolChanges {
 
 /// Waits for changed verified membership, coalescing background arrivals and explicit demand.
 ///
-/// Demand bypasses pacing only for notifications not included in the latest build.
-/// Stale demand permits cannot rebuild that same snapshot.
+/// Demand bypasses pacing only for notifications not included in the latest published build.
+/// Stale demand permits cannot rebuild that membership snapshot.
 async fn wait_for_mempool_change<Mempool: MempoolService>(
     changes: &mut broadcast::Receiver<MempoolChange>,
     mempool: Mempool,
@@ -1226,21 +1176,20 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
     }
 }
 
-/// Validates the cache's next work one build at a time, and serves each build that passes if the
-/// work it was checked against is still served.
+/// Checks served templates one at a time, retaining successful verdicts and falling back on failure.
 ///
-/// Coalesces builds staged while the verifier is busy, and abandons outdated parents immediately,
-/// including queued conversion and verification work. A build staged before the tip watch
-/// reports its parent waits for that notification. A failure keeps the previously served work, so
-/// miners hold coinbase-only or validated work throughout.
+/// Coalesces builds published while the verifier is busy, and abandons outdated parents immediately,
+/// including queued conversion and verification work. Work published before the tip watch reports
+/// its parent waits for that notification. Accepted clock-narrowed responses replace only the work
+/// they were checked against.
 async fn validate_templates(
     cache: TemplateCache,
     network: Network,
     verifier: impl BlockVerifierService,
     mut latest_chain_tip: impl ChainTip,
 ) {
-    // The next build and the work it would replace, while the tip watch has not reported the
-    // build's parent yet, or has reported it superseded.
+    // The queued response and its served source, while the tip watch has not reported the
+    // response's parent yet, or has reported it superseded.
     let mut pending = None;
     // The last build with a verdict, so work that stays queued after its check isn't checked again.
     let mut checked: Option<Arc<CachedTemplate>> = None;
@@ -1320,7 +1269,7 @@ async fn validate_templates(
                     was_failing = false;
                 }
                 if latest_chain_tip.best_tip_hash() != Some(parent)
-                    || !cache.promote(&template, base.as_ref())
+                    || !cache.accept_validated(&template, base.as_ref())
                 {
                     tracing::debug!(?parent, "discarding a validated template for older work");
                 }
