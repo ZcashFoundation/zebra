@@ -149,6 +149,8 @@ jobs:
       pull-requests: write # for `docker-scout` to be able to write the comment
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
+      # Docker Build Cloud and Docker Hub credentials belong to ZcashFoundation/zebra, so copies build locally.
+      DOCKER_BUILDER: ${{ github.repository == 'ZcashFoundation/zebra' && vars.DOCKER_BUILDER || 'docker-container' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -196,6 +198,7 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to DockerHub
+        if: github.repository == 'ZcashFoundation/zebra'
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -206,12 +209,12 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
         with:
           version: lab:latest
-          driver: ${{ vars.DOCKER_BUILDER || 'docker-container' }}
-          endpoint: ${{ vars.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
+          driver: ${{ env.DOCKER_BUILDER }}
+          endpoint: ${{ env.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
           # Only local hosted builders disappear with the VM; remote drivers retain cleanup.
           cleanup: >-
             ${{ runner.environment != 'github-hosted' ||
-            (vars.DOCKER_BUILDER || 'docker-container') != 'docker-container' }}
+            env.DOCKER_BUILDER != 'docker-container' }}
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
@@ -461,7 +464,7 @@ jobs:
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
         # See: https://github.com/docker/scout-action/issues/56
-        if: ${{ inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        if: ${{ github.repository == 'ZcashFoundation/zebra' && inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
         with:
           command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}
