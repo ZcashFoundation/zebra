@@ -15,6 +15,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{
     error::TransactionError, Config as ConsensusConfig, RouterError, VerifyBlockError,
+    VerifyCheckpointError,
 };
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
@@ -1606,7 +1607,7 @@ async fn invalid_height_does_not_restart_sync() {
 }
 
 /// A concrete `ChainSync` type for calling associated functions in tests.
-type TestChainSync = ChainSync<
+pub(super) type TestChainSync = ChainSync<
     MockService<zn::Request, zn::Response, PanicAssertion>,
     MockService<zs::Request, zs::Response, PanicAssertion>,
     MockService<zs::ReadRequest, zs::ReadResponse, PanicAssertion>,
@@ -1739,6 +1740,33 @@ async fn verify_timeout_elapsed_does_not_restart_sync() {
             .contains(&block::Hash::from([0xCD; 32])),
         "a block dropped on the post-checkpoint verify timeout must be re-requested"
     );
+}
+
+/// A verifier can drop a valid block because its queue is full of blocks a peer sent, so the
+/// syncer requests the block again instead of restarting, which would cancel the downloads that
+/// are draining the queue.
+#[tokio::test]
+async fn queue_full_errors_rerequest_block_without_restart() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+
+    let errors = [
+        RouterError::from(VerifyCheckpointError::QueuedLimit),
+        RouterError::from(VerifyBlockError::Commit(
+            zs::CommitBlockError::OrphanQueueFull,
+        )),
+    ];
+    for (i, error) in errors.into_iter().enumerate() {
+        let hash = block::Hash::from([u8::try_from(i).expect("few errors"); 32]);
+        let response = Err(BlockDownloadVerifyError::Invalid {
+            error,
+            height: block::Height(1),
+            hash,
+            advertiser_addr: None,
+        });
+
+        assert!(chain_sync.handle_block_response(response).is_ok());
+        assert!(chain_sync.reobtain_hashes.contains(&hash));
+    }
 }
 
 /// Regression test for GHSA-g95h-hw6g-pvgv: a behind-tip drop scores the supplying peer and
@@ -2921,7 +2949,7 @@ pub(in crate::components::sync) fn new_chain_sync_with_misbehavior() -> (
 /// Builds a [`ChainSync`] like [`new_chain_sync_with_misbehavior`], downloading from `peer_set`
 /// and verifying with `block_verifier_router`.
 #[allow(clippy::type_complexity)]
-fn new_chain_sync_with<ZN>(
+pub(super) fn new_chain_sync_with<ZN>(
     peer_set: ZN,
     block_verifier_router: MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
 ) -> (

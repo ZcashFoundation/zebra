@@ -31,7 +31,9 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_consensus::{error::TransactionError, RouterError, VerifyBlockError};
+use zebra_consensus::{
+    error::TransactionError, RouterError, VerifyBlockError, VerifyCheckpointError,
+};
 use zebra_network as zn;
 use zebra_state as zs;
 
@@ -1410,6 +1412,8 @@ where
         // - `Invalid` because an ancestor had a mismatched authorizing data commitment: the state
         //   rejects queued descendants along with the forged ancestor, but their hashes are still
         //   wanted, and the peers that served them are not scored.
+        // - `Invalid` because a verifier queue was full: the block might be valid. Re-request it
+        //   a bounded number of times, then restart to rediscover it instead of silently stalling.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1436,6 +1440,9 @@ where
             {
                 Some(*hash)
             }
+            Err(e @ BlockDownloadVerifyError::Invalid { hash, .. }) if Self::is_queue_full(e) => {
+                Some(*hash)
+            }
             _ => None,
         };
 
@@ -1450,11 +1457,11 @@ where
                     "re-queueing missing block for re-download"
                 );
             } else {
-                debug!(
-                    ?hash,
-                    "missing block exceeded re-download retries, dropping"
-                );
+                debug!(?hash, "missing block exceeded re-download retries");
                 self.block_reobtain_retries.remove(&hash);
+                if response.as_ref().is_err_and(Self::is_queue_full) {
+                    return response.map(|_| ());
+                }
             }
         }
 
@@ -1504,6 +1511,27 @@ where
         )
     }
 
+    /// Returns `true` if the verifier dropped a block because its queue was full.
+    ///
+    /// The block might be valid, and Zebra might need it, so `should_restart_sync` exempts it,
+    /// and the syncer requests it again a few times.
+    fn is_queue_full(e: &BlockDownloadVerifyError) -> bool {
+        match e {
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Checkpoint { source },
+                ..
+            } => matches!(**source, VerifyCheckpointError::QueuedLimit),
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } => matches!(
+                **source,
+                VerifyBlockError::Commit(zs::CommitBlockError::OrphanQueueFull)
+            ),
+            _ => false,
+        }
+    }
+
     /// Returns a bounded label for a block download or verify error, for metrics and logs.
     fn block_error_kind(e: &BlockDownloadVerifyError) -> &'static str {
         use BlockDownloadVerifyError::*;
@@ -1518,6 +1546,7 @@ where
             }
             e if Self::is_utxo_lookup_timeout(e) => "utxo_lookup_timeout",
             e if Self::is_post_checkpoint_verify_timeout(e) => "final_checkpoint_verify_timeout",
+            e if Self::is_queue_full(e) => "queue_full",
             Invalid { .. } => "invalid",
             ValidationRequestError { error, .. }
                 if error.is::<tower::timeout::error::Elapsed>() =>
@@ -1736,6 +1765,12 @@ where
             // commit a restart would cancel, looping near the tip (#11168, #11132).
             e if Self::is_utxo_lookup_timeout(e) => {
                 debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting, continuing");
+                false
+            }
+            // A peer can fill a verifier queue with blocks Zebra can't use, so a restart could
+            // cancel the downloads that would drain it.
+            e if Self::is_queue_full(e) => {
+                debug!(error = ?e, "block verifier queue was full, re-requesting, continuing");
                 false
             }
 

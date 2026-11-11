@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Bound queued blocks and checkpoint commit owners, including work retained after callers cancel requests or state commits fail. The syncer requests a block dropped from a full queue again without cancelling other downloads, restarting the round if bounded re-downloads exhaust their retries. The `sync.block.error.count` metric counts these errors with the `queue_full` kind.
+time: 2026-11-11T04:15:51.548407427+01:00
