@@ -692,6 +692,32 @@ fn zip244_round_trip() -> Result<()> {
     Ok(())
 }
 
+/// Serialization reuses decoded bytes, so they must equal the canonical encoding of the parsed
+/// body. This also keeps the encoder covered, since round trips now return the decoded bytes.
+#[test]
+fn decoded_bytes_are_the_canonical_encoding() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block_transactions = zebra_test::vectors::BLOCKS.iter().flat_map(|bytes| {
+        bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block test vectors are valid")
+            .transactions
+    });
+    let zip244_transactions = zip0244::TEST_VECTORS
+        .iter()
+        .map(|test| Arc::new(test.tx.zcash_deserialize_into().expect("vectors are valid")));
+
+    for tx in block_transactions.chain(zip244_transactions) {
+        let mut canonical = Vec::new();
+        tx.inner().write(&mut canonical)?;
+
+        assert_eq!(tx.zcash_serialize_to_vec()?, canonical);
+    }
+
+    Ok(())
+}
+
 #[test]
 fn zip244_txid() -> Result<()> {
     let _init_guard = zebra_test::init();

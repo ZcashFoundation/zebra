@@ -663,12 +663,16 @@ impl ContextuallyVerifiedBlock {
 }
 
 /// Wire size and conservative decoded-content/metadata charge, computed in one serialization pass.
+///
+/// The wire size is charged twice: once for decoded variable-length content, and once for the
+/// serialized bytes each decoded transaction keeps.
 pub(crate) fn block_wire_and_retained_bytes(
     block: &Block,
     transaction_hashes: &[transaction::Hash],
 ) -> (usize, usize) {
     let wire_bytes = block.zcash_serialized_size();
     let mut bytes = wire_bytes
+        .saturating_mul(2)
         .saturating_add(size_of::<Block>())
         .saturating_add(size_of::<block::Header>())
         .saturating_add(

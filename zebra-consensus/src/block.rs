@@ -131,9 +131,9 @@ struct PreparedProposal {
 
 /// Bound retained proposal data, including unusually large spent-output scripts.
 ///
-/// The shared conservative charge, not measured heap usage, is 66,198,006 bytes for a MAX_BLOCK_BYTES
+/// The shared conservative charge, not measured heap usage, is 66,424,106 bytes for a MAX_BLOCK_BYTES
 /// proposal with 19,215 transactions using 104-byte one-input/one-P2PKH-output payments. Eight such
-/// ordinary transparent proposals need about 505 MiB; 8 * 72 MiB leaves about 14% layout headroom.
+/// ordinary transparent proposals need about 507 MiB; 8 * 72 MiB leaves about 14% layout headroom.
 /// Smaller consensus-valid transactions can pack more decoded structs into a block and retain fewer
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
 const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;

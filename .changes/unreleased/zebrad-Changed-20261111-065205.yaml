@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Speed up checkpoint sync of shielded-heavy blocks by storing transactions without re-serializing them ([#12417](https://github.com/ZcashFoundation/zebra/issues/12417)).
+time: 2026-11-11T06:52:05.47690327+01:00
