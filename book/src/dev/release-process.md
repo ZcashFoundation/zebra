@@ -135,9 +135,10 @@ To correct a Release PR by hand without release-plz regenerating it:
 
 1. Freeze `main` in Merge Freeze.
 2. Remove every other pull request from the merge queue. A freeze does not stop a group that has already passed `mergefreeze` (see [Holding a Pull Request Back](continuous-integration.md#holding-a-pull-request-back)).
-3. Push the corrections to the Release PR branch.
-4. Unblock the Release PR with Merge Freeze's **Unblock 1 pull request**, then merge it.
-5. Unfreeze `main`, and queue the pull requests you removed again.
+3. Wait until no **Create or update Release PR** job in the Release workflow is queued or running. Jobs started by earlier pushes to `main` still finish, and they would regenerate the Release PR over your corrections.
+4. Push the corrections to the Release PR branch.
+5. Unblock the Release PR with Merge Freeze's **Unblock 1 pull request**, then merge it.
+6. Unfreeze `main`, and queue the pull requests you removed again.
 
 ### What Release Readiness Reports
 
