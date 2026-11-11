@@ -997,6 +997,7 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid"),
     );
+    let backup_block_file_path = backup_dir_path.join(block.hash().to_string());
 
     non_finalized_state
         .commit_new_chain(block.into(), &finalized_state.db)
@@ -1006,29 +1007,26 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         .send(non_finalized_state.clone())
         .expect("backup task should have a receiver, channel should be open");
 
-    // Poll restoration until the rate-limited writer has finished writing a readable backup.
-    let non_finalized_state = tokio::time::timeout(
+    // Poll for the final hash-named file without restoring while it is being written.
+    tokio::time::timeout(
         MIN_DURATION_BETWEEN_BACKUP_UPDATES + Duration::from_secs(30),
         async {
-            loop {
-                let (restored_state, _sender, _receiver) = NonFinalizedState::new(&network)
-                    .with_backup(
-                        Some(backup_dir_path.clone()),
-                        &finalized_state.db,
-                        true,
-                        // Only the original state should write backups while restoration is polled.
-                        true,
-                    )
-                    .await;
-                if restored_state.best_chain_len().is_some() {
-                    break restored_state;
-                }
+            while !backup_block_file_path.exists() {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         },
     )
     .await
-    .expect("the backup task should write a restorable non-finalized block");
+    .expect("the backup task should write the final hash-named file");
+
+    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
+        .with_backup(
+            Some(backup_dir_path.clone()),
+            &finalized_state.db,
+            true,
+            true,
+        )
+        .await;
 
     assert_eq!(
         non_finalized_state.best_chain_len(),
