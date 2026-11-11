@@ -11,12 +11,12 @@
 #   stops at a minor bump unless one of its fragments has the `network-upgrade`
 #   kind. Only zebrad may use that kind.
 # - A prerelease base version graduates to its release version.
-# - A path dependency that moves to an incompatible version breaks every library
-#   project that depends on it, even if its own fragments plan a smaller change.
-#   Zebra's libraries expose their dependencies' types in public signatures, not
-#   only through `pub use`, so a source scan cannot tell which ones are safe.
-#   zebrad has no library API, so it only gets a patch to publish its new
-#   dependency requirement.
+# - A path dependency that moves to an incompatible version raises a project to
+#   at least a patch, so its new dependency requirement is published. When the
+#   project's library sources (outside `src/bin`) name that dependency, it
+#   inherits the break, even if its own fragments plan a smaller change: a public
+#   signature can expose the dependency's types without a `pub use`. zebrad has
+#   no library API, so it only gets the patch.
 
 set -euo pipefail
 
@@ -67,6 +67,11 @@ package_version() {
     /^\[/ { in_package = 0 }
     in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
   '
+}
+
+uses_in_library() {
+  [[ "$1" != "zebrad" ]] &&
+    git grep --quiet -wF "${2//-/_}" "$base_revision" -- "$1/src" ":(exclude)$1/src/bin"
 }
 
 path_dependencies() {
@@ -152,9 +157,8 @@ while [[ "$changed" == "true" ]]; do
     cascade=""
     while IFS= read -r dependency; do
       if [[ -n "${new[$dependency]:-}" ]] && ! compatible "${old[$dependency]}" "${new[$dependency]}"; then
-        if [[ "$project" == "zebrad" ]]; then
-          cascade="patch"
-        else
+        cascade="patch"
+        if uses_in_library "$project" "$dependency"; then
           cascade="major"
           break
         fi

@@ -150,7 +150,7 @@ Every new Release PR commit automatically runs `PR Gate / Release readiness`. Th
 - Below 1.0.0, Cargo treats the minor version as the major one, so each level bumps one place lower.
 - `zebrad`'s major version marks a network upgrade, so `zebrad` stops at a minor version unless one of its fragments has the `network-upgrade` kind.
 - A prerelease version graduates to its release version.
-- A path dependency that moves to an incompatible version breaks every library package that depends on it, even if the package's own fragments plan a smaller change, because Zebra's libraries expose their dependencies' types in public signatures. `zebrad` has no library API, so it gets a patch release that publishes its new requirement.
+- A path dependency that moves to an incompatible version raises a package to at least a patch release, so its new requirement is published. When the package's library sources outside `src/bin` name that dependency, it inherits the break, even if its own fragments plan a smaller change, because a public signature can expose the dependency's types without a `pub use`. `zebrad` has no library API, so it only gets the patch.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 

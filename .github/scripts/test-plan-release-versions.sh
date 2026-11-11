@@ -124,17 +124,27 @@ expect_plan "the highest kind wins" \
   "zebra-chain	13.1.0"
 
 fragment zebra-chain breaking 1
-expect_plan "a break cascades: library dependents inherit it, zebrad gets a patch, dev-dependents nothing" \
+expect_plan "a break cascades: libraries that use it inherit it, zebrad gets a patch, dev-dependents nothing" \
   "zebrad	6.4.3
 zebra-chain	14.0.0
 zebra-node-services	12.0.0"
 
 fragment zebra-chain breaking 1
 fragment zebra-node-services Fixed 1
-expect_plan "a library dependent inherits a break even when its own fragments plan less" \
+expect_plan "a library that uses the dependency inherits a break even when its own fragments plan less" \
   "zebrad	6.4.3
 zebra-chain	14.0.0
 zebra-node-services	12.0.0"
+
+fragment zebra-chain breaking 1
+manifest zebra-utils 10.0.2 'zebra-chain = { path = "../zebra-chain", version = "13.0.0" }'
+write_file zebra-utils/src/lib.rs 'pub fn init_tracing() {}'
+write_file zebra-utils/src/bin/tool.rs 'fn main() { let _ = zebra_chain::parameters::Network::Mainnet; }'
+expect_plan "a library that names the dependency only in its binaries gets a patch" \
+  "zebrad	6.4.3
+zebra-chain	14.0.0
+zebra-node-services	12.0.0
+zebra-utils	10.0.3"
 
 fragment zebrad breaking 1
 expect_plan "a zebrad break stops at a minor bump" \
