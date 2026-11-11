@@ -1,31 +1,42 @@
 # Automated checkpoint updates.
 #
-# Triggered whenever the integration tests succeed; requires both checkpoint artifacts.
-# Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
-# appends new entries to the checkpoint files, validates them, and opens a PR.
+# Runs daily, and uses the latest successful integration test run on `main` that has both
+# checkpoint artifacts. Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
+# appends new entries to the checkpoint files, validates them, and opens or updates a PR.
 #
 # The PR requires human review before merge; checkpoints are consensus-critical.
+#
+#! Artifact handling:
+#!
+#! - `resolve-run` only uses runs of the integration test workflow file in this repository,
+#!   from a `push`, `schedule` or `workflow_dispatch` event on `main` (`is_trusted_run`).
+#! - Artifacts are downloaded into `runner.temp`, outside the checkout, and are only read as
+#!   text by `merge-checkpoint-artifact.sh`.
+#! - `validate-checkpoints` holds no secrets. The release App token is minted only in
+#!   `open-pr`, after it has checked the validated files again.
 name: Checkpoint Update
 
 on:
-  # zizmor: ignore[dangerous-triggers] -- triggers only on internal CI workflow completion,
-  # processes deterministic checkpoint data from artifacts, no untrusted user input
-  workflow_run:
-    workflows: ["Integration Tests on GCP"]
-    types: [completed]
-    branches: [main]
+  # Checkpoint PRs wait for review, so a daily update is frequent enough.
+  schedule:
+    - cron: "43 5 * * *"
 
-  # Manual trigger for testing; resolves the latest successful integration test run with checkpoint artifacts
+  # Manual trigger, for testing or an update before the next scheduled run.
   workflow_dispatch:
 
 permissions: {}
+
+env:
+  MAINNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
+  TESTNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
 
 jobs:
   # Successful integration runs can still skip the checkpoint generators, and
   # cancelled or failed runs may not have uploaded their artifacts.
   resolve-run:
     name: Find checkpoint artifacts
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Copies of this repository don't have the release App, so only this one runs the schedule.
+    if: github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra'
     runs-on: ubuntu-26.04
     permissions:
       actions: read
@@ -33,20 +44,31 @@ jobs:
       run_id: ${{ steps.resolve-run.outputs.run_id }}
       run_url: ${{ steps.resolve-run.outputs.run_url }}
     steps:
-      # For workflow_run: use the triggering run.
-      # For workflow_dispatch: use the latest successful run with both artifacts.
+      # Use the latest successful run with both artifacts.
       - name: Resolve integration test run ID
         id: resolve-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
-          WF_RUN_ID: ${{ github.event.workflow_run.id }}
           REPO: ${{ github.repository }}
+          PRODUCER_PATH: .github/workflows/zfnd-ci-integration-tests-gcp.yml
         run: |
-          # Run IDs on main that still have this artifact, newest first.
+          # The only provenance check: runs of our own integration test workflow on
+          # main, from `push`, `schedule` or `workflow_dispatch` events.
+          is_trusted_run() {
+            gh api "repos/${REPO}/actions/runs/$1" --jq '
+              (.path | split("@")[0]) == env.PRODUCER_PATH
+              and .head_repository.full_name == env.REPO
+              and .head_branch == "main"
+              and (.event | IN("push", "schedule", "workflow_dispatch"))
+              and .conclusion == "success"
+            ' | grep -qx true
+          }
+
+          # Run IDs on main in this repository that still have this artifact, newest first.
           artifact_runs() {
             gh api "repos/${REPO}/actions/artifacts?name=$1&per_page=100" --paginate \
-              --jq '.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main") | .workflow_run.id'
+              --jq '.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main"
+                and .workflow_run.head_repository_id == .workflow_run.repository_id) | .workflow_run.id'
           }
 
           MAINNET_RUNS=$(artifact_runs generate-checkpoints-mainnet-checkpoints)
@@ -54,11 +76,9 @@ jobs:
           RUN_IDS=$(grep -Fx -f <(printf '%s\n' "$TESTNET_RUNS") <<< "$MAINNET_RUNS" || true)
 
           for RUN_ID in $RUN_IDS; do
-            if [ "$EVENT_NAME" = "workflow_run" ]; then
-              [ "$RUN_ID" = "$WF_RUN_ID" ] || continue
-            else
-              RUN=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}" --jq '.name + "/" + .conclusion')
-              [ "$RUN" = "Integration Tests on GCP/success" ] || continue
+            if ! is_trusted_run "$RUN_ID"; then
+              echo "::warning::Skipping integration test run ${RUN_ID}: not a successful main run of ${PRODUCER_PATH} in ${REPO}"
+              continue
             fi
 
             RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
@@ -68,20 +88,120 @@ jobs:
             exit 0
           done
 
-          echo "::notice::No integration test run with both checkpoint artifacts found, skipping the update"
+          echo "::notice::No trusted integration test run with both checkpoint artifacts found, skipping the update"
 
-  update-checkpoints:
-    name: Update checkpoint files
+  # Parses the downloaded artifacts as data and builds the updated checkpoint files.
+  # This job has no secrets: the release App token is never on a runner that has
+  # downloaded the integration test artifacts.
+  validate-checkpoints:
+    name: Validate checkpoint artifacts
     needs: resolve-run
     if: needs.resolve-run.outputs.run_id != ''
     runs-on: ubuntu-26.04
     permissions:
       actions: read
       contents: read
-    env:
-      MAINNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
-      TESTNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
+    outputs:
+      has_changes: ${{ steps.changes.outputs.has_changes }}
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          ref: main
+
+      # Download into scratch directories outside the checkout, so an artifact can't replace
+      # any file in the workspace. Each artifact gets its own empty directory.
+      - name: Download mainnet checkpoint artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: generate-checkpoints-mainnet-checkpoints
+          path: ${{ runner.temp }}/checkpoint-artifacts/mainnet
+          run-id: ${{ needs.resolve-run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download testnet checkpoint artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: generate-checkpoints-testnet-checkpoints
+          path: ${{ runner.temp }}/checkpoint-artifacts/testnet
+          run-id: ${{ needs.resolve-run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Check the artifacts as data and append the new entries, then validate the results.
+      - name: Merge and validate checkpoint files
+        run: |
+          mkdir -p "${RUNNER_TEMP}/validated-checkpoints"
+          .github/scripts/merge-checkpoint-artifact.sh \
+            "${RUNNER_TEMP}/checkpoint-artifacts/mainnet" main-checkpoints.txt "${MAINNET_CHECKPOINTS}" "${RUNNER_TEMP}/validated-checkpoints/main-checkpoints.txt"
+          .github/scripts/merge-checkpoint-artifact.sh \
+            "${RUNNER_TEMP}/checkpoint-artifacts/testnet" test-checkpoints.txt "${TESTNET_CHECKPOINTS}" "${RUNNER_TEMP}/validated-checkpoints/test-checkpoints.txt"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if cmp -s "${RUNNER_TEMP}/validated-checkpoints/main-checkpoints.txt" "${MAINNET_CHECKPOINTS}" &&
+             cmp -s "${RUNNER_TEMP}/validated-checkpoints/test-checkpoints.txt" "${TESTNET_CHECKPOINTS}"; then
+            echo "No changes to commit"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload validated mainnet checkpoints
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: validated-mainnet-checkpoints
+          path: ${{ runner.temp }}/validated-checkpoints/main-checkpoints.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload validated testnet checkpoints
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: validated-testnet-checkpoints
+          path: ${{ runner.temp }}/validated-checkpoints/test-checkpoints.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  # Opens or updates the checkpoint PR. The App token is minted only after the validated
+  # files have been downloaded outside the checkout and checked again as data.
+  open-pr:
+    name: Open checkpoint update PR
+    needs: [resolve-run, validate-checkpoints]
+    if: needs.validate-checkpoints.outputs.has_changes == 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Download validated mainnet checkpoints
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: validated-mainnet-checkpoints
+          path: ${{ runner.temp }}/validated/mainnet
+
+      - name: Download validated testnet checkpoints
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: validated-testnet-checkpoints
+          path: ${{ runner.temp }}/validated/testnet
+
+      # Re-run the data checks: the merged files must be the current checkpoint files plus
+      # valid new entries. This also catches `main` moving since the validation job ran.
+      - name: Apply validated checkpoint files
+        run: |
+          .github/scripts/merge-checkpoint-artifact.sh \
+            "${RUNNER_TEMP}/validated/mainnet" main-checkpoints.txt "${MAINNET_CHECKPOINTS}" "${MAINNET_CHECKPOINTS}"
+          .github/scripts/merge-checkpoint-artifact.sh \
+            "${RUNNER_TEMP}/validated/testnet" test-checkpoints.txt "${TESTNET_CHECKPOINTS}" "${TESTNET_CHECKPOINTS}"
+          git diff --stat
+
       - name: Generate release app token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 #v3.2.0
@@ -91,92 +211,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-          ref: main
-          token: ${{ steps.app-token.outputs.token }}
-
-      # Download checkpoint artifacts from the integration test run.
-      - name: Download mainnet checkpoint artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
-        with:
-          name: generate-checkpoints-mainnet-checkpoints
-          run-id: ${{ needs.resolve-run.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download testnet checkpoint artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
-        with:
-          name: generate-checkpoints-testnet-checkpoints
-          run-id: ${{ needs.resolve-run.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify required checkpoint artifacts
-        run: |
-          for artifact in main-checkpoints.txt test-checkpoints.txt; do
-            if [ ! -f "$artifact" ]; then
-              echo "::error::Required checkpoint artifact file is missing: ${artifact}"
-              exit 1
-            fi
-
-            LINES=$(wc -l < "$artifact" | tr -d ' ')
-            echo "${artifact}: ${LINES} checkpoint lines"
-          done
-
-      # Append new mainnet checkpoints (entries with heights higher than current last)
-      - name: Append new mainnet checkpoints
-        run: |
-          CURRENT_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
-          echo "Current last mainnet checkpoint: ${CURRENT_LAST}"
-
-          # Extract only new entries (height > current last)
-          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt | wc -l | tr -d ' ')
-          echo "New mainnet checkpoints to append: ${NEW_COUNT}"
-
-          if [ "$NEW_COUNT" -gt 0 ]; then
-            awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt >> "${MAINNET_CHECKPOINTS}"
-            NEW_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
-            echo "Updated last mainnet checkpoint: ${NEW_LAST}"
-          fi
-
-      # Append new testnet checkpoints
-      - name: Append new testnet checkpoints
-        run: |
-          CURRENT_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
-          echo "Current last testnet checkpoint: ${CURRENT_LAST}"
-
-          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt | wc -l | tr -d ' ')
-          echo "New testnet checkpoints to append: ${NEW_COUNT}"
-
-          if [ "$NEW_COUNT" -gt 0 ]; then
-            awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt >> "${TESTNET_CHECKPOINTS}"
-            NEW_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
-            echo "Updated last testnet checkpoint: ${NEW_LAST}"
-          fi
-
-      # Validate the updated checkpoint files
-      - name: Validate checkpoint files
-        run: |
-          .github/scripts/validate-checkpoints.sh "${MAINNET_CHECKPOINTS}"
-          .github/scripts/validate-checkpoints.sh "${TESTNET_CHECKPOINTS}"
-
-      # Check if there are actual changes to commit
-      - name: Check for changes
-        id: changes
-        run: |
-          if git diff --quiet; then
-            echo "No changes to commit"
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Changes detected:"
-            git diff --stat
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Open or update a PR with the checkpoint changes
       - name: Create checkpoint update PR
-        if: steps.changes.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 #v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
