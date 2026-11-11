@@ -132,10 +132,17 @@ find_available_disk_type() {
 
     # Use >&2 to redirect to stderr and avoid sending wrong assignments to stdout
     for state_version in "${STATE_VERSIONS[@]}"; do
-        disk_name=$(find_newest_image "${base_name}-cache" ".+-[0-9a-f]+-v${state_version}-${NETWORK}-${disk_type}")
+        # A failed query must not fall through to the previous state version.
+        if ! disk_name=$(find_newest_image "${base_name}-cache" ".+-[0-9a-f]+-v${state_version}-${NETWORK}-${disk_type}"); then
+            echo "Failed to list ${base_name} ${disk_type} disk images." >&2
+            return 1
+        fi
 
         if [[ -n "${disk_name}" ]]; then
             echo "Found ${disk_type^^} disk: ${disk_name} for ${base_name^^} on network: ${NETWORK} (state version ${state_version})" >&2
+            if [[ "${state_version}" != "${LOCAL_STATE_VERSION}" ]]; then
+                echo "::warning::No v${LOCAL_STATE_VERSION} ${base_name} ${disk_type} image exists. Using the v${state_version} image ${disk_name}, which zebrad upgrades in place." >&2
+            fi
             disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
             echo "Description: ${disk_description}" >&2
             echo "true" # This is the actual return value when a disk is found
