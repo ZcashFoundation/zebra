@@ -124,10 +124,12 @@ write_dependency_fragment() {
 
 # Restore `.changes` to the base revision, so this script always starts from the
 # fragments on main: a previous run on this branch may have consumed some of
-# them already, and batching what is left would drop entries.
+# them already, and batching what is left would drop entries. That includes a
+# run whose output is not committed yet, so staged and untracked files go too.
 while IFS= read -r -d '' path; do
   git rm --quiet --force "$path"
-done < <(git diff --name-only -z --diff-filter=A "$base_revision" HEAD -- .changes)
+done < <(git diff --name-only -z --diff-filter=A "$base_revision" -- .changes)
+git clean --force --quiet -- .changes
 
 git checkout "$base_revision" -- .changes
 

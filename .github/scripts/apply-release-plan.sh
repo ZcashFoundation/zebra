@@ -142,7 +142,7 @@ fi
 if [[ -n "$body_file" ]]; then
   if grep -q '^## Release summary[[:space:]]*$' "$body_file"; then
     SUMMARY="$summary" awk '
-      skipping && (/^> \[!/ || /^##/) { skipping = 0 }
+      skipping && (/^> \[!/ || /^##/ || /^---[[:space:]]*$/) { skipping = 0 }
       skipping { next }
       { print }
       !done && /^## Release summary[[:space:]]*$/ {

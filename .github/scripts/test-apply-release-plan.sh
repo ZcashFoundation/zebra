@@ -161,6 +161,14 @@ write_body() {
     '' '> [!IMPORTANT]' '> Review this.' '' '## Release checklist' '' '- [ ] An item.' > "$body"
 }
 
+# The body shape release-plz.toml configures: the summary list, then a `---` rule
+# and the footer.
+write_release_plz_body() {
+  printf '%s
+' '## Release summary' '' '- `zebra-chain`: 13.0.0 → 99.0.0' '' '---' \
+    'This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).' > "$body"
+}
+
 fail() {
   echo "$1" >&2
   shift
@@ -322,6 +330,36 @@ expect_locked zebrad 7.0.0-rc.1 "$case"
 [[ -e "${fixture}/.changes/zebrad/v7.0.0-rc.1.md" && ! -e "${fixture}/.changes/zebrad/v7.0.0.md" ]] ||
   fail "$case: expected zebrad to be batched as 7.0.0-rc.1 only"
 expect_title "chore: release v7.0.0-rc.1" "$case"
+expect_ready "$case"
+reset_fixture
+
+case="the summary rewrite keeps the release-plz footer after the rule"
+fragment zebra-chain Fixed 1
+apply_plan zebra-chain@13.0.1
+write_release_plz_body
+(cd "$fixture" && .github/scripts/apply-release-plan.sh base "$plan" "$body" > /dev/null 2> "${temporary_root}/log") ||
+  fail "$case: the apply script failed" "$(cat "${temporary_root}/log")"
+expected="$(printf '%s\n' '## Release summary' '' '- `zebra-chain`: 13.0.0 → 13.0.1' '' '---' \
+  'This PR was generated with [release-plz](https://github.com/release-plz/release-plz/).')"
+[[ "$(cat "$body")" == "$expected" ]] || fail "$case: unexpected body" "expected:" "$expected" "actual:" "$(cat "$body")"
+reset_fixture
+
+case="a second run before the first result is committed gives the same result"
+fragment zebra-chain Fixed 1
+git -C "$fixture" add --all
+git -C "$fixture" commit --quiet --message base
+git -C "$fixture" update-ref refs/tags/base HEAD
+release_plz zebra-chain@13.0.1
+(cd "$fixture" && .github/scripts/plan-release-versions.sh base > "$plan")
+for run in 1 2; do
+  (cd "$fixture" && .github/scripts/apply-release-plan.sh base "$plan" > /dev/null 2> "${temporary_root}/log") ||
+    fail "$case: run ${run} failed" "$(cat "${temporary_root}/log")"
+done
+! compgen -G "${fixture}/.changes/unreleased/*.yaml" > /dev/null ||
+  fail "$case: fragments are left unreleased" "$(cd "$fixture" && ls .changes/unreleased)"
+expect_line .changes/zebra-chain/v13.0.1.md '- An entry for zebra-chain.' "$case"
+git -C "$fixture" add --all
+git -C "$fixture" commit --quiet --message "chore: apply the fragment release plan"
 expect_ready "$case"
 reset_fixture
 
