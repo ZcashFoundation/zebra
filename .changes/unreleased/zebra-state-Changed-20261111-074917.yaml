@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Run the block writer's parallel work on its own Rayon thread pool, sized like the global pool ([#12418](https://github.com/ZcashFoundation/zebra/issues/12418)).
+time: 2026-11-11T07:49:17.12520683+01:00

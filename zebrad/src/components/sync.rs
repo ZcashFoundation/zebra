@@ -281,6 +281,9 @@ pub struct Config {
     /// If the number of threads is not configured or zero, Zebra uses the number of logical cores.
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
+    ///
+    /// The state's block writer uses a separate pool with the same number of threads, so committing
+    /// blocks doesn't wait for other CPU-intensive work.
     pub parallel_cpu_threads: usize,
 }
 
