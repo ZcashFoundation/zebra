@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Charge the bytes decoded transactions keep against the proposal cache's memory budget ([#12417](https://github.com/ZcashFoundation/zebra/issues/12417)).
+time: 2026-11-11T07:49:15.032653101+01:00

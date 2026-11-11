@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Store decoded transactions without serializing them again, and charge the bytes they keep against the orphan-queue and early-relay memory budgets ([#12417](https://github.com/ZcashFoundation/zebra/issues/12417)).
+time: 2026-11-11T07:49:15.028315226+01:00

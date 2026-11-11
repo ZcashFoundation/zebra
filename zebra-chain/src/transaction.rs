@@ -1,6 +1,9 @@
 //! Transactions and transaction-related structures.
 
-use std::{fmt, sync::OnceLock};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 pub use zcash_primitives::transaction::TxVersion;
 
@@ -56,13 +59,18 @@ use crate::{
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
 #[derive(Clone)]
-pub struct Transaction(
-    zp_tx::Transaction,
-    OnceLock<AuthDigest>,
-    /// Exact canonical byte count retained by decoding; zero means the body must be measured.
-    /// Private immutable access to the inner value prevents callers from keeping stale evidence.
-    u32,
-);
+pub struct Transaction(zp_tx::Transaction, Derived);
+
+/// Values derived from an immutable transaction body, computed at most once.
+#[derive(Clone, Default)]
+struct Derived {
+    auth_digest: OnceLock<AuthDigest>,
+    /// The serialized body: the decoded bytes, or the first serialization of a built body.
+    ///
+    /// Serializing recompresses every Sapling and Orchard curve point, so reusing these bytes
+    /// avoids that work when a block is sized, stored and relayed.
+    bytes: OnceLock<Arc<[u8]>>,
+}
 
 impl std::ops::Deref for Transaction {
     type Target = zp_tx::TransactionData<zp_tx::Authorized>;
@@ -73,11 +81,23 @@ impl std::ops::Deref for Transaction {
 }
 
 impl Transaction {
-    /// Starts with an empty digest cache and no decoded-size evidence whenever a transaction body
-    /// is built or decoded. The inner value is private and only exposed immutably, so every body
-    /// mutation must replace the transaction through this helper.
+    /// Starts with empty caches whenever a transaction body is built or decoded.
+    /// The inner value is private and only exposed immutably, so every body mutation must
+    /// replace the transaction through this helper.
     fn from_inner(inner: zp_tx::Transaction) -> Self {
-        Self(inner, OnceLock::new(), 0)
+        Self(inner, Derived::default())
+    }
+
+    /// Returns the serialized transaction, serializing it on first use.
+    fn serialized(&self) -> std::io::Result<&[u8]> {
+        if let Some(bytes) = self.1.bytes.get() {
+            return Ok(bytes);
+        }
+
+        let mut bytes = Vec::new();
+        self.0.write(&mut bytes)?;
+
+        Ok(self.1.bytes.get_or_init(|| bytes.into()))
     }
 
     /// Access the inner `zcash_primitives::transaction::Transaction`.
@@ -301,7 +321,7 @@ impl Transaction {
     pub fn auth_digest(&self) -> Option<AuthDigest> {
         match self.tx_version() {
             TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
-            _ => Some(*self.1.get_or_init(|| {
+            _ => Some(*self.1.auth_digest.get_or_init(|| {
                 let hash = self.0.auth_commitment();
                 AuthDigest(
                     hash.as_ref()
@@ -910,18 +930,14 @@ impl TryFrom<&Transaction> for AuthDigest {
 }
 
 impl crate::serialization::ZcashSerialize for Transaction {
-    fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
-        self.0.write(writer)
+    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
+        writer.write_all(self.serialized()?)
     }
 
     fn zcash_serialized_size(&self) -> usize {
-        if self.2 != 0 {
-            return usize::try_from(self.2).expect("decoded transaction sizes fit usize");
-        }
-        let mut writer = crate::serialization::FakeWriter(0);
-        self.zcash_serialize(&mut writer)
-            .expect("transaction size counting cannot fail");
-        writer.0
+        self.serialized()
+            .expect("transactions accepted by decoding or construction can be serialized")
+            .len()
     }
 }
 
@@ -973,34 +989,14 @@ fn deserialize_and_check<R: std::io::Read>(
     reader: R,
     branch_id: zcash_protocol::consensus::BranchId,
 ) -> Result<Transaction, crate::serialization::SerializationError> {
-    use std::io::Read as _;
-
     // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
-    let mut limited = reader.take(crate::block::MAX_BLOCK_BYTES);
+    let limited = reader.take(crate::block::MAX_BLOCK_BYTES);
 
-    // Only V4 transactions need their bytes recorded, for the `valueBalanceSapling` check
-    // below. Reading the 4-byte header up front and putting it back lets every other
-    // version parse without copying the transaction a second time, which matters during
-    // the initial block download.
-    let mut header = [0u8; 4];
-    limited.read_exact(&mut header)?;
-    let is_v4 = {
-        let header = u32::from_le_bytes(header);
-        let overwintered = header & 0x8000_0000 != 0;
-        overwintered && (header & 0x7FFF_FFFF) == 4
-    };
-    let with_header = std::io::Read::chain(&header[..], &mut limited);
-
-    let (inner, raw_bytes) = if is_v4 {
-        let mut recording = RecordingReader::new(with_header);
-        let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
-        (inner, recording.into_recorded())
-    } else {
-        (
-            zp_tx::Transaction::read(with_header, branch_id)?,
-            Vec::new(),
-        )
-    };
+    // The decoded bytes are kept, so later serializations don't recompress curve points.
+    // V4 transactions also need them for the `valueBalanceSapling` check below.
+    let mut recording = RecordingReader::new(limited);
+    let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
+    let raw_bytes = recording.into_recorded();
 
     // # Consensus
     //
@@ -1091,11 +1087,10 @@ fn deserialize_and_check<R: std::io::Read>(
 
     // CompactSize decoding rejects nonminimal lengths; fixed-width fields and retained vectors
     // serialize to their consumed lengths, including empty bundles. The V4 discarded balance is
-    // checked above. Thus successful decoding supplies the canonical serialized byte count.
-    let mut transaction = Transaction::from_inner(inner);
-    // The count is capped by MAX_BLOCK_BYTES; the bound below makes both casts lossless.
-    const { assert!(crate::block::MAX_BLOCK_BYTES <= u32::MAX as u64) };
-    transaction.2 = (crate::block::MAX_BLOCK_BYTES - limited.limit()) as u32;
+    // checked above. Thus successful decoding supplies the canonical serialized bytes and size.
+    let transaction = Transaction::from_inner(inner);
+    let _ = transaction.1.bytes.set(raw_bytes.into());
+
     Ok(transaction)
 }
 
@@ -1161,7 +1156,7 @@ fn v4_empty_sapling_value_balance(raw_bytes: &[u8], inner: &zp_tx::Transaction) 
     Some(i64::from_le_bytes(field))
 }
 
-/// An `io::Read` wrapper that records every byte consumed, for post-parse validation.
+/// An `io::Read` wrapper that records every byte consumed, to keep a decoded body's bytes.
 struct RecordingReader<R> {
     inner: R,
     recorded: Vec<u8>,

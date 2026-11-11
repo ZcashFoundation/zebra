@@ -22,18 +22,24 @@ fn uncached_digest(tx: &Transaction) -> Option<AuthDigest> {
 }
 
 fn check_cache(tx: &Transaction) {
-    assert!(tx.1.get().is_none(), "new bodies must start unhashed");
+    assert!(
+        tx.1.auth_digest.get().is_none(),
+        "new bodies must start unhashed"
+    );
     let debug = format!("{tx:?}");
     let pretty_debug = format!("{tx:#?}");
     let bytes = tx.zcash_serialize_to_vec().unwrap();
+    let mut canonical = Vec::new();
+    tx.inner().write(&mut canonical).unwrap();
+    assert_eq!(bytes, canonical, "kept bytes must belong to this body");
     let txid = tx.hash();
     let expected = uncached_digest(tx);
     for _ in 0..2 {
         assert_eq!(tx.auth_digest(), expected);
-        assert_eq!(tx.1.get().copied(), expected);
+        assert_eq!(tx.1.auth_digest.get().copied(), expected);
     }
     let clone = tx.clone();
-    assert_eq!(clone.1.get().copied(), expected);
+    assert_eq!(clone.1.auth_digest.get().copied(), expected);
     assert_eq!(clone.auth_digest(), expected);
     assert_eq!(clone.hash(), txid);
     assert_eq!(clone, *tx);
@@ -90,15 +96,6 @@ fn auth_digest_cache_matches_native_all_versions() {
         check_cache(&tx);
     }
     assert_eq!(versions, (1..=6).collect());
-
-    // Only a digest and cell state are retained, rounded up to the wrapper's alignment.
-    let overhead = std::mem::size_of::<Transaction>()
-        - std::mem::size_of::<zcash_primitives::transaction::Transaction>();
-    assert!(
-        overhead
-            <= std::mem::size_of::<std::sync::OnceLock<AuthDigest>>()
-                + std::mem::align_of::<Transaction>()
-    );
 }
 
 #[test]
@@ -110,7 +107,7 @@ fn auth_digest_cache_concurrent_first_readers() {
         fake_bundle_for_branch(BranchId::Nu6_3, ValuePool::Ironwood, 2, 2),
     ));
     let expected = uncached_digest(&tx);
-    assert!(tx.1.get().is_none());
+    assert!(tx.1.auth_digest.get().is_none());
     let barrier = Barrier::new(8);
     std::thread::scope(|scope| {
         for _ in 0..8 {
@@ -119,11 +116,11 @@ fn auth_digest_cache_concurrent_first_readers() {
             scope.spawn(move || {
                 barrier.wait();
                 assert_eq!(tx.auth_digest(), expected);
-                assert_eq!(tx.1.get().copied(), expected);
+                assert_eq!(tx.1.auth_digest.get().copied(), expected);
             });
         }
     });
-    assert_eq!(tx.1.get().copied(), expected);
+    assert_eq!(tx.1.auth_digest.get().copied(), expected);
 }
 
 #[test]
@@ -219,6 +216,6 @@ fn auth_digest_cache_rebuilt_bodies_are_independent() {
         rebuilt.for_each_value_mut(|value| *value = 2.try_into().unwrap());
         check_cache(&rebuilt);
         assert_eq!(tx.auth_digest(), original_digest);
-        assert_eq!(tx.1.get().copied(), original_digest);
+        assert_eq!(tx.1.auth_digest.get().copied(), original_digest);
     }
 }

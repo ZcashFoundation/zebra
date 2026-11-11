@@ -861,21 +861,6 @@ impl DiskWriteBatch {
         self.zs_insert(&hash_by_height, height, hash);
         self.zs_insert(&height_by_hash, hash, height);
 
-        // Adapted from zakura-core/zakura
-        // (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
-        // Indexed parallel collection preserves transaction order for the batch inserts.
-        let raw_transactions: Option<Vec<_>> =
-            (block.transactions.len() >= super::PARALLEL_BLOCK_TX_THRESHOLD).then(|| {
-                block
-                    .transactions
-                    .par_iter()
-                    .map(|tx| {
-                        tx.zcash_serialize_to_vec()
-                            .expect("verified transactions have a valid serialization")
-                    })
-                    .collect()
-            });
-
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
             .iter()
@@ -884,18 +869,8 @@ impl DiskWriteBatch {
         {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
-            // Adapted from zakura-core/zakura
-            // (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
             // Commit each transaction's data
-            if let Some(raw_transactions) = &raw_transactions {
-                self.zs_insert(
-                    &tx_by_loc,
-                    transaction_location,
-                    raw_transactions[transaction_index].as_slice(),
-                );
-            } else {
-                self.zs_insert(&tx_by_loc, transaction_location, transaction);
-            }
+            self.zs_insert(&tx_by_loc, transaction_location, transaction);
 
             // Index each transaction hash and location
             self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);

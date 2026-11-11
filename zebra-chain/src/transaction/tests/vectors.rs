@@ -5,6 +5,7 @@ use arbitrary::v5_transactions;
 use chrono::DateTime;
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
+use proptest::prelude::*;
 use rand::seq::IteratorRandom;
 use zcash_protocol::{consensus::BranchId, value::ZatBalance};
 
@@ -690,6 +691,62 @@ fn zip244_round_trip() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Serialization reuses decoded bytes, so they must equal the canonical encoding of the parsed
+/// body. This also keeps the encoder covered, since round trips now return the decoded bytes.
+#[test]
+fn decoded_bytes_are_the_canonical_encoding() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block_transactions = zebra_test::vectors::BLOCKS.iter().flat_map(|bytes| {
+        bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block test vectors are valid")
+            .transactions
+    });
+    let zip244_transactions = zip0244::TEST_VECTORS
+        .iter()
+        .map(|test| Arc::new(test.tx.zcash_deserialize_into().expect("vectors are valid")));
+
+    for tx in block_transactions.chain(zip244_transactions) {
+        let mut canonical = Vec::new();
+        tx.inner().write(&mut canonical)?;
+
+        assert_eq!(tx.zcash_serialize_to_vec()?, canonical);
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    /// Accepted mutated and arbitrary encodings must retain only canonical transaction bytes.
+    #[test]
+    fn decoded_mutated_bytes_are_the_canonical_encoding(
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                crate::LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with),
+        index in any::<usize>(),
+        mask in 1u8..=u8::MAX,
+        arbitrary_bytes in proptest::collection::vec(any::<u8>(), 0..4096),
+    ) {
+        let _init_guard = zebra_test::init();
+        let mut mutated = tx.zcash_serialize_to_vec()?;
+        let index = index % mutated.len();
+        mutated[index] ^= mask;
+
+        for bytes in [mutated, arbitrary_bytes] {
+            if let Ok(decoded) = bytes.zcash_deserialize_into::<Transaction>() {
+                let mut canonical = Vec::new();
+                decoded.inner().write(&mut canonical)?;
+
+                prop_assert_eq!(decoded.zcash_serialize_to_vec()?, canonical);
+            }
+        }
+    }
 }
 
 #[test]

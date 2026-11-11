@@ -41,12 +41,6 @@ use super::disk_format::upgrade::restorable_db_versions;
 // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the Apache
 // License, Version 2.0, at your option.
 // Adapted from zakura-core/zakura
-// (https://github.com/zakura-core/zakura/commit/840787155a9ad1735356af57c475648e572a1fec).
-/// Keep small blocks on the writer thread: waking the Rayon pool for every block costs more CPU
-/// than parallel serialization saves.
-const PARALLEL_BLOCK_TX_THRESHOLD: usize = 64;
-
-// Adapted from zakura-core/zakura
 // (https://github.com/zakura-core/zakura/commit/a0e5371241ae64c339bf6af8769c9f0551a34ae5).
 /// Minimum input or address count for parallel finalized-state lookups.
 const PARALLEL_BLOCK_READ_THRESHOLD: usize = 64;
