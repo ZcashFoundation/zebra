@@ -1,6 +1,6 @@
 //! Serialization and deserialization for Zcash blocks.
 
-use std::{borrow::Borrow, io};
+use std::{borrow::Borrow, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
@@ -9,9 +9,10 @@ use hex::{FromHex, FromHexError};
 use crate::{
     block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
     serialization::{
-        CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
+        CompactSizeMessage, ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
+    transaction::{Transaction, MIN_TRANSPARENT_TX_SIZE},
     work::{difficulty::CompactDifficulty, equihash},
 };
 
@@ -162,9 +163,37 @@ impl ZcashDeserialize for Block {
             // The stored `consensus_branch_id` may be wrong for pre-Canopy transactions.
             // This field is not used in production (sighash computation provides the
             // correct branch ID explicitly via the NetworkUpgrade parameter).
-            transactions: limited_reader.zcash_deserialize_into()?,
+            transactions: zcash_deserialize_block_transactions(limited_reader)?,
         })
     }
+}
+
+/// Deserializes a block's transactions, rejecting them once they average fewer than
+/// [`MIN_TRANSPARENT_TX_SIZE`] bytes, so a small message can't parse into many transactions.
+fn zcash_deserialize_block_transactions<R: io::Read>(
+    reader: &mut io::Take<R>,
+) -> Result<Vec<Arc<Transaction>>, SerializationError> {
+    let count: CompactSizeMessage = (&mut *reader).zcash_deserialize_into()?;
+    let count: usize = count.into();
+    if count as u64 > Transaction::max_allocation() {
+        return Err(SerializationError::Parse(
+            "Vector longer than max_allocation",
+        ));
+    }
+
+    let start = reader.limit();
+    let mut transactions = Vec::new();
+    for parsed in 1..=count as u64 {
+        transactions.push((&mut *reader).zcash_deserialize_into()?);
+
+        if start - reader.limit() < parsed * MIN_TRANSPARENT_TX_SIZE {
+            return Err(SerializationError::Parse(
+                "block transactions are smaller than the smallest valid transaction",
+            ));
+        }
+    }
+
+    Ok(transactions)
 }
 
 /// A serialized block.
