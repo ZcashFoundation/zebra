@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Speed up syncing shielded-heavy blocks by updating note commitment trees on a thread pool the block writer doesn't share ([#12418](https://github.com/ZcashFoundation/zebra/issues/12418)).
+time: 2026-11-11T06:53:03.369163745+01:00
