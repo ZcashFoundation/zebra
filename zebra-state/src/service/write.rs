@@ -3,7 +3,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use indexmap::IndexMap;
@@ -123,6 +123,13 @@ fn update_latest_chain_channels(
 
     tip_block_height
 }
+
+/// How long the writer waits for readers to release a retired chain before giving up on
+/// replaying it ahead of the next commit or finalization.
+///
+/// Readers hold a snapshot for the duration of one request, and candidate and proposal checks
+/// hold one for a few milliseconds, so most retired chains are released well within this bound.
+const SPARE_WAIT: Duration = Duration::from_millis(50);
 
 /// A worker task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state`.
@@ -581,6 +588,11 @@ impl WriteBlockWorkerTask {
             {
                 let _context_update = early_relay.updating_context();
                 tracing::trace!("finalizing block past the reorg limit");
+                // Let readers release the retired chain, so finalization replays it rather
+                // than cloning the published chain.
+                non_finalized_state.prepare_spare(Instant::now() + SPARE_WAIT, || {
+                    !non_finalized_block_write_receiver.is_empty()
+                });
                 let contextually_verified_with_trees = non_finalized_state.finalize();
                 prev_finalized_note_commitment_trees = finalized_state
                             .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
@@ -602,6 +614,20 @@ impl WriteBlockWorkerTask {
                 "phase" => "finalization"
             )
             .record(phase_start.elapsed().as_secs_f64());
+
+            // Replay the retired chain into a spare for the next commit while no block is
+            // waiting, so that commit only pushes its own block.
+            if non_finalized_block_write_receiver.is_empty() {
+                let phase_start = Instant::now();
+                non_finalized_state.prepare_spare(Instant::now() + SPARE_WAIT, || {
+                    !non_finalized_block_write_receiver.is_empty()
+                });
+                metrics::histogram!(
+                    "state.block_writer.phase.duration_seconds",
+                    "phase" => "prepare_spare"
+                )
+                .record(phase_start.elapsed().as_secs_f64());
+            }
 
             // Update the metrics if semantic and contextual validation passes
             //
