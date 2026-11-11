@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [13.0.1] - 2026-11-11
+
+### Breaking Changes
+
+- Remove the unused `color-eyre` Cargo feature and optional dependency; remove this feature from dependency declarations.
+
 ## [13.0.0] - 2026-10-22
 
 ### Breaking Changes

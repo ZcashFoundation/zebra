@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [10.0.5] - 2026-11-11
+
+### Breaking Changes
+
+- Remove the unused `zcash_primitives` Cargo feature and optional dependency; remove this feature from dependency declarations.
+
 ## [10.0.4] - 2026-10-22
 
 ### Changed
