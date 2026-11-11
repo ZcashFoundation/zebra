@@ -1826,6 +1826,28 @@ async fn verify_timeout_elapsed_does_not_restart_sync() {
     );
 }
 
+/// An early-relayed block whose parent doesn't commit in time to authenticate it might still be
+/// valid, so the syncer requests it again instead of restarting (#12162).
+#[tokio::test]
+async fn early_relay_unavailable_rerequests_block_without_restart() {
+    let (mut chain_sync, _misbehavior_rx) = new_chain_sync_with_misbehavior();
+    let hash = block::Hash::from([0xCE; 32]);
+
+    let response = Err(BlockDownloadVerifyError::Invalid {
+        error: RouterError::Block {
+            source: Box::new(VerifyBlockError::EarlyRelayUnavailable(Box::new(
+                VerifyBlockError::Transaction(TransactionError::BadBalance),
+            ))),
+        },
+        height: block::Height(3_428_007),
+        hash,
+        advertiser_addr: None,
+    });
+
+    assert!(chain_sync.handle_block_response(response).is_ok());
+    assert!(chain_sync.reobtain_hashes.contains(&hash));
+}
+
 /// Regression test for GHSA-g95h-hw6g-pvgv: a behind-tip drop scores the supplying peer and
 /// re-queues the hash the syncer still needs.
 ///

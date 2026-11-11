@@ -1390,6 +1390,8 @@ where
         // - `Invalid` because an ancestor had a mismatched authorizing data commitment: the state
         //   rejects queued descendants along with the forged ancestor, but their hashes are still
         //   wanted, and the peers that served them are not scored.
+        // - `Invalid` because an early-relayed block's parent didn't commit in time to authenticate
+        //   it: the block might be valid, and another peer can serve it (#12162).
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {
@@ -1413,6 +1415,11 @@ where
             }
             Err(e @ BlockDownloadVerifyError::ValidationRequestError { hash, .. })
                 if Self::is_post_checkpoint_verify_timeout(e) =>
+            {
+                Some(*hash)
+            }
+            Err(e @ BlockDownloadVerifyError::Invalid { hash, .. })
+                if Self::is_early_relay_unavailable(e) =>
             {
                 Some(*hash)
             }
@@ -1471,6 +1478,19 @@ where
                 **source,
                 VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound)
             )
+        )
+    }
+
+    /// Returns `true` if an early-relayed block's parent didn't commit in time to authenticate it.
+    ///
+    /// That doesn't make the block invalid, so `should_restart_sync` exempts it.
+    fn is_early_relay_unavailable(e: &BlockDownloadVerifyError) -> bool {
+        matches!(
+            e,
+            BlockDownloadVerifyError::Invalid {
+                error: RouterError::Block { source },
+                ..
+            } if matches!(**source, VerifyBlockError::EarlyRelayUnavailable(_))
         )
     }
 
@@ -1716,6 +1736,11 @@ where
             // commit a restart would cancel, looping near the tip (#11168, #11132).
             e if Self::is_utxo_lookup_timeout(e) => {
                 debug!(error = ?e, "block spends an output that is not in our state yet, re-requesting, continuing");
+                false
+            }
+            // The parent might commit later, or another peer can serve the block (#12162).
+            e if Self::is_early_relay_unavailable(e) => {
+                debug!(error = ?e, "early-relayed block could not be authenticated in time, re-requesting, continuing");
                 false
             }
 

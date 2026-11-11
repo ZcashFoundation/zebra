@@ -70,8 +70,14 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Avoid repeatedly revalidating a body while retention capacity or its checkpoint ancestor recovers.
+/// The delay before the first retry of a block that a full verifier queue dropped.
+///
+/// Each retry verifies the block again, and the queue can stay full for minutes, so the delay
+/// doubles after each retry, up to [`RESOURCE_PRESSURE_MAX_RETRY_DELAY`] (#12162).
 const RESOURCE_PRESSURE_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+/// The longest delay between retries of a block that a full verifier queue dropped.
+const RESOURCE_PRESSURE_MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
@@ -625,6 +631,7 @@ where
                 let verifier = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?;
                 let verification = async move {
+                    let mut retry_delay = RESOURCE_PRESSURE_RETRY_DELAY;
                     loop {
                         let request = if early_relay {
                             zebra_consensus::Request::CommitEarlyRelay(block.clone())
@@ -640,7 +647,8 @@ where
                         if !pressure {
                             return result;
                         }
-                        tokio::time::sleep(RESOURCE_PRESSURE_RETRY_DELAY).await;
+                        tokio::time::sleep(retry_delay).await;
+                        retry_delay = (retry_delay * 2).min(RESOURCE_PRESSURE_MAX_RETRY_DELAY);
                         verifier.ready().await?;
                     }
                 };

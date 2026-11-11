@@ -1115,3 +1115,58 @@ async fn cancelling_pressure_retry_releases_downloaded_body() {
     verifier.expect_no_requests().await;
     network.expect_no_requests().await;
 }
+
+/// A block that a full queue keeps dropping is verified again after a growing delay, so it is
+/// verified a few times before its deadline, not every 100 ms (#12162).
+#[tokio::test(start_paused = true)]
+async fn resource_pressure_retries_back_off() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let _init_guard = zebra_test::init();
+    let (_, mut network, _, state) = mock_downloads(Height(0));
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let verifier = tower::service_fn({
+        let attempts = attempts.clone();
+        move |_request: zebra_consensus::Request| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            let pressure = zebra_consensus::RouterError::from(
+                zebra_consensus::VerifyCheckpointError::QueuedLimit,
+            );
+            std::future::ready(Err::<block::Hash, _>(crate::BoxError::from(pressure)))
+        }
+    });
+    let (latest_chain_tip, chain_tip_sender) = MockChainTip::new();
+    chain_tip_sender.send_best_tip_height(Height(0));
+    let mut downloads = Downloads::new(
+        network.clone(),
+        verifier,
+        state,
+        latest_chain_tip,
+        watch::channel(false).0,
+        MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+        Height(1_000_000),
+    );
+
+    let block = block_1();
+    let hash = block.hash();
+    downloads.download_and_verify(hash).await.unwrap();
+    network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: None,
+        })
+        .await
+        .respond(zn::Response::Blocks(vec![Available((block, None))]));
+
+    let error = downloads.next().await.unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        BlockDownloadVerifyError::ValidationRequestError { error, .. }
+            if error.is::<tower::timeout::error::Elapsed>()
+    ));
+    let attempts = attempts.load(Ordering::SeqCst);
+    assert!(
+        attempts < 20,
+        "the block was verified {attempts} times before its deadline"
+    );
+}
