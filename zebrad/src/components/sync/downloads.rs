@@ -73,8 +73,8 @@ const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Returns a [`BlockDownloadVerifyError::BodyHeaderMismatch`] if `block`'s transactions don't
 /// match its header, so its coinbase height can't be trusted.
 ///
-/// Only call this before dropping a block without verifying it, because the block verifiers
-/// compute the same Merkle root. See [`zebra_consensus::body_matches_header()`].
+/// Only call this before using a block's height without verifying the block, because the block
+/// verifiers compute the same Merkle root. See [`zebra_consensus::body_matches_header()`].
 fn check_body_matches_header(
     block: &block::Block,
     hash: block::Hash,
@@ -159,8 +159,8 @@ pub enum BlockDownloadVerifyError {
         advertiser_addr: Option<PeerSocketAddr>,
     },
 
-    /// A downloaded block was going to be dropped for its height, but its transactions don't
-    /// match its header.
+    /// A downloaded block was going to be dropped for its height, or to pause or resume new
+    /// downloads, but its transactions don't match its header.
     ///
     /// The block hash only commits to the header, so a peer can answer a request for a block hash
     /// with a body that claims any coinbase height (GHSA-g9rc-89v4-hhvf). That height can't be
@@ -550,6 +550,13 @@ where
                     // This log can be very verbose, usually hundreds of blocks are dropped.
                     // So we only log at info level for the first above-height block.
                     if !past_lookahead_limit_receiver.cloned_watch_data() {
+                        // Security: a peer can serve a requested block hash with a body that
+                        // claims a height in this range, so only pause new downloads if the body
+                        // is the one its header commits to (GHSA-g9rc-89v4-hhvf). This only checks
+                        // the block that sets the pause, so the blocks that follow it, which the
+                        // verifier checks anyway, aren't checked twice.
+                        check_body_matches_header(&block, hash, advertiser_addr)?;
+
                         info!(
                             ?hash,
                             ?block_height,
@@ -581,6 +588,10 @@ where
 
                     metrics::counter!("sync.max.height.limit.paused.count").increment(1);
                 } else if block_height <= lookahead_reset_height && past_lookahead_limit_receiver.cloned_watch_data() {
+                    // Security: like the pause, only a body that its header commits to can end
+                    // it. This only checks the block that ends the pause.
+                    check_body_matches_header(&block, hash, advertiser_addr)?;
+
                     // Reset the watched value to false, since we're well under the limit.
                     // We need to block here, because if we don't the syncer can hang.
 

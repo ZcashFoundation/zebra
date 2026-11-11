@@ -876,7 +876,24 @@ fn with_transactions_of(block: &Block, other: &Block) -> Arc<Block> {
 /// Answers a parent lookup with "not found", so a parent never proves a rewrite, and checks that
 /// the block never reaches the verifier.
 async fn drop_error_for(tip_height: Height, block: Arc<Block>) -> BlockDownloadVerifyError {
+    let (error, _downloads_paused) = drop_error_and_pause_for(tip_height, block, false).await;
+
+    error
+}
+
+/// Like [`drop_error_for()`], but new downloads start out paused if `downloads_paused` is true.
+/// Also returns whether new downloads are paused after the block is dropped.
+async fn drop_error_and_pause_for(
+    tip_height: Height,
+    block: Arc<Block>,
+    downloads_paused: bool,
+) -> (BlockDownloadVerifyError, bool) {
     let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(tip_height);
+    downloads
+        .past_lookahead_limit_sender
+        .lock()
+        .expect("no other thread holds the sender")
+        .send_replace(downloads_paused);
     let hash = block.hash();
     let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
 
@@ -896,6 +913,7 @@ async fn drop_error_for(tip_height: Height, block: Arc<Block>) -> BlockDownloadV
             Some(advertiser),
         ))]));
 
+    let pause_receiver = downloads.past_lookahead_limit_receiver.clone();
     let mut next = downloads.next();
     let error = tokio::select! {
         result = &mut next => result,
@@ -911,7 +929,9 @@ async fn drop_error_for(tip_height: Height, block: Arc<Block>) -> BlockDownloadV
 
     verifier.expect_no_requests().await;
 
-    error
+    let downloads_paused = pause_receiver.cloned_watch_data();
+
+    (error, downloads_paused)
 }
 
 /// Returns `true` if `error` is a body that doesn't match its header, reported for the block hash
@@ -1045,6 +1065,48 @@ async fn behind_tip_height_with_unknown_parent_is_only_trusted_from_a_body_that_
         ),
         "a genuine old block must be dropped anonymously, but was: {error:?}"
     );
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: a body that claims a height that would pause new
+/// downloads, or end a pause, only does that if it matches its header.
+///
+/// Otherwise a peer could pause the syncer with a height just below the far-ahead limit, or end a
+/// pause early with a low height, before the verifier rejects the block.
+#[tokio::test(start_paused = true)]
+async fn only_a_body_that_matches_its_header_pauses_or_resumes_downloads() {
+    let _init_guard = zebra_test::init();
+
+    let v5_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687106_BYTES
+        .zcash_deserialize_into()
+        .expect("hard-coded block vector deserializes");
+    let v5_height = v5_block
+        .coinbase_height()
+        .expect("test vectors have a height");
+    let tip_height = (v5_height - 1).expect("test vector is above genesis");
+
+    // The highest height that isn't dropped as too far ahead is above the pause height.
+    let pause_height = (tip_height + VERIFICATION_PIPELINE_DROP_LIMIT).expect("height is valid");
+    let forged = rewrite_v5_coinbase_height(&v5_block, pause_height);
+    let (error, downloads_paused) =
+        drop_error_and_pause_for(tip_height, forged.clone(), false).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_coinbase_expiry_mismatch),
+        "{error:?}"
+    );
+    assert!(
+        !downloads_paused,
+        "a forged height must not pause downloads"
+    );
+
+    // The tip height is below the reset height, and isn't dropped as behind the tip.
+    let forged = rewrite_v5_coinbase_height(&v5_block, tip_height);
+    let (error, downloads_paused) =
+        drop_error_and_pause_for(tip_height, forged.clone(), true).await;
+    assert!(
+        is_attributed_body_header_mismatch(&error, &forged, is_coinbase_expiry_mismatch),
+        "{error:?}"
+    );
+    assert!(downloads_paused, "a forged height must not end a pause");
 }
 
 /// Regression test for GHSA-g9rc-89v4-hhvf: a body without a coinbase height, served for a block

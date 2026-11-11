@@ -1428,8 +1428,9 @@ where
         // - `Invalid` because a block verifier found that the body doesn't match its header, such
         //   as a rewritten coinbase height (GHSA-g9rc-89v4-hhvf): like a mismatched authorizing
         //   data commitment, only the served body was forged, and the serving peer is scored.
-        // - `BodyHeaderMismatch`: the downloader was going to drop the block for its height, but
-        //   found that the body doesn't match its header, so the same applies.
+        // - `BodyHeaderMismatch`: the downloader was going to drop the block for its height, or
+        //   use it to pause or resume downloads, but found that the body doesn't match its header,
+        //   so the same applies.
         // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
         // excluded — re-downloading a block the network already rejected is pointless.
         let reobtain_hash = match &response {

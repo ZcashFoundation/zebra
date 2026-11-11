@@ -336,7 +336,8 @@ pub fn coinbase_height_is_committed(block: &Block, height: Height) -> Result<(),
 ///
 /// It hashes the transaction IDs into a Merkle root. The IDs are computed when the block is
 /// deserialized, so this costs much less than deserializing the block. But the block verifiers
-/// compute the same root, so only call it before dropping a block without verifying it.
+/// compute the same root, so only call it before using a block's height without verifying the
+/// block.
 pub fn body_matches_header(block: &Block) -> Result<(), BlockError> {
     // A peer can send a body without transactions, which has no Merkle root, so no header can
     // commit to it.
