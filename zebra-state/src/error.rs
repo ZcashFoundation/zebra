@@ -352,6 +352,13 @@ pub enum ValidateContextError {
         parent_height: block::Height,
     },
 
+    #[error("block height {candidate_height:?} is not one greater than its finalized parent block's height {parent_height:?}")]
+    #[non_exhaustive]
+    NonSequentialFinalizedChild {
+        candidate_height: block::Height,
+        parent_height: block::Height,
+    },
+
     #[error("block time {candidate_time:?} is less than or equal to the median-time-past for the block {median_time_past:?}")]
     #[non_exhaustive]
     TimeTooEarly {
@@ -650,6 +657,8 @@ impl ValidateContextError {
             // A wrong block subsidy, funding stream, or miner fee payment is invalid given only
             // the block and its parent, so the peer that sent it is misbehaving.
             ValidateContextError::InvalidSubsidy { .. } => 100,
+            // The parent's height is known, so the block is invalid on its own.
+            ValidateContextError::NonSequentialFinalizedChild { .. } => 100,
             _other => 0,
         }
     }

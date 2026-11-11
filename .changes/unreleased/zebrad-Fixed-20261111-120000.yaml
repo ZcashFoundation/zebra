@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Made the switch from checkpoint sync to full block validation more robust against invalid peer blocks.'
+time: 2026-11-11T12:00:00.000000000-03:00
