@@ -72,7 +72,8 @@ manifest zebra-chain 13.0.0
 manifest zebra-node-services 11.0.0 'zebra-chain = { path = "../zebra-chain", version = "13.0.0" }'
 manifest zebra-utils 10.0.2 '' 'zebra-node-services = { path = "../zebra-node-services" }'
 manifest tower-fallback 0.2.43
-write_file zebra-node-services/src/lib.rs 'pub use zebra_chain::parameters;'
+# zebra-node-services exposes zebra-chain types in a signature, without `pub use`.
+write_file zebra-node-services/src/lib.rs 'pub fn tip(block: zebra_chain::block::Block) {}'
 git -C "$fixture" add --all
 git -C "$fixture" commit --quiet --message base
 git -C "$fixture" update-ref refs/tags/base HEAD
@@ -123,14 +124,14 @@ expect_plan "the highest kind wins" \
   "zebra-chain	13.1.0"
 
 fragment zebra-chain breaking 1
-expect_plan "a break cascades: re-exporters inherit it, other dependents get a patch" \
+expect_plan "a break cascades: library dependents inherit it, zebrad gets a patch, dev-dependents nothing" \
   "zebrad	6.4.3
 zebra-chain	14.0.0
 zebra-node-services	12.0.0"
 
 fragment zebra-chain breaking 1
 fragment zebra-node-services Fixed 1
-expect_plan "a re-exporter inherits a break even when its own fragments plan less" \
+expect_plan "a library dependent inherits a break even when its own fragments plan less" \
   "zebrad	6.4.3
 zebra-chain	14.0.0
 zebra-node-services	12.0.0"

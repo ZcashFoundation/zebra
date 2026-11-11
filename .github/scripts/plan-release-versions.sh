@@ -11,10 +11,12 @@
 #   stops at a minor bump unless one of its fragments has the `network-upgrade`
 #   kind. Only zebrad may use that kind.
 # - A prerelease base version graduates to its release version.
-# - A path dependency that moves to an incompatible version raises a project to
-#   at least a patch, so its new dependency requirement is published. When the
-#   project re-exports that dependency (`pub use <dependency>`), it inherits the
-#   break, even if its own fragments plan a smaller change.
+# - A path dependency that moves to an incompatible version breaks every library
+#   project that depends on it, even if its own fragments plan a smaller change.
+#   Zebra's libraries expose their dependencies' types in public signatures, not
+#   only through `pub use`, so a source scan cannot tell which ones are safe.
+#   zebrad has no library API, so it only gets a patch to publish its new
+#   dependency requirement.
 
 set -euo pipefail
 
@@ -72,10 +74,6 @@ path_dependencies() {
     /^\[/ { normal = ($0 ~ /^\[(target\..*\.)?(build-)?dependencies\]$/); next }
     normal && /path[[:space:]]*=/ { print $1 }
   '
-}
-
-reexports() {
-  git grep --quiet -E "^[[:space:]]*pub use ${2//-/_}(::|;| as )" "$base_revision" -- "$1/src"
 }
 
 bump() {
@@ -154,8 +152,9 @@ while [[ "$changed" == "true" ]]; do
     cascade=""
     while IFS= read -r dependency; do
       if [[ -n "${new[$dependency]:-}" ]] && ! compatible "${old[$dependency]}" "${new[$dependency]}"; then
-        cascade="patch"
-        if reexports "$project" "$dependency"; then
+        if [[ "$project" == "zebrad" ]]; then
+          cascade="patch"
+        else
           cascade="major"
           break
         fi
