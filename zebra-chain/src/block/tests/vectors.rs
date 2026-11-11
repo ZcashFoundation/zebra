@@ -1222,6 +1222,10 @@ fn block_with_tiny_transactions_is_rejected() {
     let tiny = block_with_repeated_transaction(&empty_v1, count);
     assert_too_small(&tiny);
 
+    // The block is rejected after its first transaction, before reading any more of them.
+    let first_only = &tiny[..tiny.len() - (count - 1) * empty_v1.len()];
+    assert_too_small(first_only);
+
     // A V1 transaction with one empty-script input, one empty-script output and a lock time.
     let mut smallest = vec![1, 0, 0, 0, 1];
     smallest.extend_from_slice(&[0x11; 32]);
