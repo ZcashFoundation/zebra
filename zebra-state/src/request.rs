@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    mem::{size_of, size_of_val},
     ops::{Add, Deref, DerefMut, RangeInclusive},
     pin::Pin,
     sync::Arc,
@@ -16,7 +17,7 @@ use zebra_chain::{
     history_tree::HistoryTree,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    serialization::SerializationError,
+    serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
     transparent::{self, utxos_from_ordered_utxos},
@@ -28,7 +29,7 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
-    ReadResponse, Response,
+    CommitBlockError, ReadResponse, Response,
 };
 use crate::{
     error::{InvalidateError, LayeredStateError, ReconsiderError},
@@ -627,6 +628,40 @@ impl SemanticallyVerifiedBlock {
             received_time: None,
         }
     }
+
+    /// Returns an estimate of the memory this block keeps alive, in bytes.
+    ///
+    /// Queues of blocks that can't be verified or committed yet use it to limit their memory. A
+    /// decoded block can be many times larger than its serialized size, for example when it has
+    /// many small transactions or transparent outputs, so this also counts its decoded transactions
+    /// and [`Self::new_outputs`].
+    pub fn retained_bytes(&self) -> usize {
+        let transactions = &self.block.transactions;
+        let mut bytes = self.block.zcash_serialized_size()
+            + transactions.capacity() * size_of::<Arc<transaction::Transaction>>()
+            + size_of_val(&*self.transaction_hashes)
+            + new_outputs_retained_bytes(&self.new_outputs);
+
+        for transaction in transactions {
+            bytes += size_of_val(transaction.as_ref());
+            if let Some(bundle) = transaction.transparent_bundle() {
+                bytes += size_of_val(bundle.vin.as_slice()) + size_of_val(bundle.vout.as_slice());
+            }
+        }
+
+        bytes
+    }
+}
+
+/// Returns the memory used by `new_outputs`, including their scripts, in bytes.
+pub(crate) fn new_outputs_retained_bytes(
+    new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+) -> usize {
+    new_outputs.capacity() * size_of::<(transparent::OutPoint, transparent::OrderedUtxo)>()
+        + new_outputs
+            .values()
+            .map(|output| output.utxo.output.lock_script.as_raw_bytes().len())
+            .sum::<usize>()
 }
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
@@ -851,7 +886,8 @@ pub enum Request {
     /// committing it to the state if successful.
     ///
     /// This request can be made out-of-order; the state service will queue it
-    /// until its parent is ready.
+    /// until its parent is ready. The queue has a size limit: when it is full, the state fails the
+    /// highest queued blocks with [`CommitBlockError::OrphanQueueFull`].
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
     /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if

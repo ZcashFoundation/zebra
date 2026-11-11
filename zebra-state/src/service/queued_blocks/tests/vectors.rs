@@ -2,18 +2,23 @@
 
 use std::sync::Arc;
 
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, error::TryRecvError};
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, Block},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transparent,
 };
 use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    service::queued_blocks::{QueuedBlocks, QueuedSemanticallyVerified, SentHashes},
+    service::queued_blocks::{
+        QueuedBlocks, QueuedSemanticallyVerified, SentHashes, MAX_QUEUED_BLOCKS, MAX_QUEUED_BYTES,
+    },
     tests::FakeChainHelper,
+    CommitBlockError,
 };
 
 // Quick helper trait for making queued blocks with throw away channels
@@ -329,5 +334,147 @@ fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
     sent.remove(&prepared.hash);
     assert!(sent.utxo(&outpoint).is_none());
 
+    Ok(())
+}
+
+/// A full queue fails its highest blocks, so a peer can't fill it with blocks whose parents never
+/// arrive. It keeps the lower blocks, because their parents are needed first.
+#[test]
+fn full_queue_fails_highest_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let mut block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut queue = QueuedBlocks::default();
+    let mut receivers = Vec::new();
+    for _ in 0..=MAX_QUEUED_BLOCKS {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((block.clone().prepare(), rsp_tx));
+        receivers.push(rsp_rx);
+        block = block.make_fake_child();
+    }
+
+    queue.prune_overflow();
+
+    assert_eq!(queue.blocks.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(queue.by_height.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(queue.by_parent.len(), MAX_QUEUED_BLOCKS);
+    assert_eq!(
+        queue.queued_bytes,
+        queue
+            .blocks
+            .values()
+            .map(|(_, bytes)| *bytes)
+            .sum::<usize>()
+    );
+    assert_eq!(
+        receivers.pop().expect("blocks were queued").try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+    assert!(receivers
+        .iter_mut()
+        .all(|rsp_rx| rsp_rx.try_recv() == Err(TryRecvError::Empty)));
+
+    Ok(())
+}
+
+/// A block with many small outputs uses many times its serialized size in memory, mostly in
+/// its outputs and their copies. The queue limits that memory, not just the number of blocks.
+#[test]
+fn queue_limits_memory_of_blocks_with_many_small_outputs() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let mut block = Block::clone(&block);
+    let output = transparent::Output {
+        value: Amount::zero(),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let coinbase = (*block.transactions[0])
+        .clone()
+        .with_transparent_outputs(vec![output; 100_000]);
+    block.transactions[0] = Arc::new(coinbase);
+    let mut block = Arc::new(block);
+    assert!(
+        block.clone().prepare().retained_bytes() > 10 * block.zcash_serialized_size(),
+        "the memory estimate counts the decoded outputs, not just the serialized block"
+    );
+
+    let mut queue = QueuedBlocks::default();
+    let mut receivers = Vec::new();
+    while queue.queued_bytes <= MAX_QUEUED_BYTES {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+        queue.queue((block.clone().prepare(), rsp_tx));
+        receivers.push(rsp_rx);
+        block = block.make_fake_child();
+    }
+
+    queue.prune_overflow();
+
+    assert!(queue.queued_bytes <= MAX_QUEUED_BYTES);
+    assert_eq!(
+        receivers.pop().expect("blocks were queued").try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+    assert_eq!(queue.blocks.len(), receivers.len());
+
+    // Removing the other blocks releases all their memory.
+    let highest = *queue
+        .by_height
+        .keys()
+        .next_back()
+        .expect("blocks are queued");
+    queue.prune_by_height(highest);
+    assert_eq!(queue.queued_bytes, 0);
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+
+    Ok(())
+}
+
+/// Draining releases indexes and memory charges even if response receivers were cancelled, and
+/// the empty queue can admit and dequeue the same blocks again.
+#[test]
+fn drain_releases_accounting_and_allows_requeue() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let child = block.make_fake_child();
+    let mut queue = QueuedBlocks::default();
+    let (cancelled_tx, cancelled_rx) = oneshot::channel();
+    queue.queue((block.clone().prepare(), cancelled_tx));
+    drop(cancelled_rx);
+    let (response_tx, mut response_rx) = oneshot::channel();
+    queue.queue((child.clone().prepare(), response_tx));
+    assert!(queue.queued_bytes > 0);
+
+    let drained = queue.drain().collect::<Vec<_>>();
+    assert_eq!(drained.len(), 2);
+    assert!(queue.blocks.is_empty());
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert_eq!(queue.queued_bytes, 0);
+    for (_, (_, response)) in drained {
+        let _ = response.send(Err(CommitBlockError::OrphanQueueFull.into()));
+    }
+    assert_eq!(
+        response_rx.try_recv(),
+        Ok(Err(CommitBlockError::OrphanQueueFull.into()))
+    );
+
+    queue.queue(child.clone().into_queued());
+    queue.prune_overflow();
+    assert_eq!(queue.blocks.len(), 1);
+    let dequeued = queue.dequeue_children(block.hash());
+    assert_eq!(dequeued.len(), 1);
+    assert_eq!(queue.queued_bytes, 0);
+    assert_eq!(queue.known_utxos.len(), 0);
+    assert!(queue.by_parent.is_empty());
+    assert!(queue.by_height.is_empty());
+    assert_eq!(CommitBlockError::OrphanQueueFull.misbehavior_score(), 0);
     Ok(())
 }

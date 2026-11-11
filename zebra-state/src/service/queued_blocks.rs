@@ -1,17 +1,21 @@
 //! Queued blocks that are awaiting their parent block for verification.
 
 use std::{
-    collections::{hash_map::Drain, BTreeMap, HashMap, HashSet, VecDeque},
-    iter, mem,
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    iter,
 };
 
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-use zebra_chain::{block, transparent};
+use zebra_chain::{
+    block, parameters::checkpoint::constants::MAX_CHECKPOINT_BYTE_COUNT, transparent,
+};
 
 use crate::{
+    constants::{MAX_BLOCK_REORG_HEIGHT, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::{CommitBlockError, CommitCheckpointVerifiedError},
+    request::new_outputs_retained_bytes,
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
     SemanticallyVerifiedBlock,
 };
@@ -31,17 +35,30 @@ pub type QueuedSemanticallyVerified = (
     oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
 );
 
+/// The maximum number of blocks in a [`QueuedBlocks`].
+// The reorg height fits in usize on every supported platform.
+const MAX_QUEUED_BLOCKS: usize = MAX_BLOCK_REORG_HEIGHT as usize;
+
+/// The maximum memory used by the blocks in a [`QueuedBlocks`], in bytes: one maximum-size
+/// checkpoint range for each supported chain fork.
+// 32 MiB fits in usize on every supported platform.
+const MAX_QUEUED_BYTES: usize = MAX_CHECKPOINT_BYTE_COUNT as usize * MAX_NON_FINALIZED_CHAIN_FORKS;
+
 /// A queue of blocks, awaiting the arrival of parent blocks.
+///
+/// The queue holds at most [`MAX_QUEUED_BLOCKS`] blocks, which use at most [`MAX_QUEUED_BYTES`].
 #[derive(Debug, Default)]
 pub struct QueuedBlocks {
-    /// Blocks awaiting their parent blocks for contextual verification.
-    blocks: HashMap<block::Hash, QueuedSemanticallyVerified>,
+    /// Blocks awaiting their parent blocks for contextual verification, with their memory use.
+    blocks: HashMap<block::Hash, (QueuedSemanticallyVerified, usize)>,
     /// Hashes from `queued_blocks`, indexed by parent hash.
     by_parent: HashMap<block::Hash, HashSet<block::Hash>>,
     /// Hashes from `queued_blocks`, indexed by block height.
     by_height: BTreeMap<block::Height, HashSet<block::Hash>>,
     /// Known UTXOs.
     known_utxos: KnownUtxos,
+    /// The total memory used by `blocks`.
+    queued_bytes: usize,
 }
 
 /// UTXOs created by queued or sent blocks, with the number of those blocks that create each one.
@@ -81,9 +98,7 @@ impl KnownUtxos {
 impl QueuedBlocks {
     /// Queue a block for eventual verification and commit.
     ///
-    /// # Panics
-    ///
-    /// - if a block with the same `block::Hash` has already been queued.
+    /// The queue can go over its limits until the caller calls [`Self::prune_overflow`].
     #[instrument(skip(self, new), fields(height = ?new.0.height, hash = %new.0.hash))]
     pub fn queue(&mut self, new: QueuedSemanticallyVerified) {
         let new_hash = new.0.hash;
@@ -101,7 +116,10 @@ impl QueuedBlocks {
                 .insert(*outpoint, ordered_utxo.utxo.clone());
         }
 
-        self.blocks.insert(new_hash, new);
+        // Count the block, and the copy of its outputs in `known_utxos`.
+        let bytes = new.0.retained_bytes() + new_outputs_retained_bytes(&new.0.new_outputs);
+        self.queued_bytes += bytes;
+        self.blocks.insert(new_hash, (new, bytes));
         self.by_height
             .entry(new_height)
             .or_default()
@@ -113,6 +131,59 @@ impl QueuedBlocks {
 
         tracing::trace!(%parent_hash, queued = %self.blocks.len(), "queued block");
         self.update_metrics();
+    }
+
+    /// Fails the highest queued blocks with [`CommitBlockError::OrphanQueueFull`] until the queue
+    /// is within its limits.
+    ///
+    /// Callers should send the queued blocks that are ready to commit first, so they aren't failed.
+    pub fn prune_overflow(&mut self) {
+        if self.blocks.len() <= MAX_QUEUED_BLOCKS && self.queued_bytes <= MAX_QUEUED_BYTES {
+            return;
+        }
+
+        while self.blocks.len() > MAX_QUEUED_BLOCKS || self.queued_bytes > MAX_QUEUED_BYTES {
+            let hash = *self
+                .by_height
+                .values()
+                .next_back()
+                .and_then(|hashes| hashes.iter().next())
+                .expect("a queue over its limits has blocks");
+            let (_block, rsp_tx) = self.remove(&hash);
+
+            // The caller might have stopped waiting for the block.
+            let _ = rsp_tx.send(Err(CommitBlockError::OrphanQueueFull.into()));
+        }
+
+        tracing::debug!(queued = %self.blocks.len(), "failed queued blocks over the queue limits");
+        self.update_metrics();
+    }
+
+    /// Removes a queued block, its indexes, and its outputs.
+    fn remove(&mut self, hash: &block::Hash) -> QueuedSemanticallyVerified {
+        let (queued, bytes) = self.blocks.remove(hash).expect("indexed blocks are queued");
+        self.queued_bytes -= bytes;
+
+        let parent_hash = queued.0.block.header.previous_block_hash;
+        if let Some(hashes) = self.by_parent.get_mut(&parent_hash) {
+            hashes.remove(hash);
+            if hashes.is_empty() {
+                self.by_parent.remove(&parent_hash);
+            }
+        }
+
+        if let Some(hashes) = self.by_height.get_mut(&queued.0.height) {
+            hashes.remove(hash);
+            if hashes.is_empty() {
+                self.by_height.remove(&queued.0.height);
+            }
+        }
+
+        for outpoint in queued.0.new_outputs.keys() {
+            self.known_utxos.remove(outpoint);
+        }
+
+        queued
     }
 
     /// Returns `true` if there are any queued children of `parent_hash`.
@@ -139,26 +210,8 @@ impl QueuedBlocks {
             .remove(&parent_hash)
             .unwrap_or_default()
             .into_iter()
-            .map(|hash| {
-                self.blocks
-                    .remove(&hash)
-                    .expect("block is present if its hash is in by_parent")
-            })
+            .map(|hash| self.remove(&hash))
             .collect::<Vec<_>>();
-
-        for queued in &queued_children {
-            if let Some(hashes) = self.by_height.get_mut(&queued.0.height) {
-                hashes.remove(&queued.0.hash);
-
-                if hashes.is_empty() {
-                    self.by_height.remove(&queued.0.height);
-                }
-            }
-
-            for outpoint in queued.0.new_outputs.keys() {
-                self.known_utxos.remove(outpoint);
-            }
-        }
 
         tracing::trace!(
             dequeued = queued_children.len(),
@@ -174,52 +227,20 @@ impl QueuedBlocks {
     /// `finalized_tip_height`.
     #[instrument(skip(self))]
     pub fn prune_by_height(&mut self, finalized_tip_height: block::Height) {
-        // split_off returns the values _greater than or equal to_ the key. What
-        // we need is the keys that are less than or equal to
-        // `finalized_tip_height`. To get this we have split at
-        // `finalized_tip_height + 1` and swap the removed portion of the list
-        // with the remainder.
-        let split_height = finalized_tip_height + 1;
-        let split_height =
-            split_height.expect("height after finalized tip won't exceed max height");
-        let mut by_height = self.by_height.split_off(&split_height);
-        mem::swap(&mut self.by_height, &mut by_height);
-
-        for hash in by_height.into_values().flatten() {
-            let (expired_block, expired_sender) =
-                self.blocks.remove(&hash).expect("block is present");
-            let parent_hash = &expired_block.block.header.previous_block_hash;
-
-            // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
-                Some(expired_block.height.into()),
-                KnownBlock::Finalized,
-            )
-            .into()));
-
-            for outpoint in expired_block.new_outputs.keys() {
-                self.known_utxos.remove(outpoint);
+        while let Some(lowest) = self.by_height.first_entry() {
+            if *lowest.key() > finalized_tip_height {
+                break;
             }
 
-            let parent_list = self
-                .by_parent
-                .get_mut(parent_hash)
-                .expect("parent is present");
+            for hash in lowest.remove() {
+                let (expired_block, expired_sender) = self.remove(&hash);
 
-            if parent_list.len() == 1 {
-                let removed = self
-                    .by_parent
-                    .remove(parent_hash)
-                    .expect("parent is present");
-                assert!(
-                    removed.contains(&hash),
-                    "hash must be present in parent hash list"
-                );
-            } else {
-                assert!(
-                    parent_list.remove(&hash),
-                    "hash must be present in parent hash list"
-                );
+                // we don't care if the receiver was dropped
+                let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
+                    Some(expired_block.height.into()),
+                    KnownBlock::Finalized,
+                )
+                .into()));
             }
         }
 
@@ -229,7 +250,7 @@ impl QueuedBlocks {
 
     /// Return the queued block if it has already been registered
     pub fn get_mut(&mut self, hash: &block::Hash) -> Option<&mut QueuedSemanticallyVerified> {
-        self.blocks.get_mut(hash)
+        self.blocks.get_mut(hash).map(|(queued, _bytes)| queued)
     }
 
     /// Update metrics after the queue is modified
@@ -260,14 +281,19 @@ impl QueuedBlocks {
     /// Returns all key-value pairs of blocks as an iterator.
     ///
     /// Doesn't update the metrics, because it is only used when the state is being dropped.
-    pub fn drain(&mut self) -> Drain<'_, block::Hash, QueuedSemanticallyVerified> {
+    pub fn drain(
+        &mut self,
+    ) -> impl Iterator<Item = (block::Hash, QueuedSemanticallyVerified)> + '_ {
         self.known_utxos.0.clear();
         self.known_utxos.0.shrink_to_fit();
         self.by_parent.clear();
         self.by_parent.shrink_to_fit();
         self.by_height.clear();
+        self.queued_bytes = 0;
 
-        self.blocks.drain()
+        self.blocks
+            .drain()
+            .map(|(hash, (queued, _bytes))| (hash, queued))
     }
 }
 
