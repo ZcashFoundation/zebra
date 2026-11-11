@@ -139,8 +139,9 @@ To check the bumps, read the "Public API diff since zebrad vX" comment on the Re
 Every new Release PR commit automatically runs `PR Gate / Release readiness`. The job confirms that the PR includes current `main`, then runs these checks independently, so the summary reports every outcome even when one fails:
 
 - **Changelogs:** each released package has a non-empty versioned changelog.
-- **Versions:** each package moves to the version its change fragments plan. A prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is accepted.
+- **Versions:** each package moves to the version its change fragments plan. A new prerelease of the planned version, such as `7.0.0-rc.0` for `7.0.0`, is also accepted, unless the planned version is compatible with the current one and another workspace package depends on it. Its dependents' requirements would reject the prerelease, and the plan doesn't release them. A package that is a prerelease and has no new fragments may keep its version, graduate to its release version, or move to another prerelease.
 - **Manifests:** a package whose `Cargo.toml` changes is released.
+- **Fragments:** a released package has no fragments left in `.changes/unreleased`, so the next plan doesn't count them again.
 - **Cargo release:** Cargo 1.91's multi-package dry-run. It also observes crates.io, tags, and the GitHub Release without changing them.
 
 `.github/scripts/plan-release-versions.sh <base>` prints the plan. It follows these rules:
@@ -149,7 +150,7 @@ Every new Release PR commit automatically runs `PR Gate / Release readiness`. Th
 - Below 1.0.0, Cargo treats the minor version as the major one, so each level bumps one place lower.
 - `zebrad`'s major version marks a network upgrade, so `zebrad` stops at a minor version unless one of its fragments has the `network-upgrade` kind.
 - A prerelease version graduates to its release version.
-- A path dependency that moves to an incompatible version raises a package to at least a patch release, so its new requirement is published. When the package re-exports that dependency with `pub use`, it inherits the break, even if its own fragments plan a smaller change.
+- A path dependency that moves to an incompatible version breaks every library package that depends on it, even if the package's own fragments plan a smaller change, because Zebra's libraries expose their dependencies' types in public signatures. `zebrad` has no library API, so it gets a patch release that publishes its new requirement.
 
 Before publication, a green report with `reason: "incomplete"` is expected: the plan and dry-run passed, while the planned crates, tags, or GitHub Release are correctly absent. The job summary shows the complete plan and observed state, so maintainers can review readiness without running local commands.
 

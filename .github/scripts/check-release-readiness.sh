@@ -6,8 +6,13 @@
 #
 # - Changelogs: each released package has a non-empty versioned changelog.
 # - Versions: each package moves to the version its fragments plan. A prerelease
-#   of the planned version is accepted.
+#   of the planned version is accepted when it is new, and when the planned
+#   version breaks compatibility or no workspace package depends on the package.
+#   A compatible prerelease would not satisfy its dependents' requirements, so
+#   they would need releases the plan doesn't have. A prerelease base without a
+#   planned version may also stay, graduate, or move to another prerelease.
 # - Manifests: a package whose Cargo.toml changes is released.
+# - Fragments: a released package's unreleased fragments are consumed.
 #
 # Writes the table to GITHUB_STEP_SUMMARY when it is set.
 
@@ -38,17 +43,53 @@ projects() {
   '
 }
 
+path_dependents() {
+  local project="$1" dependent
+
+  while IFS= read -r dependent; do
+    git show "${base_revision}:${dependent}/Cargo.toml" 2>/dev/null | awk -v dependency="$project" '
+      /^\[/ { normal = ($0 ~ /^\[(target\..*\.)?(build-)?dependencies\]$/); next }
+      normal && $1 == dependency && /path[[:space:]]*=/ { found = 1 }
+      END { exit !found }
+    ' && echo "$dependent"
+  done < <(projects)
+}
+
+compatible() {
+  local old_major old_minor new_major new_minor
+  IFS=. read -r old_major old_minor _ <<< "${1%%-*}"
+  IFS=. read -r new_major new_minor _ <<< "${2%%-*}"
+  [[ "$old_major" == "$new_major" && ("$old_major" != "0" || "$old_minor" == "$new_minor") ]]
+}
+
 check_versions() {
-  local plan project planned base actual failed=false
-  plan="$("${scripts}/plan-release-versions.sh" "$base_revision")"
+  local plan project planned base actual dependents failed=false
+
+  if ! plan="$("${scripts}/plan-release-versions.sh" "$base_revision")"; then
+    echo "::error title=Release plan failed::The fragments at ${base_revision} can't be planned. Fix them on main." >&2
+    return 1
+  fi
 
   while IFS= read -r project; do
     base="$(package_version "$base_revision" "$project")"
     actual="$(package_version "$release_revision" "$project")"
     planned="$(awk -F'\t' -v project="$project" '$1 == project { print $2 }' <<< "$plan")"
-    planned="${planned:-$base}"
 
-    if [[ "$actual" == "$planned" || ("$actual" == "${planned}-"* && "$planned" != "$base") ]]; then
+    if [[ -z "$planned" ]]; then
+      # A prerelease base without new fragments may stay, graduate, or take another prerelease.
+      if [[ "$actual" == "$base" || ("$base" == *-* && ("$actual" == "${base%%-*}" || "$actual" == "${base%%-*}-"*)) ]]; then
+        continue
+      fi
+      planned="$base"
+    elif [[ "$actual" == "$planned" ]]; then
+      continue
+    elif [[ "$actual" == "${planned}-"* && "$actual" != "$base" ]]; then
+      dependents="$(path_dependents "$project" | paste -sd, - | sed 's/,/, /g')"
+      if ! compatible "$base" "$planned" || [[ -z "$dependents" ]]; then
+        continue
+      fi
+      echo "::error title=Prerelease needs dependent releases::${project} ${actual} doesn't satisfy the ${base} requirement of ${dependents}, which the plan doesn't release. Set ${project}/Cargo.toml to ${planned}." >&2
+      failed=true
       continue
     fi
     echo "::error title=Unplanned version::${project} moves from ${base} to ${actual}, but its fragments plan ${planned}. If a fragment is wrong, fix it on main. Otherwise set ${project}/Cargo.toml to ${planned} and update its requirement in each released dependent." >&2
@@ -68,6 +109,22 @@ check_manifests() {
       failed=true
     fi
   done < <(projects)
+
+  [[ "$failed" == "false" ]]
+}
+
+check_fragments() {
+  local fragment project failed=false
+
+  while IFS= read -r fragment; do
+    [[ "$fragment" == *.yaml ]] || continue
+    project="$(git show "${base_revision}:${fragment}" | sed -n 's/^project: *//p')"
+    if [[ "$(package_version "$base_revision" "$project")" != "$(package_version "$release_revision" "$project")" ]] &&
+      git cat-file -e "${release_revision}:${fragment}" 2>/dev/null; then
+      echo "::error title=Unconsumed fragment::${project} is released, but ${fragment} is still unreleased. The next plan would count it again. Remove it in the Release PR." >&2
+      failed=true
+    fi
+  done < <(git ls-tree --name-only "$base_revision" .changes/unreleased/)
 
   [[ "$failed" == "false" ]]
 }
@@ -92,6 +149,7 @@ run_check() {
 run_check Changelogs "${scripts}/validate-release-changelogs.sh" "$base_revision" "$release_revision"
 run_check Versions check_versions
 run_check Manifests check_manifests
+run_check Fragments check_fragments
 
 {
   echo "| Validation | Result |"
