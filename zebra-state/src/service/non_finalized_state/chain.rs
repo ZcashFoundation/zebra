@@ -1611,54 +1611,65 @@ impl Chain {
             .filter(|max_overlap_height| self.blocks.contains_key(max_overlap_height))
             .map(|max_overlap_height| Height::MIN..=max_overlap_height);
 
-        let (balance, received) = addresses
-            .iter()
-            .filter_map(|address| {
-                let transfers = self.partial_transparent_transfers.get(address)?;
-                Some((address, transfers))
-            })
-            .fold(
-                (Ok(Amount::zero()), 0u64),
-                |(balance, received), (address, transfers)| {
-                    let mut balance = balance + transfers.balance();
+        // Correctness: every partial sum here is a change in the total amount held by some of
+        // these distinct addresses, so it is between minus and plus the total money supply.
+        //
+        // The overlap is subtracted from the combined change of all the addresses, rather than
+        // from each address' change. Adding one address' change after the overlap to another
+        // address' change in the whole chain doesn't have that bound, so it can overflow.
+        let (mut balance, received) = self.partial_transparent_indexes(addresses).fold(
+            (Ok(Amount::zero()), 0u64),
+            |(balance, received), transfers| {
+                // Saturate: each per-address `received_from()` can already reach `u64::MAX`,
+                // so summing several of them could overflow. Matches the finalized path
+                // (#10556).
+                (
+                    balance + transfers.balance(),
+                    received.saturating_add(transfers.received_from(min_height)),
+                )
+            },
+        );
 
-                    if let Some(overlap_heights) = overlap_heights.clone() {
-                        balance -=
-                            self.transparent_balance_change_in(address, transfers, overlap_heights);
-                    }
+        if let Some(overlap_heights) = overlap_heights {
+            balance -= self.transparent_balance_change_in(addresses, overlap_heights);
+        }
 
-                    // Saturate: each per-address `received_from()` can already reach `u64::MAX`,
-                    // so summing several of them could overflow. Matches the finalized path
-                    // (#10556).
-                    (
-                        balance,
-                        received.saturating_add(transfers.received_from(min_height)),
-                    )
-                },
-            );
-
-        (balance.expect("unexpected amount overflow"), received)
+        (
+            balance.expect(
+                "partial sums are changes in the total amount held by distinct addresses, \
+                 which is between zero and the total money supply",
+            ),
+            received,
+        )
     }
 
-    /// Returns the transparent balance change for `address` in the blocks of this chain at
+    /// Returns the transparent balance change for `addresses` in the blocks of this chain at
     /// `heights`.
     ///
-    /// `transfers` must be the address index for `address` in this chain.
-    ///
-    /// Only looks at the transactions that sent or received funds to `address`, using the same
-    /// transparent outputs and spent outputs as [`Chain::push`].
+    /// Only looks at the transactions that sent or received funds to `addresses`, using the same
+    /// transparent outputs and spent outputs as [`Chain::push`]. Each transaction is scanned
+    /// once, even if it sends or receives funds to many of the addresses.
     fn transparent_balance_change_in(
         &self,
-        address: &transparent::Address,
-        transfers: &TransparentTransfers,
+        addresses: &HashSet<transparent::Address>,
         heights: RangeInclusive<Height>,
     ) -> Amount<NegativeAllowed> {
         let mut balance = Ok(Amount::zero());
 
-        let tx_locs: BTreeSet<TransactionLocation> = transfers
-            .tx_ids(&self.tx_loc_by_hash, heights)
-            .map(|(tx_loc, _tx_hash)| tx_loc)
-            .collect();
+        let mut tx_locs: BTreeSet<TransactionLocation> = BTreeSet::new();
+        for transfers in self.partial_transparent_indexes(addresses) {
+            tx_locs.extend(
+                transfers
+                    .tx_ids(&self.tx_loc_by_hash, heights.clone())
+                    .map(|(tx_loc, _tx_hash)| tx_loc),
+            );
+        }
+
+        let pays_addresses = |output: &transparent::Output| {
+            output
+                .address(&self.network)
+                .is_some_and(|address| addresses.contains(&address))
+        };
 
         for tx_loc in tx_locs {
             let block = self
@@ -1668,7 +1679,7 @@ impl Chain {
             let transaction = &block.block.transactions[tx_loc.index.as_usize()];
 
             // Spends are subtracted before outputs are added, so every partial sum is the
-            // difference between two amounts held by the address, in chain order.
+            // difference between two total amounts held by the addresses, in chain order.
             for input in transaction.inputs() {
                 // Coinbase inputs don't spend outputs. Some tests don't supply spent outputs,
                 // but `push()` panics on missing spent outputs outside tests.
@@ -1679,7 +1690,7 @@ impl Chain {
                     continue;
                 };
 
-                if spent_output.utxo.output.address(&self.network).as_ref() == Some(address) {
+                if pays_addresses(&spent_output.utxo.output) {
                     balance -= spent_output
                         .utxo
                         .output
@@ -1690,7 +1701,7 @@ impl Chain {
             }
 
             for output in transaction.outputs() {
-                if output.address(&self.network).as_ref() == Some(address) {
+                if pays_addresses(&output) {
                     balance += output
                         .value()
                         .constrain()
@@ -1700,7 +1711,7 @@ impl Chain {
         }
 
         balance.expect(
-            "partial sums are differences between amounts held by the address, \
+            "partial sums are differences between two total amounts held by distinct addresses, \
              which are between zero and the total money supply",
         )
     }
