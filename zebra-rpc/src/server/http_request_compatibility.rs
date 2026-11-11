@@ -228,9 +228,6 @@ pub(super) fn reencode_response(bytes: Bytes, version: JsonRpcVersion) -> Bytes 
     }
 }
 
-/// The longest response `id` the splice looks for, so it only scans the head of the body.
-const MAX_SPLICED_ID_LEN: usize = 256;
-
 /// Converts a `jsonrpsee` response, `{"jsonrpc":"2.0","id":…,"result":…}` or `…"error":…}`,
 /// to a 1.0 `version` by rewriting its head and tail. Returns `None` for any other layout.
 pub(super) fn splice_response(body: &[u8], version: JsonRpcVersion) -> Option<Bytes> {
@@ -240,10 +237,10 @@ pub(super) fn splice_response(body: &[u8], version: JsonRpcVersion) -> Option<By
         JsonRpcVersion::TwoPointZero | JsonRpcVersion::Unknown => return None,
     };
     let rest = body.strip_prefix(br#"{"jsonrpc":"2.0","id":"#)?;
-    let (id, rest) = rest.split_at(scalar_len(&rest[..rest.len().min(MAX_SPLICED_ID_LEN)])?);
+    let (id, rest) = rest.split_at(scalar_len(rest)?);
     let rest = rest.strip_suffix(b"}")?;
 
-    // The id and error are short, so re-encode them as the parsing path does.
+    // The id and error are small next to the result, so re-encode them as the parsing path does.
     let reencode = |value: &[u8]| {
         serde_json::from_slice::<serde_json::Value>(value)
             .ok()

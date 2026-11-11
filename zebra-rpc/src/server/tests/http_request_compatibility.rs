@@ -325,6 +325,7 @@ fn ids() -> Vec<Id<'static>> {
         Id::Str("".into()),
         Id::Str("q\"b\\s\n\u{1}\u{7f}é/,}".into()),
         Id::Str("\"jsonrpc\":\"2.0\",\"error\":null".into()),
+        Id::Str("a".repeat(300).into()),
     ]
 }
 
@@ -376,10 +377,6 @@ fn spliced_responses_match_reencoded_responses() {
 /// Any other layout falls back to parsing, so the output is still the parsing path's.
 #[test]
 fn unexpected_layouts_fall_back_to_reencoding() {
-    let long_id = format!(
-        r#"{{"jsonrpc":"2.0","id":"{}","result":1}}"#,
-        "a".repeat(300)
-    );
     for body in [
         r#"{"jsonrpc":"2.0","result":1,"id":1}"#,
         r#"{"id":1,"jsonrpc":"2.0","result":1}"#,
@@ -405,7 +402,6 @@ fn unexpected_layouts_fall_back_to_reencoding() {
         r#"[{"jsonrpc":"2.0","id":1,"result":1}]"#,
         r#"not json {"#,
         "",
-        long_id.as_str(),
     ] {
         let body = Bytes::from(body.to_string());
         for version in CONVERTED {
