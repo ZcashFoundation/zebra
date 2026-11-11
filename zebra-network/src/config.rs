@@ -56,15 +56,17 @@ pub use cache_dir::CacheDir;
 const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
 /// Public DNS seed endpoints, also used to isolate configured networks.
-const DEFAULT_MAINNET_PEERS: [&str; 5] = [
+const DEFAULT_MAINNET_PEERS: [&str; 6] = [
     "dnsseed.str4d.xyz:8233",
     "dnsseed.z.cash:8233",
     "mainnet.seeder.shieldedinfra.net:8233",
     "mainnet.seeder.zfnd.org:8233",
+    "mainnet.zodl.com:8233",
     "seeder.zec.rocks:8233",
 ];
-const DEFAULT_TESTNET_PEERS: [&str; 3] = [
+const DEFAULT_TESTNET_PEERS: [&str; 4] = [
     "dnsseed.testnet.z.cash:18233",
+    "dnsseed.testnet.zodl.com:18233",
     "seeder.testnet.zec.rocks:18233",
     "testnet.seeder.zfnd.org:18233",
 ];

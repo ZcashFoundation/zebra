@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: "The default DNS seeders now also include `mainnet.zodl.com` (Mainnet) and `dnsseed.testnet.zodl.com` (Testnet)."
+time: 2026-11-11T23:47:03.000000000Z
