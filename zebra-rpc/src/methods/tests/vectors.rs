@@ -5091,6 +5091,7 @@ async fn getblocktemplate_refreshes_after_fallback_publication_or_updater_exit()
 async fn getblocktemplate_fallback_validates_transaction_bearing_work_in_the_background() {
     use crate::methods::types::get_block_template::{
         proposal::proposal_block_from_template, BlockTemplateTimeSource,
+        MAX_CONCURRENT_PROPOSAL_CHECKS,
     };
 
     let _init_guard = zebra_test::init();
@@ -5191,6 +5192,19 @@ async fn getblocktemplate_fallback_validates_transaction_bearing_work_in_the_bac
             "the served template is the validated proposal"
         );
         request.respond(proposal.hash());
+
+        // Background checks share the RPC's proposal check limit, and skip work beyond it.
+        let busy = rpc
+            .gbt
+            .proposal_checks()
+            .acquire_many_owned(
+                u32::try_from(MAX_CONCURRENT_PROPOSAL_CHECKS).expect("the limit is small"),
+            )
+            .await
+            .expect("the limit is never closed");
+        rpc.validate_fallback_template(&template);
+        verifier.expect_no_requests().await;
+        drop(busy);
     })
     .await
     .expect("fallback validation must not delay the template");

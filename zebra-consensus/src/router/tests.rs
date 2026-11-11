@@ -385,7 +385,10 @@ async fn mined_checkpoint_notifications_follow_commit() {
         committed.try_send(occupied).unwrap();
         let error = router
             .clone()
-            .oneshot(Request::CommitMined(genesis.clone(), notifications.clone()))
+            .oneshot(Request::CommitDecoded(
+                genesis.clone().into(),
+                Some(notifications.clone()),
+            ))
             .await
             .unwrap_err();
         let error = error
@@ -431,7 +434,7 @@ async fn mined_checkpoint_notifications_follow_commit() {
         );
 
         assert!(router
-            .oneshot(Request::CommitMined(genesis, notifications))
+            .oneshot(Request::CommitDecoded(genesis.into(), Some(notifications)))
             .await
             .unwrap_err()
             .downcast_ref::<RouterError>()
