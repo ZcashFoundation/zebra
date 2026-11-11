@@ -37,11 +37,13 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 
         prop_assert_eq![&tx, &tx2];
 
-        let data2 = tx2
-            .zcash_serialize_to_vec()
+        // Encode the parsed body, not the kept decoded bytes, which serialization would return.
+        let mut data2 = Vec::new();
+        tx2.inner()
+            .write(&mut data2)
             .expect("vec serialization is infallible");
 
-        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+        prop_assert_eq![data, data2, "decoded bytes must be the canonical encoding"];
     }
 
     Ok(())
