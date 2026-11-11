@@ -373,14 +373,13 @@ jobs:
           done
 
   # No ruleset context pins this worker's display name; the ruleset requires `pr-gate-result`.
+  # It runs on every event for a Release PR, including body edits and unrelated labels:
+  # the required result comes from the newest PR Gate run for the head commit, and that
+  # run would otherwise accept a skipped readiness check whatever the earlier run found.
   release-readiness:
     name: Release readiness
     if: >-
       github.event_name == 'pull_request' &&
-      ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
-      github.event.label.name == 'release') &&
-      (github.event.action != 'edited' ||
-      github.event.changes.title != null || github.event.changes.base != null) &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-') &&
       contains(github.event.pull_request.labels.*.name, 'release')
     permissions:
