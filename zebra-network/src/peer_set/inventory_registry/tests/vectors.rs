@@ -301,6 +301,41 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
     }
 }
 
+/// Check that peers that returned an advertised block are recorded separately from failed peers,
+/// aren't cleared when the peer reconnects, and expire after two rotations.
+#[tokio::test]
+async fn inv_registry_served_peers_ok() {
+    let test_hash = InventoryHash::Block(block::Hash([0; 32]));
+    let test_peer = "1.1.1.1:1"
+        .parse()
+        .expect("unexpected invalid peer address");
+
+    let (mut inv_registry, _inv_stream_tx) = new_inv_registry();
+
+    inv_registry.register_served(test_hash, test_peer);
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+    assert_eq!(inv_registry.failed_peers(test_hash).count(), 0);
+
+    // The record is about the block, so a new connection from the same address keeps it.
+    inv_registry.clear_peer_failures(test_peer);
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    inv_registry.rotate();
+    assert_eq!(
+        inv_registry.served_peers(test_hash).next(),
+        Some(&test_peer)
+    );
+
+    inv_registry.rotate();
+    assert_eq!(inv_registry.served_peers(test_hash).count(), 0);
+}
+
 /// Check that failed peers are recorded, aren't cleared by advertisements, and expire after two
 /// rotations.
 #[tokio::test]

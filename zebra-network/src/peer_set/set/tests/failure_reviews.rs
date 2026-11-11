@@ -574,3 +574,155 @@ async fn overdue_inventory_rotations_preserve_new_block_failure() {
         "missed ticks must not expire a failure registered on the first poll",
     );
 }
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: once a peer returned a block it was asked for because
+/// the block was advertised, the next request for that block doesn't go to any of its advertisers.
+///
+/// A block hash only commits to the header, so a peer can advertise a block, then serve its header
+/// with other transactions. The downloader rejects that block, and asks for it again. If
+/// advertisers kept their preference, one advertiser could get every retry until its ban arrived,
+/// and four advertisers could take the first request and all three retries in turn. The mock
+/// peers here are never banned or disconnected, so the routing can't depend on a ban arriving
+/// before the retry.
+#[tokio::test(start_paused = true)]
+async fn repeat_request_for_served_advertised_block_ignores_its_advertisers() {
+    let _init_guard = zebra_test::init();
+
+    // The syncer asks for a block once, then at most 3 more times.
+    const REQUESTS: usize = 4;
+
+    // One advertiser, then enough advertisers for every request.
+    for advertiser_count in [1, REQUESTS] {
+        // Peer 0 doesn't advertise the block. The others do.
+        let services = vec![PeerServices::NODE_NETWORK; advertiser_count + 1];
+        let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+            peer_set_with_services(&services);
+        let (_, inventory, response) = block_download();
+        let InventoryHash::Block(hash) = inventory else {
+            unreachable!("the helper constructs block inventory");
+        };
+        // The syncer doesn't know who advertised the block.
+        let request = Request::BlockDownload {
+            hash,
+            advertiser: None,
+        };
+
+        for advertiser in &addrs[1..] {
+            send_inventory(
+                &mut guard,
+                InventoryStatus::new_available(inventory, *advertiser),
+            );
+            peer_set.ready().await.expect("the peers are ready");
+        }
+
+        // The first request goes to an advertiser, which returns a block.
+        let download = peer_set
+            .ready()
+            .await
+            .expect("the peers are ready")
+            .call(request.clone());
+        assert_eq!(
+            received_request(&mut handles[0]),
+            None,
+            "the first request must prefer an advertiser",
+        );
+        let first_peer = (1..handles.len())
+            .find(|&index| {
+                handles[index]
+                    .try_to_receive_outbound_client_request()
+                    .request()
+                    .map(|client_request| {
+                        client_request
+                            .tx
+                            .send(Ok(response.clone()))
+                            .expect("the download is still waiting for its response")
+                    })
+                    .is_some()
+            })
+            .expect("an advertiser received the first request");
+        download.await.expect("the advertiser returned a block");
+
+        // The downloader rejected that block, so it asks again. Every repeat goes to the peer that
+        // didn't advertise the block, even though the advertisers are still connected and ready.
+        for _ in 1..REQUESTS {
+            let download = peer_set
+                .ready()
+                .await
+                .expect("the peers are ready")
+                .call(request.clone());
+            for (index, handle) in handles.iter_mut().enumerate().skip(1) {
+                assert_eq!(
+                    received_request(handle),
+                    None,
+                    "advertiser {index} must not get a repeat request, \
+                     with {advertiser_count} advertisers",
+                );
+            }
+            finish_download(&mut handles[0], request.clone(), response.clone(), download).await;
+        }
+
+        assert_eq!(
+            peer_set
+                .inventory_registry
+                .served_peers(inventory)
+                .collect::<Vec<_>>(),
+            vec![&addrs[first_peer]],
+            "only a block from a peer chosen for its advertisement is recorded",
+        );
+
+        // Control: the record expires with the advertisements, after two rotations.
+        tokio::time::advance(2 * crate::constants::INVENTORY_ROTATION_INTERVAL).await;
+        for _ in 0..2 {
+            peer_set.ready().await.expect("the peers are ready");
+            tokio::time::advance(crate::constants::INVENTORY_ROTATION_INTERVAL).await;
+        }
+        peer_set.ready().await.expect("the peers are ready");
+        assert_eq!(
+            peer_set.inventory_registry.served_peers(inventory).count(),
+            0,
+        );
+    }
+}
+
+/// A block from a peer that wasn't chosen for an advertisement isn't recorded, so historic block
+/// downloads don't fill the registry, and a later advertiser of the block is still preferred.
+#[tokio::test(start_paused = true)]
+async fn served_block_without_advertisement_keeps_advertiser_preference() {
+    let _init_guard = zebra_test::init();
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&[PeerServices::NODE_NETWORK, PeerServices::empty()]);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+
+    // Nobody advertised the block, so the serving peer gets the request.
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    finish_download(&mut handles[0], request.clone(), response.clone(), download).await;
+    peer_set.ready().await.expect("the peers are ready");
+    assert_eq!(
+        peer_set.inventory_registry.served_peers(inventory).count(),
+        0,
+    );
+
+    // The non-serving peer advertises the block, so it gets the next request.
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[1]),
+    );
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    assert_eq!(received_request(&mut handles[0]), None);
+    finish_download(&mut handles[1], request, response, download).await;
+}
