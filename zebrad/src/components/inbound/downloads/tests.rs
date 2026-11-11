@@ -8,9 +8,18 @@
 //! ahead of the tip, or behind the finalized tip, before consensus validation. The supplying peer
 //! must be scored only when the parent header Zebra holds proves the height was rewritten.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures::stream::StreamExt;
+use metrics::{
+    Counter, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder, SharedString, Unit,
+};
 
 use zebra_chain::{
     block::{Block, Height},
@@ -820,4 +829,125 @@ async fn download_deadline_includes_readiness_and_response() {
         assert_eq!(advertiser, None);
         assert_eq!(Instant::now() - started, budget);
     }
+}
+
+/// The sample count and the most recent sample of one histogram.
+#[derive(Default)]
+struct Samples {
+    count: AtomicU64,
+    last: AtomicU64,
+}
+
+impl Samples {
+    fn get(&self) -> (u64, f64) {
+        (
+            self.count.load(Ordering::SeqCst),
+            f64::from_bits(self.last.load(Ordering::SeqCst)),
+        )
+    }
+}
+
+impl HistogramFn for Samples {
+    fn record(&self, value: f64) {
+        self.last.store(value.to_bits(), Ordering::SeqCst);
+        self.count.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Records the gossiped block timing histograms and ignores every other metric.
+#[derive(Default)]
+struct GossipTimingRecorder {
+    download: Arc<Samples>,
+    verify_commit: Arc<Samples>,
+}
+
+impl Recorder for GossipTimingRecorder {
+    fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+    fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+    fn register_counter(&self, _: &Key, _: &Metadata<'_>) -> Counter {
+        Counter::noop()
+    }
+
+    fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+        Gauge::noop()
+    }
+
+    fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+        let samples = match key.name() {
+            "gossip.block.download.duration_seconds" => &self.download,
+            "gossip.block.verify_commit.duration_seconds" => &self.verify_commit,
+            _ => return Histogram::noop(),
+        };
+        assert_eq!(
+            key.labels().count(),
+            0,
+            "gossip timing histograms are unlabeled"
+        );
+        Histogram::from_arc(samples.clone())
+    }
+}
+
+/// A verified gossiped block records how long its download and its verification and commit took,
+/// and logs both on the existing INFO line, which keeps its message and `height` field.
+#[tokio::test(start_paused = true)]
+#[tracing_test::traced_test]
+async fn verified_block_records_download_and_verify_durations() {
+    const DOWNLOAD: Duration = Duration::from_millis(7);
+    const VERIFY: Duration = Duration::from_millis(3);
+
+    // The current-thread runtime runs the download task on this thread, so the local recorder
+    // sees it.
+    let recorder = GossipTimingRecorder::default();
+    let _recorder_guard = metrics::set_default_local_recorder(&recorder);
+    let (mut downloads, mut network, mut verifier, mut state) = mock_downloads(Height(0));
+    let block = block_1();
+    let hash = block.hash();
+    let advertiser: PeerSocketAddr = ADVERTISER.parse().expect("hard-coded address is valid");
+
+    assert!(matches!(
+        downloads.download_and_verify(hash, Some(advertiser)),
+        DownloadAction::AddedToQueue
+    ));
+    state
+        .expect_request(zs::Request::KnownBlock(hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+    let download = network
+        .expect_request(zn::Request::BlockDownload {
+            hash,
+            advertiser: Some(advertiser),
+        })
+        .await;
+    tokio::time::advance(DOWNLOAD).await;
+    download.respond(zn::Response::Blocks(vec![Available((
+        block.clone(),
+        Some(advertiser),
+    ))]));
+    let verify = verifier
+        .expect_request(zebra_consensus::Request::Commit(block))
+        .await;
+    assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
+    assert_eq!(
+        recorder.verify_commit.get().0,
+        0,
+        "the block is not verified yet"
+    );
+    tokio::time::advance(VERIFY).await;
+    verify.respond(hash);
+
+    assert_eq!(
+        downloads
+            .next()
+            .await
+            .expect("downloads is non-empty")
+            .expect("the block is verified"),
+        hash,
+    );
+    assert_eq!(recorder.download.get(), (1, DOWNLOAD.as_secs_f64()));
+    assert_eq!(recorder.verify_commit.get(), (1, VERIFY.as_secs_f64()));
+    assert!(logs_contain(
+        "downloaded and verified gossiped block height=Height(1) download_ms=7.0 verify_ms=3.0"
+    ));
 }

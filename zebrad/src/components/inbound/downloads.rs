@@ -18,7 +18,11 @@ use futures::{
 };
 use pin_project::pin_project;
 use thiserror::Error;
-use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
+use tokio::{
+    sync::oneshot,
+    task::JoinHandle,
+    time::{timeout, Instant},
+};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -396,6 +400,7 @@ where
             }
             .map_err(|e| (e, None))?;
 
+            let download_start = Instant::now();
             let response = timeout(
                 zn::constants::REQUEST_TIMEOUT + BLOCK_DOWNLOAD_TIMEOUT,
                 network.oneshot(zn::Request::BlockDownload { hash, advertiser }),
@@ -403,6 +408,9 @@ where
             .await
             .map_err(|e| (BoxError::from(e), None))?
             .map_err(|e| (e, None))?;
+            let download = download_start.elapsed();
+            metrics::histogram!("gossip.block.download.duration_seconds")
+                .record(download.as_secs_f64());
             let early_relay = matches!(response, zn::Response::EarlyBlocks(_));
             let (block, advertiser_addr) = if let zn::Response::Blocks(blocks)
             | zn::Response::EarlyBlocks(blocks) = response
@@ -542,14 +550,22 @@ where
             } else {
                 zebra_consensus::Request::Commit(block)
             };
+            let verify_start = Instant::now();
             verifier
                 .oneshot(request)
                 .await
-                .map(|hash| (hash, block_height))
+                .map(|hash| (hash, block_height, download, verify_start.elapsed()))
                 .map_err(|e| (e, advertiser_addr))
         }
-        .map_ok(|(hash, height)| {
-            info!(?height, "downloaded and verified gossiped block");
+        .map_ok(|(hash, height, download, verify)| {
+            metrics::histogram!("gossip.block.verify_commit.duration_seconds")
+                .record(verify.as_secs_f64());
+            info!(
+                ?height,
+                download_ms = download.as_secs_f64() * 1000.0,
+                verify_ms = verify.as_secs_f64() * 1000.0,
+                "downloaded and verified gossiped block"
+            );
             metrics::counter!("gossip.verified.block.count").increment(1);
             hash
         })
