@@ -57,7 +57,7 @@ fn empty_non_finalized_channels_fall_back_to_current_finalized_tip() {
     let (state_sender, state_receiver) = watch::channel(state.clone());
 
     assert_eq!(
-        update_latest_chain_channels(&state, &finalized.db, &mut tip_sender, &state_sender, None),
+        update_latest_chain_channels(&state, &finalized.db, &mut tip_sender, &state_sender, None).0,
         Some(Height(0))
     );
     assert_eq!(latest.best_tip_hash(), Some(genesis.hash));
@@ -82,7 +82,7 @@ fn empty_chain_channels_clear_a_stale_tip() {
     let (state_sender, state_receiver) = watch::channel(populated);
 
     assert_eq!(
-        update_latest_chain_channels(&empty, &finalized.db, &mut tip_sender, &state_sender, None),
+        update_latest_chain_channels(&empty, &finalized.db, &mut tip_sender, &state_sender, None).0,
         None
     );
     assert_eq!(latest.best_tip_hash(), None);
@@ -405,6 +405,99 @@ fn precious_response_follows_tip_and_snapshot_publication() {
         observation.published.load(Ordering::SeqCst),
         "the selected tip and read-state snapshot must be published before the response",
     );
+}
+
+/// The writer responds to a commit before it drops the snapshot that the commit replaced, so freeing
+/// the replaced snapshot doesn't delay the response.
+#[test]
+fn commit_response_precedes_the_replaced_snapshot_drop() {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Weak,
+        },
+        task::{Context, Wake, Waker},
+    };
+
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    /// Records whether the replaced snapshot's chain is alive when the response is sent.
+    struct AtResponse {
+        replaced_chain: Weak<Chain>,
+        replaced_chain_alive: AtomicBool,
+    }
+
+    impl Wake for AtResponse {
+        fn wake(self: Arc<Self>) {
+            // The writer wakes the response receiver while it sends the response.
+            self.replaced_chain_alive
+                .store(self.replaced_chain.strong_count() > 0, Ordering::SeqCst);
+        }
+    }
+
+    let _init_guard = zebra_test::init();
+    let (finalized, mut state, _genesis) = new_state_with_mainnet_genesis();
+    let root: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    state
+        .commit_new_chain(root.clone().prepare(), &finalized.db)
+        .unwrap();
+    let child = root.make_fake_child();
+
+    let (chain_tip_sender, tip, _) = ChainTipSender::new(None, &Network::Mainnet);
+    let (non_finalized_state_sender, snapshot) = watch::channel(state.clone());
+
+    // Committing the child replaces the writer's copy of this chain, so only the published
+    // snapshot keeps it alive.
+    let replaced_chain = Arc::downgrade(snapshot.borrow().best_chain().unwrap());
+    let observation = Arc::new(AtResponse {
+        replaced_chain,
+        replaced_chain_alive: AtomicBool::new(false),
+    });
+    let waker = Waker::from(observation.clone());
+    let mut cx = Context::from_waker(&waker);
+    let (rsp_tx, mut rsp_rx) = oneshot::channel();
+    assert!(Pin::new(&mut rsp_rx).poll(&mut cx).is_pending());
+
+    let (queued, non_finalized_block_write_receiver) = tokio::sync::mpsc::unbounded_channel();
+    queued
+        .send(NonFinalizedWriteMessage::Commit(
+            (child.clone().prepare(), rsp_tx, None, None),
+            Instant::now(),
+        ))
+        .unwrap();
+    drop(queued);
+    let (invalid_block_reset_sender, _resets) = tokio::sync::mpsc::unbounded_channel();
+    // Bind the worker first: temporaries in a single `.run()` statement, such as the unused
+    // finalized-block sender, would live until `run()` returns and keep its first loop waiting.
+    let worker = WriteBlockWorkerTask {
+        finalized_block_write_receiver: tokio::sync::mpsc::unbounded_channel().1,
+        non_finalized_block_write_receiver,
+        finalized_state: finalized,
+        non_finalized_state: state,
+        invalid_block_reset_sender,
+        non_finalized_rejected_sender: tokio::sync::mpsc::unbounded_channel().0,
+        chain_tip_sender,
+        non_finalized_state_sender,
+        backup_dir_path: None,
+        early_relay: super::super::early_relay::EarlyRelayState::new(Some(tip)),
+    };
+    worker.run();
+
+    assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), child.hash());
+    assert!(
+        observation.replaced_chain_alive.load(Ordering::SeqCst),
+        "the replaced snapshot must be dropped after the commit response",
+    );
+    assert_eq!(
+        observation.replaced_chain.strong_count(),
+        0,
+        "the writer must drop the replaced snapshot",
+    );
+    assert_eq!(snapshot.borrow().best_tip().unwrap().1, child.hash());
 }
 
 /// Observe the real writer at notification, response, database write, and snapshot boundaries.

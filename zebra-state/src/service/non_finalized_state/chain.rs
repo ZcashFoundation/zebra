@@ -77,6 +77,12 @@ pub struct Chain {
     pub(super) last_fork_height: Option<Height>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many chains this thread has forked with [`Chain::fork`].
+    pub(super) static FORK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Spending transaction id type when the `indexer` feature is selected.
 #[cfg(feature = "indexer")]
 pub(crate) type SpendingTransactionId = transaction::Hash;
@@ -382,6 +388,38 @@ impl Chain {
         Ok(self)
     }
 
+    /// Pushes `block` onto this chain as the new tip, with its note commitment `trees` and
+    /// `history_tree`, which were computed in parallel with the rest of the block's updates.
+    ///
+    /// The chain must already have the block's other updates, from
+    /// [`Chain::update_chain_tip_with_block_except_trees`].
+    ///
+    /// # Panics
+    ///
+    /// If the chain doesn't have the block's other updates.
+    #[instrument(level = "debug", skip_all, fields(block = %block.block))]
+    pub(crate) fn push_with_trees(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+        trees: NoteCommitmentTrees,
+        history_tree: Arc<HistoryTree>,
+    ) -> Chain {
+        assert_eq!(
+            self.height_by_hash.get(&block.hash),
+            Some(&block.height),
+            "the chain must already have the block's other updates",
+        );
+
+        self.add_note_commitment_trees(block.height, trees);
+        self.add_history_tree(block.height, history_tree);
+
+        tracing::debug!(block = %block.block, "adding block to chain");
+        self.blocks.insert(block.height, Arc::new(block));
+        self.precious_rank = None;
+
+        self
+    }
+
     /// Pops the lowest height block of the non-finalized portion of a chain,
     /// and returns it with its associated treestate.
     #[instrument(level = "debug", skip(self))]
@@ -453,6 +491,9 @@ impl Chain {
         if !self.height_by_hash.contains_key(&fork_tip) {
             return None;
         }
+
+        #[cfg(test)]
+        FORK_COUNT.with(|count| count.set(count.get() + 1));
 
         let mut forked = self.clone();
         forked.precious_rank = None;
@@ -1400,6 +1441,58 @@ impl Chain {
         }
     }
 
+    /// Returns the note commitment trees of the tip of this [`Chain`], with the subtrees completed
+    /// at the tip.
+    pub(crate) fn note_commitment_trees_for_tip(&self) -> NoteCommitmentTrees {
+        NoteCommitmentTrees {
+            sprout: self.sprout_note_commitment_tree_for_tip(),
+            sapling: self.sapling_note_commitment_tree_for_tip(),
+            sapling_subtree: self.sapling_subtree_for_tip(),
+            orchard: self.orchard_note_commitment_tree_for_tip(),
+            orchard_subtree: self.orchard_subtree_for_tip(),
+            ironwood: self.ironwood_note_commitment_tree_for_tip(),
+            ironwood_subtree: self.ironwood_subtree_for_tip(),
+        }
+    }
+
+    /// Adds the note commitment trees in `nct` to the tree and anchor indexes at `height`, and
+    /// their completed subtrees to the subtree indexes.
+    fn add_note_commitment_trees(&mut self, height: Height, nct: NoteCommitmentTrees) {
+        self.add_sprout_tree_and_anchor(height, nct.sprout);
+        self.add_sapling_tree_and_anchor(height, nct.sapling);
+        self.add_orchard_tree_and_anchor(height, nct.orchard);
+        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
+
+        if let Some(subtree) = nct.sapling_subtree {
+            self.sapling_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.orchard_subtree {
+            self.orchard_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+        if let Some(subtree) = nct.ironwood_subtree {
+            self.ironwood_subtrees
+                .insert(subtree.index, subtree.into_data());
+        }
+    }
+
+    /// Returns `history_tree` with `block` pushed onto it, committing to the note commitment tree
+    /// `roots` after `block`.
+    pub(crate) fn history_tree_with_block(
+        network: &Network,
+        mut history_tree: Arc<HistoryTree>,
+        block: Arc<block::Block>,
+        roots: BlockCommitmentTreeRoots,
+    ) -> Result<Arc<HistoryTree>, ValidateContextError> {
+        let history_tree_mut = Arc::make_mut(&mut history_tree);
+        history_tree_mut
+            .push(network, block, roots)
+            .map_err(Arc::new)?;
+
+        Ok(history_tree)
+    }
+
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
@@ -1719,15 +1812,7 @@ impl Chain {
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
-        let mut nct = NoteCommitmentTrees {
-            sprout: self.sprout_note_commitment_tree_for_tip(),
-            sapling: self.sapling_note_commitment_tree_for_tip(),
-            sapling_subtree: self.sapling_subtree_for_tip(),
-            orchard: self.orchard_note_commitment_tree_for_tip(),
-            orchard_subtree: self.orchard_subtree_for_tip(),
-            ironwood: self.ironwood_note_commitment_tree_for_tip(),
-            ironwood_subtree: self.ironwood_subtree_for_tip(),
-        };
+        let mut nct = self.note_commitment_trees_for_tip();
 
         let mut tree_result = None;
         let mut partial_result = None;
@@ -1749,42 +1834,23 @@ impl Chain {
         partial_result.expect("scope has already finished")?;
 
         // Update the note commitment trees in the chain.
-        self.add_sprout_tree_and_anchor(height, nct.sprout);
-        self.add_sapling_tree_and_anchor(height, nct.sapling);
-        self.add_orchard_tree_and_anchor(height, nct.orchard);
-        self.add_ironwood_tree_and_anchor(height, nct.ironwood);
-
-        if let Some(subtree) = nct.sapling_subtree {
-            self.sapling_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.orchard_subtree {
-            self.orchard_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
-        if let Some(subtree) = nct.ironwood_subtree {
-            self.ironwood_subtrees
-                .insert(subtree.index, subtree.into_data());
-        }
+        self.add_note_commitment_trees(height, nct);
 
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
         let ironwood_root = self.ironwood_note_commitment_tree_for_tip().root();
 
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
-        let mut history_tree = self.history_block_commitment_tree();
-        let history_tree_mut = Arc::make_mut(&mut history_tree);
-        history_tree_mut
-            .push(
-                &self.network,
-                contextually_valid.block.clone(),
-                BlockCommitmentTreeRoots {
-                    sapling: &sapling_root,
-                    orchard: &orchard_root,
-                    ironwood: &ironwood_root,
-                },
-            )
-            .map_err(Arc::new)?;
+        let history_tree = Self::history_tree_with_block(
+            &self.network,
+            self.history_block_commitment_tree(),
+            contextually_valid.block.clone(),
+            BlockCommitmentTreeRoots {
+                sapling: &sapling_root,
+                orchard: &orchard_root,
+                ironwood: &ironwood_root,
+            },
+        )?;
 
         self.add_history_tree(height, history_tree);
 
@@ -1800,7 +1866,7 @@ impl Chain {
         fields(height = ?contextually_valid.height, hash = %contextually_valid.hash)
     )]
     #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with_block_except_trees(
+    pub(super) fn update_chain_tip_with_block_except_trees(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {

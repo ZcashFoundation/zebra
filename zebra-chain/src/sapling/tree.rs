@@ -234,11 +234,36 @@ impl NoteCommitmentTree {
         note_commitments: &[NoteCommitmentUpdate],
     ) -> Result<Option<(NoteCommitmentSubtreeIndex, sapling_crypto::Node)>, NoteCommitmentTreeError>
     {
+        match self.append_batch_with_cancel(note_commitments, || false) {
+            Ok(completed) => Ok(completed),
+            Err(crate::parallel::batch_frontier::AppendBatchError::Frontier) => {
+                Err(NoteCommitmentTreeError::FullTree)
+            }
+            Err(crate::parallel::batch_frontier::AppendBatchError::Cancelled) => {
+                unreachable!("a non-cancellable append cannot be cancelled")
+            }
+        }
+    }
+
+    /// Appends commitments in order, stopping when `is_cancelled` returns true.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn append_batch_with_cancel<F>(
+        &mut self,
+        note_commitments: &[NoteCommitmentUpdate],
+        is_cancelled: F,
+    ) -> Result<
+        Option<(NoteCommitmentSubtreeIndex, sapling_crypto::Node)>,
+        crate::parallel::batch_frontier::AppendBatchError,
+    >
+    where
+        F: Fn() -> bool + Sync,
+    {
         let old_size = self.inner.tree_size();
-        let result = crate::parallel::batch_frontier::append_batch(
+        let result = crate::parallel::batch_frontier::append_batch_with_cancel(
             &mut self.inner,
             note_commitments,
             sapling_crypto::Node::from_cmu,
+            is_cancelled,
         );
 
         if self.inner.tree_size() != old_size {
@@ -248,7 +273,7 @@ impl NoteCommitmentTree {
                 .expect("a thread that previously held exclusive lock access panicked") = None;
         }
 
-        result.map_err(|_| NoteCommitmentTreeError::FullTree)
+        result
     }
 
     /// Returns frontier of non-empty tree, or None.

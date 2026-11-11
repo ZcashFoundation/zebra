@@ -74,7 +74,9 @@ pub(crate) fn validate_and_commit_non_finalized(
 /// If `backup_dir_path` is `Some`, the non-finalized state is written to the backup
 /// directory before updating the channels.
 ///
-/// Returns the latest chain tip height, or `None` if both states are empty.
+/// Returns the latest chain tip height, or `None` if both states are empty, and the snapshot
+/// that the new one replaced. Callers drop it after they respond, because freeing a large
+/// snapshot would otherwise delay the tip update and the response.
 #[instrument(
     level = "debug",
     skip(
@@ -92,7 +94,7 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
-) -> Option<block::Height> {
+) -> (Option<block::Height>, NonFinalizedState) {
     let non_finalized_tip = non_finalized_state
         .best_tip_block()
         .cloned()
@@ -107,8 +109,7 @@ fn update_latest_chain_channels(
         non_finalized_state.write_to_backup(backup_dir_path);
     }
 
-    // If the final receiver was just dropped, ignore the error.
-    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+    let replaced_snapshot = non_finalized_state_sender.send_replace(non_finalized_state.clone());
 
     if let Some(tip) = non_finalized_tip {
         chain_tip_sender.set_best_non_finalized_tip(tip);
@@ -121,7 +122,7 @@ fn update_latest_chain_channels(
         chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
     }
 
-    tip_block_height
+    (tip_block_height, replaced_snapshot)
 }
 
 /// A worker task that reads, validates, and writes blocks to the
@@ -421,7 +422,7 @@ impl WriteBlockWorkerTask {
                 NonFinalizedWriteMessage::Precious { hash, rsp_tx } => {
                     tracing::info!(?hash, "preferring a block in the non-finalized state");
                     let result = non_finalized_state.precious_block(hash, &finalized_state.db);
-                    update_latest_chain_channels(
+                    let (_tip_block_height, replaced_snapshot) = update_latest_chain_channels(
                         non_finalized_state,
                         &finalized_state.db,
                         chain_tip_sender,
@@ -430,6 +431,7 @@ impl WriteBlockWorkerTask {
                     );
                     drop(_context_update);
                     let _ = rsp_tx.send(result);
+                    drop(replaced_snapshot);
                     continue;
                 }
             };
@@ -548,14 +550,15 @@ impl WriteBlockWorkerTask {
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
             let phase_start = Instant::now();
-            let tip_block_height = update_latest_chain_channels(
+            let (tip_block_height, replaced_snapshot) = update_latest_chain_channels(
                 non_finalized_state,
                 &finalized_state.db,
                 chain_tip_sender,
                 non_finalized_state_sender,
                 backup_dir_path.as_deref(),
-            )
-            .expect("just successfully inserted a non-finalized block above");
+            );
+            let tip_block_height =
+                tip_block_height.expect("just successfully inserted a non-finalized block above");
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",
                 "phase" => "update_latest_chain_channels"
@@ -571,6 +574,7 @@ impl WriteBlockWorkerTask {
 
             // Acknowledge published state, not completion of older blocks' retention writes.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
+            drop(replaced_snapshot);
 
             // Finish retention before receiving another block; finalization errors remain fatal.
             let phase_start = Instant::now();

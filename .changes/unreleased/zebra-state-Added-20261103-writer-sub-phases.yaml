@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Records the `transparent_spend`, `anchor_reads`, `pickup`, `chain_clone`, `trees`, `chain_updates` and `history` sub-phases of each committed block in the `state.block_writer.phase.duration_seconds` histograms.
+time: 2026-11-03T06:10:49-05:00
