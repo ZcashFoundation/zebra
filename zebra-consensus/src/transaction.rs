@@ -529,6 +529,16 @@ where
             // the script interpreter.
             check::mempool_standard_input_scripts(tx.as_ref(), &spent_outputs)?;
 
+            // Reject transactions above the standard sigop limit before script verification
+            // checks every one of their signatures, in the same order as zcashd:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1901-L1905
+            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
+            let p2sh_sigops = zebra_script::p2sh_sigop_count(tx.as_ref(), &spent_outputs);
+            let total_sigops = sigops.saturating_add(p2sh_sigops);
+            if total_sigops > check::MAX_STANDARD_TX_SIGOPS {
+                return Err(TransactionError::NonStandardSigops { sigops: total_sigops });
+            }
+
             // Apply ZIP-317 policy before expensive cryptographic verification.
             let miner_fee = miner_fee(tx.as_ref(), &spent_utxos)?;
             let unpaid_actions = transaction::zip317::unpaid_actions(&unmined_tx, miner_fee);
@@ -569,8 +579,6 @@ where
 
             tracing::trace!(?tx_id, "finished async checks");
 
-            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
-
             // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
             // spends both chain and mempool UTXOs (mempool outputs are appended last by
             // `mempool_spent_utxos()`), causing policy checks to pair the wrong input with
@@ -582,7 +590,7 @@ where
                 unmined_tx,
                 miner_fee,
                 sigops,
-                cached_ffi_transaction.p2sh_sigops(),
+                p2sh_sigops,
                 spent_outputs.into(),
             )?;
 

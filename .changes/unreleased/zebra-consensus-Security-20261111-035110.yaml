@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Security
+body: The mempool transaction verifier rejects transactions with more than `MAX_STANDARD_TX_SIGOPS` legacy and P2SH signature operations before script verification, instead of verifying every signature first ([GHSA-423j-2vj4-j5x4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-423j-2vj4-j5x4)). Thanks to @janneh2000 for reporting the issue.
+time: 2026-11-11T03:51:10.530971911+01:00
