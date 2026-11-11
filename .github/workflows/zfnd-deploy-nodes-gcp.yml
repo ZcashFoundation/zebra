@@ -238,14 +238,15 @@ jobs:
     # - Pull requests that are not drafts, because the build uses billed larger runners
     # - Manual workflow_dispatch
     # - Push to main and next branches
-    # - Releases
+    # - Releases in ZcashFoundation/zebra, because release builds write the shared version tags
     if: >-
       ${{
         (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork &&
           !github.event.pull_request.draft) ||
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'next')) ||
-        (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+        (github.event_name == 'release' && github.repository == 'ZcashFoundation/zebra' &&
+          startsWith(github.event.release.tag_name, 'v'))
       }}
     with:
       source_sha: ${{ github.sha }}

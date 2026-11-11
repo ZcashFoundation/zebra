@@ -173,7 +173,7 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ inputs.source_sha }}
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=schedule
@@ -218,10 +218,10 @@ jobs:
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
-      # With provenance and SBOM (ZcashFoundation repository only)
+      # With provenance and SBOM (ZcashFoundation/zebra only)
       - name: Build & push (with attestations)
         id: docker_build
-        if: github.repository_owner == 'ZcashFoundation'
+        if: github.repository == 'ZcashFoundation/zebra'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
@@ -244,11 +244,11 @@ jobs:
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
 
-      # Build and push image by digest without attestations (contributor forks)
+      # Build and push image by digest without attestations (forks and other copies)
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
       - name: Build & push (without attestations)
         id: docker_build_no_attestations
-        if: github.repository_owner != 'ZcashFoundation'
+        if: github.repository != 'ZcashFoundation/zebra'
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
@@ -328,7 +328,7 @@ jobs:
             # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
             # Pre-release versions (e.g., 1.2.3-alpha.0) only get their exact version tag, never `latest`.
             #
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             # - `edge`: Points to the most recent pre-release from `next`, which is any pre-release except a release candidate (release candidates are cut from `main`).
             type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
             # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
