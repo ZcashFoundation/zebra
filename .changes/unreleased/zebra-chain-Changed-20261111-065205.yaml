@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Decoded transactions keep their bytes and serialize from them instead of recompressing their Sapling and Orchard curve points ([#12417](https://github.com/ZcashFoundation/zebra/issues/12417)).
+time: 2026-11-11T06:52:05.472867405+01:00
