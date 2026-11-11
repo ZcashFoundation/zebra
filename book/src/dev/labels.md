@@ -63,7 +63,8 @@ Do not apply or repurpose these labels manually; close resolved failure issues.
 | --- | --- |
 | `ci-fail/advisory` | `advisory.yml`: scheduled advisory checks |
 | `ci-fail/binaries` | `release-binaries.yml`: release artifact failures |
-| `ci-fail/main` | `zfnd-ci-integration-tests-gcp.yml`: selected Mainnet and lightwalletd integration failures outside PRs; Testnet-only jobs are excluded |
+| `ci-fail/main` | `zfnd-ci-integration-tests-gcp.yml`: selected Mainnet and lightwalletd integration test failures outside PRs; Testnet-only jobs are excluded |
+| `ci-fail/main-infra` | `zfnd-ci-integration-tests-gcp.yml`: infrastructure failures in the same jobs, such as a GCP instance that could not be created |
 | `ci-fail/release` | `zfnd-deploy-nodes-gcp.yml` and `zfnd-deploy-prebuilt-nodes-gcp.yml`: image-build and node-deployment failures |
 
 ## Other repository labels

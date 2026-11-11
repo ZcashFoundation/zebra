@@ -482,12 +482,21 @@ jobs:
       # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
+      #
+      # The `failure-issue` job in zfnd-ci-integration-tests-gcp.yml finds this step by its
+      # `Result of ` name prefix to tell a failed test from a failed setup step.
+      #
+      # `ssh` exits 255 when it cannot connect or loses the connection, and the remote command
+      # only exits 0 or 1. On 255 the test result is unknown, so this step passes and the next
+      # step fails the job, which reports it as an infrastructure failure.
       - name: Result of ${{ inputs.test_id }} test
+        id: test-status
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           echo "Using pre-discovered container ID: ${CONTAINER_ID}"
+          SSH_STATUS=0
           gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -508,7 +517,21 @@ jobs:
             echo 'Test successful with exit code: '\$EXIT_STATUS;
             exit 0;
           fi
-          "
+          " || SSH_STATUS=$?
+
+          if [[ "${SSH_STATUS}" == 255 ]]; then
+            echo "ssh_failed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          exit "${SSH_STATUS}"
+
+      - name: Check the SSH connection to the test instance
+        if: steps.test-status.outputs.ssh_failed == 'true'
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
+        run: |
+          echo "::error::The SSH connection to ${INSTANCE_NAME} failed before the test result was known."
+          exit 1
 
       # Collect VM-level diagnostics when the test, or any earlier step, failed, or
       # when the job was cancelled or hit its `timeout-minutes`.
