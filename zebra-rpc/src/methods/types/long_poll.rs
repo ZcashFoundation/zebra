@@ -143,6 +143,7 @@ pub struct LongPollId {
     /// If the tip block changes, a new template must be provided.
     /// Old work is no longer valid.
     /// This checksum is not cryptographically secure.
+    /// RPC responses mix in the cache's rejected-generation identity to revoke failed old work.
     ///
     /// It's ok to do a probabilistic check here,
     /// so we choose a 1 in 2^32 chance of missing a block change.

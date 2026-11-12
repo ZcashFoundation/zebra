@@ -1,5 +1,7 @@
 //! Fixed test vectors for RPC methods.
 
+mod work_authorization;
+
 use std::{
     str::FromStr,
     sync::{

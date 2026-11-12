@@ -26,6 +26,7 @@ mod lifecycle;
 mod publication;
 mod rejection;
 mod speculation;
+mod verdicts;
 
 /// Returns a template with an explicit timestamp boundary.
 fn template_with_max_time(net: &Network, max_time: DateTime32) -> BlockTemplateResponse {
