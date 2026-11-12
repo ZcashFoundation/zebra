@@ -1,6 +1,6 @@
 //! Sends the batches of the [`SentryPolicy`] through the Sentry SDK.
 
-use std::{sync::OnceLock, thread};
+use std::{io, sync::OnceLock, thread};
 
 use sentry::protocol::{LogAttribute, Unit};
 
@@ -11,18 +11,31 @@ use crate::components::metrics::sentry_policy::{
 /// The policy that every metric goes through once [`start`] has run.
 static POLICY: OnceLock<SentryPolicy> = OnceLock::new();
 
-/// Creates the policy, and a thread that flushes it every [`FLUSH_INTERVAL`].
+/// Starts a thread that flushes the policy every [`FLUSH_INTERVAL`], then creates the policy.
 pub(super) fn start() {
-    let policy = POLICY.get_or_init(SentryPolicy::default);
+    start_with(&POLICY, || {
+        thread::Builder::new()
+            .name("sentry metrics flush".to_owned())
+            .spawn(|| loop {
+                thread::sleep(FLUSH_INTERVAL);
+                flush();
+            })
+    });
+}
 
-    let flush = thread::Builder::new()
-        .name("sentry metrics flush".to_owned())
-        .spawn(move || loop {
-            thread::sleep(FLUSH_INTERVAL);
-            policy.flush(send);
-        });
-    if let Err(error) = flush {
-        warn!(?error, "unable to start Sentry metrics flush");
+/// Creates the policy in `policy` only if `spawn_flush` starts the thread that flushes it.
+///
+/// Without that thread, the policy would keep every histogram value it records, so Zebra doesn't
+/// record metrics for Sentry at all.
+fn start_with<T>(policy: &OnceLock<SentryPolicy>, spawn_flush: impl FnOnce() -> io::Result<T>) {
+    match spawn_flush() {
+        Ok(_) => {
+            policy.get_or_init(SentryPolicy::default);
+        }
+        Err(error) => error!(
+            ?error,
+            "unable to start the Sentry metrics flush thread: Zebra won't send metrics to Sentry",
+        ),
     }
 }
 
@@ -104,4 +117,28 @@ fn sentry_unit(unit: metrics::Unit) -> Option<Unit> {
         M::Percent => Unit::Percent,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io, sync::OnceLock};
+
+    use super::start_with;
+
+    #[test]
+    fn policy_is_created_only_with_a_flush_thread() {
+        let _init_guard = zebra_test::init();
+
+        let policy = OnceLock::new();
+        start_with(&policy, || {
+            Err::<(), _>(io::Error::other("no threads left"))
+        });
+        assert!(
+            policy.get().is_none(),
+            "without a flush thread, the policy would keep every histogram value",
+        );
+
+        start_with(&policy, || Ok(()));
+        assert!(policy.get().is_some());
+    }
 }
