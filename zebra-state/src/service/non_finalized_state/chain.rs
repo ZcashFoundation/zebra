@@ -1527,6 +1527,22 @@ impl Chain {
         self.blocks.len()
     }
 
+    /// Returns the number of blocks, transactions, transparent outputs and spends, and
+    /// nullifiers in this chain.
+    ///
+    /// Each fork owns a separate copy of these indexes, so this approximates the memory a fork of
+    /// this chain uses.
+    pub(crate) fn index_entry_count(&self) -> usize {
+        self.blocks.len()
+            + self.tx_loc_by_hash.len()
+            + self.created_utxos.len()
+            + self.spent_utxos.len()
+            + self.sprout_nullifiers.len()
+            + self.sapling_nullifiers.len()
+            + self.orchard_nullifiers.len()
+            + self.ironwood_nullifiers.len()
+    }
+
     /// Returns the unspent transaction outputs (UTXOs) in this non-finalized chain.
     ///
     /// Callers should also check the finalized state for available UTXOs.

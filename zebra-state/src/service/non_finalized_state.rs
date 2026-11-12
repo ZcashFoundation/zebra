@@ -304,6 +304,9 @@ impl NonFinalizedState {
                 .clone();
 
             self.chain_set.remove(&evicted);
+            if self.should_count_metrics() {
+                metrics::counter!("state.memory.fork.evicted.count").increment(1);
+            }
             tracing::warn!(
                 tip = ?evicted.non_finalized_tip_hash(),
                 height = ?evicted.non_finalized_tip_height(),
@@ -992,6 +995,17 @@ impl NonFinalizedState {
         metrics::gauge!("state.memory.chain.count").set(self.chain_set.len() as f64);
         metrics::gauge!("state.memory.best.chain.length",)
             .set(self.best_chain_len().unwrap_or_default() as f64);
+        // Index entry counts are far below the integers f64 represents exactly.
+        metrics::gauge!("state.memory.index.entries").set(
+            self.chain_set
+                .iter()
+                .map(|chain| chain.index_entry_count())
+                .sum::<usize>() as f64,
+        );
+        metrics::gauge!("state.memory.best.chain.index.entries").set(
+            self.best_chain()
+                .map_or(0, |chain| chain.index_entry_count()) as f64,
+        );
 
         if let Some(best_chain) = self.best_chain() {
             let value_pools = best_chain.chain_value_pools;

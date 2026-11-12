@@ -141,6 +141,26 @@ state tip` warning with the `reason`, `kind`, and `error`. The `chain updates ha
 includes the latest `last_restart` reason, `restarts_without_progress`, `in_flight`, and
 `oldest_in_flight_secs`.
 
+## Memory metrics
+
+These metrics show how much memory `zebrad` uses, and how large the non-finalized state is.
+
+Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives the counter as
+one total per minute, and each gauge's latest value once a minute.
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `process.memory.rss_bytes` | gauge | Memory `zebrad` is using (its resident set size). Only on Linux. |
+| `process.memory.rss_fraction` | gauge | `process.memory.rss_bytes` as a fraction of the memory `zebrad` can use: its cgroup memory limit, or the machine's memory if that is smaller. The kernel stops the process near 1. |
+| `state.memory.chain.count` | gauge | Non-finalized chains, the best chain and its forks |
+| `state.memory.best.chain.length` | gauge | Blocks in the best non-finalized chain. Above the 1,000-block reorg limit, older blocks are waiting to be written to the database. |
+| `state.memory.index.entries` | gauge | Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all non-finalized chains |
+| `state.memory.best.chain.index.entries` | gauge | The same count for the best chain only |
+| `state.memory.fork.evicted.count` | counter | Forks dropped because the node tracked too many |
+| `state.memory.backup.restored.block.count` | gauge | Blocks restored from the non-finalized backup at startup |
+| `state.memory.backup.restore.duration_seconds` | gauge | How long restoring the non-finalized backup took at startup |
+
 ## Network metric aggregation
 
 Connection state, request, response, message, and byte metrics are aggregated across
