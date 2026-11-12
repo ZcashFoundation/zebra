@@ -914,29 +914,12 @@ where
                         }
                         _ = timer_ref => {
                             trace!(parent: &span, "client request timed out");
-                            let e = PeerError::ConnectionReceiveTimeout;
-
-                            self.state = match std::mem::replace(&mut self.state, State::Failed) {
-                                // Ping timeouts fail the connection, not just the request.
-                                State::AwaitingResponse {
-                                    handler: Handler::Ping { .. },
-                                    tx,
-                                    ..
-                                } => {
-                                    let e = SharedPeerError::from(e);
-                                    let _ = tx.send(Err(e.clone()));
-                                    self.fail_with(e).await;
-                                    State::Failed
-                                }
-                                State::AwaitingResponse { tx, .. } => {
-                                    let _ = tx.send(Err(e.into()));
-                                    State::AwaitingRequest
-                                }
-                                _ => unreachable!(
-                                    "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
-                                    self.client_rx
-                                ),
-                            };
+                            if let Err(error) = Self::expire_pending_request(
+                                &mut self.state,
+                                &mut self.request_timer,
+                            ) {
+                                self.fail_with(error).await;
+                            }
                             continue;
                         }
                         msg = peer_rx.next() => msg,
@@ -1023,18 +1006,11 @@ where
         self.shutdown_async(error).await;
     }
 
+    /// Write dequeued adverts even if their callers have stopped waiting for the result.
+    ///
     /// Acknowledge only completed local writes, after rechecking live authorization.
+    /// A stalled write must not extend an outstanding request's response deadline.
     async fn send_block_advert(&mut self, advert: BlockAdvert) {
-        if advert.result.is_closed() {
-            metrics::counter!("peer.canceled").increment(1);
-            metrics::counter!(
-                "zebra.net.out.requests.canceled",
-                "command" => "AdvertiseBlock",
-            )
-            .increment(1);
-            return;
-        }
-
         metrics::counter!(
             "zebra.net.out.requests",
             "command" => "AdvertiseBlock",
@@ -1045,9 +1021,8 @@ where
         let version = self.connection_info.remote.version;
         let minimum = &mut self.minimum_peer_version;
         let bans = &self.bans_receiver;
-        let delivery = self
-            .peer_tx
-            .send_authorized(
+        let delivery = {
+            let delivery = self.peer_tx.send_authorized(
                 Message::Inv(vec![InventoryHash::Block(advert.hash)]),
                 || {
                     if version >= minimum.current()
@@ -1058,8 +1033,23 @@ where
                         Err(PeerError::AdvertAuthorizationRevoked)
                     }
                 },
-            )
-            .await;
+            );
+            tokio::pin!(delivery);
+            tokio::select! {
+                biased;
+                _ = Self::wait_for_response_deadline(&self.state, &mut self.request_timer) => {
+                    match Self::expire_pending_request(&mut self.state, &mut self.request_timer) {
+                        Ok(()) => {
+                            // Keep the same send alive, including any item or partial frame in the
+                            // sink.
+                            delivery.await
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                result = &mut delivery => result,
+            }
+        };
         match delivery {
             Ok(()) => {
                 let _ = advert.result.send(Ok(()));
@@ -1067,8 +1057,47 @@ where
             Err(error) => {
                 let error = SharedPeerError::from(error);
                 let _ = advert.result.send(Err(error.clone().into()));
-                self.fail_with(error).await;
+                // Do not await the stalled sink's close before notifying pending requests.
+                self.shutdown(error);
             }
+        }
+    }
+
+    /// Waits for the outstanding response's deadline, or stays pending if no response is expected.
+    async fn wait_for_response_deadline(
+        state: &State,
+        request_timer: &mut Option<Pin<Box<Sleep>>>,
+    ) {
+        if matches!(state, State::AwaitingResponse { .. }) {
+            request_timer
+                .as_mut()
+                .expect("timeout must be set while awaiting response")
+                .await;
+        } else {
+            futures::future::pending::<()>().await;
+        }
+    }
+
+    /// Notifies the timed-out request and clears its state, returning an error if a Ping expired.
+    ///
+    /// The caller must shut down the connection on error, without delaying request notification.
+    fn expire_pending_request(
+        state: &mut State,
+        request_timer: &mut Option<Pin<Box<Sleep>>>,
+    ) -> Result<(), PeerError> {
+        let State::AwaitingResponse { handler, tx, .. } =
+            std::mem::replace(state, State::AwaitingRequest)
+        else {
+            unreachable!("the response timer only completes while awaiting a response")
+        };
+        *request_timer = None;
+        let _ = tx.send(Err(PeerError::ConnectionReceiveTimeout.into()));
+
+        if matches!(handler, Handler::Ping { .. }) {
+            *state = State::Failed;
+            Err(PeerError::ConnectionReceiveTimeout)
+        } else {
+            Ok(())
         }
     }
 
