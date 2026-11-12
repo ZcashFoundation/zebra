@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Serve templates before background proposal checks finish, withdraw only failed generations, and restore valid fallback work without bypassing refresh pacing. Rejection revokes previously issued old-work authorization, while ordinary fee-only refreshes continue to allow old work. Proposal admission remains held until verification ends, even after RPC timeout or cancellation; parent changes cancel stale background checks. Large block decoding shares bounded blocking admission retained through cancellation, while exact solved-template cache hits remain inline.
+time: 2026-11-13T18:01:16.373577836+01:00
