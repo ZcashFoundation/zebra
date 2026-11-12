@@ -52,21 +52,36 @@ When Sentry is active, Zebra sends:
   the last one ends as exited on a clean shutdown and as crashed on a panic or a
   fatal error. Every session of a run has the same user ID, so Sentry's
   crash-free users rate is the share of runs without a crash;
-- the [block timing](metrics.md#block-timing) and
-  [sync stall](metrics.md#sync-stall-metrics) metrics as Sentry metrics, along
-  with these metrics once a minute, which help compare nodes:
-  `sync.verified.block.count`, `gossip.verified.block.count`,
-  `zcash.mempool.size.transactions`, and
-  `zebra.state.rocksdb.total_disk_size_bytes`;
-- the [process metrics](metrics.md#process-metrics) `process_resident_memory_bytes`,
-  `process_virtual_memory_bytes`, `process_open_fds`, `process_max_fds`,
-  `process_threads`, and `process_start_time_seconds`, once a minute.
+- every metric in the [metric catalog](metrics.md#metric-catalog), the same
+  metrics the Prometheus endpoint exports, as Sentry metrics.
+
+Zebra sends metrics to Sentry once a minute, and again when it shuts down or
+panics. Each time, it sends:
+
+- for each counter, its increase since the previous minute, once for each set
+  of labels that increased. A counter that holds a running total, such as
+  `process_cpu_seconds_total`, also sends its increase;
+- for each gauge, its latest value, once for each set of labels;
+- for each histogram, at most 20 of the values recorded since the previous
+  minute for each set of labels, as distributions. When more values were
+  recorded, Zebra picks 20 spread across the minute. Histograms recorded about
+  once per block near the chain tip, such as
+  `zcash.chain.tip.block_delay_seconds`, send every value.
+
+These limits keep one minute of metrics within the Sentry SDK's queue, even
+during an initial sync.
+
+Sentry metrics carry each metric's labels as attributes. Histograms also carry
+their event attributes, without the `event.` prefix, such as `chain.height` on
+`zcash.chain.tip.block_delay_seconds`.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the node has a
-chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`,
-and metrics carry `chain.network_upgrade`. Metrics also carry
-`process.uptime_seconds`, the whole seconds since `zebrad` started, so queries can
-leave out the values recorded just after a restart.
+chain tip, events and logs also carry `chain.height` and `chain.network_upgrade`.
+Metrics carry `chain.network_upgrade`, and `chain.near_tip`, which is `true`
+when the syncer was close to the chain tip as the metrics were sent. Use
+`chain.near_tip` to leave out the values that an initial sync records. Metrics
+also carry `process.uptime_seconds`, the whole seconds since `zebrad` started,
+so queries can leave out the values recorded just after a restart.
 
 You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
 attached to Sentry events. Zebra also tags events with the git SHA when

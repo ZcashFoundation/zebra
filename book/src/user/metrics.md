@@ -108,6 +108,12 @@ aggregated across nodes:
 - `rpc.request.duration_seconds`
 - `zcash.net.peer.handshake.duration_seconds`
 
+Label keys that start with `event.`, such as `event.chain.height`, are event
+attributes. An event attribute can have a new value every time the metric is recorded,
+so the Prometheus endpoint doesn't export it: each value would become a new series.
+[Sentry](tracing.md#sentry-production-monitoring) receives event attributes without the
+`event.` prefix. Only histograms have event attributes.
+
 The catalog file in a release lists that release's metrics, so you can check your own
 dashboards and alerts against the version you run.
 
@@ -130,8 +136,8 @@ platform the `metrics-process` crate supports, and some are missing on Windows.
 | `process_cpu_seconds_total` | seconds | Total user and system CPU time. |
 | `process_start_time_seconds` | seconds | Start time of the process since the Unix epoch. |
 
-Sentry receives every one of these except `process_cpu_seconds_total` and
-`process_virtual_memory_max_bytes`.
+Sentry receives all of them. It receives `process_cpu_seconds_total` as the CPU time
+used in each minute.
 
 ## Block timing
 
@@ -139,15 +145,20 @@ These histograms show how quickly a node accepts new blocks. Official release bu
 also send them to [Sentry](tracing.md#sentry-production-monitoring) as distributions
 when `SENTRY_DSN` is set, even with the Prometheus endpoint off.
 
-| Metric | Unit | Description |
-|---|---|---|
-| `zcash.chain.tip.block_delay_seconds` | seconds | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+| Metric | Unit | Labels | Description |
+|---|---|---|---|
+| `zcash.chain.tip.block_delay_seconds` | seconds | `chain.network_upgrade`, `event.chain.height` | Time from a block's header time until it becomes this node's best chain tip. Recorded only for blocks mined at most two minutes before their parent became this node's tip, so most of the blocks a node catches up on after a restart or a stall aren't counted, but a block that arrives while its parent is still being verified is. The block just before a network upgrade activates isn't counted either. Negative when the miner's clock is ahead of this node's. |
+
+`chain.network_upgrade` is the network upgrade at the block's height, such as `Nu6`.
+The Prometheus endpoint exports it as the `chain_network_upgrade` label.
+`event.chain.height` is the block's height. It is an
+[event attribute](#metric-catalog), so only Sentry receives it, as the number
+`chain.height`.
 
 The header time is set by the block's miner, so a single value is only approximate.
 Nodes that follow the same chain see the same header times, so comparing these
 values across nodes over the same period shows which nodes accept blocks sooner.
-In Sentry, each `zcash.chain.tip.block_delay_seconds` value also carries the block's
-`chain.height`, so nodes can be compared block by block.
+In Sentry, `chain.height` lets you compare nodes block by block.
 
 ## Sync stall metrics
 
@@ -155,9 +166,8 @@ These metrics show why the syncer stopped advancing the chain tip. Their labels 
 set of values. Block heights and hashes are in the matching log fields instead.
 
 Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
-when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter as
-one total per minute for each set of labels, and each gauge's latest value once a minute, along
-with `sync.downloads.in_flight`.
+when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter's
+increase once a minute for each set of labels, and each gauge's latest value once a minute.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
