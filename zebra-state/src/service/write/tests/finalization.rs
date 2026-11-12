@@ -56,6 +56,7 @@ fn early_relay_commit_past_reorg_limit_publishes_tip_and_finalizes_root() {
         chain_tip_sender: tip_sender,
         non_finalized_state_sender: state_sender,
         backup_dir_path: None,
+        tree_roots_cache: no_fast_tree_sync(),
     };
     worker.run();
     assert_eq!(rsp_rx.blocking_recv().unwrap().unwrap(), block.hash());

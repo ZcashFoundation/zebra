@@ -7,6 +7,7 @@ expression: cf_names
   "block_header_by_height",
   "block_info",
   "default",
+  "fast_sync_tree_roots",
   "hash_by_height",
   "hash_by_tx_loc",
   "height_by_hash",

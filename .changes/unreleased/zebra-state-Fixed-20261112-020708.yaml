@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Read-only state instances now open databases that lack column families added by newer Zebra versions, instead of failing to open them.
+time: 2026-11-12T02:07:08.819455284+01:00

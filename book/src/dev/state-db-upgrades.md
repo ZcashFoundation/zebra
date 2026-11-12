@@ -378,6 +378,7 @@ We use the following rocksdb column families:
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 | `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
+| `fast_sync_tree_roots`             | `block::Height`        | `FastSyncTreeRoots`           | Create  |
 
 With the following additional modifications when compiled with the `indexer` feature
 (the column families themselves are always registered — see `STATE_COLUMN_FAMILIES_IN_CODE`
@@ -649,13 +650,21 @@ So they should not be used for consensus-critical checks.
   For each block committed, the old tree is deleted and a new one is inserted
   by its new height.
 
-- The `{sapling, orchard}_note_commitment_tree` stores the note commitment tree
+- The `{sapling, orchard, ironwood}_note_commitment_tree` stores the note commitment tree
   state for every height, for the specific pool. Each tree is stored
   as a "Merkle tree frontier" which is basically a (logarithmic) subset of
   the Merkle tree nodes as required to insert new items.
+  Heights committed by fast checkpoint sync are the exception: see `fast_sync_tree_roots`.
 
-- The `{sapling, orchard}_note_commitment_subtree` stores the completion height and
+- The `{sapling, orchard, ironwood}_note_commitment_subtree` stores the completion height and
   root for every completed level 16 note commitment subtree, for the specific pool.
+
+- `fast_sync_tree_roots` stores the Sapling, Orchard, and Ironwood note commitment tree roots and
+  sizes after each block that fast checkpoint sync committed without updating its trees. These
+  heights are contiguous, and have no trees in the `*_note_commitment_tree` column families, so
+  tree reads for them return nothing, and the tree size RPC fields use these sizes. Fast sync ends
+  by storing the trees embedded in Zebra, and the subtrees they completed, so subtrees can end at
+  these heights.
 
 - `history_tree` stores the ZIP-221 history tree state at the tip of the finalized
   state. There is always a single entry for it. The tree is stored as the set of "peaks"

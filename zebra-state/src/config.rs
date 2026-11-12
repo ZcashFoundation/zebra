@@ -100,6 +100,19 @@ pub struct Config {
     /// deleted.
     pub delete_old_database: bool,
 
+    /// Whether to start fast checkpoint sync, which takes note commitment tree roots from peers
+    /// that advertise `NODE_TREE_ROOTS` instead of computing the Sapling, Orchard, and Ironwood
+    /// note commitment trees, up to the trees embedded in Zebra.
+    ///
+    /// Set to `false` by default. Once fast sync starts, checkpoint sync waits for those roots
+    /// until it reaches the embedded trees, even if this is set back to `false`, so only enable
+    /// it if such peers are available.
+    ///
+    /// The state has no historical note commitment trees for the heights fast sync commits, so
+    /// `z_gettreestate` and lightwalletd tree states are unavailable for them. Don't enable it
+    /// on nodes that serve wallets.
+    pub fast_tree_sync: bool,
+
     // Debug configs
     //
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -202,6 +215,7 @@ impl Default for Config {
             ephemeral: false,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
+            fast_tree_sync: false,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

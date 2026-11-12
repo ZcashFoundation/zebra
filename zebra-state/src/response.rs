@@ -2,6 +2,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::RangeInclusive,
     sync::Arc,
 };
 
@@ -11,7 +12,9 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
-    orchard, sapling,
+    orchard,
+    parallel::tree::TreeRoots,
+    sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
@@ -20,6 +23,8 @@ use zebra_chain::{
 };
 
 use zebra_chain::work::difficulty::CompactDifficulty;
+
+use crate::service::finalized_state::FastSyncTreeRoots;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
 // will work with inline links.
@@ -226,6 +231,13 @@ pub enum Response {
 
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal(Box<ContextuallyVerifiedBlock>),
+
+    /// Response to [`Request::SupplyTreeRoots`].
+    TreeRootsSupplied,
+
+    /// Response to [`Request::WantedTreeRoots`]: the heights whose note commitment tree roots
+    /// fast checkpoint sync needs next, or `None` if it needs none.
+    WantedTreeRoots(Option<RangeInclusive<block::Height>>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -677,6 +689,14 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::IsTransparentOutputSpent`]
     IsTransparentOutputSpent(bool),
+
+    /// Response to [`ReadRequest::TreeRoots`]: the roots after each requested block, or `None`
+    /// if the state can't serve them.
+    TreeRoots(Option<Vec<TreeRoots>>),
+
+    /// Response to [`ReadRequest::FastSyncTreeRoots`]: the stored roots and tree sizes, or
+    /// `None` if fast checkpoint sync didn't commit the block.
+    FastSyncTreeRoots(Option<FastSyncTreeRoots>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -789,6 +809,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::ValidBestTipBlockCommitments
             | ReadResponse::NonFinalizedBlocksListener(_)
             | ReadResponse::IsTransparentOutputSpent(_)
+            | ReadResponse::TreeRoots(_)
+            | ReadResponse::FastSyncTreeRoots(_)
             | ReadResponse::ForkPoint(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

@@ -32,6 +32,7 @@ use zebra_chain::{
 };
 use zebra_db::{
     chain::BLOCK_INFO,
+    shielded::FAST_SYNC_TREE_ROOTS,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
@@ -39,7 +40,7 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, ChainTipBlock},
+    service::{check, fast_tree_sync::FastTreeSync, ChainTipBlock},
     CheckpointVerifiedBlock, Config, StateInitError, ValidateContextError,
 };
 
@@ -61,8 +62,8 @@ pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
-    FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
-    MAX_ON_DISK_HEIGHT,
+    shielded::FastSyncTreeRoots, FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex,
+    TransactionLocation, MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
 
@@ -117,6 +118,8 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
+    // Roots of heights committed without their note commitment trees
+    FAST_SYNC_TREE_ROOTS,
 ];
 
 /// The finalized part of the chain state, stored in the db.
@@ -243,6 +246,45 @@ impl FinalizedState {
         checkpoint_verified: CheckpointVerifiedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_checkpoint(checkpoint_verified.into(), prev_note_commitment_trees)
+    }
+
+    /// Commits a checkpoint-verified block without updating its Sapling, Orchard, and Ironwood
+    /// note commitment trees, like [`Self::commit_finalized`].
+    ///
+    /// # Panics
+    ///
+    /// If `fast_checkpoint` is not a [`FinalizableBlock::FastCheckpoint`].
+    pub(crate) fn commit_finalized_fast(
+        &mut self,
+        fast_checkpoint: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        assert!(
+            matches!(fast_checkpoint, FinalizableBlock::FastCheckpoint { .. }),
+            "only fast checkpoint blocks skip their tree updates",
+        );
+
+        self.commit_checkpoint(fast_checkpoint, prev_note_commitment_trees)
+    }
+
+    /// Commits a checkpoint-verified block, and updates the checkpoint metrics.
+    fn commit_checkpoint(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+    ) -> Result<(ChainTipBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        let (FinalizableBlock::Checkpoint {
+            checkpoint_verified,
+        }
+        | FinalizableBlock::FastCheckpoint {
+            checkpoint_verified,
+            ..
+        }) = &finalizable_block
+        else {
+            unreachable!("callers only pass checkpoint-verified blocks");
+        };
+
         let tip_block = ChainTipBlock {
             hash: checkpoint_verified.hash,
             height: checkpoint_verified.height,
@@ -252,7 +294,7 @@ impl FinalizedState {
             previous_block_hash: checkpoint_verified.block.header.previous_block_hash,
         };
         let result = self.commit_finalized_direct(
-            checkpoint_verified.into(),
+            finalizable_block,
             prev_note_commitment_trees,
             "commit checkpoint-verified request",
         );
@@ -389,6 +431,72 @@ impl FinalizedState {
                         treestate,
                         deferred_pool_balance_change,
                     ),
+                    Some(prev_note_commitment_trees),
+                )
+            }
+            FinalizableBlock::FastCheckpoint {
+                checkpoint_verified,
+                tree_roots,
+                history_tree,
+                embedded_trees,
+            } => {
+                let block = checkpoint_verified.block.clone();
+                let network = self.network();
+                let prev_note_commitment_trees = prev_note_commitment_trees
+                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+
+                // This block's header commits to the previous block's roots. The writer verified
+                // this block's roots against the next block's header.
+                check::block_commitment_is_valid_for_chain_history(
+                    block.clone(),
+                    &network,
+                    &self.db.history_tree(),
+                    checkpoint_verified.precomputed_auth_data_root(),
+                )?;
+
+                // No header commits to Sprout roots, so the Sprout tree is always updated.
+                let mut note_commitment_trees = prev_note_commitment_trees.clone();
+                note_commitment_trees
+                    .update_sprout_tree(&block)
+                    .map_err(ValidateContextError::from)?;
+                note_commitment_trees.sapling_subtree = None;
+                note_commitment_trees.orchard_subtree = None;
+                note_commitment_trees.ironwood_subtree = None;
+
+                let fast_tree_sync = match embedded_trees {
+                    Some(embedded_trees) => {
+                        note_commitment_trees.sapling = embedded_trees.sapling.clone();
+                        note_commitment_trees.orchard = embedded_trees.orchard.clone();
+                        note_commitment_trees.ironwood = embedded_trees.ironwood.clone();
+                        FastTreeSync::Embedded(embedded_trees)
+                    }
+                    None => FastTreeSync::Frozen(tree_roots),
+                };
+
+                let height = checkpoint_verified.height;
+                let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+                    height,
+                    &network,
+                    self.db.finalized_value_pool(),
+                )
+                .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+                    subsidy_error: subsidy_error.into(),
+                    height,
+                    block_hash: checkpoint_verified.hash,
+                })?;
+
+                (
+                    height,
+                    checkpoint_verified.hash,
+                    FinalizedBlock::from_checkpoint_verified(
+                        checkpoint_verified,
+                        Treestate {
+                            note_commitment_trees,
+                            history_tree,
+                        },
+                        deferred_pool_balance_change,
+                    )
+                    .with_fast_tree_sync(fast_tree_sync),
                     Some(prev_note_commitment_trees),
                 )
             }

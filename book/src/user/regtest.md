@@ -146,7 +146,7 @@ Starting at the configured deployment height, mining templates and
 block's reserve. `getblocksubsidy` rejects a future reissuance height whose parent
 block is not yet in the best chain.
 
-Ordinary builds use database format v29.0.0, including the NSM balance in each
+Ordinary builds use database format v29, including the NSM balance in each
 new value-pool record. The registered upgrade automatically moves compatible v28
 state into `state/v29` when no v29 database exists, without resyncing. Legacy
 48-byte value-pool and 52-byte block-info records remain readable with a zero NSM
