@@ -30,6 +30,12 @@ const MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(3_36
 // lands 3_500 blocks later.
 const TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(4_048_500);
 
+// Mainnet `FEE_REDUCTION_HEIGHT` from ZIP 2009: <https://zips.z.cash/zip-2009#deployment>
+const MAINNET_FEE_REDUCTION_HEIGHT: Height = Height(3_590_000);
+
+// Testnet `FEE_REDUCTION_HEIGHT` from ZIP 2009, which is also the Testnet NU7 activation height.
+const TESTNET_FEE_REDUCTION_HEIGHT: Height = Height(4_465_026);
+
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
 //       of history trees in the db format.
@@ -357,6 +363,18 @@ impl Network {
                 )
             })
             .collect()
+    }
+
+    /// Returns the first next-block height using the reduced ZIP-2009 fee parameters.
+    ///
+    /// Custom testnets use the Testnet policy height. Regtest uses the new policy from
+    /// its first non-genesis block, without requiring a network upgrade.
+    pub fn fee_reduction_height(&self) -> Height {
+        match self {
+            Network::Mainnet => MAINNET_FEE_REDUCTION_HEIGHT,
+            Network::Testnet(parameters) if parameters.is_regtest() => Height(1),
+            Network::Testnet(_) => TESTNET_FEE_REDUCTION_HEIGHT,
+        }
     }
 
     /// Returns the height at which the soft fork that temporarily disables Orchard

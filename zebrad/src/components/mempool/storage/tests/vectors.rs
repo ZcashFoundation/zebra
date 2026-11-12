@@ -279,6 +279,8 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             0,
             0,
             std::sync::Arc::new(vec![]),
+            &zebra_chain::parameters::Network::Mainnet,
+            zebra_chain::block::Height::MAX,
         )
         .expect("verification should pass"),
         Vec::new(),

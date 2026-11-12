@@ -412,7 +412,7 @@ proptest! {
     }
 }
 
-fn genesis_chain_tip() -> Option<ChainTipBlock> {
+pub(super) fn genesis_chain_tip() -> Option<ChainTipBlock> {
     zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
         .map(CheckpointVerifiedBlock::from)
@@ -421,7 +421,7 @@ fn genesis_chain_tip() -> Option<ChainTipBlock> {
 }
 
 /// Create a new [`Mempool`] instance using mocked services.
-fn setup(
+pub(super) fn setup(
     network: &Network,
 ) -> (
     Mempool,

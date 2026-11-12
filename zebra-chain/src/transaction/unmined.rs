@@ -20,6 +20,7 @@ use std::{fmt, sync::Arc};
 use crate::{
     amount::{Amount, NonNegative},
     block::Height,
+    parameters::Network,
     serialization::ZcashSerialize,
     transaction::{AuthDigest, Hash, Transaction, WtxId},
     transparent,
@@ -224,10 +225,10 @@ pub struct UnminedTx {
     /// The size in bytes of the serialized transaction data
     pub size: usize,
 
-    /// The conventional fee for this transaction, as defined by [ZIP-317].
+    /// The height-independent conventional action count, as defined by [ZIP-317].
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
-    pub conventional_fee: Amount<NonNegative>,
+    pub conventional_actions: u32,
 }
 
 impl fmt::Debug for UnminedTx {
@@ -247,12 +248,12 @@ impl fmt::Display for UnminedTx {
 impl From<Arc<Transaction>> for UnminedTx {
     fn from(transaction: Arc<Transaction>) -> Self {
         let size = transaction.zcash_serialized_size();
-        let conventional_fee = zip317::conventional_fee(&transaction);
+        let conventional_actions = zip317::conventional_actions(&transaction);
 
         Self {
             id: transaction.as_ref().into(),
             size,
-            conventional_fee,
+            conventional_actions,
             transaction,
         }
     }
@@ -261,12 +262,12 @@ impl From<Arc<Transaction>> for UnminedTx {
 impl From<&Arc<Transaction>> for UnminedTx {
     fn from(transaction: &Arc<Transaction>) -> Self {
         let size = transaction.zcash_serialized_size();
-        let conventional_fee = zip317::conventional_fee(transaction);
+        let conventional_actions = zip317::conventional_actions(transaction);
 
         Self {
             id: transaction.as_ref().into(),
             size,
-            conventional_fee,
+            conventional_actions,
             transaction: transaction.clone(),
         }
     }
@@ -298,13 +299,6 @@ pub struct VerifiedUnminedTx {
     /// the block-level `MAX_BLOCK_SIGOPS` check and for `getblocktemplate` sigop budgeting,
     /// matching zcashd's consensus behavior.
     pub p2sh_sigop_count: u32,
-
-    /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
-    ///
-    /// The number of actions is limited by [`MAX_BLOCK_BYTES`], so it fits in a u32.
-    ///
-    /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-    pub conventional_actions: u32,
 
     /// The number of unpaid actions for `transaction`,
     /// as defined by [ZIP-317] for block production.
@@ -356,18 +350,26 @@ impl fmt::Display for VerifiedUnminedTx {
 }
 
 impl VerifiedUnminedTx {
-    /// Create a new verified unmined transaction from an unmined transaction, its miner fee, its
-    /// legacy and P2SH sigop counts, and the spent outputs for its transparent inputs.
+    /// Create a verified unmined transaction, checking fee policy for the next block on `network`.
+    ///
+    /// Includes the miner fee, legacy and P2SH sigop counts, and spent transparent outputs.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u32,
         p2sh_sigop_count: u32,
         spent_outputs: Arc<Vec<transparent::Output>>,
+        network: &Network,
+        next_block_height: Height,
     ) -> Result<Self, zip317::Error> {
-        let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
-        let conventional_actions = zip317::conventional_actions(&transaction.transaction);
-        let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
+        let fee_weight_ratio = zip317::conventional_fee_weight_ratio(
+            &transaction,
+            miner_fee,
+            network,
+            next_block_height,
+        );
+        let unpaid_actions =
+            zip317::unpaid_actions(&transaction, miner_fee, network, next_block_height);
 
         zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size)?;
 
@@ -377,12 +379,29 @@ impl VerifiedUnminedTx {
             legacy_sigop_count,
             p2sh_sigop_count,
             fee_weight_ratio,
-            conventional_actions,
             unpaid_actions,
             time: None,
             height: None,
             spent_outputs,
         })
+    }
+
+    /// Refreshes the cached fee policy for the next block.
+    ///
+    /// Mempool storage and block templates call this when retained transactions cross fee activation.
+    pub fn update_fee_parameters(&mut self, network: &Network, next_block_height: Height) {
+        self.fee_weight_ratio = zip317::conventional_fee_weight_ratio(
+            &self.transaction,
+            self.miner_fee,
+            network,
+            next_block_height,
+        );
+        self.unpaid_actions = zip317::unpaid_actions(
+            &self.transaction,
+            self.miner_fee,
+            network,
+            next_block_height,
+        );
     }
 
     /// The total number of transparent signature operations for block-level accounting: legacy +
@@ -399,7 +418,7 @@ impl VerifiedUnminedTx {
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#mempool-size-limiting
     pub fn pays_conventional_fee(&self) -> bool {
-        self.miner_fee >= self.transaction.conventional_fee
+        self.unpaid_actions == 0
     }
 
     /// The cost in bytes of the transaction, as defined in [ZIP-401].

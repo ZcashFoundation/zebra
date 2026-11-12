@@ -19,6 +19,7 @@ use thiserror::Error;
 use zcash_script::solver;
 use zebra_chain::{
     block::Height,
+    parameters::Network,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -242,6 +243,12 @@ impl Storage {
             tip_rejected_same_effects: Default::default(),
             chain_rejected_same_effects: Default::default(),
         }
+    }
+
+    /// Refresh the stored entries' fee policy and metrics.
+    pub(super) fn update_fee_parameters(&mut self, network: &Network, next_block_height: Height) {
+        self.verified
+            .update_fee_parameters(network, next_block_height);
     }
 
     /// Check and reject non-standard transaction.

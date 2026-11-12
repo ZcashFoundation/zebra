@@ -76,6 +76,8 @@ impl Network {
                     0,
                     0,
                     std::sync::Arc::new(vec![]),
+                    &Network::Mainnet,
+                    crate::block::Height::MAX,
                 )
                 .ok()
             })

@@ -5237,7 +5237,7 @@ async fn mempool_zip317_ok() {
         fund_height,
         true,
         0,
-        Amount::try_from(2_001).expect("valid amount"),
+        Amount::try_from(10_001).expect("valid amount"),
     );
 
     // Create a non-coinbase V5 tx.
@@ -5789,7 +5789,13 @@ fn cacheable_mainnet_orchard_transaction() -> Transaction {
                     .value_balance(&HashMap::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
-                    .is_some_and(|fee| fee >= zip317::conventional_fee(tx))
+                    .is_some_and(|fee| {
+                        fee >= zip317::conventional_fee(
+                            zip317::conventional_actions(tx),
+                            &Network::Mainnet,
+                            Height(0),
+                        )
+                    })
         })
         .map(|tx| tx.as_ref().clone())
         .expect("the mainnet test blocks must contain a fee-paying Orchard-only transaction")
@@ -6038,7 +6044,13 @@ fn cacheable_mainnet_sapling_transaction() -> (NetworkUpgrade, Transaction) {
                     .value_balance(&HashMap::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
-                    .is_some_and(|fee| fee >= zip317::conventional_fee(tx))
+                    .is_some_and(|fee| {
+                        fee >= zip317::conventional_fee(
+                            zip317::conventional_actions(tx),
+                            &Network::Mainnet,
+                            Height(0),
+                        )
+                    })
         })
         .map(|(nu, tx)| (nu, tx.as_ref().clone()))
         .expect("the mainnet test blocks must contain a fee-paying Sapling-only transaction")

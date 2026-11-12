@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Apply reduced ZIP 2009 mempool fees only from the next-block activation height.
+time: 2026-11-04T06:08:32.491588072+01:00

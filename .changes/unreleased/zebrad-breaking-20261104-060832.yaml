@@ -1,0 +1,4 @@
+project: zebrad
+kind: breaking
+body: Follow [ZIP 2009](https://zips.z.cash/zip-2009) by requiring the original ZIP 317 fees until next-block height 3,590,000 on Mainnet or 4,465,026 on Testnet and custom testnets. Reduced fees and higher mining weights activate at those heights, or height 1 on Regtest; transactions paying the reduced fee before activation are no longer relayed. Old-policy fee rejections do not block resubmission after activation. Retained mempool entries and metrics switch to the new weights at activation.
+time: 2026-11-04T06:08:32.582997111+01:00
