@@ -53,7 +53,10 @@ use zebra_state::{
 };
 
 use crate::{
-    methods::types::{long_poll::LongPollInput, transaction::TransactionTemplate},
+    methods::types::{
+        long_poll::{LongPollId, LongPollInput},
+        transaction::TransactionTemplate,
+    },
     server::error::MapError,
 };
 
@@ -159,6 +162,8 @@ struct TemplateState {
     /// work, or a build that passed its check. Served again if the served template fails its
     /// check, so miners don't keep work whose solved block would be rejected.
     last_valid: Option<Arc<CachedTemplate>>,
+    /// Revocation identity covering rejected generations and every withdrawal of served work.
+    rejected_generation: u64,
     published_at: Instant,
     error: Option<(Option<block::Hash>, ErrorObjectOwned)>,
 }
@@ -170,6 +175,7 @@ impl TemplateState {
             template,
             next: None,
             last_valid: None,
+            rejected_generation: 0,
             published_at: Instant::now(),
             error: None,
         }
@@ -214,6 +220,22 @@ impl TemplateChanges {
         }
     }
 
+    /// Waits for initialized work to be withdrawn, excluding failed-snapshot retry backoff.
+    async fn withdrawn(&mut self) {
+        if self
+            .0
+            .wait_for(|state| {
+                state
+                    .as_ref()
+                    .is_some_and(|state| state.template.is_none() && state.error.is_none())
+            })
+            .await
+            .is_err()
+        {
+            std::future::pending::<()>().await;
+        }
+    }
+
     /// Consumes publications observed while waiting for another fallback build.
     pub(crate) fn take_changed(&mut self) -> bool {
         if self.0.has_changed().unwrap_or(false) {
@@ -249,6 +271,24 @@ impl TemplateCache {
     /// Returns `true` if the updater has not initialized the cache.
     pub(crate) fn is_uninitialized(&self) -> bool {
         self.served.borrow().is_none()
+    }
+
+    /// Returns an RPC work identity, excluding cached responses whose generation was superseded.
+    pub(crate) fn work_id(
+        &self,
+        mut id: LongPollId,
+        template: Option<&CachedTemplate>,
+    ) -> Option<LongPollId> {
+        let state = self.served.borrow();
+        let state = state.as_ref();
+        if let Some(template) = template {
+            if state?.template.as_ref()?.generation != template.generation {
+                return None;
+            }
+        }
+        // The opaque work checksum deliberately retains its existing 32-bit collision bound.
+        id.tip_hash_checksum ^= state.map_or(0, |state| state.rejected_generation) as u32;
+        Some(id)
     }
 
     /// Returns `true` if no template is currently available.
@@ -328,7 +368,13 @@ impl TemplateCache {
                 let same_parent = current.is_some_and(|current| {
                     current.previous_block_hash == validated.previous_block_hash
                 });
-                if same_parent && !current_is_valid {
+                if same_parent
+                    && !current_is_valid
+                    && state
+                        .last_valid
+                        .as_ref()
+                        .is_none_or(|valid| valid.generation <= validated.generation)
+                {
                     state.last_valid = Some(Arc::clone(validated));
                 }
                 return false;
@@ -348,6 +394,7 @@ impl TemplateCache {
             *state = TemplateState {
                 next: state.next.take(),
                 last_valid: Some(Arc::clone(&template)),
+                rejected_generation: state.rejected_generation,
                 ..TemplateState::new(Some(template))
             };
             served = true;
@@ -356,28 +403,54 @@ impl TemplateCache {
         served
     }
 
-    /// Serves the last valid work again if `failed`, which failed its check, is served.
+    /// Withdraws a failed generation, restoring different, valid work for its parent if available.
     ///
-    /// The fallback can be coinbase-only work or an earlier build whose check passed.
-    /// Returns whether the served work changed.
+    /// Clock-narrowed responses share their source generation, so rejection also withdraws the
+    /// source rather than repeatedly returning the rejected response.
+    ///
+    /// Removes failed fallback work even when a newer generation is served. Returns whether served
+    /// work or old-work authorization changed, so long polls also revoke previously served failures.
     fn reject(&self, failed: &Arc<CachedTemplate>) -> bool {
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
                 return false;
             };
-            if !state
+            let withdrawing_served = state
                 .template
                 .as_ref()
-                .is_some_and(|served| Arc::ptr_eq(served, failed))
-            {
-                return false;
-            }
-            let Some(valid) = state.last_valid.clone() else {
-                return false;
+                .is_some_and(|served| served.generation == failed.generation);
+            let rejected_generation = failed
+                .generation
+                .checked_add(1)
+                .expect("published generations were incremented successfully when allocated");
+            let rejected_generation = if withdrawing_served {
+                rejected_generation.max(
+                    state
+                        .rejected_generation
+                        .checked_add(1)
+                        .expect("2^64 served-work withdrawals cannot occur in a cache lifetime"),
+                )
+            } else {
+                rejected_generation
             };
+            let authorization_changed = state.rejected_generation < rejected_generation;
+            state.rejected_generation = state.rejected_generation.max(rejected_generation);
+            state.last_valid = state
+                .last_valid
+                .take()
+                .filter(|valid| valid.generation != failed.generation);
+            if !withdrawing_served {
+                return authorization_changed;
+            }
+            let valid = state.last_valid.clone();
             *state = TemplateState {
-                last_valid: Some(Arc::clone(&valid)),
-                ..TemplateState::new(Some(valid))
+                next: state
+                    .next
+                    .take()
+                    .filter(|next| next.generation != failed.generation),
+                last_valid: valid.clone(),
+                rejected_generation: state.rejected_generation,
+                ..TemplateState::new(valid)
             };
             true
         })
@@ -408,6 +481,7 @@ impl TemplateCache {
         let generation = template.generation;
         let unchecked = !template.transactions.is_empty();
         self.served.send_modify(|state| {
+            let rejected_generation = state.as_ref().map_or(0, |state| state.rejected_generation);
             let last_valid = if unchecked {
                 state
                     .as_ref()
@@ -419,11 +493,47 @@ impl TemplateCache {
             *state = Some(TemplateState {
                 next: unchecked.then(|| Arc::clone(&template)),
                 last_valid,
+                rejected_generation,
                 ..TemplateState::new(Some(template))
             });
         });
         self.queued.notify_one();
         generation
+    }
+
+    /// Publishes fallback work before checking it, retaining its exact generation for the verdict.
+    pub(crate) fn publish_fallback(
+        &self,
+        template: BlockTemplateResponse,
+        network: Network,
+        verifier: impl BlockVerifierService,
+    ) {
+        let unchecked = !template.transactions.is_empty();
+        let generation = self.publish(template);
+        if !unchecked {
+            return;
+        }
+        let template = self
+            .served
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.template.clone())
+            .filter(|template| template.generation == generation);
+        let Some(template) = template else {
+            return;
+        };
+        let cache = self.clone();
+        tokio::spawn(async move {
+            match check_template(template.clone(), network, verifier).await {
+                Ok(_) => {
+                    cache.accept_validated(&template, Some(&template));
+                }
+                Err(error) => {
+                    cache.reject(&template);
+                    tracing::debug!(%error, "fallback block template failed validation");
+                }
+            }
+        });
     }
 
     fn cached_template(&self, response: BlockTemplateResponse) -> Arc<CachedTemplate> {
@@ -441,7 +551,13 @@ impl TemplateCache {
 
     /// Withdraws cached work and wakes long polls.
     pub(crate) fn clear(&self) {
-        self.served.send_replace(Some(TemplateState::new(None)));
+        self.served.send_modify(|state| {
+            let rejected_generation = state.as_ref().map_or(0, |state| state.rejected_generation);
+            *state = Some(TemplateState {
+                rejected_generation,
+                ..TemplateState::new(None)
+            });
+        });
     }
 
     /// Returns a template for `tip_hash`, narrowing its timestamp range to the local-clock bound.
@@ -525,9 +641,9 @@ fn preserved_max_timestamp(
 
 /// Keeps `cache` filled with a block template for the current mining parent.
 ///
-/// Publishes a coinbase-only template as soon as the chain tip changes, then stages a template
-/// that contains mempool transactions, which [`validate_templates()`] serves once it passes
-/// proposal validation. Rebuilds after throttled mempool changes, with a
+/// Publishes a coinbase-only template as soon as the chain tip changes, then serves a template
+/// containing mempool transactions immediately while [`validate_templates()`] checks it in the
+/// background. Rebuilds after throttled mempool changes, with a
 /// backstop for missed events and clock changes after at least [`MEMPOOL_LONG_POLL_INTERVAL`]
 /// seconds. Both waits respect the previous build's duration. A candidate under verification
 /// takes priority and receives only coinbase-only work.
@@ -555,6 +671,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
     let Some(_updater) = cache.claim_updater() else {
         return;
     };
+    let mut template_changes = cache.subscribe();
     // A fallback that started before this updater retains ownership until its blocking work
     // finishes. Once active, this updater is the sole default-template builder.
     drop(coinbase_cache.build.lock().await);
@@ -884,6 +1001,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     return;
                 }
             }
+            _ = template_changes.withdrawn() => {}
             _ = sleep_until(
                 next_mempool_build.max(
                     build_finished + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),
@@ -1057,33 +1175,7 @@ async fn validate_templates(
             continue;
         };
         let parent = template.previous_block_hash;
-        let validation = async {
-            let network = network.clone();
-            let template = template.clone();
-            let proposal = AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
-                proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
-            }))
-            .await
-            .expect(
-                "template conversion reports malformed templates as errors rather than panicking",
-            );
-            match proposal {
-                Ok(block) => {
-                    match tokio::time::timeout(
-                        super::PROPOSAL_CHECK_TIMEOUT,
-                        verifier
-                            .clone()
-                            .oneshot(VerifyRequest::CheckProposal(Arc::new(block))),
-                    )
-                    .await
-                    {
-                        Ok(result) => result,
-                        Err(elapsed) => Err(elapsed.into()),
-                    }
-                }
-                Err(error) => Err(error.into()),
-            }
-        };
+        let validation = check_template(template.clone(), network.clone(), verifier.clone());
         let result = tokio::select! {
             biased;
             _ = async {
@@ -1114,24 +1206,40 @@ async fn validate_templates(
             }
             Err(error) => {
                 if cache.reject(&template) {
-                    tracing::debug!(?parent, "serving the last valid work after a failed check");
+                    tracing::debug!(?parent, "withdrawing failed block template work");
                 }
-                // Miners keep earlier work for this parent, which can be coinbase-only, so they can
-                // silently lose fees while this keeps failing. Log the start of a failing spell
-                // loudly, then stay quiet.
+                // Earlier valid work can lose fees, and there may be no valid fallback. Log the
+                // start of a failing spell loudly, then stay quiet.
                 if was_failing {
                     tracing::debug!(?error, "block template failed validation");
                 } else {
                     tracing::warn!(
                         ?error,
-                        "block template failed validation, serving earlier work until this \
-                         recovers"
+                        "block template failed validation, withdrawing failed work until this recovers"
                     );
                     was_failing = true;
                 }
             }
         }
     }
+}
+
+/// Converts and checks the exact served response, including verifier readiness in its deadline.
+async fn check_template(
+    template: Arc<CachedTemplate>,
+    network: Network,
+    verifier: impl BlockVerifierService,
+) -> Result<block::Hash, zebra_consensus::BoxError> {
+    let proposal = AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+        proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime, &network)
+    }))
+    .await
+    .expect("template conversion reports malformed templates as errors rather than panicking")?;
+    tokio::time::timeout(
+        super::PROPOSAL_CHECK_TIMEOUT,
+        verifier.oneshot(VerifyRequest::CheckProposal(Arc::new(proposal))),
+    )
+    .await?
 }
 
 /// Reads the current early child context.

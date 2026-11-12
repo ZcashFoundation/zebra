@@ -1140,11 +1140,9 @@ where
         .map_misc_error()?
     }
 
-    /// Validates a transaction-bearing fallback template as a block proposal in the background,
-    /// so a block solved from it reuses the verdict in `submitblock`.
+    /// Checks uncached templates built with overridden miner parameters in the background.
     ///
-    /// The updater validates its own builds, so this only runs without a live updater. A failed
-    /// check is logged: the template is already served, as the updater's first build for a tip is.
+    /// Cached fallbacks instead retain their generation, so failures withdraw the served work.
     fn validate_fallback_template(&self, template: &BlockTemplateResponse) {
         let network = self.network.clone();
         let template = template.clone();
@@ -1287,13 +1285,18 @@ where
                 return Ok(None);
             };
 
-            let is_client_template = Some(template.long_poll_id) == client_long_poll_id;
+            let Some(work_id) = cache.work_id(template.long_poll_id, Some(template.as_ref()))
+            else {
+                continue;
+            };
+            let is_client_template = Some(work_id) == client_long_poll_id;
             let now = self.template_clock_now();
             let max_time_reached =
                 long_poll_started <= template.max_time && now > template.max_time;
 
             if !is_client_template || max_time_reached {
                 let mut template = Arc::unwrap_or_clone(template).response;
+                template.long_poll_id = work_id;
                 template.submit_old = client_long_poll_id.as_ref().map(|old_long_poll_id| {
                     now <= template.max_time && template.long_poll_id.submit_old(old_long_poll_id)
                 });
@@ -3107,6 +3110,14 @@ where
                 mempool_txs.iter().map(|tx| tx.transaction.id),
             )
             .generate_id();
+            let server_work_id = self
+                .gbt
+                .template_cache()
+                .map_or(server_long_poll_id, |cache| {
+                    cache
+                        .work_id(server_long_poll_id, None)
+                        .expect("uncached snapshots have no cached-generation precondition")
+                });
 
             // Recheck after the reads: a forward clock correction can expire a live range.
             // Only notify if it was still valid when this request started, otherwise miners
@@ -3119,7 +3130,7 @@ where
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
             // - the timestamp range expired during this request.
-            if Some(&server_long_poll_id) != client_long_poll_id.as_ref() || max_time_reached {
+            if Some(&server_work_id) != client_long_poll_id.as_ref() || max_time_reached {
                 let (mut template, _build_guard) = self
                     .build_block_template(
                         miner_params,
@@ -3154,20 +3165,29 @@ where
                     template.clamped_time_range(now).ok_or_misc_error(
                         "local clock moved backwards while building the block template",
                     )?;
-                // Validate the served work in the background, so a solve of it reuses the
-                // verdict in `submitblock`. The proposal carries the served `cur_time`.
-                if !template.transactions.is_empty() {
+                // Publish before starting the background check. Its verdict belongs to this
+                // exact generation, even if an updater takes ownership while the check runs.
+                let work_id = if let Some(cache) = self.gbt.template_cache() {
+                    cache.preserve_work_identity(&mut template);
+                    cache
+                        .work_id(template.long_poll_id, None)
+                        .expect("new fallback responses have no cached-generation precondition")
+                } else {
+                    template.long_poll_id
+                };
+                template.submit_old = client_long_poll_id
+                    .as_ref()
+                    .map(|old_id| now <= template.max_time && work_id.submit_old(old_id));
+                if let Some(cache) = self.gbt.template_cache() {
+                    cache.publish_fallback(
+                        template.clone(),
+                        self.network.clone(),
+                        self.gbt.block_verifier_router(),
+                    );
+                } else if !template.transactions.is_empty() {
                     self.validate_fallback_template(&template);
                 }
-                if let Some(cache) = self.gbt.template_cache() {
-                    cache.preserve_work_identity(&mut template);
-                }
-                template.submit_old = client_long_poll_id.as_ref().map(|old_id| {
-                    now <= template.max_time && template.long_poll_id.submit_old(old_id)
-                });
-                if let Some(cache) = self.gbt.template_cache() {
-                    cache.publish(template.clone());
-                }
+                template.long_poll_id = work_id;
                 return Ok(template.into());
             }
             drop(build_guard);
