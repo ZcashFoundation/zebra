@@ -20,8 +20,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
+        MAX_BLOCK_REORG_HEIGHT, MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
         MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS,
+        MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
     },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
@@ -370,6 +371,21 @@ impl NonFinalizedState {
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
     fn insert(&mut self, chain: Arc<Chain>) {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
+    }
+
+    /// Returns `true` if the best chain's root block should be finalized: when the best chain is
+    /// longer than the reorg limit, or when the chains pass the index entry limit and the best
+    /// chain is longer than [`MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT`].
+    pub fn should_finalize_root(&self) -> bool {
+        let Some(best_chain_len) = self.best_chain_len() else {
+            return false;
+        };
+
+        best_chain_len > MAX_BLOCK_REORG_HEIGHT
+            || (best_chain_len > MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT
+                && self
+                    .max_index_entries
+                    .is_some_and(|max_index_entries| self.index_entry_count() > max_index_entries))
     }
 
     /// Finalize the lowest height block in the non-finalized portion of the best

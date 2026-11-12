@@ -1975,3 +1975,45 @@ fn index_entry_limit_is_only_on_test_networks() {
         NonFinalizedState::new(&Network::Mainnet).max_index_entries
     );
 }
+
+/// Past the index entry limit, test networks finalize blocks before the reorg limit, but keep
+/// at least `MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT` blocks. Mainnet has no index entry limit.
+#[test]
+fn index_entry_limit_finalizes_early_down_to_the_minimum() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let min_blocks = crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT;
+    for network in [Network::new_default_testnet(), Network::Mainnet] {
+        let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+        let mut tip = busy_child(&block1, &block1, &network, 1_000, 10);
+        state.commit_block(tip.clone().prepare(), &finalized_state)?;
+        while state.best_chain_len() < Some(min_blocks + 1) {
+            tip = tip.make_fake_child();
+            state.commit_block(tip.clone().prepare(), &finalized_state)?;
+        }
+        assert!(!state.should_finalize_root(), "{network}: under the limit");
+
+        if state.max_index_entries.is_some() {
+            state.max_index_entries = Some(1);
+        }
+        assert_eq!(
+            network.is_a_test_network(),
+            state.should_finalize_root(),
+            "{network}: over the limit",
+        );
+
+        while state.should_finalize_root() {
+            state.finalize();
+        }
+        let expected_len = if network.is_a_test_network() {
+            min_blocks
+        } else {
+            min_blocks + 1
+        };
+        assert_eq!(Some(expected_len), state.best_chain_len(), "{network}");
+    }
+
+    Ok(())
+}

@@ -12,7 +12,10 @@ use tokio::sync::{
 };
 
 use tracing::Span;
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    parallel::tree::NoteCommitmentTrees,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
@@ -64,6 +67,30 @@ pub(crate) fn validate_and_commit_non_finalized(
     }
 
     Ok(())
+}
+
+/// Finalizes the best chain's root blocks while [`NonFinalizedState::should_finalize_root`].
+fn finalize_root_blocks(
+    finalized_state: &mut FinalizedState,
+    non_finalized_state: &mut NonFinalizedState,
+    prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+) {
+    while non_finalized_state.should_finalize_root() {
+        tracing::trace!("finalizing a block past the reorg or index entry limit");
+        let contextually_verified_with_trees = non_finalized_state.finalize();
+        *prev_finalized_note_commitment_trees = finalized_state
+            .commit_finalized_direct(
+                contextually_verified_with_trees,
+                prev_finalized_note_commitment_trees.take(),
+                "commit contextually-verified request",
+            )
+            .expect(
+                "unexpected finalized block commit error: note commitment and history trees were \
+                 already checked by the non-finalized state",
+            )
+            .1
+            .into();
+    }
 }
 
 /// Sends the hashes of blocks evicted from the non-finalized state on `non_finalized_rejected_sender`,
@@ -371,6 +398,25 @@ impl WriteBlockWorkerTask {
             return;
         }
 
+        // A restored backup can hold more blocks than the limits allow, so finalize them before
+        // committing any new blocks.
+        let restored_root = non_finalized_state.root_height();
+        finalize_root_blocks(
+            finalized_state,
+            non_finalized_state,
+            &mut prev_finalized_note_commitment_trees,
+        );
+        if non_finalized_state.root_height() != restored_root {
+            forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
+            update_latest_chain_channels(
+                non_finalized_state,
+                &finalized_state.db,
+                chain_tip_sender,
+                non_finalized_state_sender,
+                backup_dir_path.as_deref(),
+            );
+        }
+
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
@@ -482,19 +528,11 @@ impl WriteBlockWorkerTask {
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
-            {
-                tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees = non_finalized_state.finalize();
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
-            }
+            finalize_root_blocks(
+                finalized_state,
+                non_finalized_state,
+                &mut prev_finalized_note_commitment_trees,
+            );
 
             // Update the metrics if semantic and contextual validation passes
             //

@@ -114,6 +114,12 @@ pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 /// [`MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`].
 pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
 
+/// The minimum number of blocks Zebra keeps in the best non-finalized chain when the index entry
+/// limit makes it finalize blocks before the chain reaches [`MAX_BLOCK_REORG_HEIGHT`].
+///
+/// zcashd does not reorganize more than 99 blocks.
+pub const MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT: u32 = 100;
+
 /// The maximum total number of index entries in all non-finalized chains on test networks.
 ///
 /// Chains index their blocks, transactions, transparent outputs and spends, and nullifiers, at
@@ -121,8 +127,8 @@ pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
 /// passes this limit, Zebra drops the chain with the lowest work, but keeps the best chain and the
 /// most recently inserted chain.
 ///
-/// This limits non-finalized chains to about 2 GB, unless the best and newest chains alone are
-/// larger. Finalizing a block can double that until the next block is committed (#11820).
+/// If the best and newest chains alone pass the limit, Zebra also finalizes blocks early, but keeps
+/// at least [`MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT`] blocks.
 pub const MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS: usize = 2_000_000;
 
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
