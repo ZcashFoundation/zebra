@@ -64,9 +64,12 @@ move the `edge` image tag. Pre-releases from `next` do not publish crates.
 For a release candidate, package versions, tags, and versioned changelogs must
 agree. Use the normal Release PR and readiness process:
 
-1. Agree on the candidate's scope and prerelease version. Check that the final
-   Release PR manifests, dependency requirements, and versioned changelogs use
-   that version; there is no separate `rc` dispatch operation in `release.yml`.
+1. Agree on the candidate's scope and prerelease version. The release workflow
+   applies the release version, so set the candidate version with the
+   [prerelease procedure](#what-release-readiness-reports), and repeat it after
+   any workflow refresh. Check that the final Release PR manifests, dependency
+   requirements, and versioned changelogs use that version; there is no
+   separate `rc` dispatch operation in `release.yml`.
 2. Review the readiness report's exact source commit and package plan, then
    approve publication through the normal release workflow.
 3. Test the published candidate and record the results. Publish fixes with new
@@ -233,7 +236,7 @@ Read the failed job summary before retrying.
 | --- | --- |
 | Release PR is behind `main` | Let release-plz refresh it, then review the new head. |
 | Missing or empty versioned changelog | Add missing source fragments on `main` for direct changes. A dependency-only omission requires a batching fix, not a generated-file patch. |
-| Version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let the release workflow refresh the PR. Otherwise the workflow's apply step failed, and its log names the problem. After fixing it, freeze `main` in Merge Freeze, run `plan-release-versions.sh <base> > releases.tsv` and `apply-release-plan.sh <base> releases.tsv` from `.github/scripts/` on the Release PR branch, then commit and push the result. |
+| Version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let the release workflow refresh the PR. Otherwise the workflow's apply step failed, and its log names the problem. After fixing it, freeze `main` in Merge Freeze, run `.github/scripts/plan-release-versions.sh <base> > releases.tsv` and `.github/scripts/apply-release-plan.sh <base> releases.tsv` from the repository root on the Release PR branch, then commit and push the result. |
 | Cargo dry run fails | Fix the source or dependency problem on `main`. |
 | Conflicting crate provenance, tag target, or release channel | Stop publication and investigate; do not overwrite immutable external state. |
 

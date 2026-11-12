@@ -124,7 +124,8 @@ The configured display order differs from the priority used to classify a change
 | Fixed | `Fixed` | Fixes invisible to users: the defect is gone but output is unchanged |
 | Security | `Security` | Security fixes, coordinated with the disclosure process |
 
-Choose the most impactful applicable category: breaking, Security, Removed,
+Choose the most impactful applicable category: `network-upgrade` (`zebrad`
+only), breaking, Security, Removed,
 Changed, Deprecated, Added, then Fixed. Do not repeat one change in several
 sections, except for the crate exception below.
 

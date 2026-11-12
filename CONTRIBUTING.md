@@ -66,8 +66,9 @@ successful analysis for declared breaks. Its `api-diff` and `changelog-gate`
 jobs are advisory, not merge-blocking; fragment parsing and release readiness
 are separate checks. Reviewers must check compatibility and changelog coverage.
 
-The release planner reads commits on `main`, including branch commits and the
-merge commit. A breaking marker only in the PR description is insufficient.
+The release planner sets versions from change fragments, not commit markers.
+Branch commits are preserved on `main`, so mark the commit that introduces the
+break too; a breaking marker only in the PR description is insufficient.
 
 ## AI-assisted contributions
 

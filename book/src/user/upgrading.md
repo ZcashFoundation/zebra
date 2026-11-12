@@ -22,9 +22,10 @@ from 14 days before the support height. The `getdeprecationinfo` field
 early. Both estimates assume the node is synced to the network tip.
 
 The `zebrad` version is a [SemVer](https://semver.org/) version. A major
-release adds Mainnet network-upgrade support or breaks an operator interface:
-configuration, CLI, RPC, or a state format that older releases cannot read.
-Minor and patch releases are compatible; see
+release adds Mainnet network-upgrade support. A minor release can break an
+operator interface: configuration, CLI, RPC, or a state format that older
+releases cannot read, so check the release notes' Breaking Changes section
+before every upgrade. Patch releases are compatible; see
 [Zebra versioning](../dev/release-process.md#versioning). Release candidates
 are prereleases for testing and do not move the Docker `latest` tag.
 
