@@ -9,6 +9,7 @@ pub mod config;
 pub mod indexer;
 pub mod lightwalletd;
 pub mod methods;
+pub mod metrics;
 pub mod queue;
 pub mod server;
 pub mod sync;

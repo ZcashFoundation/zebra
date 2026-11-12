@@ -8,6 +8,7 @@ use abscissa_core::{Component, FrameworkError, FrameworkErrorKind};
 use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
+pub mod catalog;
 mod process_memory;
 
 #[cfg(all(test, feature = "sentry"))]
@@ -40,6 +41,7 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
+            describe_all();
             spawn_process_metrics();
         }
 
@@ -105,12 +107,23 @@ impl MetricsEndpoint {
     }
 }
 
-/// Records the process metrics through the global recorder, which must already be installed.
+/// Describes every metric Zebra records to the current recorder.
 ///
-/// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
-/// the readings neither depend on a backend nor run on a Tokio worker.
+/// Call this right after installing the global recorder: descriptions sent while no recorder is
+/// installed are lost.
+pub fn describe_all() {
+    zebra_consensus::metrics::describe();
+    zebra_network::metrics::describe();
+    zebra_state::metrics::describe();
+    zebra_rpc::metrics::describe();
+    catalog::describe();
+    #[cfg(not(windows))]
+    describe_process_metrics();
+}
+
+/// Describes the process metrics recorded by [`spawn_process_metrics`].
 #[cfg(not(windows))]
-fn spawn_process_metrics() {
+fn describe_process_metrics() {
     use metrics::{describe_counter, describe_gauge, Unit};
 
     describe_counter!(
@@ -157,7 +170,14 @@ fn spawn_process_metrics() {
     ] {
         describe_gauge!(name, unit, description);
     }
+}
 
+/// Records the process metrics through the global recorder, which must already be installed.
+///
+/// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
+/// the readings neither depend on a backend nor run on a Tokio worker.
+#[cfg(not(windows))]
+fn spawn_process_metrics() {
     record_process_metrics();
 
     let sampler = std::thread::Builder::new()

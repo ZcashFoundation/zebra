@@ -22,6 +22,7 @@ extern crate tracing;
 pub mod config;
 // Most constants are exported by default
 pub mod constants;
+pub mod metrics;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
