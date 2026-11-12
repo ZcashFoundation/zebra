@@ -380,3 +380,42 @@ fn sent_hashes_readd_does_not_keep_outpoints() -> Result<()> {
 
     Ok(())
 }
+
+/// Once a sent block is committed, the sent hashes forget its UTXOs, which readers then find in
+/// the non-finalized state, but still treat the block as sent. Later removals and pruning don't
+/// forget the outputs again.
+#[test]
+fn sent_hashes_forget_committed_utxos_but_keep_the_hash() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let prepared1 = block1.prepare();
+    let prepared2 = block2.prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.add(&prepared2);
+    let outpoint1 = *prepared1.new_outputs.keys().next().unwrap();
+    let outpoint2 = *prepared2.new_outputs.keys().next().unwrap();
+    assert!(sent.utxo(&outpoint1).is_some());
+
+    sent.forget_utxos(&prepared1.hash);
+    assert!(sent.contains(&prepared1.hash));
+    assert!(sent.utxo(&outpoint1).is_none());
+    assert!(sent.utxo(&outpoint2).is_some());
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    // Forgetting twice, then removing, doesn't touch the other block's outputs.
+    sent.forget_utxos(&prepared1.hash);
+    sent.remove_all([prepared1.hash]);
+    assert!(!sent.contains(&prepared1.hash));
+    assert_eq!(sent.known_utxos.len(), prepared2.new_outputs.len());
+
+    sent.prune_by_height(prepared2.height);
+    assert_eq!(sent.known_utxos.len(), 0);
+
+    Ok(())
+}

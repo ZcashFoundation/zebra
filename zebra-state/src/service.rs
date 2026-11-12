@@ -171,7 +171,8 @@ pub(crate) struct StateService {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
-    non_finalized_rejected_receiver: tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+    non_finalized_rejected_receiver:
+        tokio::sync::mpsc::UnboundedReceiver<write::NonFinalizedWriteOutcome>,
 
     // Pending UTXO Request Tracking
     //
@@ -710,12 +711,13 @@ impl StateService {
         }
     }
 
-    /// Drains every hash queued on `non_finalized_rejected_receiver` and
-    /// removes it from `non_finalized_block_write_sent_hashes`.
+    /// Drains every write outcome queued on `non_finalized_rejected_receiver`.
     ///
-    /// This closes the lockout window where a rejected block keeps its hash
-    /// recorded as "sent", so a subsequent honest re-delivery of a block at
-    /// the same hash is not short-circuited as a false "duplicate".
+    /// Rejected and evicted blocks are removed from
+    /// `non_finalized_block_write_sent_hashes`. This closes the lockout window where a rejected
+    /// block keeps its hash recorded as "sent", so a subsequent honest re-delivery of a block at
+    /// the same hash is not short-circuited as a false "duplicate". Committed blocks stay sent,
+    /// but their UTXOs are forgotten, because readers then find them in the non-finalized state.
     ///
     /// # Correctness & Performance
     ///
@@ -729,7 +731,11 @@ impl StateService {
 
         loop {
             match self.non_finalized_rejected_receiver.try_recv() {
-                Ok(hash) => rejected_hashes.push(hash),
+                Ok(write::NonFinalizedWriteOutcome::Rejected(hash)) => rejected_hashes.push(hash),
+                Ok(write::NonFinalizedWriteOutcome::Committed(hash)) => {
+                    self.non_finalized_block_write_sent_hashes
+                        .forget_utxos(&hash);
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     info!(

@@ -245,9 +245,12 @@ fn evicted_blocks_are_reported_as_rejected() {
     let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
     forget_evicted_blocks(&mut state, &rejected_sender);
 
-    let evicted = rejected_receiver
+    let NonFinalizedWriteOutcome::Rejected(evicted) = rejected_receiver
         .try_recv()
-        .expect("one fork was evicted at the fork limit");
+        .expect("one fork was evicted at the fork limit")
+    else {
+        panic!("evicted blocks are reported as rejected");
+    };
     assert!(!state.any_chain_contains(&evicted));
     assert!(
         rejected_receiver.try_recv().is_err(),
@@ -311,9 +314,12 @@ fn forks_evicted_by_finalizing_are_reported_and_published() {
     );
 
     assert!(finalized.db.finalized_tip_height() > Some(Height(0)));
-    let evicted = rejected_receiver
+    let NonFinalizedWriteOutcome::Rejected(evicted) = rejected_receiver
         .try_recv()
-        .expect("finalizing evicted one fork");
+        .expect("finalizing evicted one fork")
+    else {
+        panic!("evicted blocks are reported as rejected");
+    };
     assert!(forks.iter().any(|fork| fork.hash() == evicted));
     assert!(!state.any_chain_contains(&evicted));
     assert!(rejected_receiver.try_recv().is_err());
@@ -388,7 +394,10 @@ fn finalizing_does_not_report_ancestors_of_retained_forks() {
     assert!(state.any_chain_contains(&shared.hash()));
     assert!(state.any_chain_contains(&low.hash()));
     let mut rejected = std::collections::HashSet::new();
-    while let Ok(hash) = rejected_receiver.try_recv() {
+    while let Ok(outcome) = rejected_receiver.try_recv() {
+        let NonFinalizedWriteOutcome::Rejected(hash) = outcome else {
+            panic!("evicted blocks are reported as rejected");
+        };
         assert!(rejected.insert(hash), "each evicted block is reported once");
     }
     assert_eq!(rejected, [high.hash(), middle.hash()].into());

@@ -93,18 +93,29 @@ fn finalize_root_blocks(
     }
 }
 
+/// What the block write task did with a non-finalized block, so the state service can update the
+/// blocks and outputs it tracks as sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NonFinalizedWriteOutcome {
+    /// The block was rejected, or evicted from every chain, so it isn't in the state.
+    Rejected(block::Hash),
+
+    /// The block was committed, and the state published to readers contains it.
+    Committed(block::Hash),
+}
+
 /// Sends the hashes of blocks evicted from the non-finalized state on `non_finalized_rejected_sender`,
 /// so the state service accepts them again if the network extends their chain.
 ///
 /// Returns `true` if any blocks were evicted.
 fn forget_evicted_blocks(
     non_finalized_state: &mut NonFinalizedState,
-    non_finalized_rejected_sender: &UnboundedSender<block::Hash>,
+    non_finalized_rejected_sender: &UnboundedSender<NonFinalizedWriteOutcome>,
 ) -> bool {
     let evicted = non_finalized_state.take_evicted_block_hashes();
     for &hash in &evicted {
         // If the receiver was dropped, the state service is shutting down.
-        let _ = non_finalized_rejected_sender.send(hash);
+        let _ = non_finalized_rejected_sender.send(NonFinalizedWriteOutcome::Rejected(hash));
     }
 
     !evicted.is_empty()
@@ -117,7 +128,7 @@ fn finalize_root_blocks_and_forget_evicted(
     finalized_state: &mut FinalizedState,
     non_finalized_state: &mut NonFinalizedState,
     prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
-    non_finalized_rejected_sender: &UnboundedSender<block::Hash>,
+    non_finalized_rejected_sender: &UnboundedSender<NonFinalizedWriteOutcome>,
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     backup_dir_path: Option<&Path>,
@@ -213,7 +224,7 @@ struct WriteBlockWorkerTask {
     /// Without this, a rejected same-hash block locks out a later honest
     /// re-delivery of a block at the same hash as a "duplicate" until restart
     /// or reorg.
-    non_finalized_rejected_sender: UnboundedSender<block::Hash>,
+    non_finalized_rejected_sender: UnboundedSender<NonFinalizedWriteOutcome>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
     /// If `Some`, the non-finalized state is written to this backup directory
@@ -282,7 +293,7 @@ impl BlockWriteSender {
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
-        tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+        tokio::sync::mpsc::UnboundedReceiver<NonFinalizedWriteOutcome>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
         // Security: The number of blocks in these channels is limited by
@@ -529,7 +540,8 @@ impl WriteBlockWorkerTask {
                 // If the receiver was dropped (the StateService is shutting
                 // down), ignore the error: the lockout cannot matter once the
                 // service exits.
-                let _ = non_finalized_rejected_sender.send(child_hash);
+                let _ = non_finalized_rejected_sender
+                    .send(NonFinalizedWriteOutcome::Rejected(child_hash));
 
                 // Update the caller with the error.
                 let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
@@ -558,6 +570,11 @@ impl WriteBlockWorkerTask {
                 backup_dir_path.as_deref(),
             )
             .expect("just successfully inserted a non-finalized block above");
+
+            // Readers can now find the block's outputs in the published state, so the state
+            // service doesn't need its own copies.
+            let _ =
+                non_finalized_rejected_sender.send(NonFinalizedWriteOutcome::Committed(child_hash));
 
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));

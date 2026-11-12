@@ -372,6 +372,20 @@ impl SentHashes {
         }
     }
 
+    /// Forgets the UTXOs of the sent block `hash`, but still treats the block as sent.
+    ///
+    /// Called once the block is committed to a non-finalized chain that readers can see, because
+    /// UTXO lookups then find its outputs in that chain.
+    pub fn forget_utxos(&mut self, hash: &block::Hash) {
+        let Some(outpoints) = self.sent.get_mut(hash) else {
+            return;
+        };
+
+        for outpoint in mem::take(outpoints) {
+            self.known_utxos.remove(&outpoint);
+        }
+    }
+
     /// Try to look up this UTXO in any sent block.
     #[instrument(level = "trace", skip(self))]
     pub fn utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
