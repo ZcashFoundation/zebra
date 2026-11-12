@@ -693,3 +693,210 @@ fn message_with_wrong_network_magic_returns_error() {
         .decode(&mut bytes)
         .expect_err("decoding message with mismatching network magic should return an error");
 }
+
+/// Check that a header declaring a large body, followed by no body bytes,
+/// does not reserve capacity anywhere near the declared length. (#10564)
+#[test]
+fn header_then_stall_does_not_reserve_full_body() {
+    let _init_guard = zebra_test::init();
+
+    // Encode a real message, then overwrite its declared body length.
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut encoded = BytesMut::new();
+    codec
+        .encode(VERSION_TEST_VECTOR.clone(), &mut encoded)
+        .expect("encoding should succeed");
+
+    // Header layout: magic(4) + command(12) + body_len(4, LE) + checksum(4).
+    const BODY_LEN_OFFSET: usize = 16;
+    let fake_body_len: u32 = 500_000; // well above INITIAL_BODY_RESERVATION_STEP
+    encoded[BODY_LEN_OFFSET..BODY_LEN_OFFSET + 4].copy_from_slice(&fake_body_len.to_le_bytes());
+
+    // Keep only the 24-byte header; the peer "stalls" and never sends a body.
+    let mut stalled = encoded.split_to(HEADER_LEN);
+
+    let result = codec
+        .decode(&mut stalled)
+        .expect("a header-only buffer should not error, just wait for more data");
+    assert!(
+        result.is_none(),
+        "decode should wait for the rest of the body, not return a message"
+    );
+
+    assert!(
+        stalled.capacity() <= HEADER_LEN + INITIAL_BODY_RESERVATION_STEP,
+        "a stalled peer forced a reservation of {} bytes, close to its claimed body length of {} bytes",
+        stalled.capacity(),
+        fake_body_len,
+    );
+}
+
+/// Check that a message delivered in small chunks still decodes correctly.
+#[test]
+fn multi_chunk_body_delivery_round_trips() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    let tx: Transaction = zebra_test::vectors::DUMMY_TX1
+        .zcash_deserialize_into()
+        .expect("dummy tx should deserialize");
+    let msg = Message::Tx(std::sync::Arc::new(tx).into());
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut full_bytes = BytesMut::new();
+    codec
+        .encode(msg.clone(), &mut full_bytes)
+        .expect("encoding should succeed");
+
+    // Feed the message a few bytes at a time, decoding after each chunk.
+    const CHUNK_SIZE: usize = 7;
+    let mut stream_buf = BytesMut::new();
+    let mut decoded = None;
+
+    while !full_bytes.is_empty() {
+        let take = CHUNK_SIZE.min(full_bytes.len());
+        let chunk = full_bytes.split_to(take);
+        stream_buf.extend_from_slice(&chunk);
+
+        if let Some(msg) = codec
+            .decode(&mut stream_buf)
+            .expect("partial decoding should never error")
+        {
+            decoded = Some(msg);
+            break;
+        }
+    }
+
+    assert_eq!(
+        decoded.expect("message should be fully decoded once all bytes arrive"),
+        msg,
+        "message decoded from chunked delivery should match the original"
+    );
+}
+
+/// Check that growing the read buffer to hold an arriving body never lets
+/// capacity run away via `BytesMut::reserve`'s doubling (which previously
+/// overshot `body_len` by up to ~2x, see #11793's review). Uses a large
+/// synthetic body (content doesn't need to deserialize, since we stop
+/// short of delivering the final byte and never reach message parsing)
+/// so growth genuinely happens in several steps, not a single jump.
+#[test]
+fn body_buffer_growth_stays_bounded_across_chunks() {
+    let _init_guard = zebra_test::init();
+
+    // Large enough that growth happens over several steps before the
+    // `body_len` cap takes over, unlike a small real message.
+    const BODY_LEN: usize = 600_000;
+    let body = vec![0u8; BODY_LEN];
+    let checksum = sha256d::Checksum::from(&body[..]);
+
+    let mut full_bytes = BytesMut::new();
+    full_bytes.extend_from_slice(&Network::Mainnet.magic().0);
+    full_bytes.extend_from_slice(b"tx\0\0\0\0\0\0\0\0\0\0");
+    full_bytes.extend_from_slice(&(BODY_LEN as u32).to_le_bytes());
+    full_bytes.extend_from_slice(&checksum.0);
+    full_bytes.extend_from_slice(&body);
+
+    // Hold back the last chunk: the peer never finishes sending, so decode()
+    // never reaches body parsing/checksum validation — only the buffer-growth
+    // path under test runs.
+    full_bytes.truncate(full_bytes.len() - 1);
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+
+    const CHUNK_SIZE: usize = 4096;
+    let mut stream_buf = BytesMut::new();
+    let mut received = 0usize;
+
+    // Allow some slack for the allocator rounding `with_capacity` requests
+    // up to its own size classes.
+    const ALLOCATOR_SLACK: usize = 4096;
+
+    while !full_bytes.is_empty() {
+        let take = CHUNK_SIZE.min(full_bytes.len());
+        let chunk = full_bytes.split_to(take);
+        stream_buf.extend_from_slice(&chunk);
+        received += take;
+
+        // Mirrors the codec's own growth target: proportional to bytes
+        // received so far, capped at the declared body length.
+        let body_received = received.saturating_sub(HEADER_LEN);
+        let target =
+            BODY_LEN.min(body_received + body_received.max(2 * INITIAL_BODY_RESERVATION_STEP));
+        let expected_ceiling = target + 2 * HEADER_LEN + ALLOCATOR_SLACK;
+
+        assert!(
+            stream_buf.capacity() <= expected_ceiling,
+            "buffer capacity {} exceeded the expected ceiling of {} after receiving {} bytes",
+            stream_buf.capacity(),
+            expected_ceiling,
+            received,
+        );
+
+        let result = codec
+            .decode(&mut stream_buf)
+            .expect("partial decoding should never error");
+        assert!(
+            result.is_none(),
+            "decode should never complete: we deliberately withheld the final byte"
+        );
+    }
+
+    assert!(
+        stream_buf.capacity() <= BODY_LEN + 2 * HEADER_LEN + ALLOCATOR_SLACK,
+        "final buffer capacity {} exceeded the declared body length {} (plus header/allocator slack)",
+        stream_buf.capacity(),
+        BODY_LEN,
+    );
+}
+
+/// Check that a message delivered in small chunks still decodes correctly,
+/// using a real block body. (#11793)
+#[test]
+fn multi_chunk_block_delivery_round_trips() {
+    let _init_guard = zebra_test::init();
+
+    let block: Block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+        .zcash_deserialize_into()
+        .expect("block vector should deserialize");
+    let msg = Message::Block(std::sync::Arc::new(block));
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut full_bytes = BytesMut::new();
+    codec
+        .encode(msg.clone(), &mut full_bytes)
+        .expect("encoding should succeed");
+
+    const CHUNK_SIZE: usize = 1024;
+    let mut stream_buf = BytesMut::new();
+    let mut decoded = None;
+
+    while !full_bytes.is_empty() {
+        let take = CHUNK_SIZE.min(full_bytes.len());
+        let chunk = full_bytes.split_to(take);
+        stream_buf.extend_from_slice(&chunk);
+
+        if let Some(msg) = codec
+            .decode(&mut stream_buf)
+            .expect("partial decoding should never error")
+        {
+            decoded = Some(msg);
+            break;
+        }
+    }
+
+    assert_eq!(
+        decoded.expect("message should be fully decoded once all bytes arrive"),
+        msg,
+        "message decoded from chunked delivery should match the original"
+    );
+}
