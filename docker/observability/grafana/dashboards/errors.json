@@ -78,9 +78,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "zebra_error_sapling_binding{job=\"$job\"}",
+          "expr": "rate(signatures_ed25519_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "Ed25519 signatures",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -88,9 +88,9 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
+          "expr": "rate(signatures_redjubjub_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedJubjub signatures",
           "refId": "B",
           "datasource": {
             "type": "prometheus",
@@ -98,10 +98,30 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
+          "expr": "rate(signatures_redpallas_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedPallas signatures",
           "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Sapling proofs",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Halo2 proofs",
+          "refId": "E",
           "datasource": {
             "type": "prometheus",
             "uid": "zebra-prometheus"
@@ -112,7 +132,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Sighash Errors - $job",
+      "title": "Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -209,9 +229,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "zebra_error_sapling_binding{job=\"$job\"}",
+          "expr": "rate(signatures_ed25519_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "Ed25519 signatures",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -219,9 +239,9 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
+          "expr": "rate(signatures_redjubjub_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedJubjub signatures",
           "refId": "B",
           "datasource": {
             "type": "prometheus",
@@ -229,10 +249,30 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
+          "expr": "rate(signatures_redpallas_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedPallas signatures",
           "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Sapling proofs",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Halo2 proofs",
+          "refId": "E",
           "datasource": {
             "type": "prometheus",
             "uid": "zebra-prometheus"
@@ -243,7 +283,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Sighash Errors - $job",
+      "title": "Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -340,9 +380,9 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "zebra_error_sapling_binding{job=\"$job\"}",
+          "expr": "rate(signatures_ed25519_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "Ed25519 signatures",
           "refId": "A",
           "datasource": {
             "type": "prometheus",
@@ -350,9 +390,9 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
+          "expr": "rate(signatures_redjubjub_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedJubjub signatures",
           "refId": "B",
           "datasource": {
             "type": "prometheus",
@@ -360,10 +400,30 @@
           }
         },
         {
-          "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
+          "expr": "rate(signatures_redpallas_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "RedPallas signatures",
           "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Sapling proofs",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
+          "interval": "",
+          "legendFormat": "Halo2 proofs",
+          "refId": "E",
           "datasource": {
             "type": "prometheus",
             "uid": "zebra-prometheus"
@@ -374,7 +434,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Sighash Errors - $job",
+      "title": "Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,

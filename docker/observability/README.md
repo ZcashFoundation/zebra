@@ -162,7 +162,7 @@ curl -s http://localhost:9999/metrics | grep zcash
 
 ```bash
 # Current block height
-curl -s 'http://localhost:9094/api/v1/query?query=zcash_state_tip_height'
+curl -s 'http://localhost:9094/api/v1/query?query=zcash_chain_verified_block_height'
 ```text
 
 ### Find slow operations in Jaeger
