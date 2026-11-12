@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'A node with `network.external_addr` set now uses that address, in place of its listener address, for its own entry in the sample of addresses it sends to peers that ask for them, so it stops handing out a private or unreachable listener address. If peers can not connect to the external address, for example because its port is 0, Zebra logs a warning at startup and keeps using the listener address for that entry ([#12435](https://github.com/ZcashFoundation/zebra/pull/12435)).'
+time: 2026-11-12T22:35:01.000000000Z

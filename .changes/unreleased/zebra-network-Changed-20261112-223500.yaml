@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: '`AddressBook::fresh_get_addr_response()` now uses `Config::external_addr` as the node''s own entry, in place of the local listener address, when peers can connect to that address. An external address peers can not connect to, such as one with port 0, is ignored with a warning. `AddressBook::local_listener_meta_addr()` and `AddressBook::local_listener_socket_addr()` still return the local listener address ([#12435](https://github.com/ZcashFoundation/zebra/pull/12435)).'
+time: 2026-11-12T22:35:00.000000000Z
