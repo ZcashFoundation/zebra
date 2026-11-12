@@ -421,7 +421,7 @@ where
 }
 
 /// Returns the recorder that sends every metric to Sentry, or `None` if [`init`] has not bound an
-/// enabled client.
+/// enabled client or could not start the thread that flushes metrics.
 pub(crate) fn metrics_recorder() -> Option<&'static SentryPolicy> {
     metrics_adapter::recorder()
 }
