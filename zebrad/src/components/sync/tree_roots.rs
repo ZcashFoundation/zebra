@@ -37,6 +37,9 @@ const ERROR_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// How often to log failed requests at info level.
 const FAILURE_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How long to wait for the state to answer before retrying.
+const STATE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Fetches the note commitment tree roots the state wants from peers, and supplies them to the
 /// state, forever.
 ///
@@ -54,12 +57,21 @@ where
 {
     let checkpoints = network.checkpoint_list();
     let mut started = false;
+    let mut supplied = false;
     let mut last_failure_log: Option<Instant> = None;
 
     loop {
-        let zs::Response::WantedTreeRoots(wanted) =
-            state.clone().oneshot(zs::Request::WantedTreeRoots).await?
+        // The state service can queue many block commits, so don't wait on it forever.
+        let Ok(wanted) = timeout(
+            STATE_TIMEOUT,
+            state.clone().oneshot(zs::Request::WantedTreeRoots),
+        )
+        .await
         else {
+            info!("fast tree sync: the state didn't say which tree roots it wants, retrying");
+            continue;
+        };
+        let zs::Response::WantedTreeRoots(wanted) = wanted? else {
             unreachable!("zebra-state responds to `WantedTreeRoots` with `WantedTreeRoots`");
         };
         let Some((start_height, request)) = wanted
@@ -80,14 +92,21 @@ where
         let (delay, failure) =
             match timeout(TREE_ROOTS_TIMEOUT, peers.clone().oneshot(request)).await {
                 Ok(Ok(zn::Response::TreeRoots(Some(roots)))) if !roots.is_empty() => {
-                    state
-                        .clone()
-                        .oneshot(zs::Request::SupplyTreeRoots {
-                            start_height,
-                            roots,
-                        })
-                        .await?;
-                    continue;
+                    let supply = state.clone().oneshot(zs::Request::SupplyTreeRoots {
+                        start_height,
+                        roots,
+                    });
+                    match timeout(STATE_TIMEOUT, supply).await {
+                        Ok(response) => {
+                            response?;
+                            if !supplied {
+                                info!(?start_height, "fast tree sync: received tree roots");
+                                supplied = true;
+                            }
+                            continue;
+                        }
+                        Err(_) => (RETRY_DELAY, "the state didn't take the roots".to_string()),
+                    }
                 }
                 Ok(Ok(response)) => (RETRY_DELAY, format!("peer returned {response}")),
                 Ok(Err(error)) => (ERROR_RETRY_DELAY, error.to_string()),
