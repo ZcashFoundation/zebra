@@ -48,6 +48,7 @@ mod hedge;
 pub(crate) mod progress;
 mod recent_sync_lengths;
 mod status;
+mod tree_roots;
 
 #[cfg(test)]
 mod tests;
@@ -65,6 +66,7 @@ pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
 pub use progress::{record_tip_block_delay, show_block_chain_progress};
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
+pub(crate) use tree_roots::fetch_tree_roots;
 
 /// Match the missing-block errors used by both hedging and sync recovery.
 fn is_not_found(error: &dyn std::error::Error) -> bool {

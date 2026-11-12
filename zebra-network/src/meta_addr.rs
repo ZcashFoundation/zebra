@@ -854,7 +854,7 @@ impl MetaAddrChange {
                 untrusted_services, ..
             } => Some(*untrusted_services),
             // TODO: create a "services implemented by Zebra" constant (#2324)
-            NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
+            NewLocal { .. } => Some(PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
             UpdatePingSent { .. } => None,

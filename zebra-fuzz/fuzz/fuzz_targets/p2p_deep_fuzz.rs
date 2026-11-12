@@ -272,6 +272,16 @@ fuzz_target!(|data: &[u8]| {
                         deep_fuzz_transaction(tx);
                     }
                 }
+                Message::GetTreeRoots {
+                    start_height,
+                    final_hash,
+                    count,
+                } => {
+                    let _range = (*start_height, *final_hash, *count);
+                }
+                Message::TreeRoots(roots) => {
+                    let _count = roots.as_ref().map(Vec::len);
+                }
                 Message::Tx(unmined_tx) => {
                     // Deep fuzz the transaction
                     deep_fuzz_transaction(&unmined_tx.transaction);
@@ -428,6 +438,8 @@ fuzz_target!(|data: &[u8]| {
                 | Message::CompactBlock(_)
                 | Message::GetBlockTransactions(_)
                 | Message::BlockTransactions(_)
+                | Message::GetTreeRoots { .. }
+                | Message::TreeRoots(_)
                 | Message::Headers(_)
                 | Message::GetHeaders { .. }
                 | Message::Tx(_)
