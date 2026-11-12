@@ -9,6 +9,11 @@ use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
 pub mod catalog;
+#[cfg(any(feature = "prometheus", feature = "sentry"))]
+pub(crate) mod event_labels;
+pub(crate) mod node_context;
+#[cfg(feature = "sentry")]
+pub(crate) mod sentry_policy;
 
 // `metrics-process` describes fewer metrics on Windows, so the catalog only matches elsewhere.
 #[cfg(all(test, not(target_os = "windows")))]
@@ -80,12 +85,7 @@ impl MetricsEndpoint {
             .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
             .with_http_listener(addr);
 
-        let endpoint_result = match other {
-            Some(other) => install_alongside(builder, other),
-            None => builder.install().map_err(Into::into),
-        };
-
-        match endpoint_result {
+        match install_with_prometheus(builder, other) {
             Ok(()) => {
                 // Expose binary metadata to metrics, using a single time series with
                 // value 1:
@@ -183,16 +183,42 @@ fn prometheus_builder(
     )
 }
 
-/// Installs the Prometheus recorder from `builder` and `other` as one recorder.
+/// Returns the recorder that receives every metric: `prometheus` without event attributes, and
+/// `other` beside it if it is provided.
+#[cfg(feature = "prometheus")]
+fn with_prometheus<R>(
+    prometheus: metrics_exporter_prometheus::PrometheusRecorder,
+    other: Option<R>,
+) -> Box<dyn Recorder + Sync>
+where
+    R: Recorder + Send + Sync + 'static,
+{
+    use metrics_util::layers::{FanoutBuilder, Layer};
+
+    let prometheus = event_labels::StripEventLabelsLayer.layer(prometheus);
+
+    match other {
+        Some(other) => Box::new(
+            FanoutBuilder::default()
+                .add_recorder(prometheus)
+                .add_recorder(other)
+                .build(),
+        ),
+        None => Box::new(prometheus),
+    }
+}
+
+/// Installs the Prometheus recorder from `builder`, with `other` beside it if it is provided, as
+/// the global recorder.
 ///
 /// Like [`PrometheusBuilder::install`] outside a Tokio runtime, which is how Zebra calls it, this
 /// serves the endpoint from its own thread.
 ///
 /// [`PrometheusBuilder::install`]: metrics_exporter_prometheus::PrometheusBuilder::install
 #[cfg(feature = "prometheus")]
-fn install_alongside<R>(
+fn install_with_prometheus<R>(
     builder: metrics_exporter_prometheus::PrometheusBuilder,
-    other: R,
+    other: Option<R>,
 ) -> Result<(), crate::BoxError>
 where
     R: Recorder + Send + Sync + 'static,
@@ -214,13 +240,7 @@ where
         .spawn(move || runtime.block_on(exporter))
         .map_err(|e| BuildError::FailedToCreateRuntime(e.to_string()))?;
 
-    metrics::set_global_recorder(
-        metrics_util::layers::FanoutBuilder::default()
-            .add_recorder(prometheus)
-            .add_recorder(other)
-            .build(),
-    )
-    .map_err(|e| e.to_string())?;
+    metrics::set_global_recorder(with_prometheus(prometheus, other)).map_err(|e| e.to_string())?;
 
     Ok(())
 }

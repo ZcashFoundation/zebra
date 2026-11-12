@@ -1,4 +1,4 @@
 project: zebrad
 kind: Added
-body: Added the standard Prometheus process metrics, such as `process_resident_memory_bytes`, `process_open_fds`, and `process_cpu_seconds_total`, which Zebra samples every 15 seconds when the metrics endpoint is open or Sentry is active. Sentry also receives the memory, file descriptor, thread, and start time gauges.
+body: Added the standard Prometheus process metrics, such as `process_resident_memory_bytes`, `process_open_fds`, and `process_cpu_seconds_total`, which Zebra samples every 15 seconds when the metrics endpoint is open or Sentry is active.
 time: 2026-11-12T18:56:19.571286657Z
