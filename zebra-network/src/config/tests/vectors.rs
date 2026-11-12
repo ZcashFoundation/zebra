@@ -97,6 +97,139 @@ fn default_config_uses_ipv6() {
 }
 
 #[test]
+fn parse_config_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    let fixtures: Vec<(&str, Vec<&str>)> = vec![
+        (
+            "initial_mainnet_peers = ['203.0.113.1:8233', 'seeder.example.com:8233']",
+            vec!["203.0.113.1:8233", "seeder.example.com:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233,seeder.example.com:8233'",
+            vec!["203.0.113.1:8233", "seeder.example.com:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233'",
+            vec!["203.0.113.1:8233"],
+        ),
+        (
+            "initial_mainnet_peers = ' 203.0.113.1:8233 , [2001:db8::1]:8233 ,'",
+            vec!["203.0.113.1:8233", "[2001:db8::1]:8233"],
+        ),
+        (
+            "initial_mainnet_peers = '203.0.113.1:8233,203.0.113.1:8233'",
+            vec!["203.0.113.1:8233"],
+        ),
+        ("initial_mainnet_peers = ''", vec![]),
+        ("initial_mainnet_peers = ' , '", vec![]),
+        ("initial_mainnet_peers = []", vec![]),
+        (
+            "initial_mainnet_peers = [' 203.0.113.1:8233 ', '']",
+            vec!["203.0.113.1:8233"],
+        ),
+        (
+            "initial_mainnet_peers = ['2001:db8::0:8233']",
+            vec!["2001:db8::0:8233"],
+        ),
+    ];
+
+    for (config, expected) in fixtures {
+        let config: Config = toml::from_str(config).unwrap();
+        assert_eq!(
+            config.initial_mainnet_peers.iter().collect::<Vec<_>>(),
+            expected,
+        );
+    }
+
+    let error = toml::from_str::<Config>("initial_mainnet_peers = 8233")
+        .expect_err("a number is not a peer list")
+        .to_string();
+    assert!(error.contains("comma-separated string"), "{error}");
+}
+
+#[test]
+fn parse_config_rejects_malformed_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    let fixtures = [
+        ("Mainnet", "initial_mainnet_peers", "203.0.113.1"),
+        ("Mainnet", "initial_mainnet_peers", "seeder.example.com"),
+        ("Mainnet", "initial_mainnet_peers", "[2001:db8::1]"),
+        ("Mainnet", "initial_mainnet_peers", "::1"),
+        ("Mainnet", "initial_mainnet_peers", "2001:db8::1"),
+        ("Mainnet", "initial_mainnet_peers", ":8233"),
+        ("Mainnet", "initial_mainnet_peers", "203.0.113.1:65536"),
+        (
+            "Mainnet",
+            "initial_mainnet_peers",
+            "a.example.com:8233 b.example.com:8233",
+        ),
+        (
+            "Mainnet",
+            "initial_mainnet_peers",
+            "a.example.com;b.example.com:8233",
+        ),
+        ("Testnet", "initial_testnet_peers", "203.0.113.1:port"),
+    ];
+
+    for (network, field_name, peer) in fixtures {
+        let config = format!("network = '{network}'\n{field_name} = '203.0.113.2:8233,{peer}'");
+        let error = toml::from_str::<Config>(&config)
+            .expect_err("a peer without a valid host and port is rejected")
+            .to_string();
+        assert!(
+            error.contains(&format!("{peer:?} in {field_name}")),
+            "{error}"
+        );
+    }
+
+    // TOML literal strings can't contain a NUL, so this needs a basic string escape.
+    let error =
+        toml::from_str::<Config>(r#"initial_mainnet_peers = "seeder\u0000.example.com:8233""#)
+            .expect_err("a peer with a NUL in its host is rejected")
+            .to_string();
+    assert!(
+        error.contains(r#""seeder\0.example.com:8233" in initial_mainnet_peers"#),
+        "{error}"
+    );
+}
+
+#[test]
+fn parse_config_ignores_unused_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    let config: Config = toml::from_str(
+        "network = 'Mainnet'\n\
+         initial_testnet_peers = ['seeder.example.com']",
+    )
+    .expect("the testnet peer list is unused on Mainnet");
+    assert!(config.initial_testnet_peers.contains("seeder.example.com"));
+
+    toml::from_str::<Config>(
+        "network = 'Testnet'\n\
+         initial_mainnet_peers = ['seeder.example.com']",
+    )
+    .expect("the mainnet peer list is unused on Testnet");
+
+    let config: Config = toml::from_str(
+        "network = 'Regtest'\n\
+         initial_testnet_peers = ['dnsseed.testnet.z.cash', '127.0.0.1:18233']",
+    )
+    .expect("public seeds are ignored on Regtest");
+    assert_eq!(
+        config.initial_peer_hostnames().iter().collect::<Vec<_>>(),
+        vec!["127.0.0.1:18233"]
+    );
+
+    toml::from_str::<Config>(
+        "network = 'Regtest'\n\
+         initial_testnet_peers = ['127.0.0.1']",
+    )
+    .expect_err("a local Regtest peer without a port is rejected");
+}
+
+#[test]
 fn funding_streams_serialization_roundtrip() {
     let _init_guard = zebra_test::init();
 

@@ -2,8 +2,9 @@
 
 use std::{
     collections::HashSet,
+    fmt,
     io::{self, ErrorKind},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -110,10 +111,14 @@ pub struct Config {
 
     /// A list of initial peers for the peerset when operating on
     /// mainnet.
+    ///
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_mainnet_peers: IndexSet<String>,
 
     /// A list of initial peers for the peerset when operating on
     /// testnet.
+    ///
+    /// Also accepts a comma-separated string, so environment variables can set it.
     pub initial_testnet_peers: IndexSet<String>,
 
     /// An optional root directory for storing cached peer address data.
@@ -676,7 +681,9 @@ struct DConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     testnet_parameters: Option<DTestnetParameters>,
 
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_mainnet_peers: IndexSet<String>,
+    #[serde(deserialize_with = "deserialize_peer_list")]
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
     peerset_initial_target_size: usize,
@@ -701,6 +708,55 @@ impl Default for DConfig {
             max_connections_per_ip: Some(config.max_connections_per_ip),
         }
     }
+}
+
+/// Deserializes a peer list from a sequence, or from a comma-separated string,
+/// because environment variables cannot express a TOML array.
+///
+/// Peer addresses never contain commas. Entries are trimmed and empty ones
+/// dropped, so padding and trailing commas are harmless.
+fn deserialize_peer_list<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct PeerListVisitor;
+
+    impl<'de> de::Visitor<'de> for PeerListVisitor {
+        type Value = IndexSet<String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a list of peer addresses, or a comma-separated string of them")
+        }
+
+        fn visit_str<E>(self, peers: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(peers
+                .split(',')
+                .map(str::trim)
+                .filter(|peer| !peer.is_empty())
+                .map(String::from)
+                .collect())
+        }
+
+        fn visit_seq<A>(self, peers: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let peers: Vec<String> =
+                Vec::deserialize(de::value::SeqAccessDeserializer::new(peers))?;
+
+            Ok(peers
+                .iter()
+                .map(|peer| peer.trim())
+                .filter(|peer| !peer.is_empty())
+                .map(String::from)
+                .collect())
+        }
+    }
+
+    deserializer.deserialize_any(PeerListVisitor)
 }
 
 impl From<Arc<testnet::Parameters>> for DTestnetParameters {
@@ -843,6 +899,23 @@ impl<'de> Deserialize<'de> for Config {
             }
         };
 
+        // Only check the peers that `initial_peer_hostnames()` resolves, so the
+        // unused list and public seeds on Regtest still load as they did before.
+        let (field_name, peers) = match &network {
+            Network::Mainnet => ("initial_mainnet_peers", &initial_mainnet_peers),
+            Network::Testnet(_) => ("initial_testnet_peers", &initial_testnet_peers),
+        };
+        if let Some(peer) = peers
+            .iter()
+            .filter(|peer| !(network.is_regtest() && is_default_initial_peer(peer)))
+            .find(|peer| !is_valid_peer_addr(peer))
+        {
+            return Err(de::Error::custom(format!(
+                "invalid peer {peer:?} in {field_name}; Hint: peers must be an IPv4 address, \
+                 IPv6 address (with brackets), or DNS name, followed by a port"
+            )));
+        }
+
         let listen_addr = match listen_addr.parse::<SocketAddr>().or_else(|_| format!("{listen_addr}:{}", network.default_port()).parse()) {
             Ok(socket) => Ok(socket),
             Err(_) => match listen_addr.parse::<IpAddr>() {
@@ -896,6 +969,24 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         })
     }
+}
+
+/// Returns true if `peer` has the `host:port` shape that peer resolution accepts.
+///
+/// This doesn't resolve DNS names, so a well-formed name can still fail to resolve.
+fn is_valid_peer_addr(peer: &str) -> bool {
+    // The resolver splits at the last `:`, so it accepts an unbracketed IPv6
+    // address followed by a port, which older configs use. A portless IPv6
+    // address leaves a host that isn't a complete address, so it's rejected.
+    peer.parse::<SocketAddr>().is_ok()
+        || peer.rsplit_once(':').is_some_and(|(host, port)| {
+            let is_dns_name = !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'));
+
+            (is_dns_name || host.parse::<Ipv6Addr>().is_ok()) && port.parse::<u16>().is_ok()
+        })
 }
 
 /// Returns true for a public DNS seed hostname, regardless of case, trailing dot, or port.

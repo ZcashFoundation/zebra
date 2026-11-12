@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Changed `Config` deserialization to reject peers that are not an IP address or DNS name followed by a valid port, in the list for the configured network (`initial_mainnet_peers` on Mainnet, `initial_testnet_peers` otherwise). These entries previously deserialized and then panicked or failed during peer resolution. The unused list, and the public DNS seeds that Regtest ignores, are not checked.
+time: 2026-10-20T13:30:07.047350728Z
