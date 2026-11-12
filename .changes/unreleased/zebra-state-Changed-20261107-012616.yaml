@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: Reduce build dependencies while retaining UTC timestamp support.
-time: 2026-11-07T01:26:16.550159572+01:00

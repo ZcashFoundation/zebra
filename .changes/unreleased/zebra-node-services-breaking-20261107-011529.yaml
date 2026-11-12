@@ -1,5 +1,0 @@
-project: zebra-node-services
-kind: breaking
-body: Remove the unused `color-eyre` Cargo feature and optional dependency; remove this feature from dependency declarations.
-time: 2026-11-07T01:15:29.789296947+01:00
-

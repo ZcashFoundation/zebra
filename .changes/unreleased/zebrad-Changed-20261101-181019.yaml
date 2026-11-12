@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Changed the log for a sync round that ends with an error without advancing the chain tip from INFO to WARN, so it reaches Sentry Logs and WARN-level alerts. The separate INFO `temporary error obtaining tips` and `temporary error extending tips` lines are gone, because the warning includes their error.
-time: 2026-11-01T18:10:19.990723125Z

@@ -1,4 +1,0 @@
-project: zebrad
-kind: Changed
-body: Read-write nodes now report incomplete stored block bodies through block RPC and peer requests instead of serving empty or partial blocks.
-time: 2026-10-24T21:38:22.944987559+02:00
