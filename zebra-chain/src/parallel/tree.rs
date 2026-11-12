@@ -14,7 +14,7 @@ mod roots;
 #[cfg(test)]
 mod tests;
 
-pub use roots::{TreeRoots, MAX_TREE_ROOTS_PER_REQUEST};
+pub use roots::{TreeRoots, TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST};
 
 /// Counts note commitment tree update attempts in tests that enable `proptest-impl`.
 #[cfg(any(test, feature = "proptest-impl"))]

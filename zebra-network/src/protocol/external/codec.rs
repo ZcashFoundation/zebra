@@ -14,7 +14,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{self, Block},
-    parallel::tree::{TreeRoots, MAX_TREE_ROOTS_PER_REQUEST},
+    parallel::tree::{TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST},
     parameters::{Magic, Network},
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
@@ -928,7 +928,7 @@ impl Codec {
 
         let mut roots = Vec::with_capacity(count);
         for _ in 0..count {
-            roots.push(TreeRoots::zcash_deserialize(&mut reader)?);
+            roots.push(TreeRootsProof::zcash_deserialize(&mut reader)?);
         }
 
         Ok(Message::TreeRoots(Some(roots)))

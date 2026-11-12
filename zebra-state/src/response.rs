@@ -13,7 +13,7 @@ use zebra_chain::{
     block::{self, Block, ChainHistoryMmrRootHash, SerializedBlock},
     block_info::BlockInfo,
     orchard,
-    parallel::tree::TreeRoots,
+    parallel::tree::TreeRootsProof,
     sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -238,9 +238,14 @@ pub enum Response {
     /// Response to [`Request::SupplyTreeRoots`].
     TreeRootsSupplied,
 
-    /// Response to [`Request::WantedTreeRoots`]: the heights whose note commitment tree roots
-    /// fast checkpoint sync needs next, or `None` if it needs none.
-    WantedTreeRoots(Option<RangeInclusive<block::Height>>),
+    /// Response to [`Request::WantedTreeRoots`]: the next missing range and the last rejected
+    /// root source. The caller must penalize that source and exclude it when retrying.
+    /// A rejection repeats until the next accepted [`Request::SupplyTreeRoots`] batch, so
+    /// cancellation cannot lose source attribution.
+    WantedTreeRoots(
+        Option<RangeInclusive<block::Height>>,
+        Option<std::net::SocketAddr>,
+    ),
 }
 
 /// Availability of bodies for known blocks, independent of any retention setting.
@@ -763,9 +768,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::UnspentOutput`], or `None` for a spent or unknown output.
     UnspentOutput(Option<OutputWithMetadata>),
 
-    /// Response to [`ReadRequest::TreeRoots`]: the roots after each requested block, or `None`
-    /// if the state can't serve them.
-    TreeRoots(Option<Vec<TreeRoots>>),
+    /// Response to [`ReadRequest::TreeRoots`]: the roots after each requested block and their
+    /// successor commitment preimages, or `None` if the state can't serve the complete proofs.
+    TreeRoots(Option<Vec<TreeRootsProof>>),
 
     /// Response to [`ReadRequest::FastSyncTreeRoots`]: the stored roots and tree sizes, or
     /// `None` if fast checkpoint sync didn't commit the block.
