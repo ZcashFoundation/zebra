@@ -66,6 +66,18 @@ pub(crate) fn validate_and_commit_non_finalized(
     Ok(())
 }
 
+/// Sends the hashes of blocks evicted from the non-finalized state on `non_finalized_rejected_sender`,
+/// so the state service accepts them again if the network extends their chain.
+fn forget_evicted_blocks(
+    non_finalized_state: &mut NonFinalizedState,
+    non_finalized_rejected_sender: &UnboundedSender<block::Hash>,
+) {
+    for hash in non_finalized_state.take_evicted_block_hashes() {
+        // If the receiver was dropped, the state service is shutting down.
+        let _ = non_finalized_rejected_sender.send(hash);
+    }
+}
+
 /// Update the [`LatestChainTip`], [`ChainTipChange`], and `non_finalized_state_sender`
 /// channels with the latest state. If there is no non-finalized chain, use the
 /// finalized tip.
@@ -379,6 +391,7 @@ impl WriteBlockWorkerTask {
             };
 
             let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+                forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
                 update_latest_chain_channels(
                     non_finalized_state,
                     &finalized_state.db,
@@ -448,6 +461,8 @@ impl WriteBlockWorkerTask {
             // A successfully committed block supersedes any contextual error
             // recorded for a different block body with the same header hash.
             parent_error_map.shift_remove(&child_hash);
+
+            forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender);
 
             // Committing blocks to the finalized state keeps the same chain,
             // so we can update the chain seen by the rest of the application now.

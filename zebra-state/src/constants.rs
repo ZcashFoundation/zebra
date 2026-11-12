@@ -109,8 +109,21 @@ pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 /// The maximum number of non-finalized chain forks Zebra will track on test networks.
 ///
 /// Minimum-difficulty blocks can create many equal-work sibling forks at once (#11133). A fork of
-/// coinbase-only blocks copies about 2.7 MB of indexes, so 100 of them use about 270 MB.
+/// coinbase-only blocks copies about 2.7 MB of indexes, so 100 of them use about 270 MB. Forks
+/// over busy blocks are much larger, so test networks also limit
+/// [`MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`].
 pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
+
+/// The maximum total number of index entries in all non-finalized chains on test networks.
+///
+/// Chains index their blocks, transactions, transparent outputs and spends, and nullifiers, at
+/// about 1 KB per entry, and count the outputs they share with other chains once. When the total
+/// passes this limit, Zebra drops the chain with the lowest work, but keeps the best chain and the
+/// most recently inserted chain.
+///
+/// This limits non-finalized chains to about 2 GB, unless the best and newest chains alone are
+/// larger. Finalizing a block can double that until the next block is committed (#11820).
+pub const MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS: usize = 2_000_000;
 
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;

@@ -221,3 +221,42 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     .unwrap()
     .unwrap();
 }
+
+/// Blocks evicted by the fork limit are reported like rejected blocks, so the state service can
+/// download and commit them again if the network extends them (#11133).
+#[test]
+fn evicted_blocks_are_reported_as_rejected() {
+    let _init_guard = zebra_test::init();
+    let (mut state, finalized, root, _child) = populated_state();
+    let received = std::time::Instant::now();
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 1..=max_forks {
+        let mut prepared = root
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+            .prepare();
+        prepared.received_time = Some(received + Duration::from_secs(i.into()));
+        state.commit_block(prepared, &finalized).unwrap();
+    }
+
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+    forget_evicted_blocks(&mut state, &rejected_sender);
+
+    let evicted = rejected_receiver
+        .try_recv()
+        .expect("one fork was evicted at the fork limit");
+    assert!(!state.any_chain_contains(&evicted));
+    assert!(
+        rejected_receiver.try_recv().is_err(),
+        "blocks that are still in another chain are not reported",
+    );
+
+    forget_evicted_blocks(&mut state, &rejected_sender);
+    assert!(
+        rejected_receiver.try_recv().is_err(),
+        "blocks are reported once"
+    );
+}

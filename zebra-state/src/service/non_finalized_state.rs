@@ -21,7 +21,7 @@ use zebra_chain::{
 use crate::{
     constants::{
         MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
-        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS,
     },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
@@ -70,6 +70,13 @@ pub struct NonFinalizedState {
     /// The configured Zcash network.
     pub network: Network,
 
+    /// The maximum [`Self::index_entry_count`] of all chains, if any.
+    max_index_entries: Option<usize>,
+
+    /// Blocks that were only in evicted chains, and haven't been taken by
+    /// [`Self::take_evicted_block_hashes`] yet.
+    evicted_block_hashes: Vec<block::Hash>,
+
     // Diagnostics
     //
     /// Configures the non-finalized state to count metrics.
@@ -110,6 +117,9 @@ impl Clone for NonFinalizedState {
         Self {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
+            max_index_entries: self.max_index_entries,
+            // Only the write task reports evicted blocks.
+            evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
@@ -127,6 +137,10 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
+            max_index_entries: network
+                .is_a_test_network()
+                .then_some(MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS),
+            evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
@@ -271,7 +285,7 @@ impl NonFinalizedState {
     }
 
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
-    /// then limit the number of tracked chains.
+    /// then limit the number of tracked chains and the size of their indexes.
     fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
@@ -285,11 +299,19 @@ impl NonFinalizedState {
         } else {
             MAX_NON_FINALIZED_CHAIN_FORKS
         };
-        while self.chain_set.len() > max_forks {
+        loop {
+            let index_entries = self.index_entry_count();
+            let over_index_limit = self
+                .max_index_entries
+                .is_some_and(|max_index_entries| index_entries > max_index_entries);
+            if self.chain_set.len() <= max_forks && !over_index_limit {
+                break;
+            }
+
             // Keep the inserted chain and the best chain, so late forks can grow. Evict the
             // lowest-work chain, and on a work tie the one whose tip was received first.
             let best_chain = self.chain_set.last().cloned();
-            let evicted = self
+            let Some(evicted) = self
                 .chain_set
                 .iter()
                 .filter(|c| **c != chain && Some(*c) != best_chain.as_ref())
@@ -300,22 +322,49 @@ impl NonFinalizedState {
                         .then_with(|| received_time(a).cmp(&received_time(b)))
                         .then_with(|| a.cmp(b))
                 })
-                .expect("the fork limit allows more than two chains")
-                .clone();
+                .cloned()
+            else {
+                // The fork limit allows more than two chains, so only the index limit can
+                // leave just the best and inserted chains.
+                break;
+            };
 
             self.chain_set.remove(&evicted);
             if self.should_count_metrics() {
                 metrics::counter!("state.memory.fork.evicted.count").increment(1);
             }
+
+            // Chains contain all their non-finalized ancestors, so once a block is in another
+            // chain, so are all the blocks below it.
+            let evicted_blocks = evicted
+                .blocks
+                .values()
+                .rev()
+                .map(|block| block.hash)
+                .take_while(|hash| !self.any_chain_contains(hash))
+                .collect::<Vec<_>>();
+            self.evicted_block_hashes.extend(evicted_blocks);
+
             tracing::warn!(
                 tip = ?evicted.non_finalized_tip_hash(),
                 height = ?evicted.non_finalized_tip_height(),
                 max_forks,
+                index_entries,
+                max_index_entries = ?self.max_index_entries,
                 "the fork limit evicted a chain: if the node stops advancing, restart it"
             );
         }
 
         self.update_metrics_bars();
+    }
+
+    /// Returns the hashes of blocks that were dropped from the non-finalized state because every
+    /// chain containing them was evicted by the fork limits, and forgets them.
+    ///
+    /// The network can still extend those blocks, so the state service must be able to download
+    /// and commit them again (#11133).
+    pub(crate) fn take_evicted_block_hashes(&mut self) -> Vec<block::Hash> {
+        mem::take(&mut self.evicted_block_hashes)
     }
 
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
@@ -765,9 +814,16 @@ impl NonFinalizedState {
             .map(|chain| chain.non_finalized_root_height())
     }
 
+    /// Returns the index entries in all chains. Each chain has its own copy of its indexes.
+    pub(crate) fn index_entry_count(&self) -> usize {
+        self.chain_set
+            .iter()
+            .map(|chain| chain.index_entry_count())
+            .sum()
+    }
+
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
-    #[allow(dead_code)]
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
@@ -996,12 +1052,7 @@ impl NonFinalizedState {
         metrics::gauge!("state.memory.best.chain.length",)
             .set(self.best_chain_len().unwrap_or_default() as f64);
         // Index entry counts are far below the integers f64 represents exactly.
-        metrics::gauge!("state.memory.index.entries").set(
-            self.chain_set
-                .iter()
-                .map(|chain| chain.index_entry_count())
-                .sum::<usize>() as f64,
-        );
+        metrics::gauge!("state.memory.index.entries").set(self.index_entry_count() as f64);
         metrics::gauge!("state.memory.best.chain.index.entries").set(
             self.best_chain()
                 .map_or(0, |chain| chain.index_entry_count()) as f64,

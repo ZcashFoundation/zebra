@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS`, which limits the combined size of non-finalized chain indexes on test networks.
+time: 2026-11-12T14:38:05.838009336Z

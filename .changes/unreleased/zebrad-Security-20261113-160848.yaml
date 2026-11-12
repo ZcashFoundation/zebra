@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Test networks now limit the combined size of non-finalized chain indexes. Past the limit, Zebra drops the lowest-work forks, and if the best chain alone is too large, it finalizes the oldest blocks early, keeping at least 100. Blocks that were only in dropped forks are downloaded again if the network extends their fork ([GHSA-j8gf-c4rj-6jv5](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-j8gf-c4rj-6jv5)).
+time: 2026-11-13T16:08:48.007000172Z

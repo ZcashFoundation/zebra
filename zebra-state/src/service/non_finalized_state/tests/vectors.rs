@@ -1744,3 +1744,234 @@ fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
 
     Ok(())
 }
+/// Returns a fake child of `parent` whose coinbase has the outputs of `template`'s coinbase,
+/// followed by `count` zero-value outputs paying `addresses` distinct addresses.
+fn busy_child(
+    parent: &Arc<Block>,
+    template: &Block,
+    network: &Network,
+    count: u32,
+    addresses: u32,
+) -> Arc<Block> {
+    let mut block = Block::clone(&parent.make_fake_child());
+    let coinbase = Arc::unwrap_or_clone(block.transactions.remove(0));
+    let mut outputs = template.transactions[0].outputs().to_vec();
+    outputs.extend((0..count).map(|i| {
+        let mut pub_key_hash = [0; 20];
+        pub_key_hash[..4].copy_from_slice(&(i % addresses.max(1)).to_le_bytes());
+        transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash)
+                .script(),
+        }
+    }));
+    block
+        .transactions
+        .insert(0, Arc::new(coinbase.with_transparent_outputs(outputs)));
+    Arc::new(block)
+}
+
+/// Returns the resident set size of this process in bytes, or zero if it is not available.
+fn resident_set_size() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status
+                .lines()
+                .find(|line| line.starts_with("VmRSS:"))?
+                .split_whitespace()
+                .nth(1)?
+                .parse::<u64>()
+                .ok()
+        })
+        .map_or(0, |kib| kib * 1024)
+}
+
+/// Returns whether to run a memory measurement test.
+///
+/// CI also runs ignored tests, so the measurements need `ZEBRA_TEST_MEASURE_MEMORY` as well.
+#[allow(clippy::print_stderr)]
+fn memory_measurement_requested() -> bool {
+    let requested = std::env::var_os("ZEBRA_TEST_MEASURE_MEMORY").is_some();
+    if !requested {
+        eprintln!("Skipping memory measurement because '$ZEBRA_TEST_MEASURE_MEMORY' is not set.");
+    }
+    requested
+}
+
+/// Measures non-finalized state memory when many equal-work forks span a busy block, as on
+/// Testnet after height 4,602,598 (#12416).
+///
+/// Run with `ZEBRA_TEST_MEASURE_MEMORY=1` and `--run-ignored=only --no-capture`.
+/// `ZEBRA_TEST_BUSY_OUTPUTS` sets the outputs in the busy block, and `ZEBRA_TEST_BUSY_FORKS` sets
+/// the sibling forks committed on top of it.
+#[test]
+#[ignore]
+#[allow(clippy::print_stdout)]
+fn measure_fork_memory_over_busy_block() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    if !memory_measurement_requested() {
+        return Ok(());
+    }
+
+    let env = |name, default| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(default)
+    };
+    let outputs: u32 = env("ZEBRA_TEST_BUSY_OUTPUTS", 200_000);
+    let forks: u32 = env("ZEBRA_TEST_BUSY_FORKS", 100);
+    let mib = |bytes: u64| bytes / (1024 * 1024);
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, outputs, 1_000);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    // `ZEBRA_TEST_INDEX_LIMIT=none` measures without the index entry limit.
+    if let Ok(limit) = std::env::var("ZEBRA_TEST_INDEX_LIMIT") {
+        state.max_index_entries = limit.parse().ok();
+    }
+
+    let start = resident_set_size();
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(busy.clone().prepare(), &finalized_state)?;
+    let one_chain = resident_set_size();
+
+    for i in 0..forks {
+        let mut sibling = busy_child(&busy, &block1, &network, 0, 1)
+            .set_work(10)
+            .set_block_commitment([0; 32]);
+        // Distinct block commitments only fit 256 siblings, so also vary the timestamp.
+        Arc::make_mut(&mut Arc::make_mut(&mut sibling).header).time +=
+            chrono::Duration::seconds(i.into());
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    let all_forks = resident_set_size();
+
+    // The write task publishes a clone of the state before it finalizes (#11820).
+    let published = state.clone();
+    state.finalize();
+    let finalized = resident_set_size();
+    drop(published);
+    let after_publish = resident_set_size();
+
+    let entries: Vec<usize> = state
+        .chain_iter()
+        .map(|chain| chain.index_entry_count())
+        .collect();
+    println!(
+        "outputs {outputs}, forks {forks}, limit {:?}: chains {}, index entries {}, \
+         RSS MiB start {}, one chain {}, all forks {}, after finalize {}, \
+         after dropping the published state {}",
+        state.max_index_entries,
+        state.chain_count(),
+        entries.iter().sum::<usize>(),
+        mib(start),
+        mib(one_chain),
+        mib(all_forks),
+        mib(finalized),
+        mib(after_publish),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/12416.
+///
+/// On test networks, forks with their own busy blocks are evicted when the index entries of all
+/// chains pass the limit, before the fork limit is reached. The best chain and the newest fork
+/// are always kept, even when they alone pass the limit.
+#[test]
+fn index_entry_limit_evicts_forks_with_busy_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 1_000, 10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    assert_eq!(
+        Some(crate::constants::MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS),
+        state.max_index_entries,
+    );
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(busy.clone().prepare(), &finalized_state)?;
+
+    let received = std::time::Instant::now();
+    let siblings: Vec<_> = (0..10u8)
+        .map(|i| {
+            busy_child(&busy, &block1, &network, 1_000, 10)
+                .set_work(10)
+                .set_block_commitment([i; 32])
+        })
+        .collect();
+    let commit = |state: &mut NonFinalizedState, i: usize| {
+        let mut prepared = siblings[i].clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(i.try_into().unwrap()));
+        state.commit_block(prepared, &finalized_state)
+    };
+
+    // Each fork copies the indexes of the busy chain below it.
+    commit(&mut state, 0)?;
+    commit(&mut state, 1)?;
+    let max_index_entries = 2 * state.index_entry_count();
+    state.max_index_entries = Some(max_index_entries);
+    for i in 2..siblings.len() {
+        commit(&mut state, i)?;
+    }
+
+    assert!(state.chain_count() < siblings.len());
+    assert!(state.chain_count() == 2 || state.index_entry_count() <= max_index_entries);
+    assert!(
+        state.any_chain_contains(&siblings[0].hash()),
+        "the best chain is kept"
+    );
+    assert!(
+        state.any_chain_contains(&siblings[9].hash()),
+        "the newest fork is kept"
+    );
+
+    // Only the evicted siblings are reported, not the blocks they share with the kept chains.
+    let evicted: std::collections::HashSet<_> = siblings
+        .iter()
+        .map(|sibling| sibling.hash())
+        .filter(|hash| !state.any_chain_contains(hash))
+        .collect();
+    let reported = state.take_evicted_block_hashes();
+    assert_eq!(evicted.len(), reported.len());
+    assert_eq!(evicted, reported.into_iter().collect());
+    assert!(state.take_evicted_block_hashes().is_empty());
+
+    // A limit below a single chain keeps the best chain and the newest fork.
+    state.max_index_entries = Some(1);
+    let late = busy_child(&busy, &block1, &network, 1_000, 10)
+        .set_work(10)
+        .set_block_commitment([10; 32]);
+    let mut prepared = late.clone().prepare();
+    prepared.received_time = Some(received + Duration::from_secs(10));
+    state.commit_block(prepared, &finalized_state)?;
+    assert_eq!(2, state.chain_count());
+    assert!(state.any_chain_contains(&siblings[0].hash()));
+    assert!(state.any_chain_contains(&late.hash()));
+
+    let late_child = late.make_fake_child().set_work(10);
+    state.commit_block(late_child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        late_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Mainnet only limits the number of forks, not their index entries.
+#[test]
+fn index_entry_limit_is_only_on_test_networks() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(
+        None,
+        NonFinalizedState::new(&Network::Mainnet).max_index_entries
+    );
+}
