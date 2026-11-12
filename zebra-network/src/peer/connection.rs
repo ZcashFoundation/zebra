@@ -949,7 +949,10 @@ where
                         None => self.fail_with(PeerError::ConnectionClosed).await,
                         Some(Err(e)) => self.fail_with(e).await,
                         Some(Ok(peer_msg)) => {
-                            self.update_state_metrics(format!("Out::Rsp::{}", peer_msg.command()));
+                            self.update_state_metrics(Some(format_args!(
+                                "Out::Rsp::{}",
+                                peer_msg.command()
+                            )));
 
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
@@ -1091,7 +1094,10 @@ where
                 "command" => request.command(),
             )
             .increment(1);
-            self.update_state_metrics(format!("Out::Req::Canceled::{}", request.command()));
+            self.update_state_metrics(Some(format_args!(
+                "Out::Req::Canceled::{}",
+                request.command()
+            )));
 
             return;
         }
@@ -1104,7 +1110,7 @@ where
             "command" => request.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("Out::Req::{}", request.command()));
+        self.update_state_metrics(Some(format_args!("Out::Req::{}", request.command())));
 
         // # Security
         //
@@ -1312,7 +1318,7 @@ where
         trace!(?msg);
         debug!(state = %self.state, %msg, "received inbound peer message");
 
-        self.update_state_metrics(format!("In::Msg::{}", msg.command()));
+        self.update_state_metrics(Some(format_args!("In::Msg::{}", msg.command())));
 
         use InboundMessage::*;
 
@@ -1521,7 +1527,7 @@ where
             "command" => req.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("In::Req::{}", req.command()));
+        self.update_state_metrics(Some(format_args!("In::Req::{}", req.command())));
 
         // Give the inbound service time to clear its queue,
         // before sending the next inbound request.
@@ -1577,7 +1583,10 @@ where
                         client_receiver = ?self.client_rx,
                         "error processing peer request",
                     );
-                    self.update_state_metrics(format!("In::Req::{}/Rsp::Error", req.command()));
+                    self.update_state_metrics(Some(format_args!(
+                        "In::Req::{}/Rsp::Error",
+                        req.command()
+                    )));
                 }
 
                 return;
@@ -1591,7 +1600,7 @@ where
             "command" => rsp.command(),
         )
         .increment(1);
-        self.update_state_metrics(format!("In::Rsp::{}", rsp.command()));
+        self.update_state_metrics(Some(format_args!("In::Rsp::{}", rsp.command())));
 
         // TODO: split response handler into its own method
         match rsp.clone() {
@@ -1750,10 +1759,16 @@ where
                 "inbound service {error} error, closing connection",
             );
 
-            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Error", req.command()));
+            self.update_state_metrics(Some(format_args!(
+                "In::Req::{}/Rsp::{error}::Error",
+                req.command()
+            )));
             self.fail_with(error).await;
         } else {
-            self.update_state_metrics(format!("In::Req::{}/Rsp::{error}::Ignored", req.command()));
+            self.update_state_metrics(Some(format_args!(
+                "In::Req::{}/Rsp::{error}::Ignored",
+                req.command()
+            )));
 
             if matches!(error, PeerError::Overloaded) {
                 metrics::counter!("pool.ignored.loadshed").increment(1);
@@ -1809,16 +1824,27 @@ where
     /// using `extra_state_info` as additional state information.
     ///
     /// Counts live connections by command, without retaining per-peer address series.
-    fn update_state_metrics(&mut self, extra_state_info: impl Into<Option<String>>) {
-        let current_metrics_state = if let Some(extra_state_info) = extra_state_info.into() {
-            format!("{}::{extra_state_info}", self.state.command()).into()
-        } else {
-            self.state.command()
-        };
+    ///
+    /// The state name is only allocated when it differs from the last one counted,
+    /// because this runs for every peer message.
+    fn update_state_metrics(&mut self, extra_state_info: Option<fmt::Arguments<'_>>) {
+        let state_command = self.state.command();
 
-        if self.last_metrics_state.as_ref() == Some(&current_metrics_state) {
+        let unchanged =
+            self.last_metrics_state
+                .as_deref()
+                .is_some_and(|last| match extra_state_info {
+                    Some(extra) => formats_to(last, format_args!("{state_command}::{extra}")),
+                    None => last == state_command,
+                });
+        if unchanged {
             return;
         }
+
+        let current_metrics_state: Cow<'static, str> = match extra_state_info {
+            Some(extra) => format!("{state_command}::{extra}").into(),
+            None => state_command,
+        };
 
         self.erase_state_metrics();
 
@@ -1965,4 +1991,19 @@ fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTx
 /// Non-block inventory hashes are skipped.
 fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
     items.iter().filter_map(InventoryHash::block_hash)
+}
+
+/// Returns true if formatting `args` produces exactly `expected`, without allocating.
+fn formats_to(expected: &str, args: fmt::Arguments<'_>) -> bool {
+    struct Matcher<'a>(&'a str);
+
+    impl fmt::Write for Matcher<'_> {
+        fn write_str(&mut self, piece: &str) -> fmt::Result {
+            self.0 = self.0.strip_prefix(piece).ok_or(fmt::Error)?;
+            Ok(())
+        }
+    }
+
+    let mut matcher = Matcher(expected);
+    fmt::write(&mut matcher, args).is_ok() && matcher.0.is_empty()
 }
