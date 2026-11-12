@@ -113,11 +113,11 @@ pub enum Request {
     ///
     /// Returns [`super::Response::Nil`] on success. Errors require full-block fallback and must
     /// not enter the block rejection cache. Success does not replace normal block verification.
-    /// Optional sealed reconstruction evidence applies only to the same immutable block allocation.
+    /// Optional reconstruction evidence applies only to the same immutable block allocation.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     CheckCompactBlock(
         Arc<block::Block>,
-        Option<crate::compact::ReconstructedBlock>,
+        Option<zebra_node_services::compact::ReconstructedBlock>,
     ),
 
     /// Download one block from a connected peer, waiting for eligible peer capacity.

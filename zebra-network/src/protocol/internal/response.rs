@@ -120,7 +120,10 @@ pub enum Response {
     /// [`Self::EarlyBlocks`], this preserves provenance, not a consensus validity verdict, and
     /// is never returned by inbound handlers.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    ReconstructedBlock(crate::compact::ReconstructedBlock, Option<PeerSocketAddr>),
+    ReconstructedBlock(
+        zebra_node_services::compact::ReconstructedBlock,
+        Option<PeerSocketAddr>,
+    ),
 
     /// Inbound block responses containing uncommitted bodies with revocable serving permission.
     ///

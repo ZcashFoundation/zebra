@@ -21,8 +21,9 @@ use zebra_chain::{
         CompactSizeMessage, SerializationError, TrustedPreallocate, ZcashDeserialize,
         ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
     },
-    transaction::{self, Transaction, UnminedTx, UnminedTxId, MIN_TRANSPARENT_TX_SIZE},
+    transaction::{Transaction, UnminedTx, UnminedTxId, MIN_TRANSPARENT_TX_SIZE},
 };
+use zebra_node_services::compact::ReconstructedBlock;
 
 #[cfg(test)]
 mod tests;
@@ -65,37 +66,6 @@ pub struct Reconstruction {
     transactions: Vec<Option<Arc<Transaction>>>,
     /// Header, transaction-count prefix, and transaction bytes already placed in the block.
     consumed_size: usize,
-}
-
-/// An immutable reconstructed block with exact size and checked transaction-Merkle evidence.
-///
-/// Only compact reconstruction creates this evidence, after checking the size bound, transaction
-/// uniqueness, and Merkle root against this exact header. This does not validate authorizing data
-/// or network-specific consensus rules.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReconstructedBlock {
-    block: Arc<Block>,
-    consumed_size: usize,
-    transaction_hashes: Arc<[transaction::Hash]>,
-}
-
-impl ReconstructedBlock {
-    /// Returns the immutable body whose serialized size was checked during reconstruction.
-    pub fn block(&self) -> &Arc<Block> {
-        &self.block
-    }
-
-    /// Returns bounded size and Merkle-checked hashes only for the exact immutable block.
-    ///
-    /// A different allocation, even with identical bytes or a shared header, must be checked again.
-    pub fn evidence_for(&self, block: &Arc<Block>) -> Option<(usize, &Arc<[transaction::Hash]>)> {
-        Arc::ptr_eq(&self.block, block).then_some((self.consumed_size, &self.transaction_hashes))
-    }
-
-    /// Consumes the reconstruction, returning its body and exact serialized-size evidence.
-    pub fn into_parts(self) -> (Arc<Block>, usize) {
-        (self.block, self.consumed_size)
-    }
 }
 
 impl CompactBlock {
@@ -351,24 +321,7 @@ impl Reconstruction {
                 .map(|tx| tx.expect("every missing slot was filled by the exact response count"))
                 .collect(),
         });
-        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let mut seen = HashSet::with_capacity(transaction_hashes.len());
-        if transaction_hashes.iter().any(|hash| !seen.insert(*hash))
-            || transaction_hashes
-                .iter()
-                .copied()
-                .collect::<block::merkle::Root>()
-                != block.header.merkle_root
-        {
-            return Err(SerializationError::Parse(
-                "compact block duplicate transaction or Merkle mismatch",
-            ));
-        }
-        Ok(ReconstructedBlock {
-            block,
-            consumed_size,
-            transaction_hashes,
-        })
+        ReconstructedBlock::new(block, consumed_size)
     }
 }
 

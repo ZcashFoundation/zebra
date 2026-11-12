@@ -1,6 +1,7 @@
 //! The interfaces of some Zebra node services.
 
 pub use zebra_chain::parameters::checkpoint::constants;
+pub mod compact;
 pub mod mempool;
 pub mod service_traits;
 

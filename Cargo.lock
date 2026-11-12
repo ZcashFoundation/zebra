@@ -7340,6 +7340,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "zebra-chain",
+ "zebra-node-services",
  "zebra-test",
 ]
 
@@ -7354,6 +7355,7 @@ dependencies = [
  "tokio",
  "tower 0.4.13",
  "zebra-chain",
+ "zebra-test",
 ]
 
 [[package]]
