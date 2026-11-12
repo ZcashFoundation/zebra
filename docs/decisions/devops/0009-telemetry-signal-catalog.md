@@ -85,7 +85,7 @@ Chosen option: **Option 1**. The `metrics` facade stays the single place where v
 
 One rule governs every backend: **every catalog signal reaches every enabled backend.** A backend's policy may change how a signal is shaped for it, such as aggregation intervals, histogram form, or which attributes it can store, but never which signals it receives. A test enforces this (part 5), so it doesn't depend on contributors remembering each backend.
 
-The design has seven parts.
+The design has eight parts.
 
 ### 1. Definition: one `metrics` module per crate
 
@@ -108,7 +108,7 @@ New names follow the existing dot-separated prefixes and end in their unit (`_se
 
 ### 2. Collection: sampling never depends on a backend
 
-Values that are sampled rather than recorded when something happens are sampled by the module that owns them, on a fixed interval, whether or not any backend is enabled. The state already samples its database size this way every 30 seconds. Process-wide values, such as memory, open file descriptors, and CPU time, are sampled by one task in `zebrad`. No backend's code computes a value. This prevents the memory-gauge drift: a backend's flush loop reads the latest value like any other gauge.
+Values that are sampled rather than recorded when something happens are sampled by the module that owns them, on a fixed interval, whenever at least one backend is enabled, and never when none is (part 8). The state already samples its database size this way every 30 seconds. Process-wide values, such as memory, open file descriptors, and CPU time, are sampled by one task in `zebrad`. No backend's code computes a value. This prevents the memory-gauge drift: a backend's flush loop reads the latest value like any other gauge.
 
 ### 3. Export: one policy per backend, in one `zebrad` module
 
@@ -176,6 +176,58 @@ Turning an existing summary into a bucketed histogram is also a breaking change,
 
 Dashboard and rule queries for series that never existed, like those in the table above, are fixed directly. No operator received data from them, so there's nothing to deprecate.
 
+### 8. Performance: off costs nothing, on costs the least
+
+Parity must not mean that running several backends slows the node, or that a backend's overhead distorts the values it reports. Release builds compile all three backends in, so what matters to operators is the cost when a backend is compiled in but turned off, and the cost of each one turned on.
+
+**Today, at commit `1ab1f8db2`:**
+
+| Mechanism | Compiled in, turned off | Turned on |
+| --- | --- | --- |
+| `metrics` call sites | Negligible for fixed names: a thread-local check and one atomic load, then a no-op. Call sites that build labels with `format!` or `to_string` still allocate, because arguments are evaluated first. | Per record, for each backend: a registry lookup and a new handle allocation, unless the caller keeps the handle. Only one place in the code keeps handles. |
+| Prometheus | None: nothing is installed without `endpoint_addr`. | Low: atomics per record, plus one exporter thread. A scrape never blocks recording. |
+| Sentry metrics | None: installed only with an enabled client. | Low for the current list. Listed counters and gauges take one global mutex per record, and listed histograms call the SDK on the recording thread. |
+| Sentry tracing layer | None. | **Medium to high.** Zebra sets no span filter, so every INFO span becomes a Sentry span, and every poll of an instrumented future forks a hub and clones a scope. That includes `msg_as_req`, a span for each inbound peer message. No `traces_sample_rate` is set, so these spans are built and then dropped unsent. |
+| OpenTelemetry tracing | None: no SDK objects are created without an endpoint. | Medium: attributes are built for every span before sampling decides, so a 1% sample rate still pays for 100% of span creation. Export runs on its own thread. |
+| Several at once | | Costs add, plus the fanout's own cost: it registers each record with every child and allocates for the combined handle. |
+
+Costs paid while everything is off: label strings built on peer-message paths (`connection.rs` formats a state name twice per message), the state sampling RocksDB properties every 30 seconds, and two Sentry threads started when `SENTRY_DSN` is set but the client is disabled. Each is small, and each is avoidable.
+
+**Observer effects.** With Sentry on, the per-poll span work falls inside the peer handshake duration and message handling, so those timings report part of Sentry's own overhead. RPC request durations may include span work, depending on middleware order. Batch verifier durations stop the clock before recording, so recording isn't included, but they include time queued for blocking threads, which telemetry threads compete for. Block phase distributions capture on the recording thread; this is microseconds against millisecond phases, under 0.1%. These estimates come from reading the code; the measurements below confirm or correct them.
+
+**Requirements for the new design:**
+
+1. **A disabled backend installs nothing:** no recorder, layer, thread, or sampler. With every backend off, telemetry costs one atomic load per fixed-name call site and nothing else.
+2. **The record path is bounded and lock-free:** at most one atomic operation per enabled backend, with no mutex, SDK call, I/O, or allocation. The Sentry policy keeps per-label-set state in a sharded map, not behind one mutex, and captures only on its flush thread.
+3. **Hot call sites keep their handles.** Per-message, per-transaction, and per-proof call sites create their handles once, after the recorder is installed. A handle created earlier stays a no-op for the life of the process, so a test checks the order.
+4. **Labels don't allocate.** Label values on hot paths are static strings, and nothing is formatted before a cheap check decides that a value changed.
+5. **`event.` keys never enter a keyed map.** The value is carried beside the record, and layers that don't see an `event.` key don't rebuild the key. Event attributes are allowed only on histograms recorded at most about once per block.
+6. **Background work stays off the async runtime:** flushes, scrapes, `/proc` sampling, and span export run on their own threads.
+7. **Each backend sends spans only when asked.** The Sentry tracing layer gets a span filter that captures nothing unless Sentry tracing is turned on, and OpenTelemetry filters spans before building attributes.
+8. **Cost doesn't grow with each backend.** If benchmarks show that the fanout makes each added backend cost more than one atomic operation per record, Sentry and the OTLP adapter read one shared registry at flush time instead of intercepting every record. Zakura's own Prometheus recorder is precedent for replacing the exporter behind the facade.
+
+`describe()` runs once at startup, and the catalog, parity, and volume tests are test-only, so neither costs anything at runtime.
+
+**Measurement.** Phase 0 of the migration records a baseline, and every later phase is compared against it:
+
+- **Micro-benchmarks** (criterion): counter, gauge, and histogram records with a fixed name, a dynamic label, and a kept handle, on 1 and 16 threads. Each runs with no recorder, Prometheus, Sentry, both, and both with the new layers. Span create, enter, and close run with no layer, Sentry, OpenTelemetry at 100% and 1%, and both.
+- **End to end:** a checkpoint sync over a fixed height range from a cached state, and full verification near the tip, offline with fixed peers, three runs each. Configurations: compiled out, compiled in and off, each backend alone, and all on. Compare blocks per second, CPU time, peak memory, and p50 and p99 of the block-commit and batch-verification histograms.
+- **Profiles:** CPU share of telemetry symbols, allocations per block and per peer message, and lock contention.
+
+Acceptance thresholds, to be confirmed against the baseline:
+
+| Measure | Threshold |
+| --- | --- |
+| Fixed-name record, everything off | ≤ 5 ns, no allocation |
+| Kept handle, per enabled backend | ≤ 15 ns, no allocation |
+| Each added backend, per record | ≤ 30 ns more, no extra allocation |
+| 16 threads against 1 | No worse than 2× per record |
+| Sync throughput, compiled in and off | Within 0.5% of compiled out |
+| Sync throughput, each backend on | Within 1% |
+| Sync throughput, all backends on | Within 2% |
+| Peak memory, all backends on | ≤ 20 MB more |
+| Histogram p50 with Sentry spans on and off | Within 1% |
+
 ### Expected Consequences
 
 - Adding a signal is one change in the recording crate: constant, description, and call. No backend needs a separate change, and the parity test fails if one is left out. The catalog diff shows reviewers the new signal.
@@ -199,9 +251,10 @@ Each phase is one or more public PRs that stand alone.
 
 | Phase | Change | Result |
 | --- | --- | --- |
+| 0 | Telemetry benchmarks and an end-to-end baseline; a span filter on the Sentry tracing layer; no Sentry threads for a disabled client; no label formatting on peer-message paths. | Today's costs are measured, and the largest avoidable ones are gone before anything new is added. |
 | 1 | Telemetry sampling task in `zebrad`; process metrics from the `metrics-process` crate, which emits the Prometheus process-collector names, replacing `process.memory.rss_bytes` before it is released. | Sampled signals reach every backend, independent of Sentry. |
 | 2 | `metrics` modules, `describe()`, and `LABELS` in each crate, described right after the recorder is installed; generated catalog JSON; call-site and dashboard/rule checks; buckets for the RPC and handshake latency histograms; fixes for the other broken queries and the error-rate alert. | The catalog exists, and repository dashboards and rules match the code. |
-| 3 | Backend-neutral node context; Sentry policy with a test adapter, sending every catalog metric with per-interval caps; parity and volume tests; `event.` label-stripping layer; tip block delay as one histogram; delta sending for absolute counters; backend-neutral exclude setting. | Every backend receives every signal, and CI proves it. |
+| 3 | Backend-neutral node context; Sentry policy with a test adapter and a lock-free record path, sending every catalog metric with per-interval caps; parity, volume, and benchmark checks against the phase 0 baseline; `event.` label-stripping layer; tip block delay as one histogram; delta sending for absolute counters; backend-neutral exclude setting. | Every backend receives every signal, and CI proves it. |
 | 4 | Counters for log-only signals (stall, start); one backend-neutral list of operator-relevant log targets; shipped and documented alerts move to counters. | Alerts no longer depend on log wording or on one backend. |
 | 5 | Catalog JSON published with releases; one book page for all three backends; z3 copies the fixed dashboards and rules when it bumps its Zebra pin, as it does today. | Operators choose a backend from one signal reference. |
 | 6 | Native OTLP metrics adapter in the fanout. | OpenTelemetry users get metrics without running a Collector against `/metrics`. |
