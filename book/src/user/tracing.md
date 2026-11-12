@@ -73,11 +73,18 @@ panics. Each time, it sends:
 
 Each minute sends at most 1,500 metrics. The Sentry SDK sends metrics in
 envelopes of 100, and queues at most 30 envelopes for events, logs, release
-health sessions, and metrics together, so one minute of metrics never takes
-more than half of that queue. Zebra also waits a second between envelopes,
-except when it shuts down, so the SDK can send each one before the next is
-queued. The SDK drops any envelope that arrives while its queue is full, and
-counts it in the client reports it sends to Sentry.
+health sessions, and metrics together. Before it sends a minute's metrics,
+Zebra waits up to 2 seconds for the SDK to send everything already in that
+queue. If the SDK is still sending, for example because your Sentry server is
+slow or unreachable, Zebra sends no metrics that minute. So metrics leave about
+half of the queue free, even while the SDK can't send anything. Zebra also
+waits a second between envelopes, so the SDK can send each one before the next
+is queued.
+
+When Zebra shuts down or panics, it ends the release health session first. Then
+it stops waiting between envelopes and, after the same check of the queue,
+sends the metrics that are due. The SDK drops any envelope that arrives while
+its queue is full, and counts it in the client reports it sends to Sentry.
 
 When more than 1,500 metrics are due in a minute, Zebra sends counters first,
 then gauges that changed, then gauges due for their 5-minute refresh, then
@@ -94,6 +101,10 @@ The `zebrad.sentry.metrics.dropped.total` counter counts the values Zebra didn't
 send to Sentry when they were due, by `reason`:
 
 - `flush_budget`: the minute already had 1,500 metrics;
+- `transport_backlog`: the Sentry SDK was still sending what was queued
+  before, so the minute sent no metrics. Counters and gauges are sent in a
+  later minute, and histogram values are dropped. If this count keeps growing,
+  check that Zebra can reach your Sentry server;
 - `label_set_cap`: the value was recorded for a set of labels over the limit.
 
 Like every other metric, this counter reaches both Sentry and the Prometheus
