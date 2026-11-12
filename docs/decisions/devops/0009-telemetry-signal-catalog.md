@@ -105,7 +105,7 @@ New names follow the existing dot-separated prefixes and end in their unit (`_se
 
 ### 2. Collection: sampling never depends on a backend
 
-Values that are sampled rather than recorded when something happens, such as process memory, open file descriptors, and database size, are sampled by one telemetry task in `zebrad`, on a fixed interval, whether or not any backend is enabled. No backend's code computes a value. This prevents the memory-gauge drift: a backend's flush loop reads the latest value like any other gauge.
+Values that are sampled rather than recorded when something happens are sampled by the module that owns them, on a fixed interval, whether or not any backend is enabled. The state already samples its database size this way every 30 seconds. Process-wide values, such as memory, open file descriptors, and CPU time, are sampled by one task in `zebrad`. No backend's code computes a value. This prevents the memory-gauge drift: a backend's flush loop reads the latest value like any other gauge.
 
 ### 3. Export: one policy per backend, in one `zebrad` module
 
@@ -135,7 +135,7 @@ Four checks run against the catalog in CI:
 
 1. **Call sites.** A test scans workspace sources for `counter!`, `gauge!`, and `histogram!` calls and fails if a literal name, or a label key, is not in the catalog. Every name constant in a `metrics` module must be described, and every `LABELS` entry must name a described metric.
 2. **Dashboards and alert rules.** A test extracts metric names from the PromQL in `docker/observability/grafana/dashboards/*.json`, `docker/observability/prometheus/rules/*.yml`, and the example queries in `docker/observability/README.md`, and maps them back to catalog entries using the Prometheus naming rules. A `_bucket` query matches only a histogram in the bucket table, and a `quantile` label only one that isn't. The test fails on any unknown name. A short allowlist covers series Zebra doesn't produce, such as `up` and the Jaeger span metrics.
-3. **Backend policies.** Unit tests check that every name in the Sentry lists and the bucket table is in the catalog with the right kind, and that `event.` keys appear only on histograms.
+3. **Backend policies.** Unit tests check that every name in the Sentry lists and the bucket table is in the catalog with the right kind, and that `event.` keys appear only on histograms. The block phase histograms on today's Sentry list are recorded only on the `next` branch, so they are described on `main` too, or the list moves to `next` with them.
 4. **External consumers.** z3 already copies the dashboards and rules from the Zebra release it pins, so fixing them in Zebra reaches z3 at its next version bump, and z3 needs no check of its own while it keeps them unmodified. Copies that are changed, and ZF's private Sentry dashboard and monitor definitions, check their queries against the catalog JSON of the Zebra release they target, using the same mapping. Zebra publishes the file with each release; those repositories run the check.
 
 Checking was chosen over generating dashboards and rules from the catalog. Generation (for example jsonnet mixins) pays off only with a regenerate-and-diff gate, and it would replace hand-edited Grafana JSON that operators copy. The checks catch the drift observed today at a fraction of the cost.
