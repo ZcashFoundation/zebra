@@ -9,6 +9,12 @@ use std::{collections::hash_map::RandomState, collections::HashSet, fmt::Debug};
 use color_eyre::eyre::Result;
 
 #[test]
+#[should_panic]
+fn div_exact_rejects_negative_quotient() {
+    let _ = Amount::<NonNegative>::new(1).div_exact(-1);
+}
+
+#[test]
 fn test_add_bare() -> Result<()> {
     let _init_guard = zebra_test::init();
 
