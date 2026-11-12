@@ -56,7 +56,12 @@ use crate::{
 
 /// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
 #[derive(Debug)]
-pub struct Transaction(pub(crate) zp_tx::Transaction);
+pub struct Transaction(
+    zp_tx::Transaction,
+    /// Exact canonical byte count retained by decoding; zero means the body must be measured.
+    /// Private immutable access to the inner value prevents callers from keeping stale evidence.
+    u32,
+);
 
 impl std::ops::Deref for Transaction {
     type Target = zp_tx::TransactionData<zp_tx::Authorized>;
@@ -67,6 +72,12 @@ impl std::ops::Deref for Transaction {
 }
 
 impl Transaction {
+    /// New or rebuilt bodies have no decoded-size evidence. The inner value is private and only
+    /// exposed immutably, so every body mutation must replace the transaction through this helper.
+    fn from_inner(inner: zp_tx::Transaction) -> Self {
+        Self(inner, 0)
+    }
+
     /// Access the inner `zcash_primitives::transaction::Transaction`.
     pub(crate) fn inner(&self) -> &zp_tx::Transaction {
         &self.0
@@ -853,6 +864,16 @@ impl crate::serialization::ZcashSerialize for Transaction {
     fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
         self.0.write(writer)
     }
+
+    fn zcash_serialized_size(&self) -> usize {
+        if self.1 != 0 {
+            return usize::try_from(self.1).expect("decoded transaction sizes fit usize");
+        }
+        let mut writer = crate::serialization::FakeWriter(0);
+        self.zcash_serialize(&mut writer)
+            .expect("transaction size counting cannot fail");
+        writer.0
+    }
 }
 
 impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus::BranchId>
@@ -919,7 +940,7 @@ fn deserialize_and_check<R: std::io::Read>(
         let overwintered = header & 0x8000_0000 != 0;
         overwintered && (header & 0x7FFF_FFFF) == 4
     };
-    let with_header = std::io::Read::chain(&header[..], limited);
+    let with_header = std::io::Read::chain(&header[..], &mut limited);
 
     let (inner, raw_bytes) = if is_v4 {
         let mut recording = RecordingReader::new(with_header);
@@ -1019,7 +1040,14 @@ fn deserialize_and_check<R: std::io::Read>(
         }
     }
 
-    Ok(Transaction(inner))
+    // CompactSize decoding rejects nonminimal lengths; fixed-width fields and retained vectors
+    // serialize to their consumed lengths, including empty bundles. The V4 discarded balance is
+    // checked above. Thus successful decoding supplies the canonical serialized byte count.
+    let mut transaction = Transaction::from_inner(inner);
+    // The count is capped by MAX_BLOCK_BYTES; the bound below makes both casts lossless.
+    const { assert!(crate::block::MAX_BLOCK_BYTES <= u32::MAX as u64) };
+    transaction.1 = (crate::block::MAX_BLOCK_BYTES - limited.limit()) as u32;
+    Ok(transaction)
 }
 
 /// Reads the `valueBalanceSapling` field of a V4 transaction that has no Sapling spends or
@@ -1113,7 +1141,7 @@ impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
 
 impl Clone for Transaction {
     fn clone(&self) -> Self {
-        Transaction(self.0.clone())
+        Transaction(self.0.clone(), self.1)
     }
 }
 
@@ -1341,7 +1369,7 @@ impl Transaction {
             None,
             None,
         );
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V5 transaction with an Orchard bundle, for tests.
@@ -1373,7 +1401,7 @@ impl Transaction {
             orchard_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Build a V6 transaction with Orchard and Ironwood bundles, for tests.
@@ -1406,7 +1434,7 @@ impl Transaction {
             ironwood_bundle,
         );
 
-        Transaction(tx_data.freeze().expect("built from valid components"))
+        Transaction::from_inner(tx_data.freeze().expect("built from valid components"))
     }
 
     /// Converts Zebra transparent inputs and outputs into a librustzcash bundle,
@@ -1492,7 +1520,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Transaction::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Rebuild this transaction with a different expiry height (recomputes txid).
@@ -1509,7 +1537,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Rebuild this transaction with a different network upgrade / branch ID (recomputes txid).
@@ -1530,7 +1558,7 @@ impl Transaction {
             data.orchard_bundle().cloned(),
             data.ironwood_bundle().cloned(),
         );
-        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+        *self = Self::from_inner(new_data.freeze().expect("rebuilt from valid transaction"));
     }
 
     /// Replace all transparent outputs (recomputes txid).
@@ -1560,7 +1588,7 @@ impl Transaction {
             bundle,
             data.ironwood_bundle().cloned(),
         );
-        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+        Transaction::from_inner(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
 
     /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
