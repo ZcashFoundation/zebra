@@ -252,6 +252,7 @@ impl TemplateCache {
     pub(crate) fn updater_is_running(&self) -> bool {
         self.updater.load(Ordering::Acquire)
     }
+
     fn claim_updater(&self) -> Option<UpdaterGuard> {
         self.updater
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
