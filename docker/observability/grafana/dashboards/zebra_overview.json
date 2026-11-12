@@ -613,7 +613,7 @@
       "pluginVersion": "10.0.0",
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_halo2_verified[1m])", "legendFormat": "Halo2", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_groth16_verified[1m])", "legendFormat": "Groth16", "refId": "B" }
+        { "datasource": { "type": "prometheus", "uid": "zebra-prometheus" }, "expr": "rate(proofs_sapling_verified[1m])", "legendFormat": "Sapling", "refId": "B" }
       ],
       "title": "Proof Verification Rate",
       "type": "timeseries"

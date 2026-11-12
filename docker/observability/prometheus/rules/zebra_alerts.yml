@@ -49,15 +49,16 @@ groups:
           summary: "No peers connected"
           description: "Zebra has 0 peers for 2 minutes. Check network connectivity and firewall rules."
 
-      # High error rate
+      # Blocks failing verification. Download errors, such as peers not having a block, are
+      # expected during sync and aren't counted.
       - alert: ZebraHighErrorRate
-        expr: rate(zebra_errors_total[5m]) > 0.1
+        expr: sum(rate(sync_block_error_count{kind=~"invalid|auth_commitment_mismatch|validation_request|verifier_service|verify_timeout|utxo_lookup_timeout|final_checkpoint_verify_timeout"}[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High error rate"
-          description: "Zebra is experiencing elevated error rates (> 0.1/s for 5 minutes)."
+          summary: "High block verification error rate"
+          description: "Zebra's syncer is failing to verify blocks (> 0.1/s for 5 minutes)."
 
   # Value Pool Alerts (Monitoring)
   - name: zebra-value-pools
