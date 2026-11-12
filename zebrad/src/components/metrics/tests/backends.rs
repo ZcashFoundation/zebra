@@ -6,9 +6,9 @@ use std::sync::Arc;
 use metrics::{Key, Label, Level, Metadata, Recorder};
 
 use crate::components::metrics::{
-    describe_all, describe_and_record_build_info,
+    describe_all,
     event_labels::EVENT_LABEL_PREFIX,
-    prometheus_builder,
+    install, prometheus_builder,
     sentry_policy::{AttributeValue, MetricType, SentryMetric, SentryPolicy, HISTOGRAM_CAP},
     with_prometheus,
 };
@@ -158,12 +158,14 @@ fn every_catalog_metric_reaches_every_backend() {
 
 /// A node that sends metrics only to Sentry sends its build info, like a node with the
 /// Prometheus endpoint open.
+///
+/// This installs the global recorder, so no other test in this process may install one.
 #[test]
 fn sentry_only_install_sends_the_build_info() {
     let _init_guard = zebra_test::init();
 
-    let sentry = SentryPolicy::default();
-    metrics::with_local_recorder(&sentry, describe_and_record_build_info);
+    let sentry: &'static SentryPolicy = Box::leak(Box::default());
+    install(sentry).expect("no other test installs a global recorder");
 
     let mut sent = Vec::new();
     sentry.flush(|batch| sent = batch);
