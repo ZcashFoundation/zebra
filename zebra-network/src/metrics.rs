@@ -28,9 +28,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `kind`: `instant` or `waited`.
 /// - `remote_version` and `negotiated_version`: a protocol version Zebra knows, or `other`.
 /// - `min_version`: the minimum protocol version Zebra accepts for the current network upgrade.
-/// - `remote_services`: the peer's advertised service bits, formatted with `Debug`.
-/// - `seed`: a configured DNS seeder host name. `cache`: the peer cache file path. Each
-///   `zcash.net.peers.initial` series has one of these two labels.
+/// - `missing_service`: the required service a rejected peer doesn't advertise: `NODE_NETWORK`.
+/// - `seed`: a configured DNS seeder host name, on the `zcash.net.peers.initial` series that count
+///   the peers from DNS seeders. The series without it counts the peers from the peer cache file.
 pub const LABELS: &[(&str, &[&str])] = &[
     (
         "zcash.net.connection.attempts.total",
@@ -69,13 +69,12 @@ pub const LABELS: &[(&str, &[&str])] = &[
         "zcash.net.peers.obsolete",
         &["remote_version", "min_version"],
     ),
-    ("zcash.net.peers.missing_services", &["remote_services"]),
+    ("zcash.net.peers.missing_services", &["missing_service"]),
     (
         "zcash.net.peers.connected",
         &["remote_version", "negotiated_version", "min_version"],
     ),
-    ("zcash.net.peers.initial", &["seed", "cache"]),
-    ("zcash.net.peers.cache", &["cache"]),
+    ("zcash.net.peers.initial", &["seed"]),
     ("zcash.net.peers", &["network"]),
     ("zcash.net.peer_set.find_fallback", &["reason", "network"]),
     ("zcash.net.peer_set.find_queued", &["network"]),

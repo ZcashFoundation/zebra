@@ -26,7 +26,7 @@ const LABEL_VALUES: &[(&str, usize)] = &[
     ("network", 1),
     ("chain.network_upgrade", 1),
     ("min_version", 1),
-    ("cache", 1),
+    ("missing_service", 1),
     ("direction", 2),
     ("address_family", 2),
     ("made_progress", 2),
