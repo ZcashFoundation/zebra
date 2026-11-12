@@ -6,10 +6,10 @@ use std::sync::Arc;
 use metrics::{Key, Label, Level, Metadata, Recorder};
 
 use crate::components::metrics::{
-    describe_all,
+    describe_all, describe_and_record_build_info,
     event_labels::EVENT_LABEL_PREFIX,
     prometheus_builder,
-    sentry_policy::{MetricType, SentryMetric, SentryPolicy, HISTOGRAM_CAP},
+    sentry_policy::{AttributeValue, MetricType, SentryMetric, SentryPolicy, HISTOGRAM_CAP},
     with_prometheus,
 };
 
@@ -153,6 +153,34 @@ fn every_catalog_metric_reaches_every_backend() {
             .flat_map(|metric| &metric.attributes)
             .all(|(key, _)| !key.starts_with(EVENT_LABEL_PREFIX)),
         "Sentry receives event attributes without their prefix",
+    );
+}
+
+/// A node that sends metrics only to Sentry sends its build info, like a node with the
+/// Prometheus endpoint open.
+#[test]
+fn sentry_only_install_sends_the_build_info() {
+    let _init_guard = zebra_test::init();
+
+    let sentry = SentryPolicy::default();
+    metrics::with_local_recorder(&sentry, describe_and_record_build_info);
+
+    let mut sent = Vec::new();
+    sentry.flush(|batch| sent = batch);
+
+    let build_info = sent
+        .iter()
+        .find(|metric| metric.name == "zebrad.build.info")
+        .unwrap_or_else(|| panic!("Sentry receives the build info: {sent:?}"));
+    assert_eq!(build_info.metric_type, MetricType::Counter);
+    assert_eq!(build_info.value, 1.0);
+    assert!(
+        build_info
+            .attributes
+            .iter()
+            .any(|(key, value)| key == "version"
+                && *value == AttributeValue::String(env!("CARGO_PKG_VERSION").into())),
+        "the build info carries the version: {build_info:?}",
     );
 }
 

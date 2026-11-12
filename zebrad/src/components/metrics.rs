@@ -63,7 +63,7 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
-            describe_all();
+            describe_and_record_build_info();
             zebra_consensus::metrics::register_failure_counters();
             spawn_process_metrics()?;
         }
@@ -86,18 +86,7 @@ impl MetricsEndpoint {
             .with_http_listener(addr);
 
         match install_with_prometheus(builder, other) {
-            Ok(()) => {
-                // Expose binary metadata to metrics, using a single time series with
-                // value 1:
-                //     https://www.robustperception.io/exposing-the-software-version-to-prometheus
-                metrics::counter!(
-                    format!("{}.build.info", env!("CARGO_PKG_NAME")),
-                    "version" => env!("CARGO_PKG_VERSION")
-                )
-                .increment(1);
-
-                info!("Opened metrics endpoint at {}", addr);
-            }
+            Ok(()) => info!("Opened metrics endpoint at {}", addr),
             Err(e) => panic!(
                 "Opening metrics endpoint listener {addr:?} failed: {e:?}. \
                  Hint: Check if another zebrad or zcashd process is running. \
@@ -138,6 +127,20 @@ pub fn describe_all() {
     zebra_rpc::metrics::describe();
     catalog::describe();
     metrics_process::Collector::default().describe();
+}
+
+/// Describes every metric, and records the build info once, through the recorder that was just
+/// installed, whichever backends it sends to.
+fn describe_and_record_build_info() {
+    describe_all();
+
+    // A single series with value 1 exposes the version:
+    // https://www.robustperception.io/exposing-the-software-version-to-prometheus
+    metrics::counter!(
+        concat!(env!("CARGO_PKG_NAME"), ".build.info"),
+        "version" => env!("CARGO_PKG_VERSION"),
+    )
+    .increment(1);
 }
 
 /// Records the process metrics through the global recorder, which must already be installed.
