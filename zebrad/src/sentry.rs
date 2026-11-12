@@ -134,6 +134,7 @@ impl Metadata {
             .release(release)
             // The Sentry metrics flush budget is a share of this queue.
             .transport_channel_capacity(TRANSPORT_QUEUE_ENVELOPES)
+            .transport(metrics_adapter::transport_factory())
             // Suspect commits need in-app stack frames. Only ERROR events and panics are sent as
             // events, so capturing the stack stays off the common paths.
             .attach_stacktrace(true)
@@ -891,6 +892,10 @@ mod tests {
             options.transport_channel_capacity.map(usize::from),
             Some(TRANSPORT_QUEUE_ENVELOPES),
             "the metrics flush budget leaves room in this queue",
+        );
+        assert!(
+            options.transport.is_some(),
+            "metrics flushes check the transport the client sends through",
         );
     }
 

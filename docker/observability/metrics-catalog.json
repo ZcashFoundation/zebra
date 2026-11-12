@@ -2682,7 +2682,7 @@
       "name": "zebrad.sentry.metrics.dropped.total",
       "kind": "counter",
       "unit": "count",
-      "description": "Metric values that weren't sent to Sentry when due, because a flush was full or the metric had too many label sets.",
+      "description": "Metric values that weren't sent to Sentry when due, because a flush was full, the Sentry transport was still sending earlier data, or the metric had too many label sets.",
       "labels": [
         "reason"
       ],

@@ -2,7 +2,7 @@
 //!
 //! Recording a metric only updates atomics in a sharded registry: there is no lock on a kept
 //! handle, no allocation for an existing label set, and no call into the Sentry SDK. Once per
-//! [`FLUSH_INTERVAL`], [`SentryPolicy::flush`] turns what was recorded into one batch of
+//! [`FLUSH_INTERVAL`], [`SentryPolicy::flush_if`] turns what was recorded into one batch of
 //! [`SentryMetric`]s and gives it to an adapter that sends it:
 //!
 //! - each counter's increase since it was last sent, for each label set that increased;
@@ -16,14 +16,18 @@
 //! that don't fit stay due and take turns in later flushes, so a counter's increase is delayed,
 //! not lost. Histogram values that don't fit are dropped.
 //!
+//! A flush sends nothing while the Sentry transport is still sending what earlier flushes queued.
+//! Its counters and gauges stay due, and its histogram values are dropped, so metrics never take
+//! more than their share of a slow or stalled transport's queue.
+//!
 //! The policy keeps at most [`LABEL_SET_CAP`] label sets for each metric name, and doesn't send
 //! the values recorded for any others, so a label that keeps taking new values can't grow the
 //! policy's memory or volume without bound. Other backends keep every label set.
 //!
 //! The `zebrad.sentry.metrics.dropped.total` counter counts the due values left out of a full
-//! flush, and the values recorded for label sets over the cap. The policy records it through the
-//! `metrics` facade, so every backend receives it, and logs a warning when it starts dropping
-//! values.
+//! flush or of a flush the transport wasn't ready for, and the values recorded for label sets over
+//! the cap. The policy records it through the `metrics` facade, so every backend receives it, and
+//! logs a warning when it starts dropping values.
 //!
 //! [Event attributes](super::event_labels) never create a label set. Histograms keep them beside
 //! each value, and send them without their `event.` prefix. Counters and gauges drop them, because
@@ -71,9 +75,10 @@ pub(crate) const TRANSPORT_QUEUE_ENVELOPES: usize = 30;
 
 /// The most metrics one flush sends.
 ///
-/// 15 envelopes of 100 metrics is half of the 30-envelope transport queue, so even if the
-/// transport sends nothing while a flush is queued, 15 envelopes stay free for events, logs, and
-/// sessions.
+/// 15 envelopes of 100 metrics is half of the 30-envelope transport queue. A flush only sends once
+/// the transport has sent what earlier flushes queued, so metrics hold at most these 15 places,
+/// plus at exit one partial envelope left by the flush before. At least 14 places stay free for
+/// events, logs, and sessions, even while the transport sends nothing.
 pub(crate) const FLUSH_BUDGET: usize = TRANSPORT_QUEUE_ENVELOPES / 2 * ENVELOPE_METRICS;
 
 /// The most label sets the policy keeps for one metric name.
@@ -123,7 +128,7 @@ pub(crate) enum AttributeValue {
     Integer(u64),
 }
 
-/// A [`Recorder`] that keeps every metric for [`SentryPolicy::flush`] to send to Sentry.
+/// A [`Recorder`] that keeps every metric for [`SentryPolicy::flush_if`] to send to Sentry.
 pub(crate) struct SentryPolicy {
     registry: Registry<Key, PolicyStorage>,
 
@@ -137,14 +142,14 @@ pub(crate) struct SentryPolicy {
     /// The unit of each described metric, by name.
     units: Mutex<HashMap<String, Unit>>,
 
-    /// Held for a whole [`flush`](Self::flush), so that the flush at shutdown waits for a periodic
-    /// flush that has taken counter increases but not sent them yet.
+    /// Held for a whole [`flush_if`](Self::flush_if), so that the flush at shutdown waits for a
+    /// periodic flush that has taken counter increases but not sent them yet.
     flushing: Mutex<FlushState>,
 }
 
 thread_local! {
-    /// Whether this thread is in a [`SentryPolicy::flush`], so that the panic hook's flush returns
-    /// instead of waiting for a flush that panicked on the same thread.
+    /// Whether this thread is in a [`SentryPolicy::flush_if`], so that the panic hook's flush
+    /// returns instead of waiting for a flush that panicked on the same thread.
     static IN_FLUSH: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -162,10 +167,23 @@ impl Default for SentryPolicy {
 
 impl SentryPolicy {
     /// Gives `send` the metrics that are due, as one batch of at most [`FLUSH_BUDGET`] metrics.
-    ///
-    /// Builds the batch before calling `send`, so `send` can record metrics, and this can run from
-    /// the panic hook.
+    #[cfg(test)]
     pub(crate) fn flush(&self, send: impl FnOnce(Vec<SentryMetric>)) {
+        self.flush_if(|| true, send);
+    }
+
+    /// Gives `send` the metrics that are due, as one batch of at most [`FLUSH_BUDGET`] metrics, if
+    /// `transport_ready` returns true. Otherwise gives `send` an empty batch: counters and gauges
+    /// stay due, and histogram values are dropped.
+    ///
+    /// Calls `transport_ready` once any flush in progress has finished, so that it can wait for the
+    /// transport to send that flush. Builds the batch before calling `send`, so `send` can record
+    /// metrics, and this can run from the panic hook.
+    pub(crate) fn flush_if(
+        &self,
+        transport_ready: impl FnOnce() -> bool,
+        send: impl FnOnce(Vec<SentryMetric>),
+    ) {
         if IN_FLUSH.get() {
             return;
         }
@@ -173,10 +191,18 @@ impl SentryPolicy {
         let mut state = self.flushing.lock().unwrap_or_else(PoisonError::into_inner);
         IN_FLUSH.set(true);
 
-        let (batch, over_budget) = self.take_batch(&mut state);
-        let dropped = Dropped {
-            flush_budget: over_budget,
+        let mut dropped = Dropped {
             label_set_cap: self.untracked.take(),
+            ..Dropped::default()
+        };
+        let batch = if transport_ready() {
+            let (batch, left_out) = self.take_batch(&mut state, FLUSH_BUDGET);
+            dropped.flush_budget = left_out;
+            batch
+        } else {
+            let (_, left_out) = self.take_batch(&mut state, 0);
+            dropped.transport_backlog = left_out;
+            Vec::new()
         };
         let capped = mem::take(&mut self.lock_label_sets().newly_capped);
 
@@ -184,6 +210,7 @@ impl SentryPolicy {
         if let Some((dropped, capped)) = state.warning.add(dropped, capped, Instant::now()) {
             tracing::warn!(
                 flush_budget = dropped.flush_budget,
+                transport_backlog = dropped.transport_backlog,
                 label_set_cap = dropped.label_set_cap,
                 capped_metrics = ?capped,
                 "some metric values weren't sent to Sentry; \
@@ -195,9 +222,9 @@ impl SentryPolicy {
         IN_FLUSH.set(false);
     }
 
-    /// Takes the metrics that are due, and returns at most [`FLUSH_BUDGET`] of them, with how many
-    /// didn't fit. Only [`flush`](Self::flush) calls this.
-    fn take_batch(&self, state: &mut FlushState) -> (Vec<SentryMetric>, u64) {
+    /// Takes the metrics that are due, and returns at most `room` of them, with how many didn't
+    /// fit. Only [`flush_if`](Self::flush_if) calls this.
+    fn take_batch(&self, state: &mut FlushState, mut room: usize) -> (Vec<SentryMetric>, u64) {
         state.flushes += 1;
         let flush = state.flushes;
 
@@ -227,7 +254,6 @@ impl SentryPolicy {
 
         let units = self.units.lock().unwrap_or_else(PoisonError::into_inner);
         let unit = |key: &Key| units.get(key.name()).copied();
-        let mut room = FLUSH_BUDGET;
         let mut over_budget = 0;
         let mut batch = Vec::new();
         let [next_counter, next_changed_gauge, next_unchanged_gauge] = &mut state.next;
@@ -520,6 +546,9 @@ struct FlushState {
 struct Dropped {
     /// Values that were due, but didn't fit in a flush's [`FLUSH_BUDGET`].
     flush_budget: u64,
+    /// Values that were due in a flush that sent nothing, because the transport was still sending
+    /// what earlier flushes queued.
+    transport_backlog: u64,
     /// Values recorded for label sets over [`LABEL_SET_CAP`].
     label_set_cap: u64,
 }
@@ -529,6 +558,7 @@ impl Dropped {
     fn record(&self) {
         for (reason, values) in [
             ("flush_budget", self.flush_budget),
+            ("transport_backlog", self.transport_backlog),
             ("label_set_cap", self.label_set_cap),
         ] {
             if values > 0 {
@@ -542,6 +572,9 @@ impl Dropped {
 impl AddAssign for Dropped {
     fn add_assign(&mut self, other: Self) {
         self.flush_budget = self.flush_budget.saturating_add(other.flush_budget);
+        self.transport_backlog = self
+            .transport_backlog
+            .saturating_add(other.transport_backlog);
         self.label_set_cap = self.label_set_cap.saturating_add(other.label_set_cap);
     }
 }
@@ -1080,6 +1113,50 @@ mod tests {
     }
 
     #[test]
+    fn a_flush_the_transport_isnt_ready_for_sends_nothing_and_counts_what_was_due() {
+        let policy = SentryPolicy::default();
+        let histogram_values = 3;
+
+        with_local_recorder(&policy, || {
+            metrics::counter!("a.count").increment(2);
+            metrics::gauge!("a.peers").set(8.0);
+            let histogram = metrics::histogram!("a.duration_seconds");
+            for _ in 0..histogram_values {
+                histogram.record(1.0);
+            }
+        });
+
+        let mut sent = vec![];
+        with_local_recorder(&policy, || {
+            policy.flush_if(|| false, |batch| sent = batch);
+        });
+        assert!(
+            sent.is_empty(),
+            "nothing is sent while the transport is behind"
+        );
+
+        let next = flush(&policy);
+        let value = |name: &str| {
+            next.iter()
+                .find(|metric| metric.name == name)
+                .map(|metric| metric.value)
+        };
+        assert_eq!(value("a.count"), Some(2.0), "counters keep their increase");
+        assert_eq!(value("a.peers"), Some(8.0), "changed gauges stay due");
+        assert_eq!(
+            value("a.duration_seconds"),
+            None,
+            "histogram values are dropped"
+        );
+        assert_eq!(
+            dropped(&next, "transport_backlog"),
+            count(1 + 1 + histogram_values),
+            "every due value is counted",
+        );
+        assert_eq!(dropped(&next, "flush_budget"), 0.0);
+    }
+
+    #[test]
     fn label_sets_over_the_cap_are_neither_kept_nor_sent() {
         let policy = SentryPolicy::default();
         let over = 10;
@@ -1142,7 +1219,7 @@ mod tests {
         let start = Instant::now();
         let over_budget = |values| Dropped {
             flush_budget: values,
-            label_set_cap: 0,
+            ..Dropped::default()
         };
         let capped = || vec!["a.count".to_owned()];
 

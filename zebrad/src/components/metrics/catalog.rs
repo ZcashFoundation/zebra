@@ -28,7 +28,8 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `zcash.chain.tip.block_delay_seconds`:
 ///   - `event.chain.height`: the block's height, an event attribute.
 ///   - `chain.network_upgrade`: the network upgrade at the block's height, such as `Nu6`.
-/// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget` or `label_set_cap`.
+/// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget`, `transport_backlog`, or
+///   `label_set_cap`.
 pub const LABELS: &[(&str, &[&str])] = &[
     ("zebrad.build.info", &["version"]),
     ("sync.restart.count", &["reason", "made_progress"]),
@@ -59,8 +60,8 @@ pub fn describe() {
     describe_counter!(
         "zebrad.sentry.metrics.dropped.total",
         Unit::Count,
-        "Metric values that weren't sent to Sentry when due, because a flush was full or the \
-         metric had too many label sets."
+        "Metric values that weren't sent to Sentry when due, because a flush was full, the Sentry \
+         transport was still sending earlier data, or the metric had too many label sets."
     );
 
     describe_sync();
