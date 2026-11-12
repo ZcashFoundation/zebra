@@ -266,6 +266,10 @@ console-subscriber = { workspace = true, optional = true }
 
 derive-new.workspace = true
 
+# `metrics-process` 2.4.3 writes through a dangling pointer when it reads memory on Windows.
+[target.'cfg(not(windows))'.dependencies]
+metrics-process = { workspace = true }
+
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 

@@ -93,6 +93,33 @@ front end that you can visualize:
 
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
 
+## Process metrics
+
+When the Prometheus endpoint is open, or [Sentry](tracing.md#sentry-production-monitoring)
+is active, Zebra samples its own process every 15 seconds and records the
+standard Prometheus process metrics. They use the usual names, without a prefix,
+so existing dashboards and alerts work unchanged. Zebra doesn't record them on
+Windows.
+
+| Metric | Unit | Description |
+|---|---|---|
+| `process_resident_memory_bytes` | bytes | Resident memory size. |
+| `process_virtual_memory_bytes` | bytes | Virtual memory size. |
+| `process_virtual_memory_max_bytes` | bytes | Maximum virtual memory available. |
+| `process_open_fds` | count | Open file descriptors. |
+| `process_max_fds` | count | Maximum open file descriptors. |
+| `process_threads` | count | OS threads in the process. |
+| `process_cpu_seconds_total` | seconds | Total user and system CPU time. |
+| `process_start_time_seconds` | seconds | Start time of the process since the Unix epoch. |
+
+Sentry receives every one of these except `process_cpu_seconds_total` and
+`process_virtual_memory_max_bytes`.
+
+`process_cpu_seconds_total` counts whole seconds, so use a window of a few
+minutes, such as `rate(process_cpu_seconds_total[5m])`, to see steady CPU usage
+on a lightly loaded node. The two maximums are left out when the limit is
+unlimited.
+
 ## Block timing
 
 These histograms show how quickly a node accepts new blocks. Official release builds
