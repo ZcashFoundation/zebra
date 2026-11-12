@@ -2098,3 +2098,30 @@ fn index_entry_limit_finalizes_early_down_to_the_minimum() -> Result<()> {
 
     Ok(())
 }
+
+/// Blocks restored into the non-finalized state count as sent, but the sent hashes don't copy
+/// their outputs, which readers find in the restored state.
+#[test]
+fn sent_hashes_from_restored_blocks_hold_no_outputs() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 100, 10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(busy.clone().prepare(), &finalized_state)?;
+
+    let sent = crate::service::queued_blocks::SentHashes::new(&state);
+    let chain = state.best_chain().unwrap();
+    for block in chain.blocks.values() {
+        assert!(sent.contains(&block.hash));
+        for outpoint in block.new_outputs.keys() {
+            assert!(sent.utxo(outpoint).is_none());
+            assert!(chain.created_utxo(outpoint).is_some());
+        }
+    }
+    assert!(sent.can_fork_chain_at_hashes);
+
+    Ok(())
+}
