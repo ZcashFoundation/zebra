@@ -3,6 +3,31 @@
 use super::*;
 
 #[test]
+fn regtest_minimum_peer_version_is_monotone() {
+    use zebra_chain::parameters::testnet::{ConfiguredActivationHeights, RegtestParameters};
+
+    let network = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            overwinter: Some(1),
+            sapling: Some(2),
+            blossom: Some(3),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    assert_eq!(
+        NetworkUpgrade::current(&network, block::Height(1)),
+        Overwinter
+    );
+    assert_eq!(NetworkUpgrade::current(&network, block::Height(2)), Sapling);
+    assert!(
+        Version::min_remote_for_height(&network, block::Height(1))
+            <= Version::min_remote_for_height(&network, block::Height(2)),
+    );
+}
+
+#[test]
 fn version_metric_labels_only_include_known_versions() {
     let mut known = std::collections::BTreeSet::from([CURRENT_NETWORK_PROTOCOL_VERSION]);
     for network in Network::iter().chain([Network::new_regtest(Default::default())]) {

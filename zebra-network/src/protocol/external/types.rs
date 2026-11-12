@@ -120,7 +120,9 @@ impl Version {
     ) -> Version {
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
-            (Testnet(params), Overwinter) if params.is_default_testnet() => 170_003,
+            (Testnet(params), Overwinter) if params.is_default_testnet() || params.is_regtest() => {
+                170_003
+            }
             (Mainnet, Overwinter) => 170_005,
             (Testnet(params), Sapling) if params.is_default_testnet() => 170_007,
             (Testnet(params), Sapling) if params.is_regtest() => 170_006,
