@@ -699,6 +699,10 @@ fn early_relay_checkpoint_commit_publishes_tip_before_notifications() {
         state_sender,
         true,
         None,
+        Arc::new(crate::service::fast_tree_sync::TreeRootsCache::new(
+            None,
+            block::Height(0),
+        )),
     );
     let (observed_tx, observed_rx) = std::sync::mpsc::channel();
     let waker = Waker::from(Arc::new(PublishedContextAtWake {

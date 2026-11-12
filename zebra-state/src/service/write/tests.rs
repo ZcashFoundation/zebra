@@ -15,6 +15,11 @@ use crate::{
 
 use super::*;
 
+/// Returns a roots cache without embedded trees, so the writer never fast syncs.
+fn no_fast_tree_sync() -> Arc<TreeRootsCache> {
+    Arc::new(TreeRootsCache::new(None, Height(0)))
+}
+
 fn populated_state() -> (NonFinalizedState, FinalizedState, Arc<Block>, Arc<Block>) {
     let network = Network::Mainnet;
     let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
@@ -96,8 +101,15 @@ async fn write_worker_survives_rejected_root_invalidation() {
     let before = state.clone();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        no_fast_tree_sync(),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -163,8 +175,15 @@ async fn write_worker_handles_requests_with_no_non_finalized_chain() {
     let (finalized, state, genesis) = new_state_with_mainnet_genesis();
     let (tip_sender, latest, mut change) = ChainTipSender::new(None, &Network::Mainnet);
     let (state_sender, mut state_receiver) = watch::channel(state.clone());
-    let (sender, _resets, _rejections, worker) =
-        BlockWriteSender::spawn(finalized, state, tip_sender, state_sender, false, None);
+    let (sender, _resets, _rejections, worker) = BlockWriteSender::spawn(
+        finalized,
+        state,
+        tip_sender,
+        state_sender,
+        false,
+        None,
+        no_fast_tree_sync(),
+    );
     let tx = sender.non_finalized.as_ref().unwrap();
 
     let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -286,6 +305,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
+        tree_roots_cache: no_fast_tree_sync(),
     };
     tracing::subscriber::with_default(
         CloseStateOnError {
@@ -535,6 +555,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
+        tree_roots_cache: no_fast_tree_sync(),
     };
     // Observe the synchronous batch write even when release builds compile out trace events.
     let recorder = FinalizedWriteRecorder(Arc::new(AtFinalizedWrite {

@@ -421,7 +421,7 @@ where
             .await
             .map_err(rpc_error_to_status)?;
 
-        Ok(Response::new(treestate_to_proto(&self.network, treestate)))
+        Ok(Response::new(treestate_to_proto(&self.network, treestate)?))
     }
 
     async fn get_latest_tree_state(
@@ -441,7 +441,7 @@ where
             .await
             .map_err(rpc_error_to_status)?;
 
-        Ok(Response::new(treestate_to_proto(&self.network, treestate)))
+        Ok(Response::new(treestate_to_proto(&self.network, treestate)?))
     }
 
     async fn get_subtree_roots(
@@ -677,21 +677,18 @@ async fn compact_block<ReadStateService: ReadState>(
             .clone()
             .oneshot(ReadRequest::OrchardTree(hash.into()));
         let ironwood_request: OptionFuture<_> = is_ironwood_active
-            .then(|| read_state.oneshot(ReadRequest::IronwoodTree(hash.into())))
+            .then(|| {
+                read_state
+                    .clone()
+                    .oneshot(ReadRequest::IronwoodTree(hash.into()))
+            })
             .into();
 
         let (sapling_response, orchard_response, ironwood_response) =
             futures::join!(sapling_request, orchard_request, ironwood_request);
 
-        // A missing tree is not an empty tree: serving zero would tell the client no
-        // notes exist as of this block, corrupting every position derived from it.
         let sapling_tree_size = match sapling_response {
-            Ok(ReadResponse::SaplingTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::SaplingTree(None)) => {
-                return Err(Status::aborted(
-                    "sapling tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::SaplingTree(tree)) => tree.map(|tree| tree.count()),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -701,12 +698,7 @@ async fn compact_block<ReadStateService: ReadState>(
         };
 
         let orchard_tree_size = match orchard_response {
-            Ok(ReadResponse::OrchardTree(Some(tree))) => tree.count(),
-            Ok(ReadResponse::OrchardTree(None)) => {
-                return Err(Status::aborted(
-                    "orchard tree not found for this block, it may have been reorged",
-                ));
-            }
+            Ok(ReadResponse::OrchardTree(tree)) => tree.map(|tree| tree.count()),
             Ok(_) => unreachable!("unexpected response type from ReadStateService"),
             Err(error) => {
                 return Err(Status::internal(format!(
@@ -717,13 +709,8 @@ async fn compact_block<ReadStateService: ReadState>(
 
         let ironwood_tree_size = match ironwood_response {
             // The read is only skipped before NU6.3, where zero is the correct size.
-            None => 0,
-            Some(Ok(ReadResponse::IronwoodTree(Some(tree)))) => tree.count(),
-            Some(Ok(ReadResponse::IronwoodTree(None))) => {
-                return Err(Status::aborted(
-                    "ironwood tree not found for this block, it may have been reorged",
-                ));
-            }
+            None => Some(0),
+            Some(Ok(ReadResponse::IronwoodTree(tree))) => tree.map(|tree| tree.count()),
             Some(Ok(_)) => unreachable!("unexpected response type from ReadStateService"),
             Some(Err(error)) => {
                 return Err(Status::internal(format!(
@@ -732,7 +719,31 @@ async fn compact_block<ReadStateService: ReadState>(
             }
         };
 
-        (sapling_tree_size, orchard_tree_size, ironwood_tree_size)
+        match (sapling_tree_size, orchard_tree_size, ironwood_tree_size) {
+            (Some(sapling), Some(orchard), Some(ironwood)) => (sapling, orchard, ironwood),
+            // Fast checkpoint sync stores only the sizes of the trees it skipped.
+            _ => match read_state
+                .oneshot(ReadRequest::FastSyncTreeRoots(hash.into()))
+                .await
+            {
+                Ok(ReadResponse::FastSyncTreeRoots(Some(roots))) => {
+                    (roots.sapling_size, roots.orchard_size, roots.ironwood_size)
+                }
+                // A missing tree is not an empty tree: serving zero would tell the client no
+                // notes exist as of this block, corrupting every position derived from it.
+                Ok(ReadResponse::FastSyncTreeRoots(None)) => {
+                    return Err(Status::aborted(
+                        "note commitment tree not found for this block, it may have been reorged",
+                    ));
+                }
+                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                Err(error) => {
+                    return Err(Status::internal(format!(
+                        "failed to read fast sync tree sizes: {error}"
+                    )));
+                }
+            },
+        }
     };
 
     Ok(CompactBlock::from_block(
@@ -1126,24 +1137,47 @@ async fn send_raw_mempool_tx(
 }
 
 /// Converts a [`GetTreestateResponse`] into a lightwalletd [`TreeState`].
-fn treestate_to_proto(network: &Network, treestate: GetTreestateResponse) -> TreeState {
-    let final_state_hex =
-        |commitments: &Option<Vec<u8>>| commitments.as_ref().map(hex::encode).unwrap_or_default();
+///
+/// Returns an error if a pool is active at the block, but its tree is missing, for example because
+/// fast checkpoint sync committed the block without its trees. Clients read an empty tree string as
+/// the empty tree, so serving one would corrupt every note position they derive from it.
+fn treestate_to_proto(
+    network: &Network,
+    treestate: GetTreestateResponse,
+) -> Result<TreeState, Status> {
+    let height = treestate.height();
+    let final_state_hex = |upgrade, commitments: &Option<Vec<u8>>| match commitments {
+        Some(commitments) => Ok(hex::encode(commitments)),
+        None if NetworkUpgrade::current(network, height) >= upgrade => Err(Status::unavailable(
+            "the note commitment trees of this block are not stored",
+        )),
+        // An empty tree is the correct answer before the pool activates.
+        None => Ok(String::new()),
+    };
 
-    TreeState {
+    Ok(TreeState {
         network: network.bip70_network_name(),
-        height: treestate.height().0.into(),
+        height: height.0.into(),
         hash: treestate.hash().to_string(),
         time: treestate.time(),
-        sapling_tree: final_state_hex(treestate.sapling().commitments().final_state()),
-        orchard_tree: final_state_hex(treestate.orchard().commitments().final_state()),
+        sapling_tree: final_state_hex(
+            NetworkUpgrade::Sapling,
+            treestate.sapling().commitments().final_state(),
+        )?,
+        orchard_tree: final_state_hex(
+            NetworkUpgrade::Nu5,
+            treestate.orchard().commitments().final_state(),
+        )?,
         // Absent before NU6.3, where an empty tree is the correct answer.
         ironwood_tree: treestate
             .ironwood()
             .as_ref()
-            .map(|ironwood| final_state_hex(ironwood.commitments().final_state()))
+            .map(|ironwood| {
+                final_state_hex(NetworkUpgrade::Nu6_3, ironwood.commitments().final_state())
+            })
+            .transpose()?
             .unwrap_or_default(),
-    }
+    })
 }
 
 /// Converts a JSON-RPC method error into a gRPC status, for a lookup of something the

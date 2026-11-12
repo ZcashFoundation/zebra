@@ -117,7 +117,12 @@ fn format_upgrades(
             "add NSM value balance",
             Version::new(29, 0, 0),
         )),
-    ] as [Box<dyn DiskFormatUpgrade>; 7])
+        // Existing databases have no fast-synced heights, so the new column family starts empty.
+        Box::new(no_migration::NoMigration::new(
+            "add fast sync tree roots",
+            Version::new(29, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 8])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

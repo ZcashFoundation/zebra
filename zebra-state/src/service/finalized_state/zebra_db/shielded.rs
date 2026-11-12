@@ -14,13 +14,14 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    ops::RangeInclusive,
     sync::Arc,
 };
 
 use zebra_chain::{
     block::Height,
     ironwood, orchard,
-    parallel::tree::NoteCommitmentTrees,
+    parallel::tree::{NoteCommitmentTrees, TreeRoots},
     parameters::NetworkUpgrade,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -29,13 +30,20 @@ use zebra_chain::{
 
 use crate::{
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{
-        disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::RawBytes,
-        zebra_db::ZebraDb,
+    service::{
+        fast_tree_sync::FastTreeSync,
+        finalized_state::{
+            disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
+            disk_format::{shielded::FastSyncTreeRoots, RawBytes},
+            zebra_db::ZebraDb,
+        },
     },
     TransactionLocation,
 };
+
+/// The column family of the note commitment tree roots and sizes after blocks that fast
+/// checkpoint sync committed without updating their note commitment trees.
+pub const FAST_SYNC_TREE_ROOTS: &str = "fast_sync_tree_roots";
 
 // Doc-only items
 #[allow(unused_imports)]
@@ -43,6 +51,79 @@ use zebra_chain::subtree::NoteCommitmentSubtree;
 
 impl ZebraDb {
     // Read shielded methods
+
+    /// Returns the heights that fast checkpoint sync committed without their note commitment
+    /// trees, or `None` if there are none.
+    ///
+    /// The database has no note commitment trees for these heights, only their roots and sizes.
+    pub fn fast_sync_tree_heights(&self) -> Option<RangeInclusive<Height>> {
+        // Read-only opens of databases written by older versions don't have this column family.
+        let cf = self.db.cf_handle(FAST_SYNC_TREE_ROOTS)?;
+        let (first, _): (Height, FastSyncTreeRoots) = self.db.zs_first_key_value(&cf)?;
+        let (last, _): (Height, FastSyncTreeRoots) = self.db.zs_last_key_value(&cf)?;
+
+        Some(first..=last)
+    }
+
+    /// Returns the note commitment tree roots and sizes that fast checkpoint sync stored for
+    /// `height`, or `None` if it committed that height with its trees.
+    pub fn fast_sync_tree_roots(&self, height: Height) -> Option<FastSyncTreeRoots> {
+        let cf = self.db.cf_handle(FAST_SYNC_TREE_ROOTS)?;
+        self.db.zs_get(&cf, &height)
+    }
+
+    /// Returns the note commitment tree roots after each finalized block from `start` to `end`
+    /// inclusive, or `None` if `end` is above the finalized tip.
+    pub fn tree_roots_by_height_range(&self, start: Height, end: Height) -> Option<Vec<TreeRoots>> {
+        if start > end || end > self.finalized_tip_height()? {
+            return None;
+        }
+
+        let fast_heights = self.fast_sync_tree_heights();
+        let after_start = (start + 1).unwrap_or(start)..=end;
+
+        // Trees are stored only at heights where they change, so carry each root forward.
+        let mut sapling_changes = self
+            .sapling_tree_by_height_range(after_start.clone())
+            .peekable();
+        let mut orchard_changes = self
+            .orchard_tree_by_height_range(after_start.clone())
+            .peekable();
+        let mut ironwood_changes = self.ironwood_tree_by_height_range(after_start).peekable();
+        let mut sapling = self.sapling_tree_by_height(&start)?.root();
+        let mut orchard = self.orchard_tree_by_height(&start)?.root();
+        let mut ironwood = self.ironwood_tree_by_height(&start)?.root();
+
+        // Peers choose these heights, so a database that can't answer refuses instead of panicking.
+        (start.0..=end.0)
+            .map(Height)
+            .map(|height| {
+                if let Some((_, tree)) = sapling_changes.next_if(|(at, _)| *at <= height) {
+                    sapling = tree.root();
+                }
+                if let Some((_, tree)) = orchard_changes.next_if(|(at, _)| *at <= height) {
+                    orchard = tree.root();
+                }
+                if let Some((_, tree)) = ironwood_changes.next_if(|(at, _)| *at <= height) {
+                    ironwood = tree.root();
+                }
+
+                if fast_heights
+                    .as_ref()
+                    .is_some_and(|heights| heights.contains(&height))
+                {
+                    self.fast_sync_tree_roots(height)
+                        .map(|fast_sync_roots| fast_sync_roots.roots)
+                } else {
+                    Some(TreeRoots {
+                        sapling,
+                        orchard,
+                        ironwood,
+                    })
+                }
+            })
+            .collect()
+    }
 
     /// Returns `true` if the finalized state contains `sprout_nullifier`.
     pub fn contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
@@ -673,8 +754,15 @@ impl DiskWriteBatch {
                     note_commitment_trees,
                     history_tree,
                 },
+            fast_tree_sync,
             ..
         } = finalized;
+
+        // Fast sync leaves the Sapling, Orchard, and Ironwood trees unchanged, so the code below
+        // stores no trees for this block, but the anchors still need the block's roots.
+        if let Some(FastTreeSync::Frozen(tree_roots)) = fast_tree_sync {
+            self.insert_fast_sync_tree_roots(zebra_db, height, tree_roots);
+        }
 
         let prev_sprout_tree = prev_note_commitment_trees.as_ref().map_or_else(
             || zebra_db.sprout_tree_for_tip(),
@@ -725,6 +813,19 @@ impl DiskWriteBatch {
             }
         }
 
+        // The embedded trees completed subtrees that fast sync didn't build.
+        if let Some(FastTreeSync::Embedded(embedded_trees)) = fast_tree_sync {
+            for subtree in &embedded_trees.sapling_subtrees {
+                self.insert_sapling_subtree(zebra_db, subtree);
+            }
+            for subtree in &embedded_trees.orchard_subtrees {
+                self.insert_orchard_subtree(zebra_db, subtree);
+            }
+            for subtree in &embedded_trees.ironwood_subtrees {
+                self.insert_ironwood_subtree(zebra_db, subtree);
+            }
+        }
+
         self.update_history_tree(zebra_db, history_tree);
     }
 
@@ -768,6 +869,25 @@ impl DiskWriteBatch {
     pub fn delete_sprout_anchor(&mut self, zebra_db: &ZebraDb, anchor: &sprout::tree::Root) {
         let sprout_anchors = zebra_db.db.cf_handle("sprout_anchors").unwrap();
         self.zs_delete(&sprout_anchors, anchor);
+    }
+
+    /// Inserts the roots and tree sizes that fast checkpoint sync verified for the block at
+    /// `height`, and the roots' anchors.
+    pub fn insert_fast_sync_tree_roots(
+        &mut self,
+        zebra_db: &ZebraDb,
+        height: &Height,
+        tree_roots: &FastSyncTreeRoots,
+    ) {
+        let fast_sync_tree_roots = zebra_db.db.cf_handle(FAST_SYNC_TREE_ROOTS).unwrap();
+        let sapling_anchors = zebra_db.db.cf_handle("sapling_anchors").unwrap();
+        let orchard_anchors = zebra_db.db.cf_handle("orchard_anchors").unwrap();
+        let ironwood_anchors = zebra_db.db.cf_handle("ironwood_anchors").unwrap();
+
+        self.zs_insert(&sapling_anchors, tree_roots.roots.sapling, ());
+        self.zs_insert(&orchard_anchors, tree_roots.roots.orchard, ());
+        self.zs_insert(&ironwood_anchors, tree_roots.roots.ironwood, ());
+        self.zs_insert(&fast_sync_tree_roots, height, tree_roots);
     }
 
     // Sapling tree methods

@@ -1089,6 +1089,9 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
+        // A read-only secondary can't create column families, so it only opens the ones on disk.
+        // Databases last opened by older Zebra versions don't have newer column families.
+        let column_families_in_code = column_families_in_code.into_iter().filter(|_| !read_only);
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 

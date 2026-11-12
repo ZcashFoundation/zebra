@@ -338,38 +338,56 @@ impl ZebraDb {
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<sapling::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.sapling_tree_by_height(&height)
     }
 
     /// Returns the Orchard [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.orchard_tree_by_height(&height)
     }
 
     /// Returns the Ironwood [`note commitment tree`](orchard::tree::NoteCommitmentTree) specified by
     /// a hash or height, if it exists in the finalized state.
+    ///
+    /// Returns `None` for heights that fast checkpoint sync committed without their trees.
     #[allow(clippy::unwrap_in_result)]
     pub fn ironwood_tree_by_hash_or_height(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Option<Arc<orchard::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = self.height_with_stored_trees(hash_or_height)?;
 
         self.ironwood_tree_by_height(&height)
+    }
+
+    /// Returns the height of `hash_or_height`, or `None` if its hash isn't in the finalized state
+    /// or fast checkpoint sync committed it without its trees.
+    ///
+    /// The trees `*_tree_by_height()` return for those heights are older frozen trees.
+    fn height_with_stored_trees(&self, hash_or_height: HashOrHeight) -> Option<Height> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        self.fast_sync_tree_roots(height)
+            .is_none()
+            .then_some(height)
     }
 
     // Read tip block methods
