@@ -312,14 +312,17 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Sends the metrics that are due without waiting between envelopes, ends the release health
-/// session with `status`, then closes the client.
+/// Ends the release health session with `status`, sends the metrics that are due without waiting
+/// between envelopes, then closes the client.
+///
+/// The session update is queued before the metrics, so metrics can't take its place in the
+/// transport queue.
 ///
 /// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
 /// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
-    metrics_adapter::flush_at_exit();
     end_session(status);
+    metrics_adapter::flush_at_exit();
 
     let guard = CLIENT_GUARD
         .lock()
