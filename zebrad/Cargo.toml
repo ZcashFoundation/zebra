@@ -60,6 +60,11 @@ features = [
 name = "zebrad-tests"
 path = "tests/main.rs"
 
+[[bench]]
+name = "telemetry"
+harness = false
+required-features = ["sentry", "prometheus"]
+
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry"]
@@ -273,6 +278,7 @@ hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json", "redactions"] }
+criterion = { workspace = true, features = ["html_reports"] }
 strum = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
