@@ -510,6 +510,7 @@ async fn mempool_changes_compare_the_verified_set() {
         ))
     });
     let (events, mut receiver) = broadcast::channel(1);
+
     let changed = wait_for_mempool_change(
         &mut receiver,
         mempool,

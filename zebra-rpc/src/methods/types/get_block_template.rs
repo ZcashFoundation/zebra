@@ -34,7 +34,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{subsidy::subsidy_is_valid, Network},
-    serialization::{DateTime32, Duration32, ZcashDeserializeInto},
+    serialization::{DateTime32, Duration32, SerializationError},
     transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty},
 };
@@ -42,7 +42,9 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{
+    router::service_trait::BlockVerifierService, DecodedBlock, PreparedBlockCache, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -780,10 +782,9 @@ impl CoinbaseCache {
 /// told to retry rather than queued.
 pub(crate) const MAX_CONCURRENT_PROPOSAL_CHECKS: usize = 2;
 
-/// How long one block proposal check may run, in the RPC and in the template updater.
+/// How long callers wait for a proposal check, in the RPC and in the template updater.
 ///
-/// A proposal that waits for missing transparent inputs is invalid against the current tip, so
-/// this cuts it off well before the verifier's own input lookup timeout.
+/// RPC admission remains held until the verifier finishes, even after this response deadline.
 pub(crate) const PROPOSAL_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Handler for the `getblocktemplate` RPC.
@@ -984,11 +985,43 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
     }
 }
 
+const BLOCK_DECODE_LIMIT: usize = 8;
+
+/// Bounds large RPC decodes independently of verifier readiness and response cancellation.
+static BLOCK_DECODES: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(BLOCK_DECODE_LIMIT);
+
+pub(crate) async fn decode_block(
+    bytes: Vec<u8>,
+    prepared: Option<PreparedBlockCache>,
+) -> RpcResult<Result<DecodedBlock, SerializationError>> {
+    // Preserve the solved-template fast path: a hit needs only a header and byte comparison.
+    if let Some(decoded) = prepared.as_ref().and_then(|cache| cache.reuse(&bytes)) {
+        return Ok(Ok(decoded));
+    }
+    let inline = bytes.len() <= 4 * 1024;
+    let decode = move || DecodedBlock::deserialize(&bytes);
+    if inline {
+        return Ok(decode());
+    }
+    let admitted =
+        tokio::time::timeout(std::time::Duration::from_secs(10), BLOCK_DECODES.acquire())
+            .await
+            .map_misc_error()?
+            .map_misc_error()?;
+    Ok(tokio::task::spawn_blocking(move || {
+        let _admitted = admitted;
+        decode()
+    })
+    .await
+    .expect("malformed block bytes return a deserialization error rather than panicking"))
+}
+
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a [`GetBlockTemplateResponse`], rejecting invalid proposals before verification
-/// when their mandatory payouts do not match the current parent's contextual subsidy.
+/// Returns a [`GetBlockTemplateResponse`], rejecting proposals before verification when they do not
+/// extend the current tip or their mandatory payouts do not match its contextual subsidy.
 ///
 /// Miners modifying templates should submit a proposal before mining. Successful results are
 /// cached for submissions differing only in nonce and Equihash solution; other changes, including
@@ -996,8 +1029,9 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 ///
 /// # Errors
 ///
-/// Returns an RPC error if Zebra is not synced, the contextual state query fails or times out,
-/// or the verifier cannot accept the request.
+/// Returns an RPC error if Zebra is not synced, admission is full, the contextual state query fails,
+/// or service readiness or the verifier response exceeds the deadline. A timed-out or cancelled
+/// caller does not release admission for verification that is still running.
 pub async fn validate_block_proposal<BlockVerifierRouter, ReadState, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     read_state: ReadState,
@@ -1013,7 +1047,7 @@ where
         + Send
         + Sync
         + 'static,
-    BlockVerifierRouter::Future: Send,
+    BlockVerifierRouter::Future: Send + 'static,
     ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -1028,17 +1062,18 @@ where
 {
     check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
-    // Proposal checks skip proof of work, so bound how many run at once and for how long.
-    let Ok(_admitted) = admission.try_acquire_owned() else {
+    // Proposal checks skip proof of work, so bound both admitted work and caller wait time.
+    let Ok(admitted) = admission.try_acquire_owned() else {
         return Err(ErrorObject::owned(
             0,
             "too many block proposals are being checked, retry later",
             None::<()>,
         ));
     };
+    let deadline = tokio::time::Instant::now() + PROPOSAL_CHECK_TIMEOUT;
 
-    let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
-        Ok(block) => block,
+    let block = match decode_block(block_proposal_bytes, None).await? {
+        Ok(decoded) => decoded.block().clone(),
         Err(parse_error) => {
             tracing::info!(
                 ?parse_error,
@@ -1053,29 +1088,29 @@ where
         }
     };
 
-    let height = block.coinbase_height();
-    // A caller-controlled pre-reissuance height must not bypass the parent/height preflight.
-    if net.nsm_reissuance_height().is_some() {
-        let chain_info = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            fetch_chain_info(read_state),
+    let chain_info = tokio::time::timeout_at(
+        deadline.min(tokio::time::Instant::now() + std::time::Duration::from_secs(10)),
+        fetch_chain_info(read_state),
+    )
+    .await
+    .map_misc_error()??;
+
+    // Every network needs the exact live height before height-gated verification work limits.
+    let height = chain_info.tip_height.next().map_misc_error()?;
+    if block.header.previous_block_hash != chain_info.tip_hash
+        || block.coinbase_height() != Some(height)
+    {
+        return Ok(BlockProposalResponse::rejected(
+            "invalid proposal",
+            "proposal does not extend the current chain tip".into(),
         )
-        .await
-        .map_misc_error()??;
+        .into());
+    }
 
+    if net.nsm_reissuance_height().is_some() {
         // The reserve and scheduled subsidy both belong to this exact parent and next height.
-        if block.header.previous_block_hash != chain_info.tip_hash
-            || chain_info.tip_height.next().ok() != height
-        {
-            return Ok(BlockProposalResponse::rejected(
-                "invalid proposal",
-                "proposal does not extend the current chain tip".into(),
-            )
-            .into());
-        }
-
         let subsidy = zebra_chain::parameters::subsidy::block_subsidy_with_parent_pools(
-            chain_info.tip_height.next().map_misc_error()?,
+            height,
             net,
             chain_info.chain_value_pools,
         )
@@ -1087,16 +1122,24 @@ where
         // verification, including when the chain reorganizes after this snapshot.
     }
 
-    let block_verifier_router_response = tokio::time::timeout(
-        PROPOSAL_CHECK_TIMEOUT,
+    let timed_out = |_| ErrorObject::owned(0, "block proposal check timed out", None::<()>);
+    tokio::time::timeout_at(deadline, block_verifier_router.ready())
+        .await
+        .map_err(timed_out)?
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+    // Keep polling the real response after the RPC is dropped: buffered verification and its
+    // dispatched CPU work can continue even when their response future is cancelled.
+    let checking = tokio::spawn(async move {
+        let _admitted = admitted;
         block_verifier_router
-            .ready()
+            .call(zebra_consensus::Request::CheckProposal(block))
             .await
-            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::CheckProposal(Arc::new(block))),
-    )
-    .await
-    .map_err(|_elapsed| ErrorObject::owned(0, "block proposal check timed out", None::<()>))?;
+    });
+    let block_verifier_router_response = tokio::time::timeout_at(deadline, checking)
+        .await
+        .map_err(timed_out)?
+        .map_misc_error()?;
 
     Ok(block_verifier_router_response
         .map(|_hash| BlockProposalResponse::Valid)

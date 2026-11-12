@@ -1,5 +1,7 @@
 //! Tests for types and functions for the `getblocktemplate` RPC.
 
+mod decoding;
+
 use anyhow::anyhow;
 use std::iter;
 use zebra_chain::amount::Amount;
