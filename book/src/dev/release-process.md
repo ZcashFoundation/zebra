@@ -14,19 +14,20 @@ against each package's audience.
 
 | Release level | `zebrad` | Library crates |
 | --- | --- | --- |
-| Major | Mainnet network-upgrade support or breaking operator interfaces, including configuration, CLI, RPC, and downgrade-incompatible state changes | Incompatible public APIs, semantics, features, or public dependency types |
-| Minor | Backward-compatible features and behavior changes | Backward-compatible API additions |
+| Major | Mainnet network-upgrade support, declared with a `network-upgrade` change fragment | Incompatible public APIs, semantics, features, or public dependency types |
+| Minor | Backward-compatible features and behavior changes, and breaking operator interfaces, including configuration, CLI, RPC, and downgrade-incompatible state changes | Backward-compatible API additions |
 | Patch | Compatible fixes without a new feature | Compatible fixes |
 
 Follow [Cargo's SemVer rules][cargo-semver], including pre-1.0 versions, and the
 [changelog guidelines](changelog-guidelines.md). A library major bump does not
 itself require a `zebrad` major bump.
 
-The [release-plz configuration][release-plz] selects releases from conventional
-commits and dependency changes. Commit types `feat`, `fix`, `perf`, `refactor`,
-and `build` trigger release consideration; dependency cascades can release other
-packages. Release-plz disables changelog generation and SemVer checking;
-maintainers must audit proposed versions and source-authored changelogs.
+The [release-plz configuration][release-plz] opens the Release PR: commit types
+`feat`, `fix`, `perf`, `refactor`, and `build` trigger release consideration.
+The release workflow then replaces release-plz's versions with the
+[fragment plan](#what-release-readiness-reports) and batches the fragments into
+those versions. Release-plz disables changelog generation and SemVer checking;
+maintainers must audit the planned versions and source-authored changelogs.
 
 <a id="supported-releases"></a>
 
@@ -124,7 +125,8 @@ Library APIs follow their crate's SemVer compatibility policy.
 ## Release candidate and release process
 
 The [release workflow][release-workflow] maintains a `release-plz-` branch labeled
-`release`. After review and merge, `ZcashFoundation/cargo-release` publishes it.
+`release`, and sets its versions and changelogs from the unreleased change
+fragments. After review and merge, `ZcashFoundation/cargo-release` publishes it.
 This action is not the local `cargo release` CLI configured by `release.toml`.
 
 ### Prepare and review the Release PR
@@ -156,11 +158,47 @@ the `release` environment deployment when its protection rules require it.
 
 ### What release readiness reports
 
-The `PR Gate / Release readiness` job requires current `main`, validates each
-released package's versioned changelog, and runs Cargo 1.91's multi-package
-publication dry run. Changelog and Cargo validation run independently and both
-appear in the summary. The controller observes crates.io, Git tags, and the
-GitHub Release without publishing.
+The `PR Gate / Release readiness` job requires current `main`, then runs these
+checks independently, so the summary reports every outcome:
+
+- **Changelogs:** each released package has a non-empty versioned changelog.
+- **Versions:** each package moves to the version its change fragments plan.
+- **Manifests:** a package whose `Cargo.toml` changes is released.
+- **Fragments:** a released package has no fragments left in
+  `.changes/unreleased`, so the next plan doesn't count them again.
+- **Cargo release:** Cargo 1.91's multi-package publication dry run.
+
+The controller observes crates.io, Git tags, and the GitHub Release without
+publishing.
+
+`.github/scripts/plan-release-versions.sh <base>` prints the plan:
+
+- Each package's fragments pick its level from their kinds: `breaking` and
+  `Removed` are major, `Added`, `Changed`, and `Deprecated` are minor, and
+  `Fixed` and `Security` are patch. The highest level wins.
+- Below 1.0.0, Cargo treats the minor version as the major one, so each level
+  bumps one place lower.
+- `zebrad` stops at a minor version unless one of its fragments has the
+  `network-upgrade` kind.
+- A prerelease version graduates to its release version.
+- A path dependency that moves to an incompatible version raises a package to at
+  least a patch release, so its new requirement is published. When the
+  package's library sources outside `src/bin` name that dependency, it inherits
+  the break, because a public signature can expose the dependency's types
+  without a `pub use`. `zebrad` has no library API, so it only gets the patch.
+
+Readiness also accepts a new prerelease of the planned version, such as
+`7.0.0-rc.0` for `7.0.0`, unless the planned version is compatible with the
+current one and another workspace package depends on it: the dependents'
+requirements would reject the prerelease, and the plan doesn't release them. A
+prerelease package without new fragments may keep its version, graduate, or move
+to another prerelease. The workflow always applies the release version. To
+release a prerelease such as `zebrad` `7.0.0-rc.1`, run
+`.github/scripts/plan-release-versions.sh <base> > releases.tsv`, change that
+package's version in `releases.tsv`, then run
+`.github/scripts/apply-release-plan.sh <base> releases.tsv` on the Release PR
+branch and push the result. The next workflow update replaces it with the
+release version.
 
 Before publication, a successful report with `reason: "incomplete"` is expected:
 the desired plan is valid, but the external artifacts do not all exist yet.
@@ -195,6 +233,7 @@ Read the failed job summary before retrying.
 | --- | --- |
 | Release PR is behind `main` | Let release-plz refresh it, then review the new head. |
 | Missing or empty versioned changelog | Add missing source fragments on `main` for direct changes. A dependency-only omission requires a batching fix, not a generated-file patch. |
+| Version differs from the fragment plan, or a manifest changes without a release | If a fragment's kind or project is wrong, fix it on `main` and let the release workflow refresh the PR. Otherwise the workflow's apply step failed, and its log names the problem. After fixing it, freeze `main` in Merge Freeze, run `plan-release-versions.sh <base> > releases.tsv` and `apply-release-plan.sh <base> releases.tsv` from `.github/scripts/` on the Release PR branch, then commit and push the result. |
 | Cargo dry run fails | Fix the source or dependency problem on `main`. |
 | Conflicting crate provenance, tag target, or release channel | Stop publication and investigate; do not overwrite immutable external state. |
 
