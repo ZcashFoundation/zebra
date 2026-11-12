@@ -19,6 +19,7 @@ use crate::{error::TransactionError, router::RouterError};
 
 use super::*;
 
+mod body_replay;
 mod commit_tasks;
 mod queue_pressure;
 
@@ -1301,6 +1302,7 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
                 notifications: None,
                 retained: RetainedBlockPermit(checkpoint_verifier.retained_blocks.clone()),
             }),
+            body_replay: None,
         })
         .expect("the verifier holds the receiver");
     // If the verifier was rewound, it would queue the block, and wait for its commit.
@@ -1833,6 +1835,7 @@ async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
                     epoch: 0,
                     tip: Some(tip),
                     child: None,
+                    body_replay: None,
                 })
                 .unwrap();
             let ordinary_body = Arc::new((*blocks[2]).clone());
@@ -1863,6 +1866,7 @@ async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
                         notifications: Some(zs::MinedBlockNotifications::new(committed, validated)),
                         retained: RetainedBlockPermit(verifier.retained_blocks.clone()),
                     }),
+                    body_replay: None,
                 })
                 .unwrap();
             // Drain the late recovery without supplying the missing parent yet.

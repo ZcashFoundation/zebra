@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
-    parallel::tree::TreeRoots,
+    parallel::tree::TreeRootsProof,
     transaction::UnminedTx,
 };
 
@@ -245,10 +245,12 @@ pub enum Message {
 
     /// A `treeroots` response to [`Message::GetTreeRoots`], or `None` if the peer refused it.
     ///
-    /// Entry `k` is for the block at `start_height + k` on the requested chain. The response can
-    /// be a prefix of the requested roots, but never has more entries than requested.
+    /// Entry `k` proves the roots after `start_height + k` on the requested chain. Each proof
+    /// includes the successor's authorizing-data root when its header uses ZIP-244, independently
+    /// of any separately served successor body. The response can be a prefix of the requested
+    /// proofs, but never has more entries than requested. This capability remains draft.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    TreeRoots(Option<Vec<TreeRoots>>),
+    TreeRoots(Option<Vec<TreeRootsProof>>),
 
     /// A `tx` message.
     ///

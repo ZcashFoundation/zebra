@@ -912,3 +912,64 @@ async fn start_server_and_get_client() -> Result<(
         mempool_change_sender,
     ))
 }
+
+#[tokio::test]
+async fn tree_state_methods_reject_fast_synced_heights_explicitly() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let (_server, client, mut read, _mempool, tip, _changes) =
+        start_server_and_get_client().await?;
+    let block: Arc<Block> =
+        zebra_test::vectors::MAINNET_BLOCKS[&419_201].zcash_deserialize_into()?;
+    let hash = block.hash();
+    tip.send_best_tip_height(block.coinbase_height());
+    tip.send_best_tip_hash(hash);
+    for latest in [false, true] {
+        let mut client = client.clone();
+        let request = tokio::spawn(async move {
+            if latest {
+                client
+                    .get_latest_tree_state(tonic::Request::new(Empty {}))
+                    .await
+            } else {
+                client
+                    .get_tree_state(tonic::Request::new(BlockId {
+                        height: 0,
+                        hash: hash.0.to_vec(),
+                    }))
+                    .await
+            }
+        });
+        read.expect_request(ReadRequest::BlockHeader(hash.into()))
+            .await
+            .respond(ReadResponse::BlockHeader(Some(zebra_state::BlockHeader {
+                header: block.header.clone(),
+                hash,
+                height: block
+                    .coinbase_height()
+                    .expect("test vector has a coinbase height"),
+                next_block_hash: None,
+            })));
+        read.expect_request(ReadRequest::AnyChainSaplingTree(hash))
+            .await
+            .respond(ReadResponse::SaplingTree(None));
+        read.expect_request(ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .respond(ReadResponse::FastSyncTreeRoots(Some(
+                zebra_state::FastSyncTreeRoots {
+                    roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                    sapling_size: 1,
+                    orchard_size: 0,
+                    ironwood_size: 0,
+                },
+            )));
+        let error = tokio::time::timeout(Duration::from_secs(5), request)
+            .await??
+            .expect_err("missing historical trees cannot be returned as empty trees");
+        assert_eq!(error.code(), tonic::Code::Unavailable);
+        assert_eq!(
+            error.message(),
+            "tree state unavailable: fast-synced height"
+        );
+    }
+    Ok(())
+}

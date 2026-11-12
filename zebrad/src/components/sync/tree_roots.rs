@@ -37,6 +37,9 @@ const ERROR_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// How often to log failed requests at info level.
 const FAILURE_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How long to wait for the state to answer before retrying.
+const STATE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Fetches the note commitment tree roots the state wants from peers, and supplies them to the
 /// state, forever.
 ///
@@ -45,6 +48,7 @@ pub async fn fetch_tree_roots<ZN, ZS>(
     network: Network,
     peers: ZN,
     state: ZS,
+    misbehavior_sender: tokio::sync::mpsc::Sender<zn::MisbehaviorReport>,
 ) -> Result<(), BoxError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone + Send + 'static,
@@ -54,20 +58,62 @@ where
 {
     let checkpoints = network.checkpoint_list();
     let mut started = false;
+    let mut supplied = false;
     let mut last_failure_log: Option<Instant> = None;
+    let mut excluded_peer = None;
+    let mut submitted_start = None;
 
     loop {
-        let zs::Response::WantedTreeRoots(wanted) =
-            state.clone().oneshot(zs::Request::WantedTreeRoots).await?
+        // The state service can queue many block commits, so don't wait on it forever.
+        let Ok(wanted) = timeout(
+            STATE_TIMEOUT,
+            state.clone().oneshot(zs::Request::WantedTreeRoots),
+        )
+        .await
         else {
+            info!("fast tree sync: the state didn't say which tree roots it wants, retrying");
+            continue;
+        };
+        let zs::Response::WantedTreeRoots(wanted, rejected) = wanted? else {
             unreachable!("zebra-state responds to `WantedTreeRoots` with `WantedTreeRoots`");
         };
-        let Some((start_height, request)) = wanted
+        if let Some(source) = rejected
+            .map(zn::PeerSocketAddr::from)
+            .filter(|source| Some(*source) != excluded_peer)
+        {
+            excluded_peer = Some(source);
+            submitted_start = None;
+            let report = zn::MisbehaviorReport::new(
+                source,
+                100,
+                "tree roots contradict checkpoint-authenticated block headers",
+            );
+            timeout(STATE_TIMEOUT, misbehavior_sender.send(report))
+                .await
+                .map_err(|_| "timed out reporting invalid tree root source")??;
+        }
+        // ponytail: poll queued writer admission; expose its watch if retry delay matters.
+        if wanted
+            .as_ref()
+            .is_some_and(|range| Some(*range.start()) == submitted_start)
+        {
+            sleep(RETRY_DELAY).await;
+            continue;
+        }
+        let Some((start_height, mut request)) = wanted
             .and_then(|wanted| Some((*wanted.start(), tree_roots_request(&checkpoints, wanted)?)))
         else {
             sleep(IDLE_DELAY).await;
             continue;
         };
+        let zn::Request::TreeRoots {
+            excluded_peer: excluded,
+            ..
+        } = &mut request
+        else {
+            unreachable!("tree_roots_request only creates TreeRoots requests");
+        };
+        *excluded = excluded_peer;
 
         if !started {
             info!(
@@ -79,15 +125,24 @@ where
 
         let (delay, failure) =
             match timeout(TREE_ROOTS_TIMEOUT, peers.clone().oneshot(request)).await {
-                Ok(Ok(zn::Response::TreeRoots(Some(roots)))) if !roots.is_empty() => {
-                    state
-                        .clone()
-                        .oneshot(zs::Request::SupplyTreeRoots {
-                            start_height,
-                            roots,
-                        })
-                        .await?;
-                    continue;
+                Ok(Ok(zn::Response::TreeRootsFromPeer(roots, source))) if !roots.is_empty() => {
+                    let supply = state.clone().oneshot(zs::Request::SupplyTreeRoots {
+                        start_height,
+                        roots,
+                        source: *source,
+                    });
+                    match timeout(STATE_TIMEOUT, supply).await {
+                        Ok(Ok(_)) => {
+                            submitted_start = Some(start_height);
+                            if !supplied {
+                                info!(?start_height, "fast tree sync: received tree roots");
+                                supplied = true;
+                            }
+                            continue;
+                        }
+                        Ok(Err(error)) => (RETRY_DELAY, error.to_string()),
+                        Err(_) => (RETRY_DELAY, "the state didn't take the roots".to_string()),
+                    }
                 }
                 Ok(Ok(response)) => (RETRY_DELAY, format!("peer returned {response}")),
                 Ok(Err(error)) => (ERROR_RETRY_DELAY, error.to_string()),
@@ -124,5 +179,6 @@ fn tree_roots_request(
         final_hash: checkpoints.hash(final_height)?,
         count: u32::try_from(final_height - start_height + 1)
             .expect("the final height is within the request limit of the start height"),
+        excluded_peer: None,
     })
 }

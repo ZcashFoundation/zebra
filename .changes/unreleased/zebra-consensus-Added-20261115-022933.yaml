@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Added
+body: Added targeted authorizing-body replay to `CheckpointVerifier`, preserving the checkpoint-certified descendant chain.
+time: 2026-11-15T02:29:33.080284744+01:00

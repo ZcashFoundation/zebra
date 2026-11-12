@@ -52,6 +52,7 @@ use crate::{
 mod header;
 mod mining_candidate;
 pub(super) mod mining_rejection;
+mod tree_roots_admission;
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
 
