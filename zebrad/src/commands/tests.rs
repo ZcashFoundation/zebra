@@ -1,8 +1,9 @@
 //! Tests for parsing zebrad commands
 
+use abscissa_core::Configurable;
 use clap::Parser;
 
-use crate::commands::ZebradCmd;
+use crate::{commands::ZebradCmd, config::ZebradConfig};
 
 use super::EntryPoint;
 
@@ -44,4 +45,69 @@ fn args_with_subcommand_pass_through() {
 
         assert_eq!(matches!(args.cmd(), ZebradCmd::Start(_)), should_be_start,);
     }
+}
+
+#[test]
+fn start_filters_override_config() {
+    let test_cases = [
+        (vec!["zebrad", "--filters", "warn"], "warn"),
+        (vec!["zebrad", "--filters", "warn", "start"], "warn"),
+        (
+            vec![
+                "zebrad",
+                "--filters",
+                "warn",
+                "start",
+                "info",
+                "zebra_network=debug",
+            ],
+            "info,zebra_network=debug",
+        ),
+    ];
+
+    for (args, expected_filter) in test_cases {
+        let processed_args = EntryPoint::process_cli_args(args.iter().map(Into::into).collect())
+            .expect("hardcoded args should process successfully");
+        let command = EntryPoint::try_parse_from(processed_args)
+            .expect("processed args should parse successfully");
+        let mut config = ZebradConfig::default();
+        config.tracing.filter = Some("error".to_owned());
+        let config = command
+            .process_config(config)
+            .expect("command filters should override the configured filter");
+
+        assert_eq!(
+            config.tracing.filter.as_deref(),
+            Some(expected_filter),
+            "{args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn halo2_key_preload_completion_does_not_exit_zebra() {
+    use futures::{future::FusedFuture, FutureExt};
+
+    let mut handle = tokio::task::spawn_blocking(|| ());
+    let completed = (&mut handle).fuse();
+    futures::pin_mut!(completed);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), &mut completed)
+        .await
+        .expect("startup task must finish");
+
+    assert!(!super::start::StartCmd::halo2_key_preload_should_exit(
+        result
+    ));
+    assert!(completed.is_terminated());
+    assert!(completed.now_or_never().is_none());
+}
+
+#[tokio::test]
+#[should_panic(expected = "Halo2 verifying key construction must succeed")]
+async fn halo2_key_preload_panic_exits_zebra() {
+    let handle = tokio::task::spawn_blocking(|| panic!("simulated key construction panic"));
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), handle)
+        .await
+        .expect("startup task must finish");
+    super::start::StartCmd::halo2_key_preload_should_exit(result);
 }

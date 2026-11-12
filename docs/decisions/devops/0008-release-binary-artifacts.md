@@ -78,7 +78,7 @@ Generate it in the matrix build job with `cargo-sbom` (SPDX 2.3 JSON, matching t
 The plumbing is not the cost. A `Cargo.lock` SBOM both over- and under-reports this binary, so it has to be corrected first:
 
 - It lists `bzip2-sys`, `libz-sys`, and `aws-lc-sys` as if linked, when none are. `bzip2` is never compiled (`zebra-state` pins `rocksdb` with `default-features = false, features = ["lz4"]`), `libz-sys` is build-time-only through `vergen-git2`, and `ring` is the TLS backend.
-- It gives the five linked native C/C++ libraries no scanner-matchable component. Each needs a `pkg:generic` entry with a pinned version and CPE: RocksDB 8.10.0 (`librocksdb-sys`), lz4 1.10.0 (`lz4-sys`), libsecp256k1 (`secp256k1-sys`, plus a second copy vendored in `libzcash_script`), the zcashd consensus C++ in `libzcash_script` 0.1.0, and the BoringSSL fork in `ring`.
+- It gives the five linked native C/C++ libraries no scanner-matchable component. Each needs a `pkg:generic` entry with a version pinned to the release's `Cargo.lock` and a CPE: RocksDB (`librocksdb-sys`), lz4 (`lz4-sys`), libsecp256k1 (`secp256k1-sys`, plus a second copy vendored in `libzcash_script`), the zcashd consensus C++ in `libzcash_script`, and the BoringSSL fork in `ring`.
 
 That augmentation has to be re-validated on every bump of those crates, and the recurring work is the real cost. Gate it on a concrete enterprise, federal, or Cyber Resilience Act consumer. Until then `Cargo.lock` is public and builds are reproducible, so any consumer can regenerate the crate graph. Consumers verify with:
 

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Records `state.block_writer.phase.duration_seconds` histograms for the write queue, contextual commit, tip channel update and finalization.
+time: 2026-10-13T02:47:50.531098465+02:00

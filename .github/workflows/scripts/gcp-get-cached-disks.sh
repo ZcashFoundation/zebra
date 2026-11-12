@@ -49,7 +49,8 @@ find_newest_image() {
     local name_pattern="${2}"
     local images
 
-    images=$(gcloud compute images list --filter="status=READY AND name~${image_prefix}-${name_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp) || return 1
+    # `name~` is an unanchored regex match, so anchor the image prefix.
+    images=$(gcloud compute images list --filter="status=READY AND name~^${image_prefix}-${name_pattern}" --format="value(NAME)" --sort-by=~creationTimestamp) || return 1
 
     if [[ "${GITHUB_REPOSITORY}" == "ZcashFoundation/zebra" ]]; then
         grep -m1 -vE -- "^${image_prefix}-r[0-9]+-[0-9a-f]+-v[0-9]+-" <<<"${images}" || true

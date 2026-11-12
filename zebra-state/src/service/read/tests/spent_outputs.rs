@@ -6,7 +6,10 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use zebra_chain::{
@@ -28,6 +31,25 @@ use crate::{
 
 /// Counts heap use per thread, so tests running in parallel don't pollute each other.
 struct CountingAlloc;
+
+static COUNT_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// Count successful allocation and reallocation calls, including Rayon workers.
+/// Run only in an isolated benchmark process, without other tests running concurrently.
+pub(in crate::service) fn count_allocations<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    ALLOCATIONS.store(0, Ordering::Relaxed);
+    assert!(!COUNT_ALLOCATIONS.swap(true, Ordering::Relaxed));
+    let result = f();
+    COUNT_ALLOCATIONS.store(false, Ordering::Relaxed);
+    (result, ALLOCATIONS.load(Ordering::Relaxed))
+}
+
+fn record_allocation() {
+    if COUNT_ALLOCATIONS.load(Ordering::Relaxed) {
+        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 thread_local! {
     static TRACKING: Cell<bool> = const { Cell::new(false) };
@@ -59,6 +81,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
         let ptr = System.alloc(layout);
         if !ptr.is_null() {
             record(layout.size() as isize);
+            record_allocation();
         }
         ptr
     }
@@ -67,6 +90,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
         let ptr = System.alloc_zeroed(layout);
         if !ptr.is_null() {
             record(layout.size() as isize);
+            record_allocation();
         }
         ptr
     }
@@ -80,6 +104,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
         let new_ptr = System.realloc(ptr, layout, new_size);
         if !new_ptr.is_null() {
             record(new_size as isize - layout.size() as isize);
+            record_allocation();
         }
         new_ptr
     }
@@ -89,12 +114,14 @@ unsafe impl GlobalAlloc for CountingAlloc {
 static GLOBAL: CountingAlloc = CountingAlloc;
 
 /// Heap use of one measured call on this thread.
-struct HeapUse {
+pub(in crate::service) struct HeapUse {
     peak: usize,
-    total: usize,
+    /// Total bytes allocated, including positive reallocation growth.
+    pub(in crate::service) total: usize,
 }
 
-fn measure<T>(f: impl FnOnce() -> T) -> (T, HeapUse) {
+/// Measure heap use on the calling thread, excluding concurrent tests.
+pub(in crate::service) fn measure<T>(f: impl FnOnce() -> T) -> (T, HeapUse) {
     CURRENT.with(|c| c.set(0));
     PEAK.with(|p| p.set(0));
     TOTAL.with(|t| t.set(0));

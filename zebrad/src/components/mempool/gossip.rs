@@ -3,6 +3,8 @@
 //! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
 //! insertion events received in a channel and broadcasts the transactions to peers.
 
+use std::time::Duration;
+
 use tokio::sync::broadcast::{
     self,
     error::{RecvError, TryRecvError},
@@ -14,10 +16,15 @@ use zebra_network::MAX_TX_INV_IN_SENT_MESSAGE;
 use zebra_network as zn;
 use zebra_node_services::mempool::MempoolChange;
 
-use crate::{
-    components::sync::{PEER_GOSSIP_DELAY, TIPS_RESPONSE_TIMEOUT},
-    BoxError,
-};
+use crate::{components::sync::TIPS_RESPONSE_TIMEOUT, BoxError};
+
+/// Delay between transaction gossip batches, limiting peer load without delaying block relay.
+#[cfg(not(test))]
+pub const TRANSACTION_GOSSIP_DELAY: Duration = Duration::from_secs(2);
+
+/// Keep gossip throttled in unit tests without waiting for real peer-network delays.
+#[cfg(test)]
+pub const TRANSACTION_GOSSIP_DELAY: Duration = Duration::from_millis(10);
 
 /// The maximum number of channel messages we will combine into a single peer broadcast.
 pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
@@ -110,10 +117,7 @@ where
 
         metrics::counter!("mempool.gossiped.transactions.total").increment(txs_len as u64);
 
-        // wait for at least the network timeout between gossips
-        //
-        // in practice, transactions arrive every 1-20 seconds,
-        // so waiting 6 seconds can delay transaction propagation, in order to reduce peer load
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+        // Batch announcements to reduce peer load.
+        tokio::time::sleep(TRANSACTION_GOSSIP_DELAY).await;
     }
 }

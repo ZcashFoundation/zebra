@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Cached templates remain usable after backward clock adjustments when their timestamp range can be narrowed safely ([#11654](https://github.com/ZcashFoundation/zebra/pull/11654)).
+time: 2026-10-14T10:43:00.538685526+02:00

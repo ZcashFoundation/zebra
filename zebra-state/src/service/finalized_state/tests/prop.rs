@@ -2,8 +2,6 @@
 
 use std::env;
 
-use tokio::sync::oneshot;
-
 use zebra_chain::{
     block::Height,
     parameters::{
@@ -124,28 +122,26 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         h == nu5_height ||
                         h == nu5_height_plus1 => {
                             let block = block.block.clone().set_block_commitment([0x42; 32]);
-                            let checkpoint_verified = CheckpointVerifiedBlock::from(block);
-                            let (rsp_tx, mut rsp_rx) = oneshot::channel();
-                            let error = state.commit_finalized(
-                                (checkpoint_verified, rsp_tx),
+                            let checkpoint_verified = CheckpointVerifiedBlock::from(block)
+                                .with_precomputed_auth_data_root();
+                            state.commit_finalized(
+                                checkpoint_verified,
                                 note_commitment_trees.clone(),
                             ).expect_err("Must fail commitment check");
-                            let response_error = rsp_rx.try_recv().unwrap().unwrap_err();
-                            prop_assert_eq!(error.inner(), response_error.inner());
                             prop_assert_eq!(state.finalized_tip_height(), Some(Height(height.0 - 1)));
                             failure_count += 1;
                         },
                     _ => {},
                 }
-                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
+                let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone())
+                    .with_precomputed_auth_data_root();
                 let expected_tip = ChainTipBlock::from(checkpoint_verified.clone());
-                let (rsp_tx, mut rsp_rx) = oneshot::channel();
                 let (tip, trees) = state.commit_finalized(
-                    (checkpoint_verified, rsp_tx),
+                    checkpoint_verified,
                     note_commitment_trees.take(),
                 ).unwrap();
+                prop_assert_eq!(tip.hash, block_hash);
                 prop_assert_eq!(tip, expected_tip);
-                prop_assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), block_hash);
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
                 note_commitment_trees = Some(trees);
                 height = Height(height.0 + 1);

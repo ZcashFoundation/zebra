@@ -1,260 +1,152 @@
-# Private Testnet Test
+# Private Testnet testing
 
-The objective of a private Testnet test is to test Testnet activation of an upcoming
-network upgrade in an isolated fashion, before the actual Testnet activation.
-It is usually done using the current state of the existing Testnet. For NU6, it was done
-by ZF and ECC engineers over a call.
+A coordinated private Testnet tests a consensus transition across nodes, miners,
+and wallets using an agreed chain prefix. Use the
+[fork procedure](../user/fork-zebra-testnet.md) for state preparation and the
+[custom parameter reference](../user/custom-testnets.md) for the configuration
+schema. Use [Regtest](../user/regtest.md) for tests that do not need public
+Testnet history.
 
-## Steps
+## Agree on the test network
 
-### Make Backup
+Record and distribute these inputs before starting nodes:
 
-Choose a public Testnet snapshot whose blocks are all below the first height at
-which the private network's consensus rules differ. Keep the public genesis and
-all consensus parameters through that snapshot unchanged, including earlier
-activation heights. Agree on the starting tip height and hash with the other
-participants, then stop Zebra before copying its state.
+- Exact source revisions or binary versions for every implementation.
+- The public-prefix tip height and hash.
+- The custom network name and unique four-byte magic.
+- Every activation height and the first height at which private rules differ
+  from public Testnet.
+- The checkpoint file and its checksum.
+- Funding streams, lockbox disbursements, proof-of-work policy, and any Network
+  Sustainability Mechanism (NSM) seed or reissuance override.
+- Participant P2P addresses, miner ownership, and the cases to test before,
+  at, and after activation.
 
-Keep an untouched backup of the public state. Copy, rather than move, the
-finalized database and its matching non-finalized backup, if present, into the
-private network's namespace, using an empty destination rather than merging
-with state from an earlier test. A compatible public Testnet prefix can be
-reused; changing only the name and wire magic does not require a full resync.
+The first incompatible height is not necessarily the new private activation
+height. Delaying an upgrade that activates earlier on public Testnet makes
+the chains incompatible from the public activation onward. Keep all copied
+blocks below that boundary.
 
-Custom storage names are `<lowercase-name>-<eight-digit-hex-magic>`. The sample
-below uses `Nu7Private` and `[0, 1, 0, 7]`, giving `nu7private-00010007`. Under
-`state.cache_dir`, copy:
+For NU7, choose an activation height divisible by three under
+[ZIP 259](https://zips.z.cash/zip-0259), overriding the
+[public schedule](../index.html#networks-and-network-upgrades).
 
-| Public source | Private destination |
-| --- | --- |
-| `state/vN/testnet` | `state/vN/nu7private-00010007` |
-| `non_finalized_state/testnet` | `non_finalized_state/nu7private-00010007` |
+### Check protocol compatibility
 
-Use the actual database version `N` supported by the test binary. The NU7/NSM
-database uses `v29`. Prepare the public snapshot with a v29-compatible writer
-before forking: its registered upgrade automatically moves compatible v28 state
-into `state/v29` when no v29 database exists, without a public Testnet resync.
-Legacy records remain readable with a zero NSM balance; new writes use the wider
-layout. Stop Zebra again before copying the upgraded snapshot, and keep the
-snapshot and any copied non-finalized blocks below the private activation.
+Zebra advertises protocol version `170190`; configured Testnets require at
+least that version from Overwinter onward, not public Testnet's
+upgrade-specific minimum
+([implementation](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/protocol/external/types.rs)).
+Check each implementation's handshake rules: changing activation heights
+does not change its advertised version.
 
-Retain an untouched v28 backup before upgrading if rollback is needed.
-`state.delete_old_database = false` does not preserve the directory that the
-upgrade moves. Manually renaming or symlinking versioned directories is not a
-substitute for the supported upgrade. Upgrade direct database readers, including
-Zallet and Zaino backends, with the writer as described in
-[State Database Upgrades](state-db-upgrades.md#upgrading-the-state-database).
+Use the consensus branch identifier assigned to the implemented upgrade.
+For NU7 it is `0x77190ad9`. Do not invent a branch identifier to simulate an
+implemented upgrade. A genuinely new protocol requires coordinated
+implementation changes, including transaction construction and signature
+verification, as described by
+[ZIP 200](https://zips.z.cash/zip-0200).
 
-On Linux the default cache root is `$XDG_CACHE_HOME/zebra`, or
-`~/.cache/zebra` if that variable is unset. If `state.cache_dir` is configured,
-use that root instead. Do not copy the public peer cache into the private
-namespace, and never copy private fork state back into public Testnet.
+### Check wallet and library parameters
 
-### Set Protocol Version
+Zebra passes its configured upgrade heights to librustzcash through
+[`zcash_protocol::consensus::Parameters`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/network.rs).
+Other nodes, wallet libraries, and transaction producers must use the same
+heights and branch identifiers. An unmodified wallet using public Testnet
+activation heights is not sufficient evidence of private-upgrade compatibility.
 
-Double check that Zebra has bumped its protocol version.
+For light-wallet tests, configure the
+[lightwalletd-compatible service](../user/lightwalletd.md) and the wallet for
+the private network. Wallet infrastructure is not required to submit an
+already constructed transaction: Zebra accepts it through `sendrawtransaction`.
+Use addresses whose keys the test participants control.
 
-### Set Up Lightwalletd Server
+## Prepare an isolated snapshot
 
-It's a good idea to set up a lightwalletd server connected to your node, and
-have a (Testnet) wallet connected to your lightwalletd server.
+Follow [Prepare public state](../user/fork-zebra-testnet.md#prepare-public-state)
+for bounded snapshot or `copy-state` preparation and private storage paths.
+Stop writers and direct database readers before copying; preserve an untouched
+backup and use an empty destination. Follow the
+[upgrade and rollback procedure](../user/upgrading.md); do not rename or
+symlink version directories to simulate an upgrade.
 
-### Connect to Peers
+Copy only blocks valid under the private parameters. Do not copy a public
+peer cache or reuse a database from a previous incompatible test. A format
+upgrade preserves storage compatibility, not consensus compatibility.
 
-Make sure everyone can connect to each other. You can **use Tailscale** to do
-that. Everyone needs to send invites to everyone else. Note that being able to
-access someone's node does not imply that they can access yours, it needs to be
-enabled both ways.
+## Configure and connect participants
 
-### Choose an Activation Height
+Use the [isolated-network configuration](../user/fork-zebra-testnet.md#configure-the-isolated-network).
+Change its activation height, prefix cutoff, and checkpoints together.
 
-Choose an activation height with the other participants. It should be in
-the near future, but with enough time for people to set things up; something
-like 30 minutes in the future? For NU7, choose a height divisible by three, as
-required by ZIP 259.
+List participant endpoints in `[network] initial_testnet_peers`. Bind
+`[network] listen_addr` to the intended private interface, and allow traffic
+only between participants. A VPN or firewall supplies access control; network
+magic does not authenticate peers. Initial peers are discovery seeds, not a
+connection allowlist. Test reachability in each required direction.
 
-### Check Activation Heights Across Implementations
-
-Zebra passes its configured activation heights to librustzcash through its
-network parameters. Check that the other participating nodes and wallet SDKs
-also use the chosen private height rather than hard-coded public Testnet
-parameters. If an implementation does not support custom heights, use a test
-branch with the agreed height for that implementation.
-
-### Configure Zebra to use a custom testnet
-
-See the sample config below and [Custom Testnets](../user/custom-testnets.md).
-All participants must use the same custom name, distinct network magic, and
-activation heights. Custom consensus rules with public Testnet magic are
-rejected, even if the peer list contains only private addresses.
-
-List only the other participants in `initial_testnet_peers`; do not keep public
-DNS seeders. The sample disables peer caching with `network.cache_dir = false`.
-If enabling it, start with an empty private cache at
-`<network.cache_dir>/network/nu7private-00010007.peers`, not public
-`testnet.peers`. Restrict inbound access to the participants using your firewall
-or Tailscale policy; wire magic is not authentication.
-
-Keep historical consensus settings compatible with the copied snapshot. Supply
-checkpoints on the shared prefix, including genesis and coverage through at least
-Canopy minus one (1,028,499 for this sample), but none at or after the fork.
-From the Zebra source checkout, prepare the sample's checkpoint file:
-
-```sh
-awk '$1 < 4200000' zebra-chain/src/parameters/checkpoint/test-checkpoints.txt > nu7-private-checkpoints.txt
-```
-
-Replace `4200000` with the agreed fork height. Share the file with all
-participants, and run Zebra from the directory containing it or configure its
-absolute path. `checkpoints = true` is safe only if every bundled checkpoint is
-before the fork. Enable verbose logging to help debug the test, and enable
-mining on some participants.
-
-### Run Nodes
-
-Everyone runs their nodes, and checks if they connect to other nodes. You can use
-e.g. `curl --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method":
-"getpeerinfo", "params": [] }' -H 'Content-Type: application/json'
-http://127.0.0.1:8232` to check that. See "Getting Peers" section below.
-
-PoW-enabled private Testnets must finish synchronizing with their peers before
-`getblocktemplate` or the internal miner will produce work. Unlike Mainnet, they
-do not require a tip less than 125 minutes old: once synchronized, participants
-can resume mining from an old snapshot even if setup took longer than that.
-`rpc.debug_force_finished_sync` only changes `getblockchaininfo`; it does not
-bypass mining synchronization. Keep the participants on the same agreed tip
-and check peer connectivity if mining still reports that Zebra is not synced.
-
-### Wait Until Activation Happens
-
-And monitor logs for behaviour.
-
-### Do Tests
-
-Do tests, including sending transactions if possible (which will require the
-lightwalletd server). Check if whatever activated in the upgrade works.
-
-## Zebra
-
-Relevant information about Zebra for the testing process.
+Keep JSON-RPC on loopback unless another participant needs access. Retain
+[cookie authentication](../user/rpc.md#authentication) and use a protected
+transport for remote RPC access. Give each local process a distinct listener,
+state root, and cookie directory.
 
 ### Getting peers
 
-Use `getpeerinfo` as above to inspect connected peers. The sample disables peer
-caching, so it does not write a peers file. If `network.cache_dir = true`, the
-default Linux peer cache is
-`~/.cache/zebra/network/nu7private-00010007.peers` (or under
-`$XDG_CACHE_HOME/zebra` when set). A custom `network.cache_dir` replaces that
-root. The file contains cached addresses, not a list of current connections.
+Use the fork procedure's
+[authenticated RPC examples](../user/fork-zebra-testnet.md#mine-and-inspect-the-fork).
+Compare `getpeerinfo` on every node with the intended participants, then
+compare `getbestblockhash` and `getblockchaininfo`. Begin activation testing
+only when all nodes agree on the starting tip.
 
-### Unredact IPs
+If peer caching is enabled, the fork example's peer file is
+`network/nu7private-00010007.peers` below the configured network cache root.
+It contains cached addresses, not current connections; inspect connectivity
+through RPC, not by patching address-redaction code.
 
-Zebra redacts IPs when logging for privacy reasons. However, for a test like
-this it can be annoying. You can disable that by editing `peer_addr.rs`
-with something like
+## Produce blocks and exercise the transition
 
-```diff
---- a/zebra-network/src/meta_addr/peer_addr.rs
-+++ b/zebra-network/src/meta_addr/peer_addr.rs
-@@ -30,7 +30,7 @@ impl fmt::Display for PeerSocketAddr {
-         let ip_version = if self.is_ipv4() { "v4" } else { "v6" };
+Designate miners before starting the test. Proof-of-work-enabled private
+Testnets require synchronization before `getblocktemplate` returns work, but
+an old tip alone does not block mining as it does on Mainnet. The
+`[rpc] debug_force_finished_sync` setting only changes the synchronization
+status reported by `getblockchaininfo`; it does not bypass the mining check.
 
-         // The port is usually not sensitive, and it's useful for debugging.
--        f.pad(&format!("{}redacted:{}", ip_version, self.port()))
-+        f.pad(&format!("{}:{}", self.ip(), self.port()))
-     }
- }
-```
+For proof-of-work tests, use the [mining interface](../user/mining.md) or the
+experimental internal miner. The latter computes Equihash solutions; do not
+assume it produces blocks immediately. For consensus tests that deliberately
+exclude proof of work, agree on `disable_pow = true` and use `generate` or
+`generatetoaddress`. Record that limitation with the results.
 
-### Sample config file
+Exercise the agreed cases on both sides of activation:
 
-Replace the example NU7 height with the agreed future height; it is not a
-scheduled public activation. With this name and magic, the database path ends
-in `state/vN/nu7private-00010007` and the non-finalized backup path ends in
-`non_finalized_state/nu7private-00010007`. Keep old database deletion disabled
-while preparing and running the test so that backups are not removed.
+1. Confirm that nodes accept the same pre-activation blocks and transactions.
+2. Mine through activation and compare height, best-block hash, branch
+   identifier, and upgrade status on every implementation.
+3. Submit valid post-activation transactions and deliberately invalid cases
+   for the changed rules. Check both mempool admission and block validation.
+4. Test a restart and, when required by the test plan, a reorganization across
+   the boundary. Verify state and transaction behavior after recovery.
 
-The sample carries public Testnet's historical reserve seed into the copied
-chain. With NU7 at 4,200,000, ZIP 237 derives reissuance height 7,835,274.
-For an accelerated test, set `nsm_reissuance_height` explicitly and agree
-on that override across all participants.
+For NU7, include the
+[ZIP 218](https://zips.z.cash/zip-0218) spacing and shielded-action limits,
+[ZIP 235](https://zips.z.cash/zip-0235) aggregate fee contribution, and
+[ZIP 237](https://zips.z.cash/zip-0237) reserve and reissuance behavior. NU7
+activation and the reissuance height are distinct. Use an explicit
+`nsm_reissuance_height` if the accelerated schedule needs reissuance before
+its calculated crossover; every implementation must agree on the override.
 
-```toml
-[consensus]
-checkpoint_sync = true
+Preserve configuration, checkpoint checksums, tip hashes, transaction and block
+identifiers, and the relevant logs with the test results. Never publish private
+RPC cookies or copy the fork back into public Testnet state.
 
-[mempool]
-eviction_memory_time = "1h"
-tx_cost_limit = 80000000
-max_datacarrier_bytes = 83
+## Repository automation
 
-[metrics]
+The [Regtest suite](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/integration/regtest.rs)
+and [NU7 cases](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/integration/regtest/nu7.rs)
+cover templates, mempool transitions, funding, reserve accounting,
+reorganizations, and restarts locally, not multi-host private forks.
 
-[mining]
-miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
-# if you want to enable mining, which also requires selecting the `internal-miner` compilation feature
-internal_miner = true
-
-[network]
-# Only use explicitly configured participants; do not load a previous peer cache.
-cache_dir = false
-crawl_new_peer_interval = "1m 1s"
-
-initial_mainnet_peers = []
-
-initial_testnet_peers = [
-    # List the other participant's Tailscale IPs here.
-    "100.64.0.1:18233",
-]
-
-listen_addr = "0.0.0.0:18233"
-max_connections_per_ip = 1
-network = "Testnet"
-peerset_initial_target_size = 25
-
-[network.testnet_parameters]
-network_name = "Nu7Private"
-# Use the same distinct magic on every participant; do not use public Testnet magic.
-network_magic = [0, 1, 0, 7]
-checkpoints = "nu7-private-checkpoints.txt"
-initial_nsm_value_balance = 55_768_414_957
-
-[network.testnet_parameters.activation_heights]
-BeforeOverwinter = 1
-Overwinter = 207_500
-Sapling = 280_000
-Blossom = 584_000
-Heartwood = 903_800
-Canopy = 1_028_500
-NU5 = 1_842_420
-NU6 = 2_976_000
-"NU6.1" = 3_536_500
-"NU6.2" = 4_052_000
-"NU6.3" = 4_134_000
-# NU7 has no scheduled activation height yet; this is an example value.
-NU7 = 4_200_000
-
-[rpc]
-debug_force_finished_sync = false
-parallel_cpu_threads = 0
-listen_addr = "127.0.0.1:8232"
-indexer_listen_addr = "127.0.0.1:8231"
-
-[state]
-delete_old_database = false
-ephemeral = false
-
-[sync]
-checkpoint_verify_concurrency_limit = 1000
-download_concurrency_limit = 50
-full_verify_concurrency_limit = 20
-parallel_cpu_threads = 0
-
-[tracing]
-buffer_limit = 128000
-force_use_color = false
-use_color = true
-use_journald = false
-# This enables debug network logging. It can be useful but it's very verbose!
-filter = 'info,zebra_network=debug'
-```
+The [zcashd-compat Regtest workflow](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zcashd-compat-regtest.yml)
+runs `make compat-test-regtest` with a pinned zcashd binary. Follow its
+preparation steps: stock zcashd rejects Zebra's null-proof-of-work Regtest
+blocks. This sidecar suite does not rehearse a public-Testnet activation.

@@ -18,7 +18,10 @@ use futures::{
     future::{FutureExt, TryFutureExt},
     stream::Stream,
 };
-use tokio::sync::oneshot::{self, error::TryRecvError};
+use tokio::sync::{
+    oneshot::{self, error::TryRecvError},
+    Semaphore,
+};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
 use zebra_network::{self as zn, PeerSocketAddr};
@@ -26,8 +29,10 @@ use zebra_state::{self as zs};
 
 use zebra_chain::{
     block::{self, Block},
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
+    transparent,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
 use zebra_network::{AddressBook, InventoryResponse, MAX_TX_INV_IN_SENT_MESSAGE};
@@ -227,6 +232,18 @@ pub struct Inbound {
     ///
     /// Some services are unavailable until Zebra has completed setup.
     setup: Setup,
+
+    /// Submitted bodies published by trusted state validation, available before commit completes.
+    submitted_blocks: zebra_rpc::SubmittedBlockCache,
+
+    /// Authenticated uncommitted bodies, available only on negotiated early-relay connections.
+    early_blocks: Option<zs::EarlyRelayCache>,
+
+    /// Read-only context for compact reconstruction; absent until explicitly configured.
+    compact_relay: Option<(Network, zs::ReadStateService)>,
+
+    /// Bounds mempool scans and detached blocking checks across all peer connections.
+    compact_checks: Arc<Semaphore>,
 }
 
 impl Inbound {
@@ -242,7 +259,32 @@ impl Inbound {
                 full_verify_concurrency_limit,
                 setup,
             },
+            submitted_blocks: Default::default(),
+            early_blocks: None,
+            compact_relay: None,
+            compact_checks: Arc::new(Semaphore::new(3)),
         }
+    }
+
+    /// Shares the cache populated by trusted validated-body notifications with the RPC service.
+    ///
+    /// Merely submitting or authenticating a block does not make it available here. Cache misses
+    /// continue through the ordinary state lookup.
+    pub fn with_submitted_blocks(mut self, cache: zebra_rpc::SubmittedBlockCache) -> Self {
+        self.submitted_blocks = cache;
+        self
+    }
+
+    /// Shares authenticated bodies with explicitly opted-in peer connections.
+    pub fn with_early_blocks(mut self, cache: Option<zs::EarlyRelayCache>) -> Self {
+        self.early_blocks = cache;
+        self
+    }
+
+    /// Provides committed-tip context for negotiated compact reconstruction, without publishing it.
+    pub fn with_compact_relay(mut self, network: Network, state: zs::ReadStateService) -> Self {
+        self.compact_relay = Some((network, state));
+        self
     }
 
     /// Remove `self.setup`, temporarily replacing it with an invalid state.
@@ -444,7 +486,22 @@ impl Service<zn::Request> for Inbound {
             }
         };
 
+        let early_relay = matches!(req, zn::Request::EarlyBlocksByHash(_));
         match req {
+            req @ (zn::Request::CheckCompactHeader(_) | zn::Request::CompactBlockTransactions(_) | zn::Request::CheckCompactBlock(_)) => {
+                let Some((network, read_state)) = self.compact_relay.clone() else {
+                    return async { Err("compact relay context is unavailable".into()) }.boxed();
+                };
+                let mempool = mempool.clone();
+                let slots = self.compact_checks.clone();
+                tokio::time::timeout(
+                    MAX_INBOUND_RESPONSE_TIME,
+                    compact_request(req, network, read_state, mempool, slots),
+                ).map(|result| match result {
+                    Ok(response) => response,
+                    Err(error) => Err(error.into()),
+                }).boxed()
+            }
             zn::Request::Peers => {
                 // # Security
                 //
@@ -463,7 +520,7 @@ impl Service<zn::Request> for Inbound {
                     Ok(response)
                 }.boxed()
             }
-            zn::Request::BlocksByHash(hashes) => {
+            zn::Request::BlocksByHash(hashes) | zn::Request::EarlyBlocksByHash(hashes) => {
                 // We return an available or missing response to each inventory request,
                 // unless the request is empty, or it reaches a response limit.
                 if hashes.is_empty() {
@@ -471,10 +528,13 @@ impl Service<zn::Request> for Inbound {
                 }
 
                 let state = state.clone();
+                let submitted_blocks = self.submitted_blocks.clone();
+                let early_blocks = if early_relay { self.early_blocks.clone() } else { None };
 
                 async move {
                     let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
                     let mut total_size = 0;
+                    let mut early_hashes = HashSet::new();
 
                     // Ignore any block hashes past the response limit.
                     // This saves us expensive database lookups.
@@ -485,7 +545,16 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?;
+                        let cached = submitted_blocks.get(&hash).or_else(|| {
+                            let block = early_blocks.as_ref()?.get(&hash)?;
+                            early_hashes.insert(hash);
+                            Some(block)
+                        });
+                        let response = if let Some(block) = cached {
+                            zs::Response::Block(Some(block))
+                        } else {
+                            state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?
+                        };
 
                         // Add the block responses to the list, while updating the size limit.
                         //
@@ -510,7 +579,19 @@ impl Service<zn::Request> for Inbound {
 
                     // The network layer handles splitting this response into multiple `block`
                     // messages, and a `notfound` message if needed.
-                    Ok(zn::Response::Blocks(blocks))
+                    Ok(if early_hashes.is_empty() {
+                        zn::Response::Blocks(blocks)
+                    } else {
+                        let cache = early_blocks.expect("early bodies came from this cache");
+                        zn::Response::AuthorizedBlocks {
+                            blocks,
+                            authorization: zn::BlockAuthorization::new(move |block| {
+                                let hash = block.hash();
+                                !early_hashes.contains(&hash)
+                                    || cache.get(&hash).is_some_and(|live| Arc::ptr_eq(&live, block))
+                            }),
+                        }
+                    })
                 }.boxed()
             }
             zn::Request::TransactionsById(req_tx_ids) => {
@@ -630,6 +711,19 @@ impl Service<zn::Request> for Inbound {
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()
             }
+            zn::Request::AdvertiseCompactBlock(hash, advertiser) => {
+                let admitted = matches!(
+                    block_downloads.download_and_verify(hash, advertiser),
+                    downloads::DownloadAction::AddedToQueue
+                );
+                async move {
+                    if admitted {
+                        Ok(zn::Response::Nil)
+                    } else {
+                        Err("compact advertisement was not admitted".into())
+                    }
+                }.boxed()
+            }
             zn::Request::AdvertiseBlock(hash, advertiser) => {
                 block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
@@ -646,11 +740,140 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request"),
+            zn::Request::AdvertiseBlockToAll(_) | zn::Request::AdvertiseEarlyBlock(_) =>
+                unreachable!("should always be decoded as `AdvertiseBlock` request"),
 
             zn::Request::BlockDownload { .. } => unreachable!("peers never send outbound block downloads"),
 
             zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
+}
+
+/// Screens compact requests without publishing bodies or caching probabilistic failure verdicts.
+async fn compact_request(
+    req: zn::Request,
+    network: Network,
+    read_state: zs::ReadStateService,
+    mempool: Mempool,
+    slots: Arc<Semaphore>,
+) -> Result<zn::Response, BoxError> {
+    let permit = Arc::new(slots.try_acquire_owned()?);
+    let header_only = matches!(req, zn::Request::CheckCompactHeader(_));
+    match req {
+        zn::Request::CheckCompactHeader(compact)
+        | zn::Request::CompactBlockTransactions(compact) => {
+            let checked = compact.clone();
+            let worker_permit = permit.clone();
+            let height = tokio::task::spawn_blocking(move || {
+                let _permit = worker_permit;
+                screen_compact_header(&checked, &network)
+            })
+            .await??;
+            let response = read_state
+                .oneshot(zs::ReadRequest::CheckBestTipHeader {
+                    header: compact.header.clone(),
+                    height,
+                })
+                .await?;
+            assert!(matches!(response, zs::ReadResponse::ValidBestTipHeader));
+            if header_only {
+                return Ok(zn::Response::Nil);
+            }
+            if compact.short_ids.is_empty() {
+                return Ok(zn::Response::CompactBlockTransactions(Vec::new()));
+            }
+            // Boxed: without type erasure the inbound response future fails a higher-ranked
+            // lifetime check on the error type.
+            let mempool::Response::TransactionIds(ids) = mempool
+                .clone()
+                .oneshot(mempool::Request::TransactionIds)
+                .boxed()
+                .await?
+            else {
+                unreachable!("transaction ID requests return transaction IDs");
+            };
+            let worker_permit = permit.clone();
+            let ids = tokio::task::spawn_blocking(move || {
+                let _permit = worker_permit;
+                compact.matching_ids(ids)
+            })
+            .await?;
+            let mempool::Response::Transactions(transactions) = mempool
+                .oneshot(mempool::Request::TransactionsById(ids))
+                .boxed()
+                .await?
+            else {
+                unreachable!("exact transaction lookups return transactions");
+            };
+            let bytes = transactions
+                .iter()
+                .fold(0usize, |bytes, tx| bytes.saturating_add(tx.size));
+            if u64::try_from(bytes).unwrap_or(u64::MAX) > block::MAX_BLOCK_BYTES {
+                return Err("compact candidates exceed the block byte limit".into());
+            }
+            Ok(zn::Response::CompactBlockTransactions(transactions))
+        }
+        zn::Request::CheckCompactBlock(block) => {
+            let checked = block.clone();
+            let worker_permit = permit.clone();
+            tokio::task::spawn_blocking(move || {
+                let _permit = worker_permit;
+                if u64::try_from(checked.zcash_serialized_size()).unwrap_or(u64::MAX)
+                    > block::MAX_BLOCK_BYTES
+                {
+                    return Err("compact body exceeds the block byte limit".into());
+                }
+                zebra_consensus::coinbase_is_first(&checked)?;
+                let hashes = checked
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash())
+                    .collect::<Vec<_>>();
+                zebra_consensus::merkle_root_validity(&network, &checked, &hashes)?;
+                Ok::<_, BoxError>(())
+            })
+            .await??;
+            let response = read_state
+                .oneshot(zs::ReadRequest::CheckBestTipBlockCommitments(block))
+                .await?;
+            assert!(matches!(
+                response,
+                zs::ReadResponse::ValidBestTipBlockCommitments
+            ));
+            Ok(zn::Response::Nil)
+        }
+        _ => unreachable!("only compact requests enter compact screening"),
+    }
+}
+
+/// Rejects malformed or unauthenticated headers before exposing local mempool membership.
+fn screen_compact_header(
+    compact: &zn::compact::CompactBlock,
+    network: &Network,
+) -> Result<block::Height, BoxError> {
+    compact.validate()?;
+    let height = compact.prefilled[0]
+        .1
+        .inputs()
+        .into_iter()
+        .next()
+        .and_then(|input| match input {
+            transparent::Input::Coinbase { height, .. } => Some(height),
+            _ => None,
+        })
+        .ok_or("compact coinbase has no height")?;
+    if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu5 {
+        return Err("compact authentication requires NU5 commitments".into());
+    }
+    let hash = compact.block_hash();
+    let header = &compact.header;
+    header.time_is_valid_at(chrono::Utc::now(), &height, &hash)?;
+    if network.disable_pow() {
+        zebra_consensus::difficulty_threshold_is_valid(header, network, &height, &hash)?;
+    } else {
+        zebra_consensus::difficulty_is_valid(header, network, &height, &hash)?;
+        zebra_consensus::equihash_solution_is_valid(header)?;
+    }
+    Ok(height)
 }

@@ -6,11 +6,15 @@ use crate::BoxError;
 
 mod cache;
 pub mod ed25519;
+pub(crate) mod flush;
 pub mod groth16;
 pub mod halo2;
 pub mod redjubjub;
 pub mod redpallas;
 pub mod sapling;
+
+#[cfg(test)]
+mod tests;
 
 /// The maximum batch size for any of the batch verifiers.
 const MAX_BATCH_SIZE: usize = 64;
@@ -18,8 +22,17 @@ const MAX_BATCH_SIZE: usize = 64;
 /// The maximum latency bound for any of the batch verifiers.
 const MAX_BATCH_LATENCY: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// The idle bound for all batch verifiers.
+///
+/// Five milliseconds accommodates microsecond-spaced bursts; continuous input extends the batch
+/// until the size or latency bound, preserving batching during sync.
+/// Completed block transaction queueing explicitly flushes partial shielded batches sooner.
+const MAX_BATCH_IDLE: std::time::Duration = std::time::Duration::from_millis(5);
+
 /// Fires off a task into the Rayon threadpool, awaits the result through a oneshot channel,
 /// then converts the error to a [`BoxError`].
+///
+/// Dropping the future skips work that has not started; running work finishes normally.
 pub async fn spawn_fifo_and_convert<
     E: 'static + std::error::Error + Into<BoxError> + Sync + Send,
     F: 'static + FnOnce() -> Result<(), E> + Send,
@@ -35,6 +48,8 @@ pub async fn spawn_fifo_and_convert<
 }
 
 /// Fires off a task into the Rayon threadpool and awaits the result through a oneshot channel.
+///
+/// Dropping the future skips work that has not started; running work finishes normally.
 pub async fn spawn_fifo<T: 'static + Send, F: 'static + FnOnce() -> T + Send>(
     f: F,
 ) -> Result<T, RecvError> {
@@ -43,7 +58,9 @@ pub async fn spawn_fifo<T: 'static + Send, F: 'static + FnOnce() -> T + Send>(
     let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();
 
     rayon::spawn_fifo(move || {
-        let _ = rsp_tx.send(f());
+        if !rsp_tx.is_closed() {
+            let _ = rsp_tx.send(f());
+        }
     });
 
     rsp_rx.await

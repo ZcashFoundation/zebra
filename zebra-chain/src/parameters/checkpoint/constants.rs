@@ -1,5 +1,15 @@
 //! Constants shared by some Zebra node services.
 
+/// The expected maximum number of hashes in an `ObtainTips` or `ExtendTips` response.
+///
+/// Shared by synchronization and checkpoint admission so their pipeline bounds agree.
+pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
+
+/// The default number of blocks submitted concurrently for checkpoint verification.
+///
+/// Two tips-response batches keep several checkpoint ranges in the download and commit pipeline.
+pub const DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT: usize = MAX_TIPS_RESPONSE_HASH_COUNT * 2;
+
 /// We limit the maximum number of blocks in each checkpoint. Each block uses a
 /// constant amount of memory for the supporting data structures and futures.
 ///

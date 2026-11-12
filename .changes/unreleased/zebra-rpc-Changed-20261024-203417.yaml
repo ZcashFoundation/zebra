@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Changed the default return value of `chain_tip_difficulty()` to `1.0` when state queries fail.
+time: 2026-10-24T20:34:17.016092535+02:00

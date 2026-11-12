@@ -59,6 +59,8 @@ rayon = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
+sha2 = { workspace = true }
+siphasher = { workspace = true }
 thiserror = { workspace = true }
 
 futures = { workspace = true }

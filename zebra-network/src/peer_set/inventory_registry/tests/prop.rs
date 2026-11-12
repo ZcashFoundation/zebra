@@ -78,8 +78,13 @@ async fn inv_registry_inbound_wrapper_with(
 
     let (mut inv_registry, inv_stream_tx) = new_inv_registry();
 
-    let forwarded_msg =
-        register_inventory_status(Ok(test_msg.clone()), test_peer, inv_stream_tx.clone()).await;
+    let forwarded_msg = register_inventory_status(
+        Ok(test_msg.clone()),
+        test_peer,
+        false,
+        inv_stream_tx.clone(),
+    )
+    .await;
     assert_eq!(
         test_msg.clone(),
         forwarded_msg.expect("unexpected forwarded error result"),

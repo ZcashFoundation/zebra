@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Avoid orphan indexing for commit-ready blocks and unused pending-UTXO copies ([#11988](https://github.com/ZcashFoundation/zebra/issues/11988)).
+time: 2026-10-24T04:24:24.969336549+02:00

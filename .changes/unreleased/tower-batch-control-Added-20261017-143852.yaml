@@ -1,0 +1,4 @@
+project: tower-batch-control
+kind: Added
+body: Added bounded, ordered explicit batch flushing with `Batch::try_flush()`.
+time: 2026-10-17T14:38:52.326945758+02:00

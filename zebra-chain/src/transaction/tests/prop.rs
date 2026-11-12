@@ -48,6 +48,49 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 }
 
 proptest! {
+    /// Borrowed prevouts preserve input order and omit coinbase inputs in every transaction version.
+    #[test]
+    fn spent_outpoints_match_converted_inputs(
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with)
+    ) {
+        let expected: Vec<_> = tx.inputs().iter().filter_map(transparent::Input::outpoint).collect();
+        prop_assert_eq!(tx.spent_outpoints().collect::<Vec<_>>(), expected);
+        let empty = tx.with_transparent_inputs(Vec::new()).with_transparent_outputs(Vec::new());
+        prop_assert_eq!(empty.spent_outpoints().next(), None);
+    }
+
+    /// Borrowed plain and ordered lookups preserve the old output-map accounting and errors.
+    #[test]
+    fn borrowed_value_balances_match_owned_outputs(
+        tx in (1..=6u32)
+            .prop_flat_map(|version|
+                LedgerState::network_upgrade_strategy(NetworkUpgrade::Nu6_3, version, true))
+            .prop_flat_map(Transaction::arbitrary_with),
+        value in any::<Amount<NonNegative>>(),
+    ) {
+        let output = transparent::Output::new(value, transparent::Script::new(&[0; 1024]));
+        let outputs: std::collections::HashMap<_, _> = tx.inputs().iter()
+            .filter_map(transparent::Input::outpoint)
+            .map(|outpoint| (outpoint, output.clone())).collect();
+        let plain: std::collections::HashMap<_, _> = outputs.iter().map(|(outpoint, output)| {
+            (*outpoint, transparent::Utxo::new(output.clone(), block::Height(1), false))
+        }).collect();
+        let ordered: std::collections::HashMap<_, _> = plain.iter().map(|(outpoint, utxo)| {
+            (*outpoint, transparent::OrderedUtxo::from_utxo(utxo.clone(), 0))
+        }).collect();
+        let transparent = super::allocating_transparent_value_balance(&tx, &outputs);
+        prop_assert_eq!(tx.transparent_value_balance_from_outputs(&outputs), transparent.clone());
+        let expected = transparent.and_then(|transparent| {
+            transparent + tx.sprout_value_balance()? + tx.sapling_value_balance()
+                + tx.orchard_value_balance() + tx.ironwood_value_balance()
+        });
+        prop_assert_eq!(tx.value_balance(&plain), expected.clone());
+        prop_assert_eq!(tx.value_balance(&ordered), expected);
+    }
+
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
         let _init_guard = zebra_test::init();

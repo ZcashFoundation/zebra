@@ -23,7 +23,11 @@ use std::{
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    util::{BoxCloneService, BoxService},
+    Service, ServiceExt,
+};
 use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
@@ -35,9 +39,10 @@ use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
-    block::{Request, SemanticBlockVerifier, VerifyBlockError},
+    block::{PreparedBlockCache, Request, SemanticBlockVerifier, VerifyBlockError},
     checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
+    primitives::halo2,
     transaction, BoxError, Config,
 };
 
@@ -62,6 +67,8 @@ const VERIFIER_BUFFER_BOUND: usize = 5;
 
 /// The block verifier router routes requests to either the checkpoint verifier or the
 /// semantic block verifier, depending on the maximum checkpoint height.
+/// Locally mined blocks use the same checkpoint policy, carrying their notifications to the
+/// state writer on either path. Checkpoint verification never publishes early validated events.
 ///
 /// # Correctness
 ///
@@ -134,6 +141,22 @@ impl From<VerifyBlockError> for RouterError {
 }
 
 impl RouterError {
+    /// Returns `true` when local retention pressure permits retrying the same body without
+    /// downloading it again.
+    ///
+    /// These operational failures do not establish that the block or its serving peer is invalid.
+    pub fn is_resource_pressure(&self) -> bool {
+        match self {
+            RouterError::Checkpoint { source } => {
+                matches!(**source, VerifyCheckpointError::QueuedLimit)
+            }
+            RouterError::Block { source } => matches!(
+                **source,
+                VerifyBlockError::Commit(zebra_state::CommitBlockError::OrphanQueueFull)
+            ),
+        }
+    }
+
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
@@ -160,8 +183,7 @@ impl RouterError {
     /// See [`zebra_state::ValidateContextError::is_descendant_of_auth_commitment_mismatch()`].
     pub fn is_descendant_of_auth_commitment_mismatch(&self) -> bool {
         match self {
-            // The finalized state drops the descendants of a failed block instead of
-            // rejecting them with an error.
+            // The checkpoint verifier requeues unchecked children itself.
             RouterError::Checkpoint { .. } => false,
             RouterError::Block { source, .. } => source.is_descendant_of_auth_commitment_mismatch(),
         }
@@ -231,9 +253,22 @@ where
                 .boxed()
             }
 
-            Some(height) if height <= self.max_checkpoint_height => {
-                self.checkpoint.call(block).map_err(Into::into).boxed()
-            }
+            Some(height) if height <= self.max_checkpoint_height => match request {
+                Request::CommitMined(_, notifications)
+                | Request::CommitDecoded(_, Some(notifications)) => self
+                    .checkpoint
+                    .verify(block, Some(notifications))
+                    .map_err(Into::into)
+                    .boxed(),
+                Request::Commit(_)
+                | Request::CommitEarlyRelay(_)
+                | Request::CommitDecoded(_, None) => {
+                    self.checkpoint.call(block).map_err(Into::into).boxed()
+                }
+                Request::CheckProposal(_) => {
+                    unreachable!("proposals below the checkpoint were rejected")
+                }
+            },
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
             _ => self.block.call(request).map_err(Into::into).boxed(),
@@ -244,8 +279,8 @@ where
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, mempool transaction verifier,
-/// a [`BackgroundTaskHandles`] with the state checkpoint verify task,
-/// and the maximum configured checkpoint verification height.
+/// a [`BackgroundTaskHandles`] with the state checkpoint and Halo2 key preload tasks,
+/// the maximum configured checkpoint verification height, and the shared prepared-block decoder.
 ///
 /// The consensus configuration is specified by `config`, and the Zcash network
 /// to verify blocks for is specified by `network`.
@@ -256,6 +291,12 @@ where
 ///
 /// The transaction verification service asynchronously performs semantic verification
 /// checks. Transactions that pass semantic verification return an `Ok` result to the caller.
+/// Mempool state queries use `read_state_service` directly, without the state writer's buffer.
+/// The optional `block_mempool` channel enables reuse of same-epoch verified transactions.
+/// Both mempool handles must refer to the mempool using this network and these verifiers.
+///
+/// Key construction runs on a blocking worker without delaying initialization. Requests arriving
+/// before it finishes can still wait for their era's key. The keys retain roughly 2 MiB of heap.
 ///
 /// This function should only be called once for a particular state service.
 ///
@@ -263,15 +304,21 @@ where
 ///
 /// # Correctness
 ///
+/// Both state services must refer to the same chain state.
+///
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
-#[instrument(skip(state_service, mempool))]
-pub async fn init<S, Mempool>(
+#[instrument(skip(state_service, read_state_service, mempool, block_mempool))]
+pub async fn init<S, ReadState, Mempool>(
     config: Config,
     network: &Network,
-    mut state_service: S,
+    state_service: S,
+    read_state_service: ReadState,
     mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -280,10 +327,63 @@ pub async fn init<S, Mempool>(
     >,
     BackgroundTaskHandles,
     Height,
+    PreparedBlockCache,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
+{
+    init_with_preload_handle(
+        config,
+        network,
+        state_service,
+        read_state_service,
+        mempool,
+        block_mempool,
+        halo2::spawn_key_preload(),
+    )
+    .await
+}
+
+/// Initializes verifier services with the caller's key preload task.
+async fn init_with_preload_handle<S, ReadState, Mempool>(
+    config: Config,
+    network: &Network,
+    mut state_service: S,
+    read_state_service: ReadState,
+    mempool: oneshot::Receiver<Mempool>,
+    block_mempool: Option<
+        oneshot::Receiver<BoxCloneService<mempool::Request, mempool::Response, BoxError>>,
+    >,
+    halo2_key_preload_handle: JoinHandle<()>,
+) -> (
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<
+        BoxService<transaction::MempoolRequest, transaction::MempoolResponse, TransactionError>,
+        transaction::MempoolRequest,
+    >,
+    BackgroundTaskHandles,
+    Height,
+    PreparedBlockCache,
+)
+where
+    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
     Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
         + Send
         + Clone
@@ -379,7 +479,7 @@ where
     let block_transaction = Buffer::new(BoxService::new(block_transaction), VERIFIER_BUFFER_BOUND);
 
     let mempool_transaction =
-        transaction::MempoolTxVerifier::new(network, state_service.clone(), mempool);
+        transaction::MempoolTxVerifier::new(network, read_state_service, mempool);
     let mempool_transaction =
         Buffer::new(BoxService::new(mempool_transaction), VERIFIER_BUFFER_BOUND);
 
@@ -405,6 +505,11 @@ where
 
     let block =
         SemanticBlockVerifier::new(network, state_service.clone(), block_transaction.clone());
+    let block = match block_mempool {
+        Some(receiver) => block.with_mempool(receiver),
+        None => block,
+    };
+    let prepared_blocks = block.prepared_blocks();
     let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
     let router = BlockVerifierRouter {
         checkpoint,
@@ -416,6 +521,7 @@ where
 
     let task_handles = BackgroundTaskHandles {
         state_checkpoint_verify_handle,
+        halo2_key_preload_handle,
     };
 
     (
@@ -423,6 +529,7 @@ where
         mempool_transaction,
         task_handles,
         max_checkpoint_height,
+        prepared_blocks,
     )
 }
 
@@ -449,16 +556,22 @@ pub struct BackgroundTaskHandles {
     /// A handle to the state checkpoint verify task.
     /// Finishes when all the checkpoints are verified, or when the state tip is reached.
     pub state_checkpoint_verify_handle: JoinHandle<()>,
+
+    /// A handle to background construction of the existing Halo2 verifying keys.
+    /// Finishes after initializing the NU6.3 key, then both historical keys.
+    /// Once started, this blocking task cannot be aborted.
+    pub halo2_key_preload_handle: JoinHandle<()>,
 }
 
-/// Calls [`init`] with a closed mempool setup channel for conciseness in tests.
+/// Initializes test verifiers with a closed mempool channel, leaving Halo2 keys lazy.
 ///
 /// See [`init`] for more details.
 #[cfg(any(test, feature = "proptest-impl"))]
-pub async fn init_test<S>(
+pub async fn init_test<S, ReadState>(
     config: Config,
     network: &Network,
     state_service: S,
+    read_state_service: ReadState,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -467,19 +580,28 @@ pub async fn init_test<S>(
     >,
     BackgroundTaskHandles,
     Height,
+    PreparedBlockCache,
 )
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    ReadState: Service<zs::ReadRequest, Response = zs::ReadResponse, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    ReadState::Future: Send + 'static,
 {
-    init(
+    init_with_preload_handle(
         config.clone(),
         network,
         state_service.clone(),
+        read_state_service,
         oneshot::channel::<
             Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
         >()
         .1,
+        None,
+        tokio::spawn(std::future::ready(())),
     )
     .await
 }

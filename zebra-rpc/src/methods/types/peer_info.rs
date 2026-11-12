@@ -21,6 +21,9 @@ pub struct PeerInfo {
     /// Inbound (true) or Outbound (false)
     pub(crate) inbound: bool,
 
+    /// The starting block height advertised by the peer, or -1 if unknown.
+    pub(crate) startingheight: i32,
+
     /// The ban score for misbehavior
     pub(crate) banscore: u32,
 
@@ -66,11 +69,18 @@ impl PeerInfo {
 
         let version = meta_addr.negotiated_version().map(|v| v.0).unwrap_or(0);
 
+        // The version codec stores these bits as u32, but zcashd reports the signed wire value.
+        let startingheight = meta_addr
+            .start_height()
+            .map(|height| i32::from_le_bytes(height.0.to_le_bytes()))
+            .unwrap_or(-1);
+
         Self {
             addr: meta_addr.addr(),
             services,
             lastrecv,
             inbound: meta_addr.is_inbound(),
+            startingheight,
             banscore,
             subver,
             version,
@@ -88,6 +98,7 @@ impl Default for PeerInfo {
             services: "0000000000000000".to_string(),
             lastrecv: 0,
             inbound: false,
+            startingheight: -1,
             banscore: 0,
             subver: String::new(),
             version: 0,

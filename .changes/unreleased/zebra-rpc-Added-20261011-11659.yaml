@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: "Added `RpcImpl::{internal_mining_is_enabled, read_committed_tip}` for internal-miner eligibility and authoritative committed-tip reads ([#11659](https://github.com/ZcashFoundation/zebra/pull/11659))."
+time: 2026-10-11T00:00:00Z

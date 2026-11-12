@@ -1,3 +1,16 @@
+# Async Rust in Zebra
+
+Status (Zebra 7.0.0): **Partially implemented**.
+
+Code: the [Tokio component](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/tokio.rs), [consensus router](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/router.rs), and [batch-control crate](https://github.com/ZcashFoundation/zebra/tree/main/tower-batch-control).
+
+- CPU-bound crypto uses [Rayon with oneshot responses](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/primitives.rs); Tokio runs async tasks and blocking I/O.
+- The `ChainVerifier` example corresponds to `BlockVerifierRouter`.
+- The [removed client](0009-zebra-client.md) does not justify current buffer bounds.
+- The [`IS_SHUTTING_DOWN` atomic](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/shutdown.rs) still uses `SeqCst`; the proposed replacement is absent.
+
+---
+
 - Feature Name: async_rust_in_zebra
 - Start Date: 2021-03-30
 - Design PR: [ZcashFoundation/zebra#1965](https://github.com/ZcashFoundation/zebra/pull/1965)
@@ -504,6 +517,8 @@ The reference section contains in-depth information about concurrency in Zebra:
 
 Most Zebra designs or code changes will only touch on one or two of these areas.
 
+<a id="cancellation-safe"></a>
+
 ## After an await, the rest of the Future might not be run
 
 [cancellation-safe]: #cancellation-safe
@@ -522,6 +537,8 @@ In particular, [`FutureExt::now_or_never`](https://docs.rs/futures/0.3.17/future
 So even if the future or service passed to `now_or_never` is cloned,
 the task won't be awoken when it is ready again.
 
+<a id="starvation"></a>
+
 ## Task starvation
 
 [starvation]: #starvation
@@ -539,6 +556,8 @@ There are a few different ways to avoid task starvation:
 
 - run the operation on another thread using [`spawn_blocking`](https://docs.rs/tokio/1.15.0/tokio/task/fn.spawn_blocking.html) or [`block_in_place`](https://docs.rs/tokio/1.15.0/tokio/task/fn.block_in_place.html)
 - [manually yield using `yield_now`](https://docs.rs/tokio/1.15.0/tokio/task/fn.yield_now.html)
+
+<a id="poll-pending-and-wakeups"></a>
 
 ## `Poll::Pending` and Wakeups
 
@@ -588,6 +607,8 @@ In these cases:
 > and only lock the mutex inside these methods
 
 For more details, see [the tokio documentation](https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use).
+
+<a id="acquiring-buffer-slots-mutexes-readiness"></a>
 
 ## Acquiring Buffer Slots, Mutexes, or Readiness
 
@@ -739,6 +760,8 @@ mapping all arguments to the same type.)
 The `futures::select` `Either` return type is complex, particularly when nested. This
 makes code hard to read and maintain. Map the `Either` to a custom enum.
 
+<a id="replacing-atomics"></a>
+
 ## Replacing Atomics with Channels
 
 [replacing-atomics]: #replacing-atomics
@@ -814,7 +837,7 @@ Zebra uses the following crates for monitoring and diagnostics:
 
 - [tracing](https://tracing.rs/tracing/): tracing events, spans, logging
 - [tracing-futures](https://docs.rs/tracing-futures/): future and async function instrumentation
-- [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
+- [metrics](https://docs.rs/metrics/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
 
 These introspection tools are also useful during testing:
 

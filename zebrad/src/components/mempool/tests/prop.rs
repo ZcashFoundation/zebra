@@ -9,7 +9,7 @@ use proptest_derive::Arbitrary;
 
 use chrono::Duration;
 use tokio::time;
-use tower::{buffer::Buffer, util::BoxService};
+use tower::{buffer::Buffer, util::BoxService, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block},
@@ -36,8 +36,8 @@ use crate::components::{
 /// A [`MockService`] representing the network service.
 type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
 
-/// A [`MockService`] representing the Zebra state service.
-type MockState = MockService<zs::Request, zs::Response, PropTestAssertion>;
+/// A [`MockService`] representing the read-only Zebra state service.
+type MockState = MockService<zs::ReadRequest, zs::ReadResponse, PropTestAssertion>;
 
 /// A [`MockService`] representing the Zebra transaction verifier service.
 type MockTxVerifier =
@@ -412,6 +412,69 @@ proptest! {
     }
 }
 
+#[tokio::test]
+async fn mempool_downloads_bypass_state_writer() {
+    time::timeout(time::Duration::from_secs(5), async {
+        let network = Network::Mainnet;
+        let (mut mempool, mut peers, mut read_state, mut verifier, mut recent_syncs, _tip_sender) =
+            setup(&network);
+        mempool.enable(&mut recent_syncs).await;
+        let transaction = network
+            .unmined_transactions_in_blocks(1..=1)
+            .next()
+            .expect("mainnet vectors contain a transaction");
+        let response = (&mut mempool)
+            .oneshot(crate::components::mempool::Request::Queue(vec![
+                transaction.transaction.clone().into(),
+            ]))
+            .await
+            .expect("an enabled mempool accepts queue requests");
+        let crate::components::mempool::Response::Queued(queued) = response else {
+            panic!("Queue must return Queued");
+        };
+        assert_eq!(queued.len(), 1);
+        assert!(queued[0].is_ok());
+
+        read_state
+            .expect_request(zs::ReadRequest::Transaction(
+                transaction.transaction.id.mined_id(),
+            ))
+            .await
+            .expect("downloads check mined transactions on the read service")
+            .respond(zs::ReadResponse::Transaction(None));
+        read_state
+            .expect_request(zs::ReadRequest::Tip)
+            .await
+            .expect("downloads obtain the verification height from the read service")
+            .respond(zs::ReadResponse::Tip(Some((
+                block::Height(0),
+                block::Hash([0; 32]),
+            ))));
+        verifier
+            .expect_request(tx::MempoolRequest {
+                transaction: transaction.transaction.clone(),
+                height: block::Height(1),
+            })
+            .await
+            .expect("the transaction reaches verification without querying the state writer")
+            .respond(tx::MempoolResponse {
+                transaction,
+                spent_mempool_outpoints: Vec::new(),
+            });
+        while mempool.tx_downloads().in_flight() > 0 {
+            mempool.dummy_call().await;
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(mempool.storage().transaction_count(), 1);
+        peers
+            .expect_no_requests()
+            .await
+            .expect("pushed transactions need no download");
+    })
+    .await
+    .expect("read-only mempool admission completes within the test timeout");
+}
+
 fn genesis_chain_tip() -> Option<ChainTipBlock> {
     zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
         .zcash_deserialize_into::<Arc<Block>>()
@@ -440,14 +503,20 @@ fn setup(
         ChainTipSender::new(None, network);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mempool_transaction_subscriber) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber, _transaction_verified) = Mempool::new(
         network,
         &Config {
             tx_cost_limit: 160_000_000,
             ..Default::default()
         },
         Buffer::new(BoxService::new(peer_set.clone()), 1),
-        Buffer::new(BoxService::new(state_service.clone()), 1),
+        Buffer::new(
+            BoxService::new(tower::service_fn(|_: zs::Request| async {
+                unreachable!("mempool reads must bypass the state writer")
+            })),
+            1,
+        ),
+        tower::util::BoxCloneService::new(state_service.clone()),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
