@@ -61,6 +61,9 @@ mod eligibility_reviews;
 #[path = "early_relay.rs"]
 mod early_relay;
 
+#[path = "tree_roots.rs"]
+mod tree_roots;
+
 #[test]
 fn peer_set_ready_single_connection() {
     // We are going to use just one peer version in this test

@@ -29,6 +29,7 @@ mod compact_relay;
 mod prop;
 mod readiness;
 mod recovery_deadline;
+mod tree_roots;
 mod vectors;
 
 /// Creates a new [`Connection`] instance for testing.
