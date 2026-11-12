@@ -22,7 +22,8 @@ Nothing records what a signal is: its name, kind, unit, labels, and meaning live
 | Dashboards query `process_resident_memory_bytes`, `process_open_fds`, `process_cpu_seconds_total`, and other `process_*` series. Zebra exports none of them. | Resource panels are always empty. |
 | Dashboards query `rpc_request_duration_seconds_bucket`, and alert rules query it and `zcash_net_peer_handshake_duration_seconds_bucket`. Zebra never configures histogram buckets, so `metrics-exporter-prometheus` renders every histogram as a summary with quantiles and no `_bucket` series. | Latency panels are empty, the latency alerts can never fire, and per-node quantiles can't be aggregated across nodes. |
 | About a dozen other dashboard queries name series that no code records, such as `state_q_max`, `sync_pending_blocks_len`, and `zebra_sighash_error_sapling_spend`. | More empty panels. |
-| z3's copies of `zebra_overview.json`, `peers.json`, and `network_messages.json` differ from Zebra's. | Two versions of the same dashboard. |
+| The observability READMEs in Zebra and z3 tell operators to check the stack by querying `zcash_state_tip_height`, which no code records. | The documented check always returns nothing. |
+| z3 vendors the dashboards and alert rules of the Zebra release it pins: at z3 `e84ce9f` they are byte-identical to Zebra `v6.2.3`, its default image. Checked against `v6.2.3`'s code, they reference the same missing series as above. | Every z3 user, the one public deployment with metrics on by default, inherits the broken panels and alerts. Version pinning itself works: z3's copies of three dashboards differ from Zebra `main` only because `v7.0.0` removed per-peer labels. |
 | The first version of the process memory gauges, on an unmerged branch, sampled them inside the Sentry flush thread. The branch also names resident memory `process.memory.rss_bytes`, while the dashboards expect `process_resident_memory_bytes`. | Prometheus users wouldn't have received them, and resident memory would have had two names. |
 | `zcash.chain.tip.block_delay_seconds` is recorded twice at one call site: a `metrics` histogram for Prometheus, and a direct Sentry distribution that adds the block height. | Two code paths for one signal. |
 | Sync stalls and node starts exist only as log lines. ZF's Sentry monitors count log text. | Prometheus can't see these conditions, and rewording a log message silently breaks a monitor. |
@@ -31,7 +32,7 @@ The question is where a signal is defined, how each backend derives from that de
 
 ## Priorities & Constraints
 
-- **ZF and operators use different backends.** For ZF's own fleets, Sentry is the single source of truth and the only thing that alerts. Public operators use Prometheus and Grafana, and possibly OpenTelemetry. Zebra must serve both, and neither can be a second-class copy of the other.
+- **ZF and operators use different backends.** For ZF's own fleets, Sentry is the single source of truth and the only thing that alerts. Public operators use Prometheus and Grafana, and possibly OpenTelemetry. The z3 stack, for example, turns on the metrics endpoint by default, scrapes it with Prometheus, and documents sending traces over OTLP to Jaeger. Zebra must serve both, and neither can be a second-class copy of the other.
 - **Existing Prometheus names are a public contract.** Operators' dashboards and alert rules depend on them. Renames need a deprecation period.
 - **Backends differ in volume and cardinality.** Sentry stores every value it receives. The SDK queues each `capture()` call, batches 100 items or 5 seconds into an envelope, and keeps at most 30 envelopes in its transport queue, which overflowed during an initial sync. Prometheus keeps one series per label set, so a label like the block height creates unbounded series. Sentry attributes can carry it.
 - **Dependency rules.** Lower crates record metrics and must not depend on `zebrad`. `zebra-chain` is sync-only.
@@ -133,9 +134,9 @@ A `zebrad` test installs a small recorder that keeps every `describe_*` call, ca
 Four checks run against the catalog in CI:
 
 1. **Call sites.** A test scans workspace sources for `counter!`, `gauge!`, and `histogram!` calls and fails if a literal name, or a label key, is not in the catalog. Every name constant in a `metrics` module must be described, and every `LABELS` entry must name a described metric.
-2. **Dashboards and alert rules.** A test extracts metric names from the PromQL in `docker/observability/grafana/dashboards/*.json` and `docker/observability/prometheus/rules/*.yml` and maps them back to catalog entries using the Prometheus naming rules. A `_bucket` query matches only a histogram in the bucket table, and a `quantile` label only one that isn't. The test fails on any unknown name. A short allowlist covers series Zebra doesn't produce, such as `up` and the Jaeger span metrics.
+2. **Dashboards and alert rules.** A test extracts metric names from the PromQL in `docker/observability/grafana/dashboards/*.json`, `docker/observability/prometheus/rules/*.yml`, and the example queries in `docker/observability/README.md`, and maps them back to catalog entries using the Prometheus naming rules. A `_bucket` query matches only a histogram in the bucket table, and a `quantile` label only one that isn't. The test fails on any unknown name. A short allowlist covers series Zebra doesn't produce, such as `up` and the Jaeger span metrics.
 3. **Backend policies.** Unit tests check that every name in the Sentry lists and the bucket table is in the catalog with the right kind, and that `event.` keys appear only on histograms.
-4. **External consumers.** z3 and ZF's private Sentry dashboard and monitor definitions check their queries against the catalog JSON published with each release, using the same mapping. Zebra provides the file and the mapping; those repositories run the check.
+4. **External consumers.** z3 already copies the dashboards and rules from the Zebra release it pins, so fixing them in Zebra reaches z3 at its next version bump, and z3 needs no check of its own while it keeps them unmodified. Copies that are changed, and ZF's private Sentry dashboard and monitor definitions, check their queries against the catalog JSON of the Zebra release they target, using the same mapping. Zebra publishes the file with each release; those repositories run the check.
 
 Checking was chosen over generating dashboards and rules from the catalog. Generation (for example jsonnet mixins) pays off only with a regenerate-and-diff gate, and it would replace hand-edited Grafana JSON that operators copy. The checks catch the drift observed today at a fraction of the cost.
 
@@ -181,7 +182,7 @@ Each phase is one or more public PRs that stand alone.
 | 2 | `metrics` modules, `describe()`, and `LABELS` in each crate, described right after the recorder is installed; generated catalog JSON; call-site and dashboard/rule checks; buckets for the RPC and handshake latency histograms; fixes for the other broken queries and the error-rate alert. | The catalog exists, and repository dashboards and rules match the code. |
 | 3 | Sentry policy checked against the catalog; `event.` label-stripping layer; tip block delay as one histogram with an event attribute; delta sending for absolute counters. | One call site per signal; per-backend differences live only in policy. |
 | 4 | Counters for log-only signals (stall, fork eviction, start); ZF monitors move to them. | Alerts no longer depend on log wording. |
-| 5 | Catalog JSON published with releases; z3 and ZF's Sentry definitions check against it; z3 takes its dashboards from Zebra. | No copy of a dashboard drifts unnoticed. |
+| 5 | Catalog JSON published with releases; ZF's Sentry definitions check against it; z3 copies the fixed dashboards and rules when it bumps its Zebra pin, as it does today. | No copy of a dashboard drifts unnoticed. |
 
 ## More Information
 
