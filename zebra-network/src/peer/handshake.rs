@@ -824,10 +824,10 @@ where
             "disconnecting from non-serving peer",
         );
 
-        // Count rejected handshakes by advertised services, without per-peer labels.
+        // Peers choose their service bits, so the label names the required service, not the bits.
         metrics::counter!(
             "zcash.net.peers.missing_services",
-            "remote_services" => format!("{:?}", remote.services),
+            "missing_service" => "NODE_NETWORK",
         )
         .increment(1);
 

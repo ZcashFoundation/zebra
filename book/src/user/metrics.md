@@ -219,3 +219,16 @@ Metric labels use bounded values:
   `bad_transaction_balance`, `script`, `opcode`, or `num`.
 - Handshake `remote_version` and `negotiated_version`: known protocol versions or
   `other`.
+- `zcash.net.peers.missing_services` `missing_service`: the required service the
+  rejected peer doesn't advertise, `NODE_NETWORK`. It replaces the
+  `remote_services` label, whose value was the service bits the peer sent.
+
+`zcash.net.peers.initial` and `zcash.net.peers.cache` no longer have a `cache`
+label with the peer cache file path. The `zcash.net.peers.initial` series without
+a `seed` label counts the addresses from the peer cache.
+
+`zcash.net.peers.initial` keeps its `seed` label, the DNS seeder host name from
+`network.initial_mainnet_peers` or `network.initial_testnet_peers`. Each node has
+one value per configured seeder, and
+[Sentry](tracing.md#sentry-production-monitoring) metrics carry it as an
+attribute.

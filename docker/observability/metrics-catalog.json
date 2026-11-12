@@ -2161,9 +2161,7 @@
       "kind": "counter",
       "unit": "count",
       "description": "Peer addresses written to the peer cache file.",
-      "labels": [
-        "cache"
-      ],
+      "labels": [],
       "prometheus": {
         "type": "counter",
         "series": [
@@ -2194,8 +2192,7 @@
       "unit": "count",
       "description": "Initial peer addresses from each DNS seeder and the peer cache.",
       "labels": [
-        "seed",
-        "cache"
+        "seed"
       ],
       "prometheus": {
         "type": "counter",
@@ -2210,7 +2207,7 @@
       "unit": "count",
       "description": "Handshakes rejected because the peer doesn't advertise the required services.",
       "labels": [
-        "remote_services"
+        "missing_service"
       ],
       "prometheus": {
         "type": "counter",

@@ -494,11 +494,8 @@ impl Config {
         // Count the initial peers from the cache. If an IP is returned by DNS seeders and the
         // cache, each duplicate adds 1 to the initial peer count. (But we only make one initial
         // connection attempt to each IP.)
-        metrics::counter!(
-            "zcash.net.peers.initial",
-            "cache" => peer_cache_file.display().to_string(),
-        )
-        .increment(u64::try_from(peer_list.len()).expect("a peer address count fits in u64"));
+        metrics::counter!("zcash.net.peers.initial")
+            .increment(u64::try_from(peer_list.len()).expect("a peer address count fits in u64"));
 
         Ok(peer_list)
     }
@@ -554,11 +551,7 @@ impl Config {
                     "updated cached peer IP addresses"
                 );
 
-                metrics::counter!(
-                    "zcash.net.peers.cache",
-                    "cache" => peer_cache_file.display().to_string(),
-                )
-                .increment(
+                metrics::counter!("zcash.net.peers.cache").increment(
                     u64::try_from(peer_list.len()).expect("a peer address count fits in u64"),
                 );
 
