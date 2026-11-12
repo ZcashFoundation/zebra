@@ -92,6 +92,7 @@ proptest-derive = { workspace = true }
 rand = { workspace = true }
 
 halo2 = { workspace = true }
+jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 

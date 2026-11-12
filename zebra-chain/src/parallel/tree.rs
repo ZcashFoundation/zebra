@@ -10,8 +10,11 @@ use crate::{
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
 };
 
+mod roots;
 #[cfg(test)]
 mod tests;
+
+pub use roots::{TreeRoots, MAX_TREE_ROOTS_PER_REQUEST};
 
 /// Counts note commitment tree update attempts in tests that enable `proptest-impl`.
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -90,6 +93,15 @@ pub enum NoteCommitmentTreeError {
 }
 
 impl NoteCommitmentTrees {
+    /// Returns the Sapling, Orchard, and Ironwood roots of these trees.
+    pub fn roots(&self) -> TreeRoots {
+        TreeRoots {
+            sapling: self.sapling.root(),
+            orchard: self.orchard.root(),
+            ironwood: self.ironwood.root(),
+        }
+    }
+
     /// Updates the note commitment trees using the transactions in `block`,
     /// then re-calculates the cached tree roots, using parallel `rayon` threads.
     ///
@@ -254,9 +266,25 @@ impl NoteCommitmentTrees {
         Ok(completed)
     }
 
+    /// Updates only the Sprout note commitment tree, using the transactions in `block`.
+    ///
+    /// Fast checkpoint sync takes the other pools' roots from peers instead, but no block header
+    /// commits to Sprout roots.
+    pub fn update_sprout_tree(&mut self, block: &Block) -> Result<(), NoteCommitmentTreeError> {
+        let sprout_note_commitments: Vec<_> = block.sprout_note_commitments().collect();
+
+        if !sprout_note_commitments.is_empty() {
+            self.sprout = Self::update_sprout_note_commitment_tree(
+                self.sprout.clone(),
+                sprout_note_commitments,
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Update the sprout note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
-    #[cfg(test)]
     #[allow(clippy::unwrap_in_result)]
     fn update_sprout_note_commitment_tree(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,

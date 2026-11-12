@@ -24,7 +24,7 @@ use zebra_chain::{
         tree::NoteCommitmentTree as SproutNoteCommitmentTree,
         NoteCommitment as SproutNoteCommitment,
     },
-    subtree::NoteCommitmentSubtreeData,
+    subtree::{NoteCommitmentSubtreeData, TRACKED_SUBTREE_HEIGHT},
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -910,4 +910,173 @@ fn orchard_checks(
         subtree, deserialized_subtree,
         "(de)serialization should not modify subtree value"
     );
+}
+
+/// Tree reads return nothing for fast-synced heights, rather than the older trees the database
+/// has below them, and the stored roots and sizes are readable instead.
+#[test]
+fn fast_synced_heights_have_no_trees() {
+    use std::sync::Arc;
+
+    use crate::service::{non_finalized_state::Chain, read};
+
+    let _init_guard = zebra_test::init();
+
+    let (state, tree_at_6) = fast_synced_state((1 << TRACKED_SUBTREE_HEIGHT) + 1, Height(6));
+    let db = &state.db;
+
+    for height in (3..=5).map(Height) {
+        let hash = db.hash(height).expect("fast-synced blocks are committed");
+        let roots = db.fast_sync_tree_roots(height);
+
+        assert!(roots.is_some(), "fast sync stored roots for {height:?}");
+        assert_eq!(read::fast_sync_tree_roots(db, height.into()), roots);
+        assert_eq!(read::fast_sync_tree_roots(db, hash.into()), roots);
+
+        assert_eq!(
+            read::sapling_tree(None::<Arc<Chain>>, db, height.into()),
+            None
+        );
+        assert_eq!(
+            read::orchard_tree(None::<Arc<Chain>>, db, height.into()),
+            None
+        );
+        assert_eq!(
+            read::ironwood_tree(None::<Arc<Chain>>, db, height.into()),
+            None
+        );
+        assert_eq!(
+            read::any_sapling_tree(std::iter::empty::<&Arc<Chain>>(), db, hash),
+            None
+        );
+        assert_eq!(
+            read::any_orchard_tree(std::iter::empty::<&Arc<Chain>>(), db, hash),
+            None
+        );
+        assert_eq!(
+            read::any_ironwood_tree(std::iter::empty::<&Arc<Chain>>(), db, hash),
+            None
+        );
+    }
+
+    let empty_tree = Some(Arc::new(OrchardNoteCommitmentTree::default()));
+    for (height, expected_tree) in [
+        (Height(2), empty_tree),
+        (Height(6), Some(tree_at_6.clone())),
+        (Height(8), Some(tree_at_6)),
+    ] {
+        let hash = db.hash(height).expect("test blocks are committed");
+
+        assert_eq!(read::fast_sync_tree_roots(db, height.into()), None);
+        assert_eq!(
+            read::orchard_tree(None::<Arc<Chain>>, db, height.into()),
+            expected_tree,
+        );
+        assert_eq!(
+            read::any_orchard_tree(std::iter::empty::<&Arc<Chain>>(), db, hash),
+            expected_tree,
+        );
+        assert!(read::sapling_tree(None::<Arc<Chain>>, db, height.into()).is_some());
+        assert!(read::ironwood_tree(None::<Arc<Chain>>, db, height.into()).is_some());
+    }
+}
+
+/// Fast-synced databases pass the format checks, though they have no trees at fast-synced
+/// heights, and their subtrees can end at those heights.
+#[test]
+fn fast_synced_database_passes_format_checks() {
+    use crate::service::finalized_state::disk_format::upgrade::DbFormatChange;
+
+    let _init_guard = zebra_test::init();
+
+    let subtree_size = 1 << TRACKED_SUBTREE_HEIGHT;
+
+    for (size_at_6, subtree_end) in [
+        // The subtree ends at a fast-synced height, and the tree is unchanged after it.
+        (subtree_size, Height(4)),
+        // The subtree ends at the height that ends fast sync.
+        (subtree_size + 1, Height(6)),
+    ] {
+        let (state, _) = fast_synced_state(size_at_6, subtree_end);
+        let (_cancel_sender, cancel_receiver) = crossbeam_channel::bounded(1);
+
+        let result = DbFormatChange::format_validity_checks_detailed(&state.db, &cancel_receiver)
+            .expect("the checks are not cancelled");
+
+        assert_eq!(result, Ok(()), "subtree ending at {subtree_end:?}");
+    }
+}
+
+/// Returns a Testnet finalized state up to height 8, which fast checkpoint sync committed from
+/// height 3 to 5, and the Orchard tree with `size_at_6` notes that ended fast sync at height 6.
+///
+/// Orchard subtree 0 ends at `subtree_end`.
+fn fast_synced_state(
+    size_at_6: u64,
+    subtree_end: Height,
+) -> (
+    crate::service::finalized_state::FinalizedState,
+    std::sync::Arc<OrchardNoteCommitmentTree>,
+) {
+    use std::sync::Arc;
+
+    use zebra_chain::{
+        block::Block, parallel::tree::TreeRoots, parameters::Network,
+        serialization::ZcashDeserializeInto, subtree::NoteCommitmentSubtree,
+    };
+
+    use crate::{
+        service::finalized_state::{DiskWriteBatch, FastSyncTreeRoots, FinalizedState},
+        Config,
+    };
+
+    let network = Network::new_default_testnet();
+    let mut state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
+
+    // These blocks have no shielded notes, so the database only stores the genesis trees.
+    for height in 0..=8 {
+        let block: Arc<Block> = network.blockchain_map()[&height]
+            .zcash_deserialize_into()
+            .expect("test data deserializes");
+        state
+            .commit_finalized_direct(block.into(), None, "fast sync test")
+            .expect("test block is valid");
+    }
+
+    let notes: Vec<_> = (0..size_at_6).map(pallas::Base::from).collect();
+    let (subtree_notes, later_notes) = notes.split_at(1 << TRACKED_SUBTREE_HEIGHT);
+    let mut tree = OrchardNoteCommitmentTree::default();
+    let (_, subtree_root) = tree
+        .append_batch(subtree_notes)
+        .expect("the tree has room")
+        .expect("the notes complete subtree 0");
+    tree.append_batch(later_notes).expect("the tree has room");
+
+    let db = &state.db;
+    let mut batch = DiskWriteBatch::new();
+    for height in (3..=5).map(Height) {
+        let subtree_size: u64 = 1 << TRACKED_SUBTREE_HEIGHT;
+        let orchard_size = if height >= subtree_end {
+            subtree_size
+        } else {
+            subtree_size - 1
+        };
+        let roots = FastSyncTreeRoots {
+            roots: TreeRoots::empty(),
+            sapling_size: 0,
+            orchard_size,
+            ironwood_size: 0,
+        };
+        batch.insert_fast_sync_tree_roots(db, &height, &roots);
+    }
+    batch.create_orchard_tree(db, &Height(6), &tree);
+    batch.insert_orchard_subtree(
+        db,
+        &NoteCommitmentSubtree::new(0, subtree_end, subtree_root),
+    );
+    db.write_batch(batch)
+        .expect("writing fast sync test data should succeed");
+
+    (state, Arc::new(tree))
 }
