@@ -1450,8 +1450,8 @@ where
 
     /// Returns where to route an inventory request for `hash`.
     ///
-    /// Prefers a ready peer that advertised the inventory, then a ready peer that isn't missing it.
-    /// For blocks, that fallback prefers peers that advertised [`PeerServices::NODE_NETWORK`].
+    /// Prefers a ready inventory advertiser or supplied source, waiting for a busy supplied block
+    /// source before using unrelated peers. For blocks, fallback prefers [`PeerServices::NODE_NETWORK`].
     /// Non-serving peers usually answer `notfound` for historic blocks, so they only get a block
     /// if no connected serving peer might have it, or if some peer advertised it (so it is recent).
     ///
@@ -1509,6 +1509,15 @@ where
         if let Some(peer) = self.select_p2c_peer_from_list(&advertising_peer_list) {
             tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
             return InvRoute::Peer(peer);
+        }
+
+        // An advert can arrive before its connection releases discovery capacity. Asking another
+        // peer in that window can return notfound before it has even learned the new block.
+        // Only carried provenance waits here: unsolicited registry adverts must not delay sync.
+        if advertiser
+            .is_some_and(|addr| self.cancel_handles.contains_key(&addr) && !has_failed(&addr))
+        {
+            return InvRoute::Wait;
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self

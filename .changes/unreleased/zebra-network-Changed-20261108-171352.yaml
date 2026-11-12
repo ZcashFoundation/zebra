@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Wait for a busy known block source before falling back to peers that have not advertised the block.
+time: 2026-11-08T17:13:52.841153436+01:00

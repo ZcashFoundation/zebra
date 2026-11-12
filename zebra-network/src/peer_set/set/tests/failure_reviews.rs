@@ -53,6 +53,66 @@ async fn finish_download(
     );
 }
 
+/// A just-advertised block must wait for its source rather than ask a peer that may not have it.
+#[tokio::test(start_paused = true)]
+async fn busy_block_advertiser_precedes_speculative_ready_peer() {
+    let _init_guard = zebra_test::init();
+    for registered in [false, true] {
+        for fallback_services in [PeerServices::empty(), PeerServices::NODE_NETWORK] {
+            let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+                peer_set_with_services(&[PeerServices::NODE_NETWORK, fallback_services]);
+            let (_, inventory, response) = block_download();
+            let InventoryHash::Block(hash) = inventory else {
+                unreachable!("the fixture contains block inventory");
+            };
+            peer_set.ready().await.unwrap();
+            let mut source = peer_set.take_ready_service(&addrs[0]).unwrap();
+            let mut busy = Vec::new();
+            for _ in 0..2 {
+                busy.push(source.ready().await.unwrap().call(Request::Peers));
+            }
+            peer_set.push_unready(addrs[0], source);
+            if registered {
+                send_inventory(
+                    &mut guard,
+                    InventoryStatus::new_available(inventory, addrs[0]),
+                );
+            }
+            let request = Request::BlockDownload {
+                hash,
+                advertiser: Some(addrs[0]),
+            };
+            let download = peer_set.ready().await.unwrap().call(request.clone());
+            assert!(peer_set.cancel_handles.contains_key(&addrs[0]));
+            assert_eq!(
+                received_request(&mut handles[1]),
+                None,
+                "readiness is not evidence that another peer has a newly advertised block",
+            );
+            assert_eq!(peer_set.queued_inv_requests.len(), 1);
+
+            // Releasing source capacity must route the download without another network request.
+            let first = handles[0]
+                .try_to_receive_outbound_client_request()
+                .request()
+                .unwrap();
+            first.tx.send(Ok(Response::Nil)).unwrap();
+            let (peer_set, _poll_task) = peer_set.into_buffer(10);
+            drop(
+                handles[0]
+                    .try_to_receive_outbound_client_request()
+                    .request()
+                    .unwrap(),
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            finish_download(&mut handles[0], request, response, download).await;
+            assert_eq!(received_request(&mut handles[1]), None);
+            drop(peer_set);
+            drop(busy);
+        }
+    }
+}
+
 /// Carried provenance cannot override explicit missing inventory or a completed peer failure.
 #[tokio::test(start_paused = true)]
 async fn carried_advertiser_respects_missing_and_failed_candidates() {
