@@ -396,3 +396,8 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
+halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
+halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "954e7e5a259eea8a8ce1d8ecce6f5425e670748c" }
