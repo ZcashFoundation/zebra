@@ -28,6 +28,7 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `zcash.chain.tip.block_delay_seconds`:
 ///   - `event.chain.height`: the block's height, an event attribute.
 ///   - `chain.network_upgrade`: the network upgrade at the block's height, such as `Nu6`.
+/// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget` or `label_set_cap`.
 pub const LABELS: &[(&str, &[&str])] = &[
     ("zebrad.build.info", &["version"]),
     ("sync.restart.count", &["reason", "made_progress"]),
@@ -45,6 +46,7 @@ pub const LABELS: &[(&str, &[&str])] = &[
         "zcash.chain.tip.block_delay_seconds",
         &["event.chain.height", "chain.network_upgrade"],
     ),
+    ("zebrad.sentry.metrics.dropped.total", &["reason"]),
 ];
 
 /// Describes every metric `zebrad` itself records to the installed [`metrics`] recorder.
@@ -53,6 +55,12 @@ pub fn describe() {
         concat!(env!("CARGO_PKG_NAME"), ".build.info"),
         Unit::Count,
         "Always 1, with the running zebrad version as a label."
+    );
+    describe_counter!(
+        "zebrad.sentry.metrics.dropped.total",
+        Unit::Count,
+        "Metric values that weren't sent to Sentry when due, because a flush was full or the \
+         metric had too many label sets."
     );
 
     describe_sync();

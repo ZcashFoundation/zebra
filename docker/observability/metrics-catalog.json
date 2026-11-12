@@ -2677,6 +2677,21 @@
           "zebrad_build_info"
         ]
       }
+    },
+    {
+      "name": "zebrad.sentry.metrics.dropped.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Metric values that weren't sent to Sentry when due, because a flush was full or the metric had too many label sets.",
+      "labels": [
+        "reason"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebrad_sentry_metrics_dropped_total"
+        ]
+      }
     }
   ]
 }

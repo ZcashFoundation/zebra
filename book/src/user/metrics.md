@@ -167,7 +167,8 @@ set of values. Block heights and hashes are in the matching log fields instead.
 
 Official release builds also send them to [Sentry](tracing.md#sentry-production-monitoring)
 when `SENTRY_DSN` is set, even with the Prometheus endpoint off. Sentry receives each counter's
-increase once a minute for each set of labels, and each gauge's latest value once a minute.
+increase once a minute for each set of labels, and each gauge's latest value in the minute it
+changes, and at least every 5 minutes.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
