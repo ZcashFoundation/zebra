@@ -13,6 +13,25 @@ pub mod catalog;
 /// How often the process metrics are sampled.
 const PROCESS_METRICS_INTERVAL: Duration = Duration::from_secs(15);
 
+/// The histograms that Prometheus exports as histograms with these bucket upper bounds, in
+/// seconds. Every other histogram is exported as a summary with quantiles.
+///
+/// Adding a histogram here removes its `quantile` series, which breaks queries that use them.
+pub const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
+    (
+        "rpc.request.duration_seconds",
+        &[
+            0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0,
+        ],
+    ),
+    (
+        "zcash.net.peer.handshake.duration_seconds",
+        &[
+            0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0,
+        ],
+    ),
+];
+
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
 pub struct MetricsEndpoint {}
@@ -52,8 +71,17 @@ impl MetricsEndpoint {
     {
         info!("Trying to open metrics endpoint at {}...", addr);
 
-        let builder =
+        let mut builder =
             metrics_exporter_prometheus::PrometheusBuilder::new().with_http_listener(addr);
+        for (name, buckets) in HISTOGRAM_BUCKETS {
+            builder = builder
+                .set_buckets_for_metric(
+                    metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
+                    buckets,
+                )
+                .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
+        }
+
         let endpoint_result = match other {
             Some(other) => install_alongside(builder, other),
             None => builder.install().map_err(Into::into),
