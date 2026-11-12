@@ -10,9 +10,22 @@ use std::{hint::black_box, sync::Arc};
 use criterion::{criterion_group, criterion_main, Criterion};
 use metrics::{Counter, Gauge, Histogram, Recorder};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::FanoutBuilder;
+use metrics_util::layers::{FanoutBuilder, Layer};
 use sentry::{test::TestTransport, ClientOptions, Hub};
 use tracing_subscriber::{layer::SubscriberExt, Registry};
+
+// The backend policies are private to zebrad, so the benchmarks compile their sources directly.
+// Checking all targets compiles their test modules without the test harness, which leaves the
+// tests' imports unused.
+#[allow(dead_code, unused_imports)]
+#[path = "../src/components/metrics/event_labels.rs"]
+mod event_labels;
+#[allow(dead_code, unused_imports)]
+#[path = "../src/components/metrics/sentry_policy.rs"]
+mod sentry_policy;
+
+use event_labels::StripEventLabelsLayer;
+use sentry_policy::SentryPolicy;
 
 /// The recorders that metric operations run against.
 enum Backend {
@@ -20,33 +33,56 @@ enum Backend {
     None,
     /// One Prometheus recorder with no HTTP listener.
     Prometheus,
+    /// The Prometheus recorder behind the layer that drops event attributes, as `zebrad`
+    /// installs it when Sentry is off.
+    PrometheusWithoutEventLabels,
+    /// That Prometheus recorder and the Sentry policy behind a fanout, as `zebrad` installs them
+    /// when Sentry is on.
+    PrometheusAndSentry,
     /// Two Prometheus recorders behind a fanout, standing in for two backends.
     Fanout,
 }
 
 impl Backend {
-    const ALL: [Backend; 3] = [Backend::None, Backend::Prometheus, Backend::Fanout];
+    const ALL: [Backend; 5] = [
+        Backend::None,
+        Backend::Prometheus,
+        Backend::PrometheusWithoutEventLabels,
+        Backend::PrometheusAndSentry,
+        Backend::Fanout,
+    ];
 
     fn name(&self) -> &'static str {
         match self {
             Backend::None => "none",
             Backend::Prometheus => "prometheus",
+            Backend::PrometheusWithoutEventLabels => "prometheus_without_event_labels",
+            Backend::PrometheusAndSentry => "prometheus_and_sentry",
             Backend::Fanout => "fanout_of_two",
         }
     }
 
     /// Runs `f` with this backend's recorder installed for the current thread.
     fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        let prometheus = || PrometheusBuilder::new().build_recorder();
+
         match self {
             Backend::None => f(),
-            Backend::Prometheus => {
-                let recorder = PrometheusBuilder::new().build_recorder();
+            Backend::Prometheus => metrics::with_local_recorder(&prometheus(), f),
+            Backend::PrometheusWithoutEventLabels => {
+                metrics::with_local_recorder(&StripEventLabelsLayer.layer(prometheus()), f)
+            }
+            Backend::PrometheusAndSentry => {
+                let recorder = FanoutBuilder::default()
+                    .add_recorder(StripEventLabelsLayer.layer(prometheus()))
+                    .add_recorder(SentryPolicy::default())
+                    .build();
                 metrics::with_local_recorder(&recorder, f)
             }
             Backend::Fanout => {
                 let recorder = FanoutBuilder::default()
-                    .add_recorder(PrometheusBuilder::new().build_recorder())
-                    .add_recorder(PrometheusBuilder::new().build_recorder())
+                    .add_recorder(prometheus())
+                    .add_recorder(prometheus())
                     .build();
                 metrics::with_local_recorder(&recorder as &dyn Recorder, f)
             }
@@ -57,6 +93,8 @@ impl Backend {
 fn metrics_benches(c: &mut Criterion) {
     // An owned label value, like call sites that format a label at runtime.
     let label = String::from("In::Req::Peers");
+    // A block height, which the tip block delay records as an event attribute.
+    let height = String::from("3543405");
 
     for backend in Backend::ALL {
         let mut group = c.benchmark_group(format!("metrics/{}", backend.name()));
@@ -102,6 +140,16 @@ fn metrics_benches(c: &mut Criterion) {
             let histogram: Histogram = metrics::histogram!("bench.histogram.cached");
             group.bench_function("histogram/cached_handle", |b| {
                 b.iter(|| histogram.record(black_box(1.0)))
+            });
+            group.bench_function("histogram/event_label", |b| {
+                b.iter(|| {
+                    metrics::histogram!(
+                        "bench.histogram.event",
+                        "event.chain.height" => height.clone(),
+                        "chain.network_upgrade" => "Nu7",
+                    )
+                    .record(black_box(1.0))
+                })
             });
         });
 
