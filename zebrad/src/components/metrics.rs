@@ -8,6 +8,8 @@ use abscissa_core::{Component, FrameworkError, FrameworkErrorKind};
 use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
+pub mod catalog;
+
 /// How often the process metrics are sampled.
 const PROCESS_METRICS_INTERVAL: Duration = Duration::from_secs(15);
 
@@ -33,6 +35,7 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
+            describe_all();
             spawn_process_metrics()?;
         }
 
@@ -98,13 +101,25 @@ impl MetricsEndpoint {
     }
 }
 
+/// Describes every metric Zebra records to the current recorder.
+///
+/// Call this right after installing the global recorder: descriptions sent while no recorder is
+/// installed are lost.
+pub fn describe_all() {
+    zebra_consensus::metrics::describe();
+    zebra_network::metrics::describe();
+    zebra_state::metrics::describe();
+    zebra_rpc::metrics::describe();
+    catalog::describe();
+    metrics_process::Collector::default().describe();
+}
+
 /// Records the process metrics through the global recorder, which must already be installed.
 ///
 /// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
 /// the readings neither depend on a backend nor run on a Tokio worker.
 fn spawn_process_metrics() -> Result<(), FrameworkError> {
     let collector = metrics_process::Collector::default();
-    collector.describe();
     collector.collect();
 
     std::thread::Builder::new()

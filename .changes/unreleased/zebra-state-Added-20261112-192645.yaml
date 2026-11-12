@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `metrics::describe()`, which describes every metric the crate records, with its unit and a one-line description, and `metrics::LABELS`, which lists the label keys of each labelled metric.
+time: 2026-11-12T19:26:45.647725261Z
