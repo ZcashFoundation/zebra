@@ -1400,19 +1400,29 @@ fn chain_with_checkpoints(
 }
 
 /// Internal callers bypass network decoding, so the verifier enforces the block size limit.
+/// A decoded block at the limit is still admitted.
 #[tokio::test]
 async fn oversized_internal_blocks_are_rejected() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let (mut chain, checkpoints) = chain_with_checkpoints(4, &[0, 4]);
-    let oversized = Arc::make_mut(&mut chain[1]);
-    let coinbase = Arc::make_mut(&mut oversized.transactions[0]);
-    let mut outputs = coinbase.outputs();
-    outputs[0].lock_script =
-        transparent::Script::new(&vec![0; usize::try_from(block::MAX_BLOCK_BYTES)?]);
-    coinbase.set_outputs(outputs);
-    let merkle_root = oversized.transactions.iter().map(|tx| tx.hash()).collect();
-    Arc::make_mut(&mut oversized.header).merkle_root = merkle_root;
+    let (chain, checkpoints) = chain_with_checkpoints(4, &[0, 4]);
+    let with_script = |script_len| {
+        let mut block = chain[1].clone();
+        let block_mut = Arc::make_mut(&mut block);
+        let coinbase = Arc::make_mut(&mut block_mut.transactions[0]);
+        let mut outputs = coinbase.outputs();
+        outputs[0].lock_script = transparent::Script::new(&vec![0; script_len]);
+        coinbase.set_outputs(outputs);
+        let merkle_root = block_mut.transactions.iter().map(|tx| tx.hash()).collect();
+        Arc::make_mut(&mut block_mut.header).merkle_root = merkle_root;
+        block
+    };
+    let limit = usize::try_from(block::MAX_BLOCK_BYTES)?;
+    // Keep the script length's CompactSize prefix five bytes wide while filling the block.
+    let overhead = with_script(65_536).zcash_serialized_size() - 65_536;
+    let at_limit = with_script(limit - overhead).zcash_serialize_to_vec()?;
+    assert_eq!(at_limit.len(), limit);
+    let decoded = Arc::<Block>::zcash_deserialize(&at_limit[..])?;
 
     let mut verifier = CheckpointVerifier::from_list(
         checkpoints.clone(),
@@ -1422,8 +1432,9 @@ async fn oversized_internal_blocks_are_rejected() -> Result<(), Report> {
     )
     .map_err(|e| eyre!(e))?;
 
+    assert!(verifier.queue_block(decoded).is_ok());
     assert!(matches!(
-        verifier.queue_block(chain[1].clone()),
+        verifier.queue_block(with_script(limit - overhead + 1)),
         Err(VerifyCheckpointError::VerifyBlock(
             VerifyBlockError::OversizedBlock
         ))
