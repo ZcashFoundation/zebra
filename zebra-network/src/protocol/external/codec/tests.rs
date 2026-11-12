@@ -4,4 +4,6 @@ use super::*;
 
 mod compact;
 
+mod tree_roots;
+
 mod vectors;

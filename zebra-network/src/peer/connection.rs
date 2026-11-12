@@ -84,6 +84,9 @@ pub(super) enum Handler {
         transactions: Vec<UnminedTx>,
     },
     MempoolTransactionIds,
+    TreeRoots {
+        count: u32,
+    },
 }
 
 impl fmt::Display for Handler {
@@ -116,6 +119,7 @@ impl fmt::Display for Handler {
                 transactions.len()
             ),
             Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Handler::TreeRoots { count } => format!("TreeRoots {{ count: {count} }}"),
         })
     }
 }
@@ -139,6 +143,7 @@ impl Handler {
             Handler::TransactionsById { .. } => "TransactionsById".into(),
 
             Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
+            Handler::TreeRoots { .. } => "TreeRoots".into(),
         }
     }
 
@@ -417,6 +422,20 @@ impl Handler {
                 Handler::Finished(Ok(Response::TransactionIds(
                     transaction_ids(&items).collect(),
                 )))
+            }
+
+            (Handler::TreeRoots { count }, Message::TreeRoots(roots)) => {
+                // u32 fits in usize on all supported platforms.
+                if roots
+                    .as_ref()
+                    .is_some_and(|roots| roots.len() > count as usize)
+                {
+                    Handler::Finished(Err(PeerError::Serialization(SerializationError::Parse(
+                        "treeroots response has more entries than requested",
+                    ))))
+                } else {
+                    Handler::Finished(Ok(Response::TreeRoots(roots)))
+                }
             }
 
             // By default, messages are not responses.
@@ -1447,6 +1466,14 @@ where
                     )
             }
 
+            (AwaitingRequest, TreeRoots { start_height, final_hash, count }) => {
+                self
+                    .peer_tx
+                    .send_authorized(Message::GetTreeRoots { start_height, final_hash, count }, authorized)
+                    .await
+                    .map(|()| Handler::TreeRoots { count })
+            }
+
             (AwaitingRequest, PushTransaction(transaction, _)) => {
                 self
                     .peer_tx
@@ -1595,6 +1622,10 @@ where
             }
             Message::Headers(_) => {
                 debug!(%msg, "got headers message unsolicited or from canceled request");
+                Unused
+            }
+            Message::TreeRoots(_) => {
+                debug!(%msg, "got treeroots message unsolicited or from canceled request");
                 Unused
             }
             // These messages should never be sent by peers.
@@ -1752,6 +1783,17 @@ where
             }
             .into(),
             Message::Mempool => Request::MempoolTransactionIds.into(),
+            // The codec rejects counts that are zero or above the limit.
+            Message::GetTreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => Request::TreeRoots {
+                start_height,
+                final_hash,
+                count,
+            }
+            .into(),
         };
 
         // Handle the request, and return unused messages.
@@ -1982,6 +2024,11 @@ where
             }
             Response::BlockHeaders(headers) => {
                 if let Err(e) = self.peer_tx.send(Message::Headers(headers)).await {
+                    self.fail_with(e).await
+                }
+            }
+            Response::TreeRoots(roots) => {
+                if let Err(e) = self.peer_tx.send(Message::TreeRoots(roots)).await {
                     self.fail_with(e).await
                 }
             }

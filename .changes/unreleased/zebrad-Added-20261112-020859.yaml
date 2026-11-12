@@ -1,0 +1,4 @@
+project: zebrad
+kind: Added
+body: Added the `state.fast_tree_sync` option. During checkpoint sync, it takes note commitment tree roots from peers that advertise `NODE_TREE_ROOTS`, instead of computing the trees, up to the trees embedded in Zebra. Once started, checkpoint sync waits for those roots, so only enable it if such peers are available, and not on nodes that serve wallets, because historical tree states are unavailable for the heights it syncs. Zebra now advertises `NODE_TREE_ROOTS` and serves tree roots for its finalized chain.
+time: 2026-11-12T02:08:59.126867893+01:00

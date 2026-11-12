@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block},
+    parallel::tree::TreeRoots,
     transaction::UnminedTx,
 };
 
@@ -224,6 +225,30 @@ pub enum Message {
     /// Complete transactions in the order requested by compact recovery.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     BlockTransactions(BlockTransactions),
+
+    /// A `gettreeroots` request for the note commitment tree roots after each block from
+    /// `start_height` to the block at height `start_height + count - 1`, whose hash is
+    /// `final_hash`.
+    ///
+    /// Only sent to peers that advertise [`PeerServices::NODE_TREE_ROOTS`]. The count is between
+    /// 1 and [`MAX_TREE_ROOTS_PER_REQUEST`] inclusive.
+    ///
+    /// [`MAX_TREE_ROOTS_PER_REQUEST`]: zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST
+    GetTreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+    },
+
+    /// A `treeroots` response to [`Message::GetTreeRoots`], or `None` if the peer refused it.
+    ///
+    /// Entry `k` is for the block at `start_height + k` on the requested chain. The response can
+    /// be a prefix of the requested roots, but never has more entries than requested.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TreeRoots(Option<Vec<TreeRoots>>),
 
     /// A `tx` message.
     ///
@@ -546,6 +571,16 @@ impl fmt::Display for Message {
             | Message::CompactBlock(_)
             | Message::GetBlockTransactions(_)
             | Message::BlockTransactions(_) => self.command().to_string(),
+            Message::GetTreeRoots {
+                start_height,
+                count,
+                ..
+            } => format!(
+                "gettreeroots {{ start_height: {}, count: {count} }}",
+                start_height.0
+            ),
+            Message::TreeRoots(Some(roots)) => format!("treeroots {{ roots: {} }}", roots.len()),
+            Message::TreeRoots(None) => "treeroots { refused }".to_string(),
             Message::NotFound(invs) => format!("notfound {{ invs: {} }}", invs.len()),
 
             Message::Mempool => "mempool".to_string(),
@@ -578,6 +613,8 @@ impl Message {
             Message::CompactBlock(_) => "cmpctblock",
             Message::GetBlockTransactions(_) => "getblocktxn",
             Message::BlockTransactions(_) => "blocktxn",
+            Message::GetTreeRoots { .. } => "gettreeroots",
+            Message::TreeRoots(_) => "treeroots",
             Message::Tx(_) => "tx",
             Message::NotFound(_) => "notfound",
             Message::Mempool => "mempool",
