@@ -221,19 +221,30 @@ impl BlockWriteSender {
 
         let span = Span::current();
         let task = std::thread::spawn(move || {
-            span.in_scope(|| {
-                WriteBlockWorkerTask {
-                    finalized_block_write_receiver,
-                    non_finalized_block_write_receiver,
-                    finalized_state,
-                    non_finalized_state,
-                    invalid_block_reset_sender,
-                    non_finalized_rejected_sender,
-                    chain_tip_sender,
-                    non_finalized_state_sender,
-                    backup_dir_path,
-                }
-                .run()
+            // The writer's parallel work, such as note commitment tree updates, gets its own
+            // pool: on the global pool, a worker waiting in a `join` can steal a long unrelated
+            // job, like decoding a whole block, and hold up the block being committed.
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(rayon::current_num_threads())
+                .thread_name(|index| format!("state writer {index}"))
+                .build()
+                .expect("startup thread creation only fails when the OS is out of resources");
+
+            pool.install(|| {
+                span.in_scope(|| {
+                    WriteBlockWorkerTask {
+                        finalized_block_write_receiver,
+                        non_finalized_block_write_receiver,
+                        finalized_state,
+                        non_finalized_state,
+                        invalid_block_reset_sender,
+                        non_finalized_rejected_sender,
+                        chain_tip_sender,
+                        non_finalized_state_sender,
+                        backup_dir_path,
+                    }
+                    .run()
+                })
             })
         });
 
