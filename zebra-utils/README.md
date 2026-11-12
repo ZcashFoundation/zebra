@@ -4,6 +4,7 @@ Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
 - [miner-poll](#miner-poll)
+- [zebra-embedded-trees](#zebra-embedded-trees)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
@@ -181,6 +182,25 @@ loopback address, `miner-poll` reads the cookie from Zebra's default cache direc
 is sent only if `--cookie-dir` is given, in plain HTTP, so only use it over a trusted network.
 
 RPC requests have a 180-second deadline, including response-body reads.
+
+## zebra-embedded-trees
+
+This command writes the Sapling, Orchard, and Ironwood note commitment trees after a block, and
+the subtrees they completed, from a synced Zebra state, in the format that fast checkpoint sync
+embeds in `zebra-state/src/service/fast_tree_sync/mainnet-trees.bin`. Use a height below the
+last checkpoint in `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`.
+
+It opens the state as a read-only secondary instance, so it doesn't modify the state, and it can
+run while `zebrad` is running. It refuses heights above the finalized tip and heights that fast
+checkpoint sync committed without their trees.
+
+```sh
+cargo build --release --bin zebra-embedded-trees
+target/release/zebra-embedded-trees --cache-dir ~/.cache/zebra --network mainnet \
+    --height <height> --output zebra-state/src/service/fast_tree_sync/mainnet-trees.bin
+```
+
+It prints the height, and each tree's size, subtree count, and root.
 
 ## zebrad-hash-lookup
 
