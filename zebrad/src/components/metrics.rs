@@ -63,8 +63,6 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
-            describe_and_record_build_info();
-            zebra_consensus::metrics::register_failure_counters();
             spawn_process_metrics()?;
         }
 
@@ -129,10 +127,11 @@ pub fn describe_all() {
     metrics_process::Collector::default().describe();
 }
 
-/// Describes every metric, and records the build info once, through the recorder that was just
-/// installed, whichever backends it sends to.
+/// Describes every metric, registers the failure counters at zero, and records the build info
+/// once, through the recorder that was just installed, whichever backends it sends to.
 fn describe_and_record_build_info() {
     describe_all();
+    zebra_consensus::metrics::register_failure_counters();
 
     // A single series with value 1 exposes the version:
     // https://www.robustperception.io/exposing-the-software-version-to-prometheus
@@ -161,13 +160,17 @@ fn spawn_process_metrics() -> Result<(), FrameworkError> {
         .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
 }
 
-/// Installs `recorder` as the global metrics recorder.
+/// Installs `recorder` as the global metrics recorder, then describes every metric and records
+/// the build info through it.
 fn install<R>(recorder: R) -> Result<(), FrameworkError>
 where
     R: Recorder + Send + Sync + 'static,
 {
     metrics::set_global_recorder(recorder)
-        .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
+        .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
+    describe_and_record_build_info();
+
+    Ok(())
 }
 
 /// Returns the Prometheus exporter's configuration, before its endpoint is added.
@@ -212,7 +215,10 @@ where
 }
 
 /// Installs the Prometheus recorder from `builder`, with `other` beside it if it is provided, as
-/// the global recorder.
+/// the global recorder, then describes every metric and records the build info through it.
+///
+/// The build info is recorded before this returns, so it is already exported when the caller
+/// logs that the endpoint is open.
 ///
 /// Like [`PrometheusBuilder::install`] outside a Tokio runtime, which is how Zebra calls it, this
 /// serves the endpoint from its own thread.
@@ -244,6 +250,7 @@ where
         .map_err(|e| BuildError::FailedToCreateRuntime(e.to_string()))?;
 
     metrics::set_global_recorder(with_prometheus(prometheus, other)).map_err(|e| e.to_string())?;
+    describe_and_record_build_info();
 
     Ok(())
 }
