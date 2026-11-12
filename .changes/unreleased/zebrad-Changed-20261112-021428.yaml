@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: '`getblock` and `getblockheader` report the tree sizes and roots of blocks that fast checkpoint sync committed without their note commitment trees from the roots and sizes it stored, and so do lightwalletd compact blocks. `z_gettreestate` omits the Sapling, Orchard, and Ironwood commitments of those blocks, and the lightwalletd `GetTreeState` and `GetLatestTreeState` methods return `UNAVAILABLE` instead of an empty tree when an active pool tree is missing.'
+time: 2026-11-12T02:14:28.508621011+01:00

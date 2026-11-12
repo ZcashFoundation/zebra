@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: Added `ReadRequest::FastSyncTreeRoots`, `ReadResponse::FastSyncTreeRoots`, and the `FastSyncTreeRoots` export, which return the note commitment tree roots and sizes stored for blocks that fast checkpoint sync committed without their trees. Tree read requests and `ZebraDb::{sapling,orchard,ironwood}_tree_by_hash_or_height` now return `None` for those blocks, instead of an older tree. The state database format is now v29.1.0, which adds the `fast_sync_tree_roots` column family; older Zebra versions read stale trees from a fast-synced database and fail its format checks.
+time: 2026-11-12T02:14:28.504137331+01:00

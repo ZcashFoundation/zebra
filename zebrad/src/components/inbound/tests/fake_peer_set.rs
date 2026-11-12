@@ -2726,3 +2726,45 @@ fn compact_header_screening_checks_proof_of_work_and_shape() {
     compact.prefilled[0].0 = 1;
     assert!(super::super::screen_compact_header(&compact, &network).is_err());
 }
+
+/// Tree roots requests are answered from the finalized state, and refused for other chains.
+#[tokio::test]
+async fn inbound_answers_tree_roots_from_read_state() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init(StateConfig::ephemeral(), &Mainnet, Height::MAX, 0).await;
+    let state = ServiceBuilder::new().buffer(1).service(state);
+    let genesis: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    state
+        .clone()
+        .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis.clone().into(),
+        ))
+        .await?;
+    let (verifier, _verifier_called) = recording_block_verifier();
+    let (inbound, _peers, _misbehavior) =
+        setup_gossiped_block_misbehavior_with_state(verifier, state, latest_chain_tip).await;
+    let mut inbound = inbound.with_compact_relay(Mainnet, read_state);
+
+    for (final_hash, expected) in [
+        (
+            genesis.hash(),
+            Some(vec![zebra_chain::parallel::tree::TreeRoots::empty()]),
+        ),
+        (zebra_chain::block::Hash([1; 32]), None),
+    ] {
+        let response = timeout(
+            Duration::from_secs(5),
+            inbound.ready().await?.call(Request::TreeRoots {
+                start_height: Height(0),
+                final_hash,
+                count: 1,
+            }),
+        )
+        .await??;
+        assert_eq!(response, Response::TreeRoots(expected));
+    }
+
+    Ok(())
+}

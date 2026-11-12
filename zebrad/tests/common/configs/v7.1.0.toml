@@ -94,6 +94,7 @@ cache_dir = "cache_dir"
 debug_skip_non_finalized_state_backup_task = false
 delete_old_database = true
 ephemeral = false
+fast_tree_sync = false
 should_backup_non_finalized_state = true
 
 [sync]

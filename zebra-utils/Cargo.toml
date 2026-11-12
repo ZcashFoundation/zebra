@@ -32,6 +32,10 @@ name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
 
+[[bin]]
+name = "zebra-embedded-trees"
+path = "src/bin/zebra-embedded-trees/main.rs"
+
 [features]
 default = []
 
@@ -66,6 +70,9 @@ zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "19.0.0" }
 
+# These crates are needed for the zebra-embedded-trees binary
+zebra-state = { path = "../zebra-state", version = "16.0.0" }
+
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
 
@@ -79,6 +86,14 @@ tokio = { workspace = true, features = ["full"], optional = true }
 
 zcash_primitives = { workspace = true, optional = true }
 zcash_protocol.workspace = true
+
+[dev-dependencies]
+sapling-crypto = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true }
+
+zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test" }
 
 [lints]
 workspace = true

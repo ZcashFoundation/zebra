@@ -13,18 +13,23 @@ use tokio::sync::{
 };
 
 use tracing::Span;
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    parallel::tree::NoteCommitmentTrees,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    error::CommitBlockError,
     service::{
         check,
+        fast_tree_sync::{CheckpointCommit, FastTreeSyncWriter, TreeRootsCache},
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
     },
-    SemanticallyVerifiedBlock, ValidateContextError,
+    CheckpointVerifiedBlock, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // These types are used in doc links
@@ -147,6 +152,8 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    /// Peer-supplied note commitment tree roots for fast checkpoint sync.
+    tree_roots_cache: Arc<TreeRootsCache>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -202,6 +209,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        tree_roots_cache: Arc<TreeRootsCache>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -242,6 +250,7 @@ impl BlockWriteSender {
                         chain_tip_sender,
                         non_finalized_state_sender,
                         backup_dir_path,
+                        tree_roots_cache,
                     }
                     .run()
                 })
@@ -259,6 +268,141 @@ impl BlockWriteSender {
             Some(Arc::new(task)),
         )
     }
+}
+
+/// What happened to a checkpoint-verified block the writer tried to commit.
+enum CommitOutcome {
+    /// The block is committed.
+    Committed,
+    /// The block failed, and the state service was told to reset its queue.
+    Failed,
+    /// The state service is shutting down.
+    Shutdown,
+}
+
+/// Commits a checkpoint-verified block to the finalized state, and reports the result to the
+/// state service and the block's sender.
+///
+/// If `next` is the block after it, fast checkpoint sync can commit the block with its verified
+/// tree roots, without updating its note commitment trees.
+fn commit_checkpoint_verified(
+    ordered_block: QueuedCheckpointVerified,
+    next: Option<&CheckpointVerifiedBlock>,
+    finalized_state: &mut FinalizedState,
+    prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+    fast_tree_sync: &mut FastTreeSyncWriter,
+    chain_tip_sender: &mut ChainTipSender,
+    invalid_block_reset_sender: &UnboundedSender<(Option<block::Height>, block::Hash)>,
+) -> CommitOutcome {
+    let committed_permit = match ordered_block
+        .2
+        .as_ref()
+        .map(crate::MinedBlockNotifications::try_reserve_committed)
+        .transpose()
+    {
+        Ok(permit) => permit.flatten(),
+        Err(error) => {
+            // Publish the reset before replying so an immediate retry can make progress.
+            let _ = invalid_block_reset_sender.send((
+                finalized_state.db.finalized_tip_height(),
+                finalized_state.db.finalized_tip_hash(),
+            ));
+            let _ = ordered_block.1.send(Err(error.into()));
+            return CommitOutcome::Failed;
+        }
+    };
+
+    // Try committing the block, but keep notifications until its context is published.
+    let (checkpoint_verified, rsp_tx, _) = ordered_block;
+    let height = checkpoint_verified.height;
+    let commit = match next {
+        Some(next) => {
+            let trees = prev_finalized_note_commitment_trees
+                .get_or_insert_with(|| finalized_state.db.note_commitment_trees_for_tip());
+            fast_tree_sync.checkpoint_commit(
+                checkpoint_verified,
+                next,
+                &finalized_state.db.history_tree(),
+                trees,
+                || invalid_block_reset_sender.is_closed(),
+            )
+        }
+        None => CheckpointCommit::Normal(checkpoint_verified),
+    };
+
+    let (result, frozen_sizes) = match commit {
+        CheckpointCommit::Fast {
+            block,
+            frozen_sizes,
+        } => (
+            finalized_state
+                .commit_finalized_fast(*block, prev_finalized_note_commitment_trees.take()),
+            frozen_sizes,
+        ),
+        CheckpointCommit::Normal(block) => {
+            assert!(
+                !fast_tree_sync.is_frozen(),
+                "blocks are never committed with tree updates from frozen trees",
+            );
+            (
+                finalized_state
+                    .commit_finalized(block, prev_finalized_note_commitment_trees.take()),
+                None,
+            )
+        }
+        CheckpointCommit::Rejected => (
+            Err(CommitBlockError::TreeRootsRejected { height }.into()),
+            None,
+        ),
+        CheckpointCommit::Shutdown => return CommitOutcome::Shutdown,
+    };
+
+    let result = match result {
+        Ok((tip_block, note_commitment_trees)) => {
+            let hash = tip_block.hash;
+            *prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+            fast_tree_sync.committed(height, frozen_sizes);
+            chain_tip_sender.set_finalized_tip(tip_block);
+            Ok(hash)
+        }
+        Err(error) => {
+            let finalized_tip = finalized_state.db.tip();
+
+            // The last block in the queue failed, so we can't commit the next block.
+            // Instead, we need to reset the state queue,
+            // and discard any children of the invalid block in the channel.
+            info!(
+                ?error,
+                last_valid_height = ?finalized_tip.map(|tip| tip.0),
+                last_valid_hash = ?finalized_tip.map(|tip| tip.1),
+                "committing a block to the finalized state failed, resetting state queue",
+            );
+
+            let send_result = invalid_block_reset_sender.send((
+                finalized_state.db.finalized_tip_height(),
+                finalized_state.db.finalized_tip_hash(),
+            ));
+
+            if send_result.is_err() {
+                info!("StateService closed the block reset channel. Is Zebra shutting down?");
+                let _ = rsp_tx.send(Err(error));
+                return CommitOutcome::Shutdown;
+            }
+            Err(error)
+        }
+    };
+
+    let outcome = if result.is_ok() {
+        CommitOutcome::Committed
+    } else {
+        CommitOutcome::Failed
+    };
+    if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
+        permit.send((*hash, height));
+    }
+    let _ = rsp_tx.send(result);
+
+    outcome
 }
 
 impl WriteBlockWorkerTask {
@@ -283,9 +427,17 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            tree_roots_cache,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
+        let mut fast_tree_sync = FastTreeSyncWriter::new(
+            &finalized_state.db,
+            tree_roots_cache.clone(),
+            finalized_state.network(),
+        );
+        // Fast checkpoint sync holds a block until the next block, which verifies its tree roots.
+        let mut held_block: Option<QueuedCheckpointVerified> = None;
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
@@ -303,11 +455,16 @@ impl WriteBlockWorkerTask {
             // So if there has been a block commit error,
             // we need to drop all the descendants of that block,
             // until we receive a block at the required next height.
-            let next_valid_height = finalized_state
-                .db
-                .finalized_tip_height()
-                .map(|height| (height + 1).expect("committed heights are valid"))
-                .unwrap_or(Height(0));
+            let next_valid_height = match &held_block {
+                Some(held_block) => {
+                    (held_block.0.height + 1).expect("held heights are below the maximum height")
+                }
+                None => finalized_state
+                    .db
+                    .finalized_tip_height()
+                    .map(|height| (height + 1).expect("committed heights are valid"))
+                    .unwrap_or(Height(0)),
+            };
 
             if ordered_block.0.height != next_valid_height {
                 debug!(
@@ -323,69 +480,39 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
-            let committed_permit = match ordered_block
-                .2
-                .as_ref()
-                .map(crate::MinedBlockNotifications::try_reserve_committed)
-                .transpose()
-            {
-                Ok(permit) => permit.flatten(),
-                Err(error) => {
-                    // Publish the reset before replying so an immediate retry can make progress.
-                    let _ = invalid_block_reset_sender.send((
-                        finalized_state.db.finalized_tip_height(),
-                        finalized_state.db.finalized_tip_hash(),
-                    ));
-                    let _ = ordered_block.1.send(Err(error.into()));
-                    continue;
+            if let Some(held_block) = held_block.take() {
+                match commit_checkpoint_verified(
+                    held_block,
+                    Some(&ordered_block.0),
+                    finalized_state,
+                    &mut prev_finalized_note_commitment_trees,
+                    &mut fast_tree_sync,
+                    chain_tip_sender,
+                    invalid_block_reset_sender,
+                ) {
+                    CommitOutcome::Committed => {}
+                    // Drop this child of the failed block.
+                    CommitOutcome::Failed => continue,
+                    CommitOutcome::Shutdown => return,
                 }
-            };
-
-            // Try committing the block, but keep notifications until its context is published.
-            let (checkpoint_verified, rsp_tx, _) = ordered_block;
-            let height = checkpoint_verified.height;
-            let result = match finalized_state.commit_finalized(
-                checkpoint_verified,
-                prev_finalized_note_commitment_trees.take(),
-            ) {
-                Ok((tip_block, note_commitment_trees)) => {
-                    let hash = tip_block.hash;
-                    prev_finalized_note_commitment_trees = Some(note_commitment_trees);
-                    chain_tip_sender.set_finalized_tip(tip_block);
-                    Ok(hash)
-                }
-                Err(error) => {
-                    let finalized_tip = finalized_state.db.tip();
-
-                    // The last block in the queue failed, so we can't commit the next block.
-                    // Instead, we need to reset the state queue,
-                    // and discard any children of the invalid block in the channel.
-                    info!(
-                        ?error,
-                        last_valid_height = ?finalized_tip.map(|tip| tip.0),
-                        last_valid_hash = ?finalized_tip.map(|tip| tip.1),
-                        "committing a block to the finalized state failed, resetting state queue",
-                    );
-
-                    let send_result = invalid_block_reset_sender.send((
-                        finalized_state.db.finalized_tip_height(),
-                        finalized_state.db.finalized_tip_hash(),
-                    ));
-
-                    if send_result.is_err() {
-                        info!(
-                            "StateService closed the block reset channel. Is Zebra shutting down?"
-                        );
-                        let _ = rsp_tx.send(Err(error));
-                        return;
-                    }
-                    Err(error)
-                }
-            };
-            if let (Ok(hash), Some(permit)) = (&result, committed_permit) {
-                permit.send((*hash, height));
             }
-            let _ = rsp_tx.send(result);
+
+            if fast_tree_sync.defers(&ordered_block.0) {
+                held_block = Some(ordered_block);
+                continue;
+            }
+
+            if let CommitOutcome::Shutdown = commit_checkpoint_verified(
+                ordered_block,
+                None,
+                finalized_state,
+                &mut prev_finalized_note_commitment_trees,
+                &mut fast_tree_sync,
+                chain_tip_sender,
+                invalid_block_reset_sender,
+            ) {
+                return;
+            }
         }
 
         // Do this check even if the channel got closed before any finalized blocks were sent.

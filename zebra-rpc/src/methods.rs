@@ -385,6 +385,10 @@ pub trait Rpc {
     /// negative where -1 is the last known valid block". On the other hand,
     /// `lightwalletd` only uses positive heights, so Zebra does not support
     /// negative heights.
+    ///
+    /// Zebra doesn't store the note commitment trees of blocks that fast checkpoint sync committed
+    /// without them. For those blocks, the response omits the Sapling, Orchard, and Ironwood
+    /// `commitments` (`finalRoot` and `finalState`), like the Sprout ones.
     #[method(name = "z_gettreestate")]
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse>;
 
@@ -1091,6 +1095,25 @@ where
         }
 
         DateTime32::now()
+    }
+
+    /// Returns the note commitment tree roots and sizes that fast checkpoint sync stored for the
+    /// block with `hash`, or `None` if it committed that block with its trees.
+    async fn fast_sync_tree_roots(
+        &self,
+        hash: block::Hash,
+    ) -> Result<Option<zebra_state::FastSyncTreeRoots>> {
+        let zebra_state::ReadResponse::FastSyncTreeRoots(roots) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::FastSyncTreeRoots(hash.into()))
+            .await
+            .map_misc_error()?
+        else {
+            unreachable!("unmatched response to a FastSyncTreeRoots request");
+        };
+
+        Ok(roots)
     }
 
     /// Builds off the async executor, retaining fallback ownership even if its caller cancels.
@@ -1968,45 +1991,11 @@ where
                 unreachable!("unmatched response to a OrchardTree request");
             };
 
-            let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
-
-            // This could be `None` if there's a chain reorg between state queries.
-            let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
-
-            let final_orchard_root = match nu5_activation {
-                Some(activation_height) if height >= activation_height => {
-                    Some(orchard_tree.root().into())
-                }
-                _other => None,
-            };
-
-            let sapling = SaplingTrees {
-                size: sapling_tree_size,
-            };
-
-            let orchard_tree_size = orchard_tree.count();
-            let orchard = OrchardTrees {
-                size: orchard_tree_size,
-            };
-
             let ironwood_tree_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::IronwoodTree(ironwood_tree) =
                 ironwood_tree_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to an IronwoodTree request");
-            };
-
-            // This could be `None` if there's a chain reorg between state queries. Before NU6.3 the
-            // Ironwood tree is empty (size 0).
-            let ironwood_tree = ironwood_tree.ok_or_misc_error("missing Ironwood tree")?;
-            let ironwood = IronwoodTrees {
-                size: ironwood_tree.count(),
-            };
-
-            let trees = GetBlockTrees {
-                sapling,
-                orchard,
-                ironwood,
             };
 
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
@@ -2020,6 +2009,44 @@ where
                 block_info_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a BlockInfo request");
+            };
+
+            // Before NU6.3 the Ironwood tree is empty (size 0).
+            let (orchard_root, orchard_tree_size, ironwood_tree_size) =
+                match (orchard_tree, ironwood_tree) {
+                    (Some(orchard_tree), Some(ironwood_tree)) => (
+                        orchard_tree.root(),
+                        orchard_tree.count(),
+                        ironwood_tree.count(),
+                    ),
+                    // Fast checkpoint sync stores only the roots and sizes of the trees it skipped.
+                    // Read them after `futs` is drained, so this read can't wait on its requests.
+                    _ => {
+                        let roots = self
+                            .fast_sync_tree_roots(hash)
+                            .await?
+                            // This could be `None` if there's a chain reorg between state queries.
+                            .ok_or_misc_error("missing Orchard or Ironwood tree")?;
+                        (roots.roots.orchard, roots.orchard_size, roots.ironwood_size)
+                    }
+                };
+
+            let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
+            let final_orchard_root = match nu5_activation {
+                Some(activation_height) if height >= activation_height => Some(orchard_root.into()),
+                _other => None,
+            };
+
+            let trees = GetBlockTrees {
+                sapling: SaplingTrees {
+                    size: sapling_tree_size,
+                },
+                orchard: OrchardTrees {
+                    size: orchard_tree_size,
+                },
+                ironwood: IronwoodTrees {
+                    size: ironwood_tree_size,
+                },
             };
 
             let delta = block_info.as_ref().and_then(|d| {
@@ -2120,8 +2147,18 @@ where
                 panic!("unexpected response to SaplingTree request")
             };
 
-            // This could be `None` if there's a chain reorg between state queries.
-            let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
+            // Fast checkpoint sync stores only the roots and sizes of the trees it skipped.
+            let (sapling_root, sapling_tree_size) = match sapling_tree {
+                Some(sapling_tree) => (sapling_tree.root(), sapling_tree.count()),
+                None => {
+                    let roots = self
+                        .fast_sync_tree_roots(hash)
+                        .await?
+                        // This could be `None` if there's a chain reorg between state queries.
+                        .ok_or_misc_error("missing Sapling tree")?;
+                    (roots.roots.sapling, roots.sapling_size)
+                }
+            };
 
             let zebra_state::ReadResponse::Depth(depth) = self
                 .read_state
@@ -2147,10 +2184,9 @@ where
             nonce.reverse();
 
             let sapling_activation = NetworkUpgrade::Sapling.activation_height(&network);
-            let sapling_tree_size = sapling_tree.count();
             let final_sapling_root: [u8; 32] =
                 if sapling_activation.is_some() && height >= sapling_activation.unwrap() {
-                    let mut root: [u8; 32] = sapling_tree.root().into();
+                    let mut root: [u8; 32] = sapling_root.into();
                     root.reverse();
                     root
                 } else {

@@ -1233,6 +1233,129 @@ async fn rpc_getblock_side_chain_verbosity2_does_not_panic() {
     }
 }
 
+/// Blocks committed by fast checkpoint sync have no stored trees, so `getblock` reports their tree
+/// sizes, and `getblockheader` its Sapling root, from the roots and sizes fast sync stored.
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblock_fast_synced_tree_sizes() {
+    use zebra_chain::parallel::tree::TreeRoots;
+
+    let _init_guard = zebra_test::init();
+
+    let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_hash = block.hash();
+    let previous_block_hash = block.header.previous_block_hash;
+    // A height where the Sapling and Orchard roots are in the response. (The mocked responses
+    // don't need to match the block.)
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&Mainnet)
+        .expect("NU5 activates on Mainnet");
+
+    let roots = zebra_state::FastSyncTreeRoots {
+        roots: TreeRoots::empty(),
+        sapling_size: 5,
+        orchard_size: 7,
+        ironwood_size: 11,
+    };
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build()
+        .with_max_request_delay(std::time::Duration::from_secs(5))
+        .for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let hash_str = block_hash.to_string();
+    let block_future = tokio::spawn(async move { rpc.get_block(hash_str, Some(1)).await });
+
+    // get_block_header: BlockHeader, SaplingTree (missing), FastSyncTreeRoots, Depth
+    read_state
+        .expect_request(ReadRequest::BlockHeader(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockHeader {
+            header: block.header.clone(),
+            hash: block_hash,
+            height,
+            next_block_hash: None,
+        });
+    read_state
+        .expect_request(ReadRequest::SaplingTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::SaplingTree(None));
+    read_state
+        .expect_request(ReadRequest::FastSyncTreeRoots(block_hash.into()))
+        .await
+        .respond(ReadResponse::FastSyncTreeRoots(Some(roots)));
+    read_state
+        .expect_request(ReadRequest::Depth(block_hash))
+        .await
+        .respond(ReadResponse::Depth(Some(0)));
+
+    // get_block: transaction IDs, OrchardTree and IronwoodTree (missing), BlockInfo x2,
+    // FastSyncTreeRoots
+    read_state
+        .expect_request(ReadRequest::TransactionIdsForBlock(block_hash.into()))
+        .await
+        .respond(ReadResponse::TransactionIdsForBlock(Some(
+            block.transactions.iter().map(|tx| tx.hash()).collect(),
+        )));
+    read_state
+        .expect_request(ReadRequest::OrchardTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::OrchardTree(None));
+    read_state
+        .expect_request(ReadRequest::IronwoodTree(block_hash.into()))
+        .await
+        .respond(ReadResponse::IronwoodTree(None));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(previous_block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(None));
+    read_state
+        .expect_request(ReadRequest::BlockInfo(block_hash.into()))
+        .await
+        .respond(ReadResponse::BlockInfo(None));
+    read_state
+        .expect_request(ReadRequest::FastSyncTreeRoots(block_hash.into()))
+        .await
+        .respond(ReadResponse::FastSyncTreeRoots(Some(roots)));
+
+    let GetBlockResponse::Object(block) = block_future
+        .await
+        .expect("task should not panic")
+        .expect("getblock should succeed for fast-synced blocks")
+    else {
+        panic!("expected verbosity-1 getblock to return an object");
+    };
+
+    assert_eq!(block.trees(), GetBlockTrees::new(5, 7, 11));
+
+    let mut sapling_root: [u8; 32] = roots.roots.sapling.into();
+    sapling_root.reverse();
+    let orchard_root: [u8; 32] = roots.roots.orchard.into();
+    assert_eq!(block.final_sapling_root(), Some(sapling_root));
+    assert_eq!(block.final_orchard_root(), Some(orchard_root));
+    assert_eq!(block.height(), Some(height));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockheader() {
     let _init_guard = zebra_test::init();

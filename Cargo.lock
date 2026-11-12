@@ -7695,9 +7695,11 @@ dependencies = [
  "itertools 0.14.0",
  "regex",
  "reqwest 0.12.28",
+ "sapling-crypto",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tower 0.4.13",
  "tracing-error",
  "tracing-subscriber",
  "zcash_primitives",
@@ -7705,6 +7707,8 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
+ "zebra-state",
+ "zebra-test",
 ]
 
 [[package]]

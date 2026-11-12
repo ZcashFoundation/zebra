@@ -1049,6 +1049,51 @@ fn read_only_open_with_ephemeral_config_returns_error() {
     }
 }
 
+/// Opening a read-only state against a database without a column family in the code, like a
+/// database last opened by an older Zebra version, must succeed: a read-only secondary can't
+/// create column families, so it opens the ones on disk.
+#[test]
+fn read_only_open_without_a_newer_column_family() {
+    use crate::{
+        constants::STATE_DATABASE_KIND,
+        service::finalized_state::{ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        state_database_format_version_in_code, write_state_database_format_version_to_disk,
+    };
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let cache_dir =
+        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let version = state_database_format_version_in_code();
+    let (newer, older) = STATE_COLUMN_FAMILIES_IN_CODE
+        .split_last()
+        .expect("the state has column families");
+
+    let _primary = ZebraDb::new(
+        &config,
+        STATE_DATABASE_KIND,
+        &version,
+        &network,
+        true,
+        older.iter().map(ToString::to_string),
+        false,
+    )
+    .expect("creating a database should succeed");
+    // Format upgrades are skipped, so they don't write the version that marks the database as
+    // existing.
+    write_state_database_format_version_to_disk(&config, &version, &network)
+        .expect("writing the version file should succeed");
+
+    let (_, secondary, _) = super::init_read_only(config, &network)
+        .expect("a read-only state opens without newer column families");
+    assert!(secondary.db().cf_handle(newer).is_none());
+}
+
 /// Returns a copy of `block` with one byte of its coinbase miner data flipped.
 ///
 /// ZIP-244 excludes scriptSigs from v5 transaction IDs, so the block hash is unchanged,

@@ -19,7 +19,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::{FastSyncTreeRoots, ZebraDb},
+        non_finalized_state::Chain,
+    },
     HashOrHeight,
 };
 
@@ -314,6 +317,19 @@ where
     } else {
         BTreeMap::new()
     }
+}
+
+/// Returns the note commitment tree roots and sizes that fast checkpoint sync stored for the
+/// finalized block specified by a hash or height, if it committed that block without its trees.
+///
+/// Only finalized blocks can be fast-synced, so this doesn't need the non-finalized chain.
+pub fn fast_sync_tree_roots(
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<FastSyncTreeRoots> {
+    let height = hash_or_height.height_or_else(|hash| db.height(hash))?;
+
+    db.fast_sync_tree_roots(height)
 }
 
 /// Get the history tree of the provided chain.

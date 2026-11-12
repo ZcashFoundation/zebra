@@ -245,7 +245,8 @@ pub struct Inbound {
     /// Authenticated uncommitted bodies, available only on negotiated early-relay connections.
     early_blocks: Option<zs::EarlyRelayCache>,
 
-    /// Read-only context for compact reconstruction; absent until explicitly configured.
+    /// Read-only state for compact reconstruction and serving tree roots; absent until explicitly
+    /// configured.
     compact_relay: Option<(Network, zs::ReadStateService)>,
 
     /// Bounds mempool scans and detached blocking checks across all peer connections.
@@ -287,7 +288,8 @@ impl Inbound {
         self
     }
 
-    /// Provides committed-tip context for negotiated compact reconstruction, without publishing it.
+    /// Provides committed-tip context for negotiated compact reconstruction, without publishing it,
+    /// and the finalized state for serving tree roots.
     pub fn with_compact_relay(mut self, network: Network, state: zs::ReadStateService) -> Self {
         self.compact_relay = Some((network, state));
         self
@@ -750,6 +752,18 @@ impl Service<zn::Request> for Inbound {
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
                     _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
                 })
+                    .boxed()
+            }
+            zn::Request::TreeRoots { start_height, final_hash, count } => {
+                let Some((_, read_state)) = self.compact_relay.clone() else {
+                    return async { Ok(zn::Response::TreeRoots(None)) }.boxed();
+                };
+                read_state
+                    .oneshot(zs::ReadRequest::TreeRoots { start_height, final_hash, count })
+                    .map_ok(|resp| match resp {
+                        zs::ReadResponse::TreeRoots(roots) => zn::Response::TreeRoots(roots),
+                        _ => unreachable!("zebra-state should always respond to a `TreeRoots` request with a `TreeRoots` response"),
+                    })
                     .boxed()
             }
             zn::Request::Ping(_) => {

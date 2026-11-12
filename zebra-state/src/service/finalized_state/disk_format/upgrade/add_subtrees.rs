@@ -14,12 +14,12 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::Network::*,
     sapling,
-    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex},
+    subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeIndex, TRACKED_SUBTREE_HEIGHT},
 };
 
 use crate::service::finalized_state::{
     disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade},
-    DiskWriteBatch, ZebraDb,
+    DiskWriteBatch, FastSyncTreeRoots, ZebraDb,
 };
 
 /// Implements [`DiskFormatUpgrade`] for populating Sapling and Orchard note commitment subtrees.
@@ -294,7 +294,17 @@ fn quick_check_sapling_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_sapling_mainnet_subtree();
 
-    let db_subtree = calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree);
+    // Fast sync stores the subtrees it skips from embedded data, so check the stored subtree.
+    let db_subtree = if spans_fast_sync(db, prev_end_height, end_height) {
+        let Some(db_subtree) = db.sapling_subtree_by_index(0) else {
+            let result = Err("missing first subtree after fast sync");
+            error!(?result);
+            return result;
+        };
+        db_subtree
+    } else {
+        calculate_sapling_subtree(db, prev_end_height, prev_tree, end_height, tree)
+    };
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -348,7 +358,17 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     // Creating this test vector involves a cryptographic check, so only do it once.
     let expected_subtree = first_orchard_mainnet_subtree();
 
-    let db_subtree = calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree);
+    // Fast sync stores the subtrees it skips from embedded data, so check the stored subtree.
+    let db_subtree = if spans_fast_sync(db, prev_end_height, end_height) {
+        let Some(db_subtree) = db.orchard_subtree_by_index(0) else {
+            let result = Err("missing first subtree after fast sync");
+            error!(?result);
+            return result;
+        };
+        db_subtree
+    } else {
+        calculate_orchard_subtree(db, prev_end_height, prev_tree, end_height, tree)
+    };
 
     if db_subtree != expected_subtree {
         let result = Err("first subtree did not match expected test vector");
@@ -357,6 +377,36 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     }
 
     Ok(())
+}
+
+/// Returns `true` if fast checkpoint sync committed the heights after `prev_end_height` and
+/// before `end_height` without their trees.
+///
+/// Fast sync stores no trees for a contiguous range of heights, so consecutive stored trees either
+/// skip that whole range or none of it.
+fn spans_fast_sync(db: &ZebraDb, prev_end_height: Height, end_height: Height) -> bool {
+    db.fast_sync_tree_heights()
+        .is_some_and(|heights| (prev_end_height..end_height).contains(heights.start()))
+}
+
+/// Returns the last height fast checkpoint sync committed without its trees, and the number of
+/// subtrees completed by that height in the pool whose tree size `size` returns.
+///
+/// Returns `None` if there are no fast-synced heights.
+#[allow(clippy::unwrap_in_result)]
+fn fast_sync_end_and_subtree_count(
+    db: &ZebraDb,
+    size: impl Fn(&FastSyncTreeRoots) -> u64,
+) -> Option<(Height, u16)> {
+    let end = *db.fast_sync_tree_heights()?.end();
+    let roots = db
+        .fast_sync_tree_roots(end)
+        .expect("fast-synced heights have stored roots");
+    let subtree_count = (size(&roots) >> TRACKED_SUBTREE_HEIGHT)
+        .try_into()
+        .expect("completing 2^16 subtrees would take 2^32 notes, which no chain has");
+
+    Some((end, subtree_count))
 }
 
 /// Check that Sapling note commitment subtrees were correctly added.
@@ -377,6 +427,7 @@ fn check_sapling_subtrees(
         first_incomplete_subtree_index += 1;
     }
 
+    let fast_sync_heights = db.fast_sync_tree_heights();
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
         // Return early if the format check is cancelled.
@@ -390,6 +441,14 @@ fn check_sapling_subtrees(
             error!(?result, index);
             continue;
         };
+
+        // Fast sync stored no trees at these heights, and stored the subtree from embedded data.
+        if fast_sync_heights
+            .as_ref()
+            .is_some_and(|heights| heights.contains(&subtree.end_height))
+        {
+            continue;
+        }
 
         // Check that there was a sapling note at the subtree's end height.
         let Some(tree) = db.sapling_tree_by_height(&subtree.end_height) else {
@@ -434,6 +493,7 @@ fn check_sapling_subtrees(
         }
     }
 
+    let mut fast_sync_end = fast_sync_end_and_subtree_count(db, |roots| roots.sapling_size);
     let mut subtree_count = 0;
     for (index, height, tree) in db
         .sapling_tree_by_height_range(..)
@@ -441,7 +501,17 @@ fn check_sapling_subtrees(
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
         // Exclude heights that don't complete a subtree and count completed subtrees
         .filter_map(|(subtree_index, height, tree)| {
-            if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
+            let mut completes_subtree =
+                tree.is_complete_subtree() || subtree_index.0 > subtree_count;
+
+            // Fast sync stored no trees for its heights, and the next stored tree can be unchanged
+            // since the last of them, so compare its size with theirs.
+            if let Some((_, count)) = fast_sync_end.take_if(|(end, _)| height > *end) {
+                subtree_count = count;
+                completes_subtree = tree.count() >> TRACKED_SUBTREE_HEIGHT > u64::from(count);
+            }
+
+            if completes_subtree {
                 let subtree_index = subtree_count;
                 subtree_count += 1;
                 Some((subtree_index, height, tree))
@@ -508,6 +578,7 @@ fn check_orchard_subtrees(
         first_incomplete_subtree_index += 1;
     }
 
+    let fast_sync_heights = db.fast_sync_tree_heights();
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
         // Return early if the format check is cancelled.
@@ -521,6 +592,14 @@ fn check_orchard_subtrees(
             error!(?result, index);
             continue;
         };
+
+        // Fast sync stored no trees at these heights, and stored the subtree from embedded data.
+        if fast_sync_heights
+            .as_ref()
+            .is_some_and(|heights| heights.contains(&subtree.end_height))
+        {
+            continue;
+        }
 
         // Check that there was a orchard note at the subtree's end height.
         let Some(tree) = db.orchard_tree_by_height(&subtree.end_height) else {
@@ -565,6 +644,7 @@ fn check_orchard_subtrees(
         }
     }
 
+    let mut fast_sync_end = fast_sync_end_and_subtree_count(db, |roots| roots.orchard_size);
     let mut subtree_count = 0;
     for (index, height, tree) in db
         .orchard_tree_by_height_range(..)
@@ -572,7 +652,17 @@ fn check_orchard_subtrees(
         .filter_map(|(height, tree)| Some((tree.subtree_index()?, height, tree)))
         // Exclude heights that don't complete a subtree and count completed subtrees
         .filter_map(|(subtree_index, height, tree)| {
-            if tree.is_complete_subtree() || subtree_index.0 > subtree_count {
+            let mut completes_subtree =
+                tree.is_complete_subtree() || subtree_index.0 > subtree_count;
+
+            // Fast sync stored no trees for its heights, and the next stored tree can be unchanged
+            // since the last of them, so compare its size with theirs.
+            if let Some((_, count)) = fast_sync_end.take_if(|(end, _)| height > *end) {
+                subtree_count = count;
+                completes_subtree = tree.count() >> TRACKED_SUBTREE_HEIGHT > u64::from(count);
+            }
+
+            if completes_subtree {
                 let subtree_index = subtree_count;
                 subtree_count += 1;
                 Some((subtree_index, height, tree))

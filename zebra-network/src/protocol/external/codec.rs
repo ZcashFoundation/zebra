@@ -14,6 +14,7 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use zebra_chain::{
     block::{self, Block},
+    parallel::tree::{TreeRoots, MAX_TREE_ROOTS_PER_REQUEST},
     parameters::{Magic, Network},
     serialization::{
         sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
@@ -186,6 +187,8 @@ impl Encoder<Message> for Codec {
             CompactBlock { .. } => b"cmpctblock\0\0",
             GetBlockTransactions { .. } => b"getblocktxn\0",
             BlockTransactions { .. } => b"blocktxn\0\0\0\0",
+            GetTreeRoots { .. } => b"gettreeroots",
+            TreeRoots { .. } => b"treeroots\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
             GetHeaders { .. } => b"getheaders\0\0",
@@ -335,6 +338,20 @@ impl Codec {
             Message::CompactBlock(block) => block.zcash_serialize(&mut writer)?,
             Message::GetBlockTransactions(request) => request.zcash_serialize(&mut writer)?,
             Message::BlockTransactions(response) => response.zcash_serialize(&mut writer)?,
+            Message::GetTreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => {
+                writer.write_u32::<LittleEndian>(start_height.0)?;
+                final_hash.zcash_serialize(&mut writer)?;
+                writer.write_u32::<LittleEndian>(*count)?;
+            }
+            Message::TreeRoots(Some(roots)) => {
+                writer.write_u8(0)?;
+                roots.zcash_serialize(&mut writer)?;
+            }
+            Message::TreeRoots(None) => writer.write_u8(1)?,
             Message::GetBlocks { known_blocks, stop } => {
                 writer.write_u32::<LittleEndian>(self.builder.version.0)?;
                 known_blocks.zcash_serialize(&mut writer)?;
@@ -544,6 +561,8 @@ impl Decoder for Codec {
                         Self::deserialize_spawning::<BlockTransactions, _>(&mut body_reader)
                             .map(Message::BlockTransactions)
                     }
+                    b"gettreeroots" => self.read_gettreeroots(&mut body_reader),
+                    b"treeroots\0\0\0" => self.read_treeroots(&mut body_reader),
                     b"getblocks\0\0\0" => self.read_getblocks(&mut body_reader),
                     b"headers\0\0\0\0\0" => self.read_headers(&mut body_reader),
                     b"getheaders\0\0" => self.read_getheaders(&mut body_reader),
@@ -866,6 +885,48 @@ impl Codec {
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::FilterClear)
+    }
+
+    fn read_gettreeroots<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let start_height = block::Height(reader.read_u32::<LittleEndian>()?);
+        let final_hash = block::Hash::zcash_deserialize(&mut reader)?;
+        let count = reader.read_u32::<LittleEndian>()?;
+        if !(1..=MAX_TREE_ROOTS_PER_REQUEST).contains(&count) {
+            return Err(Error::Parse(
+                "gettreeroots count is zero or above the limit",
+            ));
+        }
+
+        Ok(Message::GetTreeRoots {
+            start_height,
+            final_hash,
+            count,
+        })
+    }
+
+    fn read_treeroots<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        match reader.read_u8()? {
+            0 => {}
+            1 => return Ok(Message::TreeRoots(None)),
+            _ => return Err(Error::Parse("invalid treeroots result")),
+        }
+
+        let count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        let count: usize = count.into();
+        // # Security
+        //
+        // Limit the allocation before reading untrusted entries.
+        // The u32 limit fits in usize on all supported platforms.
+        if count > MAX_TREE_ROOTS_PER_REQUEST as usize {
+            return Err(Error::Parse("treeroots message has too many entries"));
+        }
+
+        let mut roots = Vec::with_capacity(count);
+        for _ in 0..count {
+            roots.push(TreeRoots::zcash_deserialize(&mut reader)?);
+        }
+
+        Ok(Message::TreeRoots(Some(roots)))
     }
 
     /// Deserializes transaction-bearing messages on the existing blocking Rayon path.

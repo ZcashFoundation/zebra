@@ -741,6 +741,18 @@ impl StartCmd {
         // (by opening more peer connections, so those peers send us requests)
         tokio::task::yield_now().await;
 
+        // The state decides whether to fast sync: a state in the middle of fast sync needs roots
+        // even if `state.fast_tree_sync` was turned off.
+        info!("spawning fast tree sync roots fetcher task");
+        let tree_roots_task_handle = tokio::spawn(
+            sync::fetch_tree_roots(
+                config.network.network.clone(),
+                peer_set.clone(),
+                state.clone(),
+            )
+            .in_current_span(),
+        );
+
         // The crawler only activates immediately in tests that use mempool debug mode
         info!("spawning mempool crawler task");
         let mempool_crawler_task_handle = mempool::Crawler::spawn(
@@ -808,6 +820,7 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
+        pin!(tree_roots_task_handle);
         pin!(miner_task_handle);
         pin!(block_template_task_handle);
 
@@ -906,6 +919,11 @@ impl StartCmd {
                     .expect("unexpected panic in the end of support task")
                     .map(|_| info!("end of support task exited")),
 
+                tree_roots_result = &mut tree_roots_task_handle => tree_roots_result
+                    .expect("unexpected panic in the tree roots task")
+                    .map(|_| info!("tree roots task exited"))
+                    .map_err(|e| eyre!(e)),
+
                 // We also expect the state checkpoint verify task to finish.
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
@@ -979,6 +997,7 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
+        tree_roots_task_handle.abort();
         miner_task_handle.abort();
         if zcashd_compat_task_finished {
             debug!("zcashd-compat supervisor task already exited before shutdown");
