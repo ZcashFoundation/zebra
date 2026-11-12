@@ -180,6 +180,13 @@ bitflags! {
         /// does not provide network services.
         const NODE_NETWORK = 1;
 
+        /// Serves note commitment tree roots for its finalized chain in response to `gettreeroots`.
+        ///
+        /// The draft P2P v2 ZIP (`draft-arya-jvff-p2p-quic-transport`) assigns this bit to
+        /// `NODE_TREE_ROOTS` for its `get-tree-roots` request. This is the legacy-protocol
+        /// counterpart.
+        const NODE_TREE_ROOTS = 1 << 3;
+
         /// Support compact blocks and authenticated next-tip relay before full transaction validation.
         ///
         /// Both ends must advertise this bit, assigned by the [draft Compact Block Relay ZIP].

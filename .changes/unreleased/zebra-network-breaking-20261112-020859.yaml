@@ -1,0 +1,4 @@
+project: zebra-network
+kind: breaking
+body: Added the `gettreeroots` and `treeroots` messages, `Request::TreeRoots`, `Response::TreeRoots`, and `PeerServices::NODE_TREE_ROOTS` (bit 3), which Zebra now advertises. The peer set routes `Request::TreeRoots` only to ready peers that advertise it. Handle the new variants in exhaustive matches; custom inbound services must answer `Request::TreeRoots` with `Response::TreeRoots`.
+time: 2026-11-12T02:08:59.1331456+01:00

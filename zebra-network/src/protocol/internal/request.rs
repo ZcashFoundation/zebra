@@ -312,6 +312,26 @@ pub enum Request {
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
 
+    /// Request the note commitment tree roots after each block from `start_height` to the block
+    /// at height `start_height + count - 1`, whose hash is `final_hash`.
+    ///
+    /// The peer set sends this only to a ready peer that advertised
+    /// [`PeerServices::NODE_TREE_ROOTS`](crate::types::PeerServices::NODE_TREE_ROOTS), and fails
+    /// immediately if there is none. Inbound requests always have a count between 1 and
+    /// [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::TreeRoots`](super::Response::TreeRoots), with at most `count` roots.
+    TreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+    },
+
     /// Drive local peer-set maintenance without sending a request to a remote peer.
     ///
     /// The network-owned idle poller routes queued discovery and inventory requests when peers,
@@ -362,6 +382,14 @@ impl fmt::Display for Request {
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+            Request::TreeRoots {
+                start_height,
+                count,
+                ..
+            } => format!(
+                "TreeRoots {{ start_height: {}, count: {count} }}",
+                start_height.0
+            ),
             Request::PollPeerSet => "PollPeerSet".to_string(),
         })
     }
@@ -392,6 +420,7 @@ impl Request {
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::AdvertiseEarlyBlock(_, _) => "AdvertiseEarlyBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+            Request::TreeRoots { .. } => "TreeRoots",
             Request::PollPeerSet => "PollPeerSet",
         }
     }

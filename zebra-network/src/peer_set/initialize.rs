@@ -214,7 +214,7 @@ where
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
             .with_bans(bans_receiver.clone())
-            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_advertised_services(PeerServices::NODE_NETWORK | PeerServices::NODE_TREE_ROOTS)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)

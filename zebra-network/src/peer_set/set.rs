@@ -1414,6 +1414,27 @@ where
         .boxed()
     }
 
+    /// Routes a tree roots request to a ready peer that advertised
+    /// [`PeerServices::NODE_TREE_ROOTS`], using P2C, or fails without queueing if there is none.
+    fn route_tree_roots(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let serving_peers = self
+            .ready_services
+            .iter()
+            .filter(|(_, svc)| {
+                svc.remote_services()
+                    .contains(PeerServices::NODE_TREE_ROOTS)
+            })
+            .map(|(key, _)| *key)
+            .collect();
+
+        match self.select_p2c_peer_from_list(&serving_peers) {
+            Some(key) => self.call_ready_peer(key, req),
+            None => {
+                future::ready(Err(SharedPeerError::from(PeerError::NoReadyPeers).into())).boxed()
+            }
+        }
+    }
+
     /// Tries to route a request to a ready peer that advertised that inventory,
     /// falling back to a ready peer that isn't missing the inventory.
     ///
@@ -2392,6 +2413,7 @@ where
 
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
+            Request::TreeRoots { .. } => self.route_tree_roots(req),
 
             // Find requests rotate across serving peers with a bounded wait; others use P2C.
             _ => self.route_request(req),

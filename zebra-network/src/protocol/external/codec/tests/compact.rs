@@ -1,6 +1,6 @@
 use super::*;
 
-fn frame(command: &[u8; 12], body: &[u8]) -> BytesMut {
+pub(super) fn frame(command: &[u8; 12], body: &[u8]) -> BytesMut {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&Network::Mainnet.magic().0);
     bytes.extend_from_slice(command);

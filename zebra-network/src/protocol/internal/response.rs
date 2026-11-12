@@ -4,6 +4,7 @@ use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
     block::{self, Block},
+    parallel::tree::TreeRoots,
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -144,6 +145,13 @@ pub enum Response {
     //
     // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
     Transactions(Vec<InventoryResponse<(UnminedTx, Option<PeerSocketAddr>), UnminedTxId>>),
+
+    /// The note commitment tree roots after each requested block, or `None` if the peer refused
+    /// the request.
+    ///
+    /// Response to [`super::Request::TreeRoots`]. The list is a prefix of the requested roots.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TreeRoots(Option<Vec<TreeRoots>>),
 }
 
 impl fmt::Display for Response {
@@ -201,6 +209,9 @@ impl fmt::Display for Response {
                 transactions.iter().filter(|r| r.is_available()).count(),
                 transactions.iter().filter(|r| r.is_missing()).count()
             ),
+
+            Response::TreeRoots(Some(roots)) => format!("TreeRoots {{ roots: {} }}", roots.len()),
+            Response::TreeRoots(None) => "TreeRoots { refused }".to_string(),
         })
     }
 }
@@ -225,6 +236,7 @@ impl Response {
             Response::AuthorizedBlocks { .. } => "AuthorizedBlocks",
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
+            Response::TreeRoots(_) => "TreeRoots",
         }
     }
 
