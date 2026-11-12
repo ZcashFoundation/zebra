@@ -119,6 +119,22 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
 
 Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
 
+**Static Credentials:**
+
+Instead of the cookie, Zebra can require a fixed username and password. They survive restarts and need no shared filesystem between Zebra and its RPC clients, so they suit containers:
+
+```toml
+[rpc]
+rpc_user = "zebra"
+rpc_password_file = "/run/secrets/rpc_password"
+```
+
+- Set `rpc_user` together with `rpc_password` or `rpc_password_file`. Zebra refuses to start when only one of them is set.
+- `rpc_password_file` is read once at startup with trailing newlines trimmed, and takes precedence over `rpc_password`. It fits Docker secrets.
+- Static credentials take precedence over `enable_cookie_auth`: no cookie file is written while they are configured.
+- With environment variables, set `ZEBRA_RPC__RPC_USER` and `ZEBRA_RPC__RPC_PASSWORD_FILE`. `ZEBRA_RPC__RPC_PASSWORD` is rejected, because Zebra does not read secrets from environment variables.
+- Clients send the credentials as HTTP Basic authentication, for example `curl --user zebra:<password> ...`.
+
 Environment variable examples for health endpoints:
 
 - `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`

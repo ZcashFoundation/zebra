@@ -35,6 +35,13 @@ cookie_dir = "/home/zebra/.cache/zebra"
 
 # enable_cookie_auth = true
 
+# To require a fixed username and password instead of the cookie, set both
+# `rpc_user` and one of `rpc_password` or `rpc_password_file`. Static
+# credentials take precedence over `enable_cookie_auth`.
+
+# rpc_user = "zebra"
+# rpc_password_file = "/run/secrets/rpc_password"
+
 [state]
 cache_dir = "/home/zebra/.cache/zebra"
 
