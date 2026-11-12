@@ -93,6 +93,24 @@ front end that you can visualize:
 
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html
 
+## Metric catalog
+
+[`docker/observability/metrics-catalog.json`](https://github.com/ZcashFoundation/zebra/blob/main/docker/observability/metrics-catalog.json)
+lists every metric Zebra records, with its kind, unit, description, label keys, and
+the series names the Prometheus endpoint exports it as. The endpoint also shows each
+description as a `# HELP` line. Prometheus names replace the dots in a metric's name
+with underscores, and don't add a unit suffix.
+
+Most histograms are exported as Prometheus summaries, with `quantile` series. These
+histograms are exported as Prometheus histograms, with `_bucket` series that can be
+aggregated across nodes:
+
+- `rpc.request.duration_seconds`
+- `zcash.net.peer.handshake.duration_seconds`
+
+The catalog file in a release lists that release's metrics, so you can check your own
+dashboards and alerts against the version you run.
+
 ## Process metrics
 
 When the Prometheus endpoint is open, or [Sentry](tracing.md#sentry-production-monitoring)

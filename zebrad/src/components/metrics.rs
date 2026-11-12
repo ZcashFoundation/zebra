@@ -15,6 +15,10 @@ mod process_memory;
 pub(crate) use process_memory::record;
 pub use process_memory::record_process_memory;
 
+// `metrics-process` describes fewer metrics on Windows, so the catalog only matches elsewhere.
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests;
+
 /// How often the process metrics are sampled.
 #[cfg(not(windows))]
 const PROCESS_METRICS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
