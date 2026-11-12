@@ -27,9 +27,9 @@ permissions: {}
 jobs:
   trigger-integration:
     name: Trigger integration tests
-    # Scheduled runs need the app secrets, so skip them on forks and mirrors
-    # (same guard as zfnd-ci-integration-tests-gcp.yml).
-    if: ${{ github.event_name != 'schedule' || github.repository == 'ZcashFoundation/zebra' }}
+    # Dispatches to the external integration-test repository with the app
+    # secrets, so only ZcashFoundation/zebra runs it, whatever the event.
+    if: github.repository == 'ZcashFoundation/zebra'
     runs-on: ubuntu-26.04
     permissions:
       # Needed for the sticky PR comment when `pr_number` is given.
