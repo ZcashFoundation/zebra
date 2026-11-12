@@ -433,24 +433,27 @@ fn add_metric_attributes(
 
 /// Returns the Sentry tracing layer, or `None` if [`init`] has not bound an enabled client.
 ///
-/// Without a client the layer sends nothing, but it still creates a Sentry span for every
-/// INFO-level span. Must be called after [`init`].
+/// Must be called after [`init`].
 pub(crate) fn tracing_layer<S>() -> Option<impl tracing_subscriber::Layer<S>>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
     is_client_enabled().then(|| {
-        sentry::integrations::tracing::layer().event_filter(|metadata| match *metadata.level() {
-            Level::ERROR => EventFilter::Event | EventFilter::Log,
-            Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
-            // Sync progress is logged once a minute, so sending it gives Sentry each node's
-            // height and network upgrade over time without the volume of all INFO logs.
-            Level::INFO if metadata.target() == progress::LOG_TARGET => {
-                EventFilter::Log | EventFilter::Breadcrumb
-            }
-            Level::INFO => EventFilter::Breadcrumb,
-            _ => EventFilter::Ignore,
-        })
+        sentry::integrations::tracing::layer()
+            // Zebra doesn't send Sentry traces, so a Sentry span would never be sent, and building
+            // one costs work on every poll of an instrumented future, such as each peer message.
+            .span_filter(|_| false)
+            .event_filter(|metadata| match *metadata.level() {
+                Level::ERROR => EventFilter::Event | EventFilter::Log,
+                Level::WARN => EventFilter::Log | EventFilter::Breadcrumb,
+                // Sync progress is logged once a minute, so sending it gives Sentry each node's
+                // height and network upgrade over time without the volume of all INFO logs.
+                Level::INFO if metadata.target() == progress::LOG_TARGET => {
+                    EventFilter::Log | EventFilter::Breadcrumb
+                }
+                Level::INFO => EventFilter::Breadcrumb,
+                _ => EventFilter::Ignore,
+            })
     })
 }
 
@@ -739,6 +742,27 @@ mod tests {
         ));
 
         assert!(tracing_layer_installed_with(Some(enabled)));
+    }
+
+    #[test]
+    fn tracing_layer_creates_no_sentry_spans() {
+        let enabled = Client::from(sentry::apply_defaults(
+            ClientOptions::new().dsn("https://public@example.com/1"),
+        ));
+        let hub = Hub::new(Some(Arc::new(enabled)), Arc::new(Scope::default()));
+
+        Hub::run(Arc::new(hub), || {
+            let layer = tracing_layer().expect("an enabled client installs the layer");
+            let subscriber = Registry::default().with(layer);
+
+            tracing::subscriber::with_default(subscriber, || {
+                let _span = tracing::info_span!("work").entered();
+
+                assert!(Hub::current()
+                    .configure_scope(|scope| scope.get_span())
+                    .is_none());
+            });
+        });
     }
 
     #[test]

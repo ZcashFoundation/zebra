@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: 'Reduced the work Zebra does when Sentry is enabled: it no longer builds a Sentry span for every INFO-level span, such as one per inbound peer message. Zebra doesn''t send Sentry traces, so these spans were never sent.'
+time: 2026-11-12T17:25:58.915544825Z
