@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: breaking
+body: '`client::GetBlockchainInfoResponse::new` and `methods::BlockObject::new` take a new `nsm_value_balance: Option<GetBlockchainInfoBalance>` parameter after `value_pools`. ([#12325](https://github.com/ZcashFoundation/zebra/pull/12325))'
+time: 2026-11-05T20:14:42.43384478-07:00

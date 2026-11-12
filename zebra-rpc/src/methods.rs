@@ -69,7 +69,7 @@ use zebra_chain::{
             block_subsidy, founders_reward, funding_stream_address, funding_stream_values,
             miner_subsidy, FundingStreamReceiver,
         },
-        ConsensusBranchId, Network, NetworkUpgrade,
+        ConsensusBranchId, Network, NetworkUpgrade, GENESIS_PREVIOUS_BLOCK_HASH,
     },
     serialization::{
         BytesInDisplayOrder, DateTime32, Duration32, ZcashDeserialize, ZcashDeserializeInto,
@@ -1464,6 +1464,12 @@ where
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
             value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                network,
+                tip_height,
+                value_balance.nsm_amount(),
+                None,
+            )),
             upgrades,
             consensus,
             headers: tip_height,
@@ -1797,12 +1803,18 @@ where
                 unreachable!("unmatched response to a BlockInfo request");
             };
 
+            // The balances before the genesis block are zero. For other blocks, the parent's
+            // balances can be missing if a reorg occurs between the two reads. In that case, the
+            // change is not known, so the response does not include it.
             let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
-                let prev_value_pools = prev_block_info
-                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
-                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
-                    .ok()?;
+                let prev_value_pools = match prev_block_info {
+                    Some(prev) => prev.value_pools().constrain::<NegativeAllowed>().ok()?,
+                    None if previous_block_hash == GENESIS_PREVIOUS_BLOCK_HASH => {
+                        ValueBalance::<NegativeAllowed>::zero()
+                    }
+                    None => return None,
+                };
                 (value_pools - prev_value_pools).ok()
             });
             let size = size.or(block_info.as_ref().map(|d| d.size() as usize));
@@ -1824,6 +1836,14 @@ where
                 chain_supply: block_info
                     .as_ref()
                     .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                nsm_value_balance: block_info.as_ref().map(|d| {
+                    GetBlockchainInfoBalance::nsm(
+                        &network,
+                        height,
+                        d.value_pools().nsm_amount(),
+                        delta.map(|delta| delta.nsm_amount()),
+                    )
+                }),
                 value_pools: block_info
                     .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
@@ -4024,6 +4044,16 @@ pub struct GetBlockchainInfoResponse {
     #[serde(rename = "valuePools")]
     value_pools: BlockchainValuePoolBalances,
 
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7). It is not part of the
+    /// chain supply, so it is not in `valuePools`. It is `monitored` from NU7 activation. It is
+    /// absent in responses from nodes that don't report it.
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
+
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
@@ -4041,6 +4071,12 @@ impl Default for GetBlockchainInfoResponse {
             estimated_height: Height(1),
             chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
             value_pools: GetBlockchainInfoBalance::zero_pools(),
+            nsm_value_balance: Some(GetBlockchainInfoBalance::nsm(
+                &Network::Mainnet,
+                Height(1),
+                Amount::zero(),
+                None,
+            )),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
@@ -4069,6 +4105,7 @@ impl GetBlockchainInfoResponse {
         estimated_height: Height,
         chain_supply: GetBlockchainInfoBalance,
         value_pools: BlockchainValuePoolBalances,
+        nsm_value_balance: Option<GetBlockchainInfoBalance>,
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,
@@ -4086,6 +4123,7 @@ impl GetBlockchainInfoResponse {
             estimated_height,
             chain_supply,
             value_pools,
+            nsm_value_balance,
             upgrades,
             consensus,
             headers,
@@ -4500,6 +4538,7 @@ impl Default for GetBlockResponse {
             difficulty: None,
             chain_supply: None,
             value_pools: None,
+            nsm_value_balance: None,
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
@@ -4614,6 +4653,26 @@ pub struct BlockObject {
     #[serde(rename = "valuePools")]
     #[serde(skip_serializing_if = "Option::is_none")]
     value_pools: Option<BlockchainValuePoolBalances>,
+
+    /// The Network Sustainability Mechanism (NSM) value balance (NU7) after this block, and the
+    /// block's change to it. It is not part of the chain supply, so it is not in `valuePools`.
+    /// It is `monitored` from NU7 activation.
+    ///
+    /// At the NU7 activation block, the change includes `INITIAL_NSM_VALUE_BALANCE`: the block
+    /// subsidy and fees that coinbase transactions left unclaimed before NU6, when [ZIP 236] made
+    /// claiming them a consensus rule. [ZIP 237] credits this amount to the NSM value balance at
+    /// NU7 activation. On Mainnet it is 36,858,445,520 zatoshis (about 368.58 ZEC), so the change
+    /// at height 3,543,405 is this amount plus the block's other changes, and not fees burned in
+    /// that block.
+    ///
+    /// [ZIP 236]: https://zips.z.cash/zip-0236
+    /// [ZIP 237]: https://zips.z.cash/zip-0237
+    #[serde(
+        rename = "nsmValueBalance",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    nsm_value_balance: Option<GetBlockchainInfoBalance>,
 
     /// Information about the note commitment trees.
     #[getter(copy)]
