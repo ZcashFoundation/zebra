@@ -62,6 +62,10 @@ pub fn atomic_write(
 
     tmp_file.write_all(data)?;
 
+    // Flush the data before the rename, so an OS crash or power loss can't leave an empty
+    // file at `file_path`.
+    tmp_file.as_file().sync_all()?;
+
     // Atomically write the temp file to `file_path`.
     let persist_result = tmp_file
         .persist(&file_path)

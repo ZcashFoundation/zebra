@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Changed `common::atomic_write` to flush the file to disk before renaming it, so an OS crash or power loss can't leave an empty file.
+time: 2026-11-10T14:50:52.843690164Z

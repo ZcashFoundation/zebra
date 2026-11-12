@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Fixed
+body: Fixed the non-finalized state restore so it deletes backup files that can't be parsed, and writes backup files atomically, instead of skipping the same truncated block on every restart.
+time: 2026-11-10T17:37:57.877914053Z
