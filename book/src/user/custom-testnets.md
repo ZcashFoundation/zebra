@@ -164,7 +164,7 @@ listen_addr = "0.0.0.0:18232"
 There are a few caveats:
 
 - Configured network upgrade activation heights must be above the genesis block height, which is reserved for Zebra's `Genesis` network upgrade, and must not be above Zebra's max block height of `2^31 - 1`[^fn2].
-- While it's possible to activate Canopy and later network upgrades after height 1, Zebra cannot currently produce pre-Canopy block templates, so the `getblocktemplate` RPC method and Zebra's internal miner which depends on the `getblocktemplate` method won't work until Canopy is activated. An alternative block source will be required to mine pre-Canopy blocks onto Zebra's chain.
+- Pre-Canopy block templates from Heartwood activation include the founders' reward for external miners. Zebra's internal miner (`generate` and `generatetoaddress`) still requires Canopy activation.
 - Incompatible Testnets must configure a network magic distinct from public Testnet and use their own initial peers. Public Testnet magic is rejected even with an empty initial peer list, and the default public seeds are also rejected[^fn3].
 - If the genesis hash is configured, a genesis block will need to be copied into the custom Testnet state or submitted via the `submitblock` RPC method, Zebra cannot currently generate genesis blocks. See the `CreateGenesisBlock()` function in `zcashd/src/chainparams.cpp` for use cases that require a new genesis block.
 
