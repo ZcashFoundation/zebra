@@ -7,7 +7,7 @@
 //! And it's unclear if these assumptions match the `zcashd` implementation.
 //! It should be refactored into a cleaner set of request/response pairs (#1515).
 
-use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
+use std::{collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
 
 use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, RngExt};
@@ -44,7 +44,10 @@ use crate::{
 
 use InventoryResponse::*;
 
+use state_label::{ExtraInfo, HandlerName, Overload, StateLabel, StateName};
+
 mod peer_tx;
+mod state_label;
 
 #[cfg(test)]
 mod tests;
@@ -106,23 +109,22 @@ impl fmt::Display for Handler {
 }
 
 impl Handler {
-    /// Returns the Zebra internal handler type as a string.
-    pub fn command(&self) -> Cow<'static, str> {
+    /// Returns the Zebra internal handler type, without the handler contents.
+    fn name(&self) -> HandlerName {
         match self {
-            Handler::Finished(Ok(response)) => format!("Finished({})", response.command()).into(),
-            Handler::Finished(Err(PeerError::Serialization(_))) => "Finished(Serialization)".into(),
-            Handler::Finished(Err(error)) => format!("Finished({})", error.kind()).into(),
+            Handler::Finished(Ok(response)) => HandlerName::Finished(response.command()),
+            Handler::Finished(Err(error)) => HandlerName::Finished(error.kind_name()),
 
-            Handler::Ping { .. } => "Ping".into(),
-            Handler::Peers => "Peers".into(),
+            Handler::Ping { .. } => HandlerName::Pending("Ping"),
+            Handler::Peers => HandlerName::Pending("Peers"),
 
-            Handler::FindBlocks => "FindBlocks".into(),
-            Handler::FindHeaders => "FindHeaders".into(),
+            Handler::FindBlocks => HandlerName::Pending("FindBlocks"),
+            Handler::FindHeaders => HandlerName::Pending("FindHeaders"),
 
-            Handler::BlocksByHash { .. } => "BlocksByHash".into(),
-            Handler::TransactionsById { .. } => "TransactionsById".into(),
+            Handler::BlocksByHash { .. } => HandlerName::Pending("BlocksByHash"),
+            Handler::TransactionsById { .. } => HandlerName::Pending("TransactionsById"),
 
-            Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
+            Handler::MempoolTransactionIds => HandlerName::Pending("MempoolTransactionIds"),
         }
     }
 
@@ -491,14 +493,12 @@ impl fmt::Display for State {
 }
 
 impl State {
-    /// Returns the Zebra internal state as a string.
-    pub fn command(&self) -> Cow<'static, str> {
+    /// Returns the Zebra internal state, without the handler contents.
+    fn name(&self) -> StateName {
         match self {
-            State::AwaitingRequest => "AwaitingRequest".into(),
-            State::AwaitingResponse { handler, .. } => {
-                format!("AwaitingResponse({})", handler.command()).into()
-            }
-            State::Failed => "Failed".into(),
+            State::AwaitingRequest => StateName::AwaitingRequest,
+            State::AwaitingResponse { handler, .. } => StateName::AwaitingResponse(handler.name()),
+            State::Failed => StateName::Failed,
         }
     }
 }
@@ -611,7 +611,7 @@ where
     pub(super) metrics_label: String,
 
     /// The state for this peer, when the metrics were last updated.
-    pub(super) last_metrics_state: Option<Cow<'static, str>>,
+    last_metrics_state: Option<StateLabel>,
 
     /// The time of the last overload error response from the inbound
     /// service to a request from this connection,
@@ -923,10 +923,7 @@ where
                         None => self.fail_with(PeerError::ConnectionClosed).await,
                         Some(Err(e)) => self.fail_with(e).await,
                         Some(Ok(peer_msg)) => {
-                            self.update_state_metrics(Some(format_args!(
-                                "Out::Rsp::{}",
-                                peer_msg.command()
-                            )));
+                            self.update_state_metrics(Some(ExtraInfo::OutRsp(peer_msg.command())));
 
                             // Try to process the message using the handler.
                             // This extremely awkward construction avoids
@@ -1068,10 +1065,7 @@ where
                 "command" => request.command(),
             )
             .increment(1);
-            self.update_state_metrics(Some(format_args!(
-                "Out::Req::Canceled::{}",
-                request.command()
-            )));
+            self.update_state_metrics(Some(ExtraInfo::OutReqCanceled(request.command())));
 
             return;
         }
@@ -1084,7 +1078,7 @@ where
             "command" => request.command(),
         )
         .increment(1);
-        self.update_state_metrics(Some(format_args!("Out::Req::{}", request.command())));
+        self.update_state_metrics(Some(ExtraInfo::OutReq(request.command())));
 
         // # Security
         //
@@ -1292,7 +1286,7 @@ where
         trace!(?msg);
         debug!(state = %self.state, %msg, "received inbound peer message");
 
-        self.update_state_metrics(Some(format_args!("In::Msg::{}", msg.command())));
+        self.update_state_metrics(Some(ExtraInfo::InMsg(msg.command())));
 
         use InboundMessage::*;
 
@@ -1511,7 +1505,7 @@ where
             "command" => req.command(),
         )
         .increment(1);
-        self.update_state_metrics(Some(format_args!("In::Req::{}", req.command())));
+        self.update_state_metrics(Some(ExtraInfo::InReq(req.command())));
 
         // Give the inbound service time to clear its queue,
         // before sending the next inbound request.
@@ -1543,7 +1537,7 @@ where
 
                     let now = Instant::now();
 
-                    self.handle_inbound_overload(req, now, PeerError::Overloaded)
+                    self.handle_inbound_overload(req, now, Overload::Overloaded)
                         .await;
                 } else if e.is::<tower::timeout::error::Elapsed>() {
                     // # Security
@@ -1554,7 +1548,7 @@ where
 
                     let now = Instant::now();
 
-                    self.handle_inbound_overload(req, now, PeerError::InboundTimeout)
+                    self.handle_inbound_overload(req, now, Overload::Timeout)
                         .await;
                 } else {
                     // We could send a reject to the remote peer, but that might cause
@@ -1567,10 +1561,7 @@ where
                         client_receiver = ?self.client_rx,
                         "error processing peer request",
                     );
-                    self.update_state_metrics(Some(format_args!(
-                        "In::Req::{}/Rsp::Error",
-                        req.command()
-                    )));
+                    self.update_state_metrics(Some(ExtraInfo::InReqRspError(req.command())));
                 }
 
                 return;
@@ -1584,7 +1575,7 @@ where
             "command" => rsp.command(),
         )
         .increment(1);
-        self.update_state_metrics(Some(format_args!("In::Rsp::{}", rsp.command())));
+        self.update_state_metrics(Some(ExtraInfo::InRsp(rsp.command())));
 
         // TODO: split response handler into its own method
         match rsp.clone() {
@@ -1719,7 +1710,8 @@ where
     /// The inbound connection rate-limit also makes it hard for multiple peers to perform this
     /// attack, because each inbound connection can only send one inbound request before its
     /// probability of being disconnected increases.
-    async fn handle_inbound_overload(&mut self, req: Request, now: Instant, error: PeerError) {
+    async fn handle_inbound_overload(&mut self, req: Request, now: Instant, overload: Overload) {
+        let error = overload.error();
         let prev = self.last_overload_time.replace(now);
         let drop_connection_probability = overload_drop_connection_probability(now, prev);
 
@@ -1743,16 +1735,18 @@ where
                 "inbound service {error} error, closing connection",
             );
 
-            self.update_state_metrics(Some(format_args!(
-                "In::Req::{}/Rsp::{error}::Error",
-                req.command()
-            )));
+            self.update_state_metrics(Some(ExtraInfo::InReqOverloaded {
+                request: req.command(),
+                overload,
+                closed: true,
+            }));
             self.fail_with(error).await;
         } else {
-            self.update_state_metrics(Some(format_args!(
-                "In::Req::{}/Rsp::{error}::Ignored",
-                req.command()
-            )));
+            self.update_state_metrics(Some(ExtraInfo::InReqOverloaded {
+                request: req.command(),
+                overload,
+                closed: false,
+            }));
 
             if matches!(error, PeerError::Overloaded) {
                 metrics::counter!("pool.ignored.loadshed").increment(1);
@@ -1807,37 +1801,19 @@ where
     /// Update the connection state metrics for this connection,
     /// using `extra_state_info` as additional state information.
     ///
-    /// Counts live connections by command, without retaining per-peer address series.
-    ///
-    /// The state name is only allocated when it differs from the last one counted,
-    /// because this runs for every peer message.
-    fn update_state_metrics(&mut self, extra_state_info: Option<fmt::Arguments<'_>>) {
-        let state_command = self.state.command();
+    /// Counts live connections by label, without retaining per-peer address series.
+    /// This runs for every peer message, so labels are built without allocating.
+    fn update_state_metrics(&mut self, extra_state_info: Option<ExtraInfo>) {
+        let current_metrics_state = StateLabel::new(self.state.name(), extra_state_info);
 
-        let unchanged =
-            self.last_metrics_state
-                .as_deref()
-                .is_some_and(|last| match extra_state_info {
-                    Some(extra) => formats_to(last, format_args!("{state_command}::{extra}")),
-                    None => last == state_command,
-                });
-        if unchanged {
+        if self.last_metrics_state == Some(current_metrics_state) {
             return;
         }
-
-        let current_metrics_state: Cow<'static, str> = match extra_state_info {
-            Some(extra) => format!("{state_command}::{extra}").into(),
-            None => state_command,
-        };
 
         self.erase_state_metrics();
 
         // Count this connection in the aggregate live-state gauge.
-        metrics::gauge!(
-            "zebra.net.connection.state",
-            "command" => current_metrics_state.clone(),
-        )
-        .increment(1.0);
+        current_metrics_state.increment();
 
         self.last_metrics_state = Some(current_metrics_state);
     }
@@ -1845,11 +1821,7 @@ where
     /// Decrement the aggregate connection state gauge for this connection.
     fn erase_state_metrics(&mut self) {
         if let Some(last_metrics_state) = self.last_metrics_state.take() {
-            metrics::gauge!(
-                "zebra.net.connection.state",
-                "command" => last_metrics_state,
-            )
-            .decrement(1.0);
+            last_metrics_state.decrement();
         }
     }
 
@@ -1975,19 +1947,4 @@ fn transaction_ids(items: &'_ [InventoryHash]) -> impl Iterator<Item = UnminedTx
 /// Non-block inventory hashes are skipped.
 fn block_hashes(items: &'_ [InventoryHash]) -> impl Iterator<Item = block::Hash> + '_ {
     items.iter().filter_map(InventoryHash::block_hash)
-}
-
-/// Returns true if formatting `args` produces exactly `expected`, without allocating.
-fn formats_to(expected: &str, args: fmt::Arguments<'_>) -> bool {
-    struct Matcher<'a>(&'a str);
-
-    impl fmt::Write for Matcher<'_> {
-        fn write_str(&mut self, piece: &str) -> fmt::Result {
-            self.0 = self.0.strip_prefix(piece).ok_or(fmt::Error)?;
-            Ok(())
-        }
-    }
-
-    let mut matcher = Matcher(expected);
-    fmt::write(&mut matcher, args).is_ok() && matcher.0.is_empty()
 }

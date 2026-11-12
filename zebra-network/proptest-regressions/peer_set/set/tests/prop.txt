@@ -4,4 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc c425858ab60a7bf01ade19a36d6aa8adca4e78bce1aec959e73d62f122a39bf3 # shrinks to total_number_of_peers = 2
+cc cf94a40b67025193ee649713eaedf5e71d1ad7c62415dae38d26bda1190e1b4b # shrinks to total_number_of_peers = 2
