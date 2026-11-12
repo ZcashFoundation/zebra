@@ -9,7 +9,11 @@ use bincode::Options;
 
 use zebra_chain::{
     block::Height,
-    ironwood, orchard, sapling, sprout,
+    ironwood, orchard,
+    parallel::tree::TreeRoots,
+    sapling,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
@@ -221,5 +225,52 @@ impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
             Height::from_bytes(height_bytes),
             Node::from_bytes(node_bytes),
         )
+    }
+}
+
+/// The note commitment tree roots and sizes after a block that fast checkpoint sync committed
+/// without updating its note commitment trees.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct FastSyncTreeRoots {
+    /// The roots of the Sapling, Orchard, and Ironwood trees.
+    pub roots: TreeRoots,
+    /// The number of leaves in the Sapling tree.
+    pub sapling_size: u64,
+    /// The number of leaves in the Orchard tree.
+    pub orchard_size: u64,
+    /// The number of leaves in the Ironwood tree.
+    pub ironwood_size: u64,
+}
+
+impl IntoDisk for FastSyncTreeRoots {
+    type Bytes = [u8; TreeRoots::SERIALIZED_SIZE + 24];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        let mut bytes = [0; TreeRoots::SERIALIZED_SIZE + 24];
+        let (roots, sizes) = bytes.split_at_mut(TreeRoots::SERIALIZED_SIZE);
+        self.roots
+            .zcash_serialize(roots)
+            .expect("roots fit their serialized size");
+        sizes[..8].copy_from_slice(&self.sapling_size.to_be_bytes());
+        sizes[8..16].copy_from_slice(&self.orchard_size.to_be_bytes());
+        sizes[16..].copy_from_slice(&self.ironwood_size.to_be_bytes());
+        bytes
+    }
+}
+
+impl FromDisk for FastSyncTreeRoots {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let (roots, sizes) = bytes.as_ref().split_at(TreeRoots::SERIALIZED_SIZE);
+        let size = |range: std::ops::Range<usize>| {
+            u64::from_be_bytes(sizes[range].try_into().expect("sizes are 8 bytes each"))
+        };
+
+        Self {
+            roots: TreeRoots::zcash_deserialize(roots)
+                .expect("trusted data should deserialize successfully"),
+            sapling_size: size(0..8),
+            orchard_size: size(8..16),
+            ironwood_size: size(16..24),
+        }
     }
 }

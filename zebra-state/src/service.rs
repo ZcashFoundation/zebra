@@ -35,6 +35,7 @@ use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
     chain_tip::ChainTip,
     diagnostic::CodeTimer,
+    parallel::tree::MAX_TREE_ROOTS_PER_REQUEST,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
@@ -54,6 +55,7 @@ use crate::{
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
+        fast_tree_sync::TreeRootsCache,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
@@ -80,6 +82,7 @@ pub mod watch_receiver;
 pub mod check;
 
 pub(crate) mod early_relay;
+pub(crate) mod fast_tree_sync;
 
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
@@ -218,6 +221,9 @@ pub(crate) struct StateService {
     /// outside tests.
     mining_candidate_lifetime: Duration,
 
+    /// Peer-supplied note commitment tree roots for fast checkpoint sync, shared with the block
+    /// writer.
+    tree_roots_cache: Arc<TreeRootsCache>,
     // Metrics
     //
     /// Shutdown sender and thread owning the metrics database handle.
@@ -475,6 +481,25 @@ impl StateService {
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
+        // Before Sapling, there are no Sapling, Orchard, or Ironwood trees to skip.
+        let tree_roots_cache = Arc::new(
+            TreeRootsCache::new(
+                fast_tree_sync::embedded_trees_for_state(
+                    network,
+                    &finalized_state.db,
+                    config.fast_tree_sync,
+                    max_checkpoint_height,
+                ),
+                finalized_tip_height.map_or(block::Height(0), |height| {
+                    (height + 1).expect("finalized heights are below the maximum height")
+                }),
+            )
+            .with_first_height(
+                NetworkUpgrade::Sapling
+                    .activation_height(network)
+                    .unwrap_or(block::Height(0)),
+            ),
+        );
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -487,6 +512,7 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            tree_roots_cache.clone(),
         );
 
         let read_service = ReadStateService::new(
@@ -527,6 +553,7 @@ impl StateService {
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
             mining_candidate_lifetime: MINING_CANDIDATE_LIFETIME,
+            tree_roots_cache,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -1755,6 +1782,19 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            Request::SupplyTreeRoots {
+                start_height,
+                roots,
+            } => {
+                self.tree_roots_cache.supply(start_height, roots);
+                async { Ok(Response::TreeRootsSupplied) }.boxed()
+            }
+
+            Request::WantedTreeRoots => {
+                let wanted = self.tree_roots_cache.wanted();
+                async move { Ok(Response::WantedTreeRoots(wanted)) }.boxed()
+            }
+
             // Used by sync, inbound, and block verifier to check if a block is already in the state
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
@@ -2336,6 +2376,26 @@ impl Service<ReadRequest> for ReadStateService {
                     hash,
                 )))
             }
+
+            ReadRequest::TreeRoots {
+                start_height,
+                final_hash,
+                count,
+            } => {
+                // Finalized blocks can't be reorganized, so peers get roots for one chain only.
+                let roots = (1..=MAX_TREE_ROOTS_PER_REQUEST)
+                    .contains(&count)
+                    .then(|| start_height + HeightDiff::from(count - 1))
+                    .flatten()
+                    .filter(|&end| state.db.hash(end) == Some(final_hash))
+                    .and_then(|end| state.db.tree_roots_by_height_range(start_height, end));
+
+                Ok(ReadResponse::TreeRoots(roots))
+            }
+
+            ReadRequest::FastSyncTreeRoots(hash_or_height) => Ok(ReadResponse::FastSyncTreeRoots(
+                read::fast_sync_tree_roots(&state.db, hash_or_height),
+            )),
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit

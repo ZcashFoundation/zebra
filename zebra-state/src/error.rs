@@ -186,6 +186,17 @@ pub enum CommitBlockError {
     /// block. It might be valid.
     #[error("block was dropped from the full queue of blocks waiting for their parent blocks")]
     OrphanQueueFull,
+
+    /// Fast checkpoint sync couldn't verify this block's peer-supplied note commitment tree roots
+    /// against the next block.
+    ///
+    /// Either the roots or the next block's body can be wrong, so the block is retried with roots
+    /// and blocks from other peers.
+    #[error("rejected the peer-supplied note commitment tree roots of the block at {height:?}")]
+    TreeRootsRejected {
+        /// The height of the block.
+        height: block::Height,
+    },
 }
 
 impl CommitBlockError {
@@ -209,7 +220,8 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed => false,
+            | CommitBlockError::MinedBlockNotificationClosed
+            | CommitBlockError::TreeRootsRejected { .. } => false,
         }
     }
 
@@ -226,14 +238,16 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed => false,
+            | CommitBlockError::MinedBlockNotificationClosed
+            | CommitBlockError::TreeRootsRejected { .. } => false,
         }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, full queues, and rejected-ancestor descendants score 0.
+    /// Duplicate requests, shutdowns, full queues, rejected-ancestor descendants, and rejected tree
+    /// roots score 0: the roots and the block come from different peers, and either can be wrong.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
@@ -241,7 +255,8 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed => 0,
+            | CommitBlockError::MinedBlockNotificationClosed
+            | CommitBlockError::TreeRootsRejected { .. } => 0,
         }
     }
 }

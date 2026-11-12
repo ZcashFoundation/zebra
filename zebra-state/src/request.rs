@@ -15,7 +15,7 @@ use zebra_chain::{
     block::{self, merkle::AuthDataRoot, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
-    parallel::tree::NoteCommitmentTrees,
+    parallel::tree::{NoteCommitmentTrees, TreeRoots},
     parameters::Network,
     serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
@@ -33,6 +33,10 @@ use crate::{
 };
 use crate::{
     error::{InvalidateError, LayeredStateError, ReconsiderError},
+    service::{
+        fast_tree_sync::{EmbeddedTrees, FastTreeSync},
+        finalized_state::FastSyncTreeRoots,
+    },
     AwaitUtxoError, CommitCheckpointVerifiedError, CommitSemanticallyVerifiedError,
     EarlyRelayOrigin,
 };
@@ -415,6 +419,17 @@ pub enum FinalizableBlock {
     Checkpoint {
         checkpoint_verified: CheckpointVerifiedBlock,
     },
+    /// A checkpoint-verified block that fast checkpoint sync commits without updating its
+    /// Sapling, Orchard, and Ironwood note commitment trees.
+    FastCheckpoint {
+        checkpoint_verified: CheckpointVerifiedBlock,
+        /// The block's verified tree roots, and the tree sizes after it.
+        tree_roots: FastSyncTreeRoots,
+        /// The chain history tree after the block, built from its verified roots.
+        history_tree: Arc<HistoryTree>,
+        /// The embedded trees after the block, if fast sync ends with it.
+        embedded_trees: Option<Arc<EmbeddedTrees>>,
+    },
     Contextual {
         contextually_verified: ContextuallyVerifiedBlock,
         treestate: Treestate,
@@ -442,6 +457,8 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: DeferredPoolBalanceChange,
+    /// How fast checkpoint sync committed this block's note commitment trees, if it did.
+    pub(super) fast_tree_sync: Option<FastTreeSync>,
 }
 
 impl FinalizedBlock {
@@ -485,7 +502,14 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change,
+            fast_tree_sync: None,
         }
+    }
+
+    /// Records that fast checkpoint sync committed this block's note commitment trees as `fast`.
+    pub(crate) fn with_fast_tree_sync(mut self, fast: FastTreeSync) -> Self {
+        self.fast_tree_sync = Some(fast);
+        self
     }
 }
 
@@ -504,6 +528,10 @@ impl FinalizableBlock {
         match self {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
+            }
+            | FinalizableBlock::FastCheckpoint {
+                checkpoint_verified,
+                ..
             } => checkpoint_verified.block.clone(),
             FinalizableBlock::Contextual {
                 contextually_verified,
@@ -1541,6 +1569,24 @@ pub enum Request {
     /// The caller must check proof of work, current time and serialized size after rebinding.
     /// Returns [`Response::Committed`], with the same queue semantics as a semantic commit.
     CommitContextuallyVerifiedBlock(Box<ContextuallyVerifiedBlock>),
+
+    /// Supplies the unverified note commitment tree roots after each block from `start_height`,
+    /// for fast checkpoint sync.
+    ///
+    /// The block writer verifies each root against the chain's header commitments before using
+    /// it, and drops roots it doesn't need.
+    ///
+    /// Returns [`Response::TreeRootsSupplied`].
+    SupplyTreeRoots {
+        /// The height of the block whose roots come first.
+        start_height: block::Height,
+        /// The roots after each consecutive block.
+        roots: Vec<TreeRoots>,
+    },
+
+    /// Returns the heights whose note commitment tree roots fast checkpoint sync needs next, in
+    /// [`Response::WantedTreeRoots`].
+    WantedTreeRoots,
 }
 
 impl Request {
@@ -1584,6 +1630,8 @@ impl Request {
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::PreciousBlock(_) => "precious_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::SupplyTreeRoots { .. } => "supply_tree_roots",
+            Request::WantedTreeRoots => "wanted_tree_roots",
         }
     }
 
@@ -2148,6 +2196,27 @@ pub enum ReadRequest {
     ///
     /// The creating transaction version is unavailable when its body has been pruned.
     UnspentOutput(transparent::OutPoint),
+
+    /// Looks up the note commitment tree roots after each finalized block from `start_height`
+    /// to the block at height `start_height + count - 1`, if that block's hash is `final_hash`.
+    ///
+    /// Returns [`ReadResponse::TreeRoots`] with `count` roots, or with `None` if the finalized
+    /// chain doesn't have `final_hash` at that height, or `count` is zero or above
+    /// [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
+    TreeRoots {
+        /// The height of the first block.
+        start_height: block::Height,
+        /// The hash of the last block.
+        final_hash: block::Hash,
+        /// The number of blocks.
+        count: u32,
+    },
+
+    /// Looks up the note commitment tree roots and sizes that fast checkpoint sync stored for a
+    /// finalized block it committed without its Sapling, Orchard, and Ironwood trees.
+    ///
+    /// Returns [`ReadResponse::FastSyncTreeRoots`] with `None` if the block isn't such a block.
+    FastSyncTreeRoots(HashOrHeight),
 }
 
 impl ReadRequest {
@@ -2208,6 +2277,8 @@ impl ReadRequest {
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::UnspentOutput(_) => "unspent_output",
+            ReadRequest::TreeRoots { .. } => "tree_roots",
+            ReadRequest::FastSyncTreeRoots(_) => "fast_sync_tree_roots",
         }
     }
 
@@ -2272,6 +2343,10 @@ impl TryFrom<Request> for ReadRequest {
             | Request::InvalidateBlock(_)
             | Request::PreciousBlock(_)
             | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
+
+            Request::SupplyTreeRoots { .. } | Request::WantedTreeRoots => {
+                Err("ReadService does not track fast sync tree roots")
+            }
 
             Request::AwaitUtxo(_) | Request::AwaitUtxos(_) => {
                 Err("ReadService does not track pending UTXOs. \

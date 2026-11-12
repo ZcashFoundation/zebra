@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added `parallel::tree::TreeRoots`, the Sapling, Orchard, and Ironwood roots after a block, `MAX_TREE_ROOTS_PER_REQUEST`, and `NoteCommitmentTrees::{roots, update_sprout_tree}`.
+time: 2026-11-12T02:51:53.541781119+01:00

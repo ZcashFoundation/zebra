@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Added fast checkpoint sync: `Request::SupplyTreeRoots`, `Request::WantedTreeRoots`, `ReadRequest::TreeRoots`, their responses, `EmbeddedTrees`, and `CommitBlockError::TreeRootsRejected`. Below the height of the embedded note commitment trees, the block writer can commit checkpoint-verified blocks with peer-supplied tree roots verified against header commitments, without updating their Sapling, Orchard, and Ironwood trees.'
+time: 2026-11-12T02:51:53.545685158+01:00
