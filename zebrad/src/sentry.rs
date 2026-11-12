@@ -199,8 +199,7 @@ impl Metadata {
     }
 }
 
-/// Starts the Sentry client, its release health sessions, which are replaced daily, and its
-/// metrics policy.
+/// Starts the Sentry client and its release health sessions, which are replaced daily.
 pub(crate) fn init(network: &Network) {
     let mut metadata = Metadata::from_env();
     metadata.tags.insert("chain.network", network.to_string());
@@ -211,7 +210,7 @@ pub(crate) fn init(network: &Network) {
     let enabled = guard.is_enabled();
     *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
 
-    // A disabled client has no sessions to rotate and no metrics to flush.
+    // A disabled client has no sessions to rotate.
     if !enabled {
         return;
     }
@@ -227,8 +226,6 @@ pub(crate) fn init(network: &Network) {
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
     }
-
-    metrics_adapter::start();
 }
 
 /// Starts the first release health session of this run.
@@ -420,10 +417,18 @@ where
     })
 }
 
-/// Returns the recorder that sends every metric to Sentry, or `None` if [`init`] has not bound an
-/// enabled client or could not start the thread that flushes metrics.
+/// Returns the recorder that sends every metric to Sentry, starting the thread that flushes it on
+/// the first call. Returns `None` if [`init`] has not bound an enabled client, or if that thread
+/// can't start.
+///
+/// Must be called after the tracing subscriber is installed, so a failure to start the thread is
+/// logged.
 pub(crate) fn metrics_recorder() -> Option<&'static SentryPolicy> {
-    metrics_adapter::recorder()
+    if !is_client_enabled() {
+        return None;
+    }
+
+    metrics_adapter::start()
 }
 
 fn is_client_enabled() -> bool {
@@ -1142,8 +1147,7 @@ mod tests {
     fn counts_since_the_last_flush_are_sent_at_shutdown() {
         let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
 
-        metrics_adapter::start();
-        let policy = super::metrics_recorder().expect("starting the adapter creates the policy");
+        let policy = metrics_adapter::start().expect("the test can start the flush thread");
 
         let metrics = sent_metrics(&metadata, || {
             metrics::with_local_recorder(policy, || {

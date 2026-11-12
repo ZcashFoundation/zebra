@@ -8,11 +8,14 @@ use crate::components::metrics::sentry_policy::{
     AttributeValue, MetricType, SentryMetric, SentryPolicy, FLUSH_INTERVAL,
 };
 
-/// The policy that every metric goes through once [`start`] has run.
+/// The policy that every metric goes through once [`start`] has created it.
 static POLICY: OnceLock<SentryPolicy> = OnceLock::new();
 
-/// Starts a thread that flushes the policy every [`FLUSH_INTERVAL`], then creates the policy.
-pub(super) fn start() {
+/// Returns the policy, creating it and a thread that flushes it every [`FLUSH_INTERVAL`] on the
+/// first call. Returns `None` and logs an error if that thread can't start.
+///
+/// Must be called after the tracing subscriber is installed, so that error reaches the logs.
+pub(super) fn start() -> Option<&'static SentryPolicy> {
     start_with(&POLICY, || {
         thread::Builder::new()
             .name("sentry metrics flush".to_owned())
@@ -20,31 +23,34 @@ pub(super) fn start() {
                 thread::sleep(FLUSH_INTERVAL);
                 flush();
             })
-    });
+    })
 }
 
 /// Creates the policy in `policy` only if `spawn_flush` starts the thread that flushes it.
 ///
 /// Without that thread, the policy would keep every histogram value it records, so Zebra doesn't
 /// record metrics for Sentry at all.
-fn start_with<T>(policy: &OnceLock<SentryPolicy>, spawn_flush: impl FnOnce() -> io::Result<T>) {
+fn start_with<T>(
+    policy: &OnceLock<SentryPolicy>,
+    spawn_flush: impl FnOnce() -> io::Result<T>,
+) -> Option<&SentryPolicy> {
+    if let Some(policy) = policy.get() {
+        return Some(policy);
+    }
+
     match spawn_flush() {
-        Ok(_) => {
-            policy.get_or_init(SentryPolicy::default);
+        Ok(_) => Some(policy.get_or_init(SentryPolicy::default)),
+        Err(error) => {
+            error!(
+                ?error,
+                "unable to start the Sentry metrics flush thread: Zebra won't send metrics to Sentry",
+            );
+            None
         }
-        Err(error) => error!(
-            ?error,
-            "unable to start the Sentry metrics flush thread: Zebra won't send metrics to Sentry",
-        ),
     }
 }
 
-/// Returns the policy to install as a metrics recorder, if [`start`] has run.
-pub(super) fn recorder() -> Option<&'static SentryPolicy> {
-    POLICY.get()
-}
-
-/// Sends what was recorded since the previous flush, if [`start`] has run.
+/// Sends what was recorded since the previous flush, if [`start`] has created the policy.
 pub(super) fn flush() {
     if let Some(policy) = POLICY.get() {
         policy.flush(send);
@@ -130,15 +136,22 @@ mod tests {
         let _init_guard = zebra_test::init();
 
         let policy = OnceLock::new();
-        start_with(&policy, || {
+        let started = start_with(&policy, || {
             Err::<(), _>(io::Error::other("no threads left"))
         });
         assert!(
-            policy.get().is_none(),
+            started.is_none() && policy.get().is_none(),
             "without a flush thread, the policy would keep every histogram value",
         );
 
-        start_with(&policy, || Ok(()));
-        assert!(policy.get().is_some());
+        assert!(start_with(&policy, || Ok(())).is_some());
+
+        let mut spawned_again = false;
+        let started_again = start_with(&policy, || {
+            spawned_again = true;
+            Ok(())
+        });
+        assert!(started_again.is_some());
+        assert!(!spawned_again, "one flush thread flushes the policy");
     }
 }
