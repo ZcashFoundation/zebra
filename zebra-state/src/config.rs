@@ -104,9 +104,9 @@ pub struct Config {
     /// that advertise `NODE_TREE_ROOTS` instead of computing the Sapling, Orchard, and Ironwood
     /// note commitment trees, up to the trees embedded in Zebra.
     ///
-    /// Set to `false` by default. Once fast sync starts, checkpoint sync waits for those roots
-    /// until it reaches the embedded trees, even if this is set back to `false`, so only enable
-    /// it if such peers are available.
+    /// Set to `false` by default. Once started, fast sync must finish even if this is set back
+    /// to `false`. Without authenticated roots for 120 seconds, Zebra exits with recovery
+    /// instructions. Only enable this if peers serving roots are available.
     ///
     /// The state has no historical note commitment trees for the heights fast sync commits, so
     /// `z_gettreestate` and lightwalletd tree states are unavailable for them. Don't enable it

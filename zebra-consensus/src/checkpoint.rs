@@ -110,7 +110,15 @@ struct Verified {
     /// Resolves once the previously verified block has been sent to the state.
     previous_sent: Option<oneshot::Receiver<()>>,
     /// Signals the next verified block once this block has been sent to the state.
-    sent: oneshot::Sender<()>,
+    sent: Option<oneshot::Sender<()>>,
+}
+
+/// Checkpoint-certified effects and their admission slot during authorizing-body recovery.
+#[derive(Debug)]
+struct BodyReplay {
+    height: block::Height,
+    hash: block::Hash,
+    retained: RetainedBlockPermit,
 }
 
 /// A failed checkpoint block commit, sent from its commit task to the verifier.
@@ -122,6 +130,8 @@ struct CommitFailure {
     tip: Option<(block::Height, block::Hash)>,
     /// The failed block, if the state failed it without checking it.
     child: Option<QueuedBlock>,
+    /// The checkpoint-certified identity of an authorizing body the writer needs replaced.
+    body_replay: Option<BodyReplay>,
 }
 
 /// A list of unverified blocks at a particular height.
@@ -212,15 +222,16 @@ where
     /// The current progress of this verifier.
     verifier_progress: Progress<block::Height>,
 
-    /// A channel to receive requests to reset the verifier,
-    /// receiving the tip of the state.
+    /// Commit failures that reset progress or request an exact authorizing-body replay.
     reset_receiver: mpsc::Receiver<CommitFailure>,
-    /// A channel to send requests to reset the verifier,
-    /// passing the tip of the state.
+    /// Sender for commit-failure notifications.
     reset_sender: mpsc::Sender<CommitFailure>,
 
     /// The number of times the verifier was reset after a failed block commit.
     epoch: u64,
+
+    /// The serial finalized writer repairs one checkpoint-certified body at a time.
+    body_replay: Option<BodyReplay>,
 
     /// Resolves once the last verified block has been sent to the state.
     previous_block_sent: Option<oneshot::Receiver<()>>,
@@ -386,6 +397,7 @@ where
             reset_receiver: receiver,
             reset_sender: sender,
             epoch: 0,
+            body_replay: None,
             previous_block_sent: None,
             #[cfg(feature = "progress-bar")]
             queued_blocks_bar,
@@ -482,6 +494,7 @@ where
 
     /// Reset the verifier progress back to given tip.
     fn reset_progress(&mut self, tip: Option<(block::Height, block::Hash)>) {
+        self.body_replay = None;
         let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
         self.initial_tip_hash = initial_tip_hash;
         self.verifier_progress = verifier_progress;
@@ -729,7 +742,17 @@ where
         let height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
-        self.check_height(height)?;
+        match self
+            .body_replay
+            .as_ref()
+            .filter(|replay| replay.hash == hash)
+        {
+            Some(replay) if replay.height != height => {
+                return Err(VerifyCheckpointError::CoinbaseHeight { hash });
+            }
+            Some(_) => {}
+            None => self.check_height(height)?,
+        }
 
         // Decoded transactions retain exact sizes; only internally rebuilt bodies need counting.
         let block_size = u64::try_from(block.zcash_serialized_size())
@@ -916,7 +939,6 @@ where
             };
             self.reject_queued(height, index);
         }
-
         // Admission is serialized through &mut self; commit owners can only decrease the count.
         self.retained_blocks.fetch_add(1, Ordering::Relaxed);
         let queued = QueuedBlock {
@@ -1163,7 +1185,7 @@ where
                 retained: qblock.retained,
                 epoch: self.epoch,
                 previous_sent: self.previous_block_sent.replace(next_sent),
-                sent,
+                sent: Some(sent),
             };
             self.commit_verified_block(verified, qblock.tx);
         }
@@ -1255,7 +1277,7 @@ pub enum VerifyCheckpointError {
         height: block::Height,
         hash: block::Hash,
     },
-    #[error("the block {hash:?} does not have a coinbase height")]
+    #[error("the block {hash:?} has a missing or unexpected coinbase height")]
     CoinbaseHeight { hash: block::Hash },
     #[error("merkle root {actual:?} does not match expected {expected:?}")]
     BadMerkleRoot {
@@ -1345,6 +1367,16 @@ impl VerifyCheckpointError {
         }
     }
 
+    /// Returns whether the state retained descendants and requested only this body again.
+    fn is_targeted_body_recovery(&self) -> bool {
+        match self {
+            VerifyCheckpointError::CommitCheckpointVerified(source) => source
+                .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                .is_some_and(|error| error.is_targeted_body_recovery()),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if the block's authorizing data doesn't match the commitment in
     /// its header.
     ///
@@ -1427,7 +1459,25 @@ where
     ) -> <Self as Service<Arc<Block>>>::Future {
         self.check_commit_tasks();
         let mut requeued = false;
-        while let Ok(CommitFailure { epoch, tip, child }) = self.reset_receiver.try_recv() {
+        while let Ok(CommitFailure {
+            epoch,
+            tip,
+            child,
+            body_replay,
+        }) = self.reset_receiver.try_recv()
+        {
+            if let Some(body_replay) = body_replay {
+                if epoch == self.epoch {
+                    assert!(
+                        self.body_replay.as_ref().is_none_or(|pending| {
+                            pending.height == body_replay.height && pending.hash == body_replay.hash
+                        }),
+                        "the serial finalized writer repairs one authorizing body at a time"
+                    );
+                    self.body_replay = Some(body_replay);
+                }
+                continue;
+            }
             if epoch == self.epoch {
                 self.reset_progress(tip);
                 self.epoch = self.epoch.wrapping_add(1);
@@ -1440,15 +1490,44 @@ where
         if requeued {
             self.process_checkpoint_range();
         }
-        if let FinalCheckpoint = self.previous_checkpoint_height() {
-            return async { Err(VerifyCheckpointError::Finished) }.boxed();
-        }
-        let req_block = match self.queue_block(block, notifications) {
-            Ok(req_block) => req_block,
-            Err(error) => return async { Err(error) }.boxed(),
+        let req_block = if self
+            .body_replay
+            .as_ref()
+            .is_some_and(|replay| replay.hash == block.hash())
+        {
+            let block = match self.check_block(block) {
+                Ok(block) => block,
+                Err(error) => return async { Err(error) }.boxed(),
+            };
+            let BodyReplay { retained, .. } = self
+                .body_replay
+                .take()
+                .expect("a validated replay retains its certificate and admission slot");
+            let (tx, rx) = oneshot::channel();
+            self.commit_verified_block(
+                Verified {
+                    block,
+                    notifications,
+                    retained,
+                    epoch: self.epoch,
+                    previous_sent: None,
+                    sent: None,
+                },
+                tx,
+            );
+            RequestBlock { rx }
+        } else {
+            if let FinalCheckpoint = self.previous_checkpoint_height() {
+                return async { Err(VerifyCheckpointError::Finished) }.boxed();
+            }
+            let req_block = match self.queue_block(block, notifications) {
+                Ok(req_block) => req_block,
+                Err(error) => return async { Err(error) }.boxed(),
+            };
+            self.process_checkpoint_range();
+            metrics::gauge!("checkpoint.queued_slots").set(self.queued.len() as f64);
+            req_block
         };
-        self.process_checkpoint_range();
-        metrics::gauge!("checkpoint.queued_slots").set(self.queued.len() as f64);
 
         async move {
             let result = req_block.rx.await;
@@ -1530,7 +1609,9 @@ where
                     .await
                     .map_err(VerifyCheckpointError::CommitCheckpointVerified)?
                     .call(commit);
-                let _ = sent.send(());
+                if let Some(sent) = sent {
+                    let _ = sent.send(());
+                }
                 match commit
                     .map_err(VerifyCheckpointError::CommitCheckpointVerified)
                     .await?
@@ -1547,6 +1628,21 @@ where
             // Only accepted commit failures reset progress. Unrelated queue rejections must not
             // rewind below an in-flight range, whose bodies have already left the queue.
             if let Err(error @ VerifyCheckpointError::CommitCheckpointVerified(_)) = &result {
+                if error.is_targeted_body_recovery() {
+                    let _ = reset_sender.send(CommitFailure {
+                        epoch,
+                        tip: None,
+                        child: None,
+                        body_replay: Some(BodyReplay {
+                            height: child.height,
+                            hash,
+                            retained,
+                        }),
+                    });
+                    drop(child);
+                    let _ = tx.send(result);
+                    return;
+                }
                 let tip = match state_service.oneshot(zs::Request::Tip).await {
                     Ok(zs::Response::Tip(tip)) => tip,
                     Ok(_) => unreachable!("wrong response for Tip"),
@@ -1570,6 +1666,7 @@ where
                             notifications,
                             retained,
                         }),
+                        body_replay: None,
                     };
                     // A closed reset channel means the verifier has been dropped.
                     if let Err(mpsc::SendError(CommitFailure {
@@ -1584,6 +1681,7 @@ where
                     epoch,
                     tip,
                     child: None,
+                    body_replay: None,
                 });
             }
             drop((child, retained));

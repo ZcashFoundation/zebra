@@ -52,7 +52,7 @@ use crate::{
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
-        fast_tree_sync::TreeRootsCache,
+        fast_tree_sync::{TreeRootsCache, TreeRootsMessage, WantedTreeRoots},
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
@@ -171,12 +171,15 @@ pub(crate) struct StateService {
     /// Hashes of blocks below the finalized tip height are periodically pruned.
     non_finalized_block_write_sent_hashes: SentHashes,
 
-    /// If an invalid block is sent on `finalized_block_write_sender`,
-    /// this channel gets the height and [`block::Hash`] of the valid finalized tip.
-    //
-    // TODO: add tests for non-finalized resets (#2654)
+    /// Receives full finalized-queue resets or targeted malformed-body replacement requests.
     invalid_block_write_reset_receiver:
-        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
+        tokio::sync::mpsc::UnboundedReceiver<write::FinalizedWriteFeedback>,
+
+    /// An exact replacement requested by the writer, without disturbing queued descendants.
+    finalized_body_replacement: Option<(
+        block::Hash,
+        std::sync::mpsc::SyncSender<queued_blocks::QueuedCheckpointVerified>,
+    )>,
 
     /// Receives the hash of every non-finalized block that the write task
     /// rejected, so the corresponding entry can be removed from
@@ -208,9 +211,11 @@ pub(crate) struct StateService {
     /// Bounds early-work computations and keeps a live candidate from being replaced.
     mining_candidate_slot: Arc<Semaphore>,
 
-    /// Peer-supplied note commitment tree roots for fast checkpoint sync, shared with the block
-    /// writer.
-    tree_roots_cache: Arc<TreeRootsCache>,
+    /// Bounded input to the writer-owned roots cache, and its published progress.
+    tree_roots_sender: std::sync::mpsc::SyncSender<TreeRootsMessage>,
+    wanted_tree_roots: watch::Receiver<WantedTreeRoots>,
+    rejected_tree_roots: std::sync::mpsc::Receiver<std::net::SocketAddr>,
+    pending_rejected_tree_roots: Option<std::net::SocketAddr>,
 
     // Metrics
     //
@@ -454,24 +459,24 @@ impl StateService {
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         // Before Sapling, there are no Sapling, Orchard, or Ironwood trees to skip.
-        let tree_roots_cache = Arc::new(
-            TreeRootsCache::new(
-                fast_tree_sync::embedded_trees_for_state(
-                    network,
-                    &finalized_state.db,
-                    config.fast_tree_sync,
-                    max_checkpoint_height,
-                ),
-                finalized_tip_height.map_or(block::Height(0), |height| {
-                    (height + 1).expect("finalized heights are below the maximum height")
-                }),
-            )
-            .with_first_height(
-                NetworkUpgrade::Sapling
-                    .activation_height(network)
-                    .unwrap_or(block::Height(0)),
+        let mut tree_roots_cache = TreeRootsCache::new(
+            fast_tree_sync::embedded_trees_for_state(
+                fast_tree_sync::EmbeddedTrees::for_network(network),
+                &finalized_state.db,
+                config.fast_tree_sync,
+                max_checkpoint_height,
             ),
+            finalized_tip_height.map_or(block::Height(0), |height| {
+                (height + 1).expect("finalized heights are below the maximum height")
+            }),
+        )
+        .with_first_height(
+            NetworkUpgrade::Sapling
+                .activation_height(network)
+                .unwrap_or(block::Height(0)),
         );
+        let (tree_roots_sender, wanted_tree_roots, rejected_tree_roots) =
+            tree_roots_cache.channels();
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -484,7 +489,7 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
-            tree_roots_cache.clone(),
+            tree_roots_cache,
         );
 
         let read_service = ReadStateService::new(
@@ -516,13 +521,17 @@ impl StateService {
             finalized_reset_next_height: None,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
+            finalized_body_replacement: None,
             non_finalized_rejected_receiver,
             pending_utxos,
             last_prune: Instant::now(),
             read_service: read_service.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             mining_candidate_slot: Arc::new(Semaphore::new(1)),
-            tree_roots_cache,
+            tree_roots_sender,
+            wanted_tree_roots,
+            rejected_tree_roots,
+            pending_rejected_tree_roots: None,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -600,6 +609,27 @@ impl StateService {
 
         // Apply pending resets first, so they can't fail the block queued below.
         self.drain_finalized_resets();
+        if self
+            .finalized_body_replacement
+            .as_ref()
+            .is_some_and(|(hash, _)| *hash == checkpoint_verified.hash)
+        {
+            let (_, replacement) = self
+                .finalized_body_replacement
+                .take()
+                .expect("the matching replacement request exists");
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            if let Err(error) = replacement.try_send((checkpoint_verified, rsp_tx, notifications)) {
+                Self::send_checkpoint_verified_block_error(
+                    match error {
+                        std::sync::mpsc::TrySendError::Full(queued)
+                        | std::sync::mpsc::TrySendError::Disconnected(queued) => queued,
+                    },
+                    CommitBlockError::WriteTaskExited,
+                );
+            }
+            return rsp_rx;
+        }
 
         if let Some(next_height) = self.finalized_reset_next_height {
             if queued_height > next_height {
@@ -741,9 +771,8 @@ impl StateService {
         }
     }
 
-    /// Applies every reset queued on `invalid_block_write_reset_receiver`: rewinds the last
-    /// sent hash to the finalized tip, forgets the sent hashes, and fails the queued blocks, so
-    /// the rejected block and every block above it can be downloaded again.
+    /// Applies writer recovery requests. Full resets fail the queue; exact body replacements
+    /// retain every queued descendant and bypass ordinary last-sent ordering once.
     ///
     /// Returns `false` if the write task closed the reset channel.
     fn drain_finalized_resets(&mut self) -> bool {
@@ -751,8 +780,9 @@ impl StateService {
 
         loop {
             match self.invalid_block_write_reset_receiver.try_recv() {
-                Ok((reset_tip_height, reset_tip_hash)) => {
+                Ok(write::FinalizedWriteFeedback::Reset(reset_tip_height, reset_tip_hash)) => {
                     self.finalized_block_write_last_sent_hash = reset_tip_hash;
+                    self.finalized_body_replacement = None;
                     self.finalized_reset_next_height = Some(
                         reset_tip_height
                             .map(|height| (height + 1).expect("committed heights are valid"))
@@ -764,8 +794,13 @@ impl StateService {
                     // the syncer from downloading them again.
                     self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 }
+                Ok(write::FinalizedWriteFeedback::InvalidBody { hash, replacement }) => {
+                    self.non_finalized_block_write_sent_hashes.remove(&hash);
+                    self.finalized_body_replacement = Some((hash, replacement));
+                }
                 Err(TryRecvError::Empty) => return true,
                 Err(TryRecvError::Disconnected) => {
+                    self.finalized_body_replacement = None;
                     info!(
                         "Block commit task closed the block reset channel. Is Zebra shutting down?"
                     );
@@ -1590,14 +1625,33 @@ impl Service<Request> for StateService {
             Request::SupplyTreeRoots {
                 start_height,
                 roots,
+                source,
             } => {
-                self.tree_roots_cache.supply(start_height, roots);
-                async { Ok(Response::TreeRootsSupplied) }.boxed()
+                let result = if roots.len()
+                    <= usize::try_from(MAX_TREE_ROOTS_PER_REQUEST)
+                        .expect("the wire roots limit fits in usize")
+                {
+                    self.tree_roots_sender
+                        .try_send((start_height, roots, source))
+                        .map(|()| Response::TreeRootsSupplied)
+                        .map_err(|error| format!("tree roots writer unavailable: {error}").into())
+                } else {
+                    Err("tree roots batch exceeds the request limit".into())
+                };
+                if result.is_ok() {
+                    self.pending_rejected_tree_roots = None;
+                }
+                async move { result }.boxed()
             }
 
             Request::WantedTreeRoots => {
-                let wanted = self.tree_roots_cache.wanted();
-                async move { Ok(Response::WantedTreeRoots(wanted)) }.boxed()
+                if self.pending_rejected_tree_roots.is_none() {
+                    self.pending_rejected_tree_roots = self.rejected_tree_roots.try_recv().ok();
+                }
+                let rejected = self.pending_rejected_tree_roots;
+                // Rejection publication follows the writer's replacement-range update.
+                let wanted = self.wanted_tree_roots.borrow().clone();
+                async move { Ok(Response::WantedTreeRoots(wanted, rejected)) }.boxed()
             }
 
             // Used by sync, inbound, and block verifier to check if a block is already in the state
@@ -1819,15 +1873,17 @@ impl Service<ReadRequest> for ReadStateService {
             .boxed();
         };
 
-        // Cancellation cannot release admission while a detached compact check is still running.
-        static COMPACT_CHECKS: Semaphore = Semaphore::const_new(3);
-        let compact_permit = if matches!(
+        // Cancellation cannot release admission while a detached expensive read is still running.
+        static EXPENSIVE_READS: Semaphore = Semaphore::const_new(3);
+        let read_permit = if matches!(
             req,
-            ReadRequest::CheckBestTipHeader { .. } | ReadRequest::CheckBestTipBlockCommitments(_)
+            ReadRequest::CheckBestTipHeader { .. }
+                | ReadRequest::CheckBestTipBlockCommitments(_)
+                | ReadRequest::TreeRoots { .. }
         ) {
-            match COMPACT_CHECKS.try_acquire() {
+            match EXPENSIVE_READS.try_acquire() {
                 Ok(permit) => Some(permit),
-                Err(_) => return async { Err("compact header checks are busy".into()) }.boxed(),
+                Err(_) => return async { Err("expensive state reads are busy".into()) }.boxed(),
             }
         } else {
             None
@@ -2138,7 +2194,7 @@ impl Service<ReadRequest> for ReadStateService {
                     .then(|| start_height + HeightDiff::from(count - 1))
                     .flatten()
                     .filter(|&end| state.db.hash(end) == Some(final_hash))
-                    .and_then(|end| state.db.tree_roots_by_height_range(start_height, end));
+                    .and_then(|end| read::tree::tree_roots(&state.db, start_height, end));
 
                 Ok(ReadResponse::TreeRoots(roots))
             }
@@ -2401,7 +2457,7 @@ impl Service<ReadRequest> for ReadStateService {
         };
 
         timed_span.spawn_blocking(move || {
-            let _compact_permit = compact_permit;
+            let _read_permit = read_permit;
             request_handler()
         })
     }

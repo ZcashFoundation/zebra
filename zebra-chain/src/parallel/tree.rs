@@ -12,7 +12,7 @@ use crate::{
 
 mod roots;
 
-pub use roots::{TreeRoots, MAX_TREE_ROOTS_PER_REQUEST};
+pub use roots::{TreeRoots, TreeRootsProof, MAX_TREE_ROOTS_PER_REQUEST};
 
 /// An argument wrapper struct for note commitment trees.
 ///

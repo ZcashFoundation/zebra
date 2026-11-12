@@ -17,6 +17,7 @@ use zebra_test::mock_service::MockService;
 
 use super::*;
 
+mod body_replay;
 mod commit_tasks;
 mod retention;
 
@@ -1124,6 +1125,7 @@ async fn commit_failure_requeues_children_of_invalid_block() -> Result<(), Repor
                 notifications: None,
                 retained: RetainedBlockPermit(Arc::new(AtomicUsize::new(1))),
             }),
+            body_replay: None,
         })
         .expect("the verifier holds the receiver");
     // If the verifier was rewound, it would queue the block, and wait for its commit.

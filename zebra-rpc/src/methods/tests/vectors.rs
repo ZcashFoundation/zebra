@@ -7990,3 +7990,62 @@ async fn rpc_getnetworkinfo_does_not_block_on_address_book_contention() {
         .expect("RPC should succeed");
     assert_eq!(response.connections, 0);
 }
+
+#[tokio::test]
+async fn rpc_treestate_reports_a_fast_synced_height_as_unavailable() {
+    let _init_guard = zebra_test::init();
+    let block: Arc<Block> = zebra_test::vectors::MAINNET_BLOCKS[&419_201]
+        .zcash_deserialize_into()
+        .unwrap();
+    let hash = block.hash();
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+    let request = tokio::spawn(async move { rpc.z_get_treestate(hash.to_string()).await });
+    read_state
+        .expect_request(ReadRequest::Block(hash.into()))
+        .await
+        .respond(ReadResponse::Block(Some(block)));
+    read_state
+        .expect_request(ReadRequest::AnyChainSaplingTree(hash))
+        .await
+        .respond(ReadResponse::SaplingTree(None));
+    read_state
+        .expect_request(ReadRequest::FastSyncTreeRoots(hash.into()))
+        .await
+        .respond(ReadResponse::FastSyncTreeRoots(Some(
+            zebra_state::FastSyncTreeRoots {
+                roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                sapling_size: 1,
+                orchard_size: 0,
+                ironwood_size: 0,
+            },
+        )));
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), request)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.code(), -20);
+    assert_eq!(
+        error.message(),
+        "tree state unavailable: fast-synced height"
+    );
+}

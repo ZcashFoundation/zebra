@@ -1001,10 +1001,12 @@ where
                 // We're awaiting a response to a client request. Compact recovery defers unrelated
                 // writes rather than cancelling and restarting a potentially partial framed write.
                 State::AwaitingResponse {
+                    ref handler,
                     ref span,
                     ref mut tx,
                     ..
                 } => {
+                    let is_tree_roots = matches!(handler, Handler::TreeRoots { .. });
                     // we have to get rid of the span reference so we can tamper with the state
                     let span = span.clone();
                     trace!(parent: &span, "awaiting response to client request");
@@ -1035,11 +1037,21 @@ where
                         _ = tx.cancellation() => {
                             // The canceled response receiver no longer needs a result.
                             trace!(parent: &span, "client request was cancelled");
+                            // Root replies have no request ID, so a delayed reply must never be
+                            // mistaken for the response to a later range on this byte stream.
+                            if is_tree_roots {
+                                self.shutdown_async(PeerError::ConnectionDropped).await;
+                                continue;
+                            }
                             self.clear_compact_recovery();
                             self.state = State::AwaitingRequest;
                             continue;
                         }
                         _ = timer_ref => {
+                            if is_tree_roots {
+                                self.shutdown_async(PeerError::ConnectionReceiveTimeout).await;
+                                continue;
+                            }
                             if let State::AwaitingResponse { handler: Handler::CompactBlock { reconstruction, .. }, .. } = &self.state {
                                 let hash = reconstruction.block_hash();
                                 self.fallback_compact(hash).await;
@@ -1463,7 +1475,7 @@ where
                     )
             }
 
-            (AwaitingRequest, TreeRoots { start_height, final_hash, count }) => {
+            (AwaitingRequest, TreeRoots { start_height, final_hash, count, .. }) => {
                 self
                     .peer_tx
                     .send_authorized(Message::GetTreeRoots { start_height, final_hash, count }, authorized)
@@ -1622,7 +1634,7 @@ where
                 Unused
             }
             Message::TreeRoots(_) => {
-                debug!(%msg, "got treeroots message unsolicited or from canceled request");
+                debug!(%msg, "got unsolicited treeroots message");
                 Unused
             }
             // These messages should never be sent by peers.
@@ -1777,6 +1789,7 @@ where
                 start_height,
                 final_hash,
                 count,
+                excluded_peer: None,
             }
             .into(),
         };
@@ -2016,6 +2029,9 @@ where
                 if let Err(e) = self.peer_tx.send(Message::TreeRoots(roots)).await {
                     self.fail_with(e).await
                 }
+            }
+            Response::TreeRootsFromPeer(..) => {
+                unreachable!("peer-set attribution is never an inbound response")
             }
             Response::TransactionIds(hashes) => {
                 let max_tx_inv_in_message: usize = MAX_TX_INV_IN_SENT_MESSAGE

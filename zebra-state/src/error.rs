@@ -152,17 +152,6 @@ pub enum CommitBlockError {
     /// This is local resource pressure, not a consensus failure; the request can be retried.
     #[error("orphan block queue is full; block was not committed")]
     OrphanQueueFull,
-
-    /// Fast checkpoint sync couldn't verify this block's peer-supplied note commitment tree roots
-    /// against the next block.
-    ///
-    /// Either the roots or the next block's body can be wrong, so the block is retried with roots
-    /// and blocks from other peers.
-    #[error("rejected the peer-supplied note commitment tree roots of the block at {height:?}")]
-    TreeRootsRejected {
-        /// The height of the block.
-        height: block::Height,
-    },
 }
 
 impl CommitBlockError {
@@ -186,8 +175,7 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed
-            | CommitBlockError::TreeRootsRejected { .. } => false,
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
@@ -204,17 +192,15 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed
-            | CommitBlockError::TreeRootsRejected { .. } => false,
+            | CommitBlockError::MinedBlockNotificationClosed => false,
         }
     }
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     ///
     /// Consensus-invalid subsidies and authorizing-data commitments score 100.
-    /// Duplicate requests, shutdowns, orphan/notification admission failures, rejected
-    /// descendants, and rejected tree roots score 0: the roots and the block come from different
-    /// peers, and either can be wrong.
+    /// Duplicate requests, shutdowns, orphan/notification admission failures, and rejected
+    /// descendants score 0.
     pub fn misbehavior_score(&self) -> u32 {
         match self {
             CommitBlockError::ValidateContextError(err) => err.misbehavior_score(),
@@ -222,8 +208,7 @@ impl CommitBlockError {
             | CommitBlockError::WriteTaskExited
             | CommitBlockError::OrphanQueueFull
             | CommitBlockError::MinedBlockNotificationFull
-            | CommitBlockError::MinedBlockNotificationClosed
-            | CommitBlockError::TreeRootsRejected { .. } => 0,
+            | CommitBlockError::MinedBlockNotificationClosed => 0,
         }
     }
 }
@@ -266,18 +251,48 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 /// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
 #[derive(Debug, Error, Clone)]
 #[error("could not commit checkpoint-verified block")]
-pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+pub struct CommitCheckpointVerifiedError {
+    #[source]
+    source: CommitBlockError,
+    targeted_body_recovery: bool,
+}
 
 impl CommitCheckpointVerifiedError {
     /// Returns the [`CommitBlockError`] describing why the commit failed.
     pub fn inner(&self) -> &CommitBlockError {
-        &self.0
+        &self.source
+    }
+
+    /// Returns `true` if the fast-sync writer requested an exact replacement for this body.
+    ///
+    /// Unlike an ordinary commit failure, the writer retains authenticated descendants and
+    /// accepts the same checkpoint-certified hash without resetting their queue. The underlying
+    /// authorizing-data error and its supplier's misbehavior score remain available via [`Self::inner`].
+    pub fn is_targeted_body_recovery(&self) -> bool {
+        self.targeted_body_recovery
+    }
+
+    /// Marks an authorizing-data rejection after its targeted writer request was published.
+    pub(crate) fn targeted_body_recovery(source: ValidateContextError) -> Self {
+        Self {
+            source: CommitBlockError::ValidateContextError(Box::new(source)),
+            targeted_body_recovery: true,
+        }
+    }
+}
+
+impl From<CommitBlockError> for CommitCheckpointVerifiedError {
+    fn from(source: CommitBlockError) -> Self {
+        Self {
+            source,
+            targeted_body_recovery: false,
+        }
     }
 }
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
-        Self(CommitBlockError::ValidateContextError(Box::new(value)))
+        CommitBlockError::ValidateContextError(Box::new(value)).into()
     }
 }
 

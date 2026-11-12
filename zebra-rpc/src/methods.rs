@@ -387,8 +387,8 @@ pub trait Rpc {
     /// negative heights.
     ///
     /// Zebra doesn't store the note commitment trees of blocks that fast checkpoint sync committed
-    /// without them. For those blocks, the response omits the Sapling, Orchard, and Ironwood
-    /// `commitments` (`finalRoot` and `finalState`), like the Sprout ones.
+    /// without them. At those heights, this method returns error -20:
+    /// "tree state unavailable: fast-synced height".
     #[method(name = "z_gettreestate")]
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse>;
 
@@ -2594,6 +2594,13 @@ where
         };
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
+        if sapling_tree.is_none()
+            && network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into())
+            && self.fast_sync_tree_roots(hash).await?.is_some()
+        {
+            return Err("tree state unavailable: fast-synced height")
+                .map_error(server::error::LegacyCode::Database);
+        }
 
         let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
             match read_state

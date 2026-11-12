@@ -952,6 +952,7 @@ async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
                     epoch: 0,
                     tip: Some(tip),
                     child: None,
+                    body_replay: None,
                 })
                 .unwrap();
             let ordinary_body = Arc::new((*blocks[2]).clone());
@@ -980,6 +981,7 @@ async fn late_child_recovery_preserves_ordinary_checkpoint_observer() {
                         notifications: Some(zs::MinedBlockNotifications::new(committed, validated)),
                         retained: RetainedBlockPermit(verifier.retained_blocks.clone()),
                     }),
+                    body_replay: None,
                 })
                 .unwrap();
             // Drain the late recovery without supplying the missing parent yet.

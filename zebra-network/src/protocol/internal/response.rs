@@ -4,7 +4,7 @@ use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
     block::{self, Block},
-    parallel::tree::TreeRoots,
+    parallel::tree::TreeRootsProof,
     transaction::{UnminedTx, UnminedTxId},
 };
 
@@ -152,9 +152,14 @@ pub enum Response {
     /// The note commitment tree roots after each requested block, or `None` if the peer refused
     /// the request.
     ///
-    /// Response to [`super::Request::TreeRoots`]. The list is a prefix of the requested roots.
+    /// Response to [`super::Request::TreeRoots`]. Complete root proofs, or a neutral refusal.
+    /// The list is a prefix of the requested blocks, with successor preimages for ZIP-244.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
-    TreeRoots(Option<Vec<TreeRoots>>),
+    TreeRoots(Option<Vec<TreeRootsProof>>),
+
+    /// Outbound root proofs with their supplier's attribution, never sent on the wire.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TreeRootsFromPeer(Vec<TreeRootsProof>, PeerSocketAddr),
 }
 
 impl fmt::Display for Response {
@@ -215,6 +220,9 @@ impl fmt::Display for Response {
 
             Response::TreeRoots(Some(roots)) => format!("TreeRoots {{ roots: {} }}", roots.len()),
             Response::TreeRoots(None) => "TreeRoots { refused }".to_string(),
+            Response::TreeRootsFromPeer(roots, _) => {
+                format!("TreeRoots {{ roots: {} }}", roots.len())
+            }
         })
     }
 }
@@ -239,7 +247,7 @@ impl Response {
             Response::AuthorizedBlocks { .. } => "AuthorizedBlocks",
             Response::CompactBlockTransactions(_) => "CompactBlockTransactions",
             Response::Transactions(_) => "Transactions",
-            Response::TreeRoots(_) => "TreeRoots",
+            Response::TreeRoots(_) | Response::TreeRootsFromPeer(..) => "TreeRoots",
         }
     }
 

@@ -2694,7 +2694,10 @@ async fn inbound_answers_tree_roots_from_read_state() -> Result<(), crate::BoxEr
     for (final_hash, expected) in [
         (
             genesis.hash(),
-            Some(vec![zebra_chain::parallel::tree::TreeRoots::empty()]),
+            Some(vec![zebra_chain::parallel::tree::TreeRootsProof {
+                roots: zebra_chain::parallel::tree::TreeRoots::empty(),
+                successor_auth_data_root: None,
+            }]),
         ),
         (zebra_chain::block::Hash([1; 32]), None),
     ] {
@@ -2704,6 +2707,7 @@ async fn inbound_answers_tree_roots_from_read_state() -> Result<(), crate::BoxEr
                 start_height: Height(0),
                 final_hash,
                 count: 1,
+                excluded_peer: None,
             }),
         )
         .await??;

@@ -1,4 +1,12 @@
 use super::{compact::frame, *};
+use zebra_chain::parallel::tree::TreeRoots;
+
+fn proof(auth: Option<[u8; 32]>) -> TreeRootsProof {
+    TreeRootsProof {
+        roots: TreeRoots::empty(),
+        successor_auth_data_root: auth.map(Into::into),
+    }
+}
 
 fn gettreeroots_body(count: u32) -> Vec<u8> {
     let mut body = 10u32.to_le_bytes().to_vec();
@@ -22,12 +30,14 @@ fn tree_roots_messages_round_trip() {
         .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
         .finish();
 
-    let max_roots = vec![TreeRoots::empty(); usize::try_from(MAX_TREE_ROOTS_PER_REQUEST).unwrap()];
+    let max_roots =
+        vec![proof(Some([7; 32])); usize::try_from(MAX_TREE_ROOTS_PER_REQUEST).unwrap()];
     for message in [
         get_tree_roots(1),
         get_tree_roots(MAX_TREE_ROOTS_PER_REQUEST),
         Message::TreeRoots(None),
         Message::TreeRoots(Some(Vec::new())),
+        Message::TreeRoots(Some(vec![proof(None), proof(Some([7; 32]))])),
         Message::TreeRoots(Some(max_roots)),
     ] {
         let mut bytes = BytesMut::new();
@@ -36,7 +46,16 @@ fn tree_roots_messages_round_trip() {
             &bytes[4..4 + message.command().len()],
             message.command().as_bytes()
         );
-        assert_eq!(codec.decode(&mut bytes).unwrap(), Some(message));
+        assert!(bytes.len() - HEADER_LEN <= MAX_PROTOCOL_MESSAGE_LEN);
+        if let Message::TreeRoots(Some(roots)) = &message {
+            if roots.len() == usize::try_from(MAX_TREE_ROOTS_PER_REQUEST).unwrap() {
+                assert_eq!(
+                    bytes.len() - HEADER_LEN,
+                    4 + roots.len() * TreeRootsProof::MAX_SERIALIZED_SIZE
+                );
+            }
+        }
+        assert_eq!(codec.decode(&mut bytes).unwrap(), Some(message.clone()));
         assert!(bytes.is_empty());
     }
 
@@ -46,13 +65,11 @@ fn tree_roots_messages_round_trip() {
 
     let mut bytes = BytesMut::new();
     codec
-        .encode(
-            Message::TreeRoots(Some(vec![TreeRoots::empty()])),
-            &mut bytes,
-        )
+        .encode(Message::TreeRoots(Some(vec![proof(None)])), &mut bytes)
         .unwrap();
     let mut body = vec![0, 1];
     TreeRoots::empty().zcash_serialize(&mut body).unwrap();
+    body.push(0);
     assert_eq!(&bytes[HEADER_LEN..], body);
 
     let mut bytes = BytesMut::new();
@@ -85,4 +102,12 @@ fn tree_roots_decoding_rejects_invalid_counts_and_results() {
     assert!(codec
         .decode(&mut frame(b"treeroots\0\0\0", &too_many))
         .is_err());
+
+    // Presence tags must be canonical; a present digest must have all 32 bytes.
+    for suffix in [&[2][..], &[1][..], &[1, 0][..]] {
+        let mut body = vec![0, 1];
+        TreeRoots::empty().zcash_serialize(&mut body).unwrap();
+        body.extend_from_slice(suffix);
+        assert!(codec.decode(&mut frame(b"treeroots\0\0\0", &body)).is_err());
+    }
 }

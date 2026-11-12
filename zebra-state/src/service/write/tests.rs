@@ -17,8 +17,8 @@ use super::*;
 
 mod finalization;
 /// Returns a roots cache without embedded trees, so the writer never fast syncs.
-fn no_fast_tree_sync() -> Arc<TreeRootsCache> {
-    Arc::new(TreeRootsCache::new(None, Height(0)))
+fn no_fast_tree_sync() -> TreeRootsCache {
+    TreeRootsCache::new(None, Height(0))
 }
 
 fn populated_state() -> (NonFinalizedState, FinalizedState, Arc<Block>, Arc<Block>) {
@@ -251,7 +251,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
     // Close the state only after the writer reports a failed commit, not at its initial
     // shutdown check. Observing the error event makes this interleaving deterministic.
     struct CloseStateOnError {
-        resets: Mutex<Option<UnboundedReceiver<(Option<Height>, block::Hash)>>>,
+        resets: Mutex<Option<UnboundedReceiver<FinalizedWriteFeedback>>>,
     }
 
     impl tracing::Subscriber for CloseStateOnError {
@@ -306,7 +306,7 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        tree_roots_cache: no_fast_tree_sync(),
+        tree_roots_cache: Some(no_fast_tree_sync()),
     };
     tracing::subscriber::with_default(
         CloseStateOnError {
@@ -318,11 +318,95 @@ fn checkpoint_failure_preserves_error_when_state_closes_during_commit() {
         .blocking_recv()
         .expect("writer shutdown must preserve the original commit response")
         .unwrap_err();
+    assert!(
+        !error.is_targeted_body_recovery(),
+        "ordinary commits keep reset recovery"
+    );
     assert!(matches!(
         error.inner(),
         crate::CommitBlockError::ValidateContextError(source)
             if matches!(**source, ValidateContextError::InvalidBlockCommitment(_))
     ));
+}
+
+/// Replayed malformed bodies are scored individually, and expiry resets rather than panicking.
+#[test]
+fn checkpoint_body_replays_expire_without_panicking() {
+    use zebra_chain::parameters::testnet::ConfiguredActivationHeights;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut finalized = FinalizedState::new(&Config::ephemeral(), &network).unwrap();
+    let genesis = block::genesis::regtest_genesis_block();
+    finalized
+        .commit_finalized(genesis.clone().into(), None)
+        .unwrap();
+    let body =
+        CheckpointVerifiedBlock::from(genesis.make_fake_child().set_block_commitment([0; 32]))
+            .with_precomputed_auth_data_root();
+    let error = check::block_commitment_is_valid_for_chain_history(
+        body.block.clone(),
+        &network,
+        &finalized.db.history_tree(),
+        body.precomputed_auth_data_root(),
+    )
+    .unwrap_err();
+    assert!(error.is_auth_commitment_mismatch());
+    let (feedback, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    let (response, completion) = oneshot::channel();
+    let mut completion = Some(completion);
+    let started = Instant::now();
+    std::thread::scope(|scope| {
+        let first = (body.clone(), response, None);
+        let finalized = &finalized;
+        let recovery =
+            scope.spawn(move || replace_checkpoint_body(first, error, finalized, &feedback));
+        let mut rejected = 0;
+        loop {
+            match requests.blocking_recv().unwrap() {
+                FinalizedWriteFeedback::InvalidBody { hash, replacement } => {
+                    assert_eq!(hash, body.hash);
+                    let error = completion
+                        .take()
+                        .unwrap()
+                        .blocking_recv()
+                        .unwrap()
+                        .unwrap_err();
+                    assert!(error.is_targeted_body_recovery());
+                    assert!(error.inner().is_auth_commitment_mismatch());
+                    assert_eq!(error.inner().misbehavior_score(), 100);
+                    rejected += 1;
+                    std::thread::sleep(Duration::from_millis(100));
+                    let (response, next_completion) = oneshot::channel();
+                    if replacement.send((body.clone(), response, None)).is_ok() {
+                        completion = Some(next_completion);
+                    }
+                }
+                FinalizedWriteFeedback::Reset(height, hash) => {
+                    assert_eq!(height, Some(Height(0)));
+                    assert_eq!(hash, genesis.hash());
+                    break;
+                }
+            }
+        }
+        assert!(
+            rejected > 1,
+            "the deadline bounds the entire replay session"
+        );
+        assert!(matches!(
+            recovery.join().unwrap(),
+            Err(CommitOutcome::Failed)
+        ));
+    });
+    assert!(started.elapsed() >= BODY_RECOVERY_TIMEOUT);
+    assert_eq!(finalized.db.finalized_tip_height(), Some(Height(0)));
 }
 
 /// Observe the real writer at notification, response, database write, and snapshot boundaries.
@@ -556,7 +640,7 @@ fn commit_response_precedes_retention_finalization_without_read_gaps() {
         chain_tip_sender,
         non_finalized_state_sender,
         backup_dir_path: None,
-        tree_roots_cache: no_fast_tree_sync(),
+        tree_roots_cache: Some(no_fast_tree_sync()),
     };
     // Observe the synchronous batch write even when release builds compile out trace events.
     let recorder = FinalizedWriteRecorder(Arc::new(AtFinalizedWrite {

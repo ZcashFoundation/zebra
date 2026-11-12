@@ -170,6 +170,21 @@ Integration builds and their binary caches must identify the Zebra revision used
 by each direct reader as well as the writer, rather than matching only the
 downstream application's revision.
 
+### Fast-synced DB 29.1 compatibility
+
+Opt-in `state.fast_tree_sync` makes DB 29.1 a one-way upgrade once it commits its first
+fast-synced block. Older Zebra versions and direct database readers cannot use that database:
+their historical trees are stale and their subtree checks fail. Keep a backup from before
+fast sync outside the active cache for rollback. Otherwise, delete this network's state
+cache and resync with `state.fast_tree_sync = false`; merely disabling the option cannot
+restore missing historical trees.
+
+While trees are frozen, restarting still requires root-serving peers, even with the option
+disabled. Zebra stops after 120 seconds without authenticated roots and explains how to
+recover. `z_gettreestate` and lightwalletd tree-state methods explicitly report
+`tree state unavailable: fast-synced height` at unavailable heights, not empty trees.
+This experimental protocol remains draft pending a ZIP.
+
 ### Writing Blocks to the State
 
 [write-block]: #write-block

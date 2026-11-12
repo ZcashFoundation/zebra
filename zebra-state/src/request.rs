@@ -15,7 +15,7 @@ use zebra_chain::{
     block::{self, merkle::AuthDataRoot, Block, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
-    parallel::tree::{NoteCommitmentTrees, TreeRoots},
+    parallel::tree::{NoteCommitmentTrees, TreeRootsProof},
     parameters::Network,
     serialization::{SerializationError, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
@@ -1522,13 +1522,16 @@ pub enum Request {
     ///
     /// The block writer verifies each root against the chain's header commitments before using
     /// it, and drops roots it doesn't need.
+    /// Accepting a batch acknowledges the last returned rejected source.
     ///
     /// Returns [`Response::TreeRootsSupplied`].
     SupplyTreeRoots {
         /// The height of the block whose roots come first.
         start_height: block::Height,
-        /// The roots after each consecutive block.
-        roots: Vec<TreeRoots>,
+        /// The roots after each consecutive block and their successor commitment preimages.
+        roots: Vec<TreeRootsProof>,
+        /// The peer that supplied these proofs, blamed only if its own proof is invalid.
+        source: std::net::SocketAddr,
     },
 
     /// Returns the heights whose note commitment tree roots fast checkpoint sync needs next, in
@@ -2104,8 +2107,9 @@ pub enum ReadRequest {
     /// Looks up the note commitment tree roots after each finalized block from `start_height`
     /// to the block at height `start_height + count - 1`, if that block's hash is `final_hash`.
     ///
-    /// Returns [`ReadResponse::TreeRoots`] with `count` roots, or with `None` if the finalized
-    /// chain doesn't have `final_hash` at that height, or `count` is zero or above
+    /// Returns [`ReadResponse::TreeRoots`] with `count` complete root proofs, or with `None`
+    /// if the finalized chain doesn't have `final_hash` at that height, required successor
+    /// authorizing data is unavailable, or `count` is zero or above
     /// [`MAX_TREE_ROOTS_PER_REQUEST`](zebra_chain::parallel::tree::MAX_TREE_ROOTS_PER_REQUEST).
     TreeRoots {
         /// The height of the first block.

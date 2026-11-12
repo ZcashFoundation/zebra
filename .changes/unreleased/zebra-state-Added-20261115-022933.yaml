@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added opt-in fast checkpoint sync through `Config::fast_tree_sync`, stored-root queries bounded by proof count and successor-body bytes, and `CommitCheckpointVerifiedError::is_targeted_body_recovery()` for exact authorizing-body retries with a non-fatal queue reset on expiry. Rejected root suppliers are reported only after their replacement range is published.
+time: 2026-11-15T02:29:33.078368729+01:00

@@ -497,7 +497,7 @@ impl StartCmd {
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
-            misbehavior_sender,
+            misbehavior_sender: misbehavior_sender.clone(),
         };
         setup_tx
             .send(setup_data)
@@ -741,6 +741,7 @@ impl StartCmd {
                 config.network.network.clone(),
                 peer_set.clone(),
                 state.clone(),
+                misbehavior_sender.clone(),
             )
             .in_current_span(),
         );

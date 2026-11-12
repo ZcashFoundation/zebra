@@ -1187,6 +1187,7 @@ fn rpc_error_to_status(error: jsonrpsee_types::ErrorObjectOwned) -> Status {
     // zcashd's `INVALID_ADDRESS_OR_KEY` (-5) and `INVALID_PARAMETER` (-8) error codes.
     match error.code() {
         -5 | -8 => Status::not_found(error.message().to_string()),
+        -20 => Status::unavailable(error.message().to_string()),
         _ => Status::internal(error.message().to_string()),
     }
 }

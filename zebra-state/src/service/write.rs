@@ -20,7 +20,6 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
-    error::CommitBlockError,
     service::{
         check,
         fast_tree_sync::{CheckpointCommit, FastTreeSyncWriter, TreeRootsCache},
@@ -43,6 +42,12 @@ use crate::service::{
 ///
 /// We allow enough space for multiple concurrent chain forks with errors.
 const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
+
+/// Bounds one exact-body recovery session, including malicious replacement replays.
+#[cfg(not(test))]
+const BODY_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+#[cfg(test)]
+const BODY_RECOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -115,9 +120,8 @@ struct WriteBlockWorkerTask {
     non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
-    /// Signals the [`crate::service::StateService`] that a finalized block commit failed,
-    /// carrying the durable finalized tip height and hash to reset to.
-    invalid_block_reset_sender: UnboundedSender<(Option<block::Height>, block::Hash)>,
+    /// Reports queue resets or requests an exact replacement for a malformed finalized body.
+    invalid_block_reset_sender: UnboundedSender<FinalizedWriteFeedback>,
     /// Signals the [`crate::service::StateService`] that a non-finalized block was rejected by
     /// the write task, so its hash should be removed from
     /// `non_finalized_block_write_sent_hashes`.
@@ -132,7 +136,21 @@ struct WriteBlockWorkerTask {
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
     /// Peer-supplied note commitment tree roots for fast checkpoint sync.
-    tree_roots_cache: Arc<TreeRootsCache>,
+    tree_roots_cache: Option<TreeRootsCache>,
+}
+
+/// Finalized writer recovery, either a full commit failure or one replaceable body.
+#[derive(Debug)]
+pub(super) enum FinalizedWriteFeedback {
+    /// Reset to the durable finalized tip after a failed current-block commit.
+    Reset(Option<block::Height>, block::Hash),
+    /// Replace only this body; descendants remain queued in their existing channel.
+    InvalidBody {
+        /// The checkpoint-authenticated hash whose authorizing data was malformed.
+        hash: block::Hash,
+        /// One-slot reply, used once by the state without changing last-sent ordering.
+        replacement: std::sync::mpsc::SyncSender<QueuedCheckpointVerified>,
+    },
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -188,10 +206,10 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
-        tree_roots_cache: Arc<TreeRootsCache>,
+        tree_roots_cache: TreeRootsCache,
     ) -> (
         Self,
-        tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
+        tokio::sync::mpsc::UnboundedReceiver<FinalizedWriteFeedback>,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
@@ -230,7 +248,7 @@ impl BlockWriteSender {
                         chain_tip_sender,
                         non_finalized_state_sender,
                         backup_dir_path,
-                        tree_roots_cache,
+                        tree_roots_cache: Some(tree_roots_cache),
                     }
                     .run()
                 })
@@ -253,7 +271,7 @@ impl BlockWriteSender {
 /// What happened to a checkpoint-verified block the writer tried to commit.
 enum CommitOutcome {
     /// The block is committed.
-    Committed,
+    Committed(Option<ValidateContextError>),
     /// The block failed, and the state service was told to reset its queue.
     Failed,
     /// The state service is shutting down.
@@ -266,14 +284,36 @@ enum CommitOutcome {
 /// If `next` is the block after it, fast checkpoint sync can commit the block with its verified
 /// tree roots, without updating its note commitment trees.
 fn commit_checkpoint_verified(
-    ordered_block: QueuedCheckpointVerified,
+    mut ordered_block: QueuedCheckpointVerified,
     next: Option<&CheckpointVerifiedBlock>,
     finalized_state: &mut FinalizedState,
     prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
     fast_tree_sync: &mut FastTreeSyncWriter,
     chain_tip_sender: &mut ChainTipSender,
-    invalid_block_reset_sender: &UnboundedSender<(Option<block::Height>, block::Hash)>,
+    invalid_block_reset_sender: &UnboundedSender<FinalizedWriteFeedback>,
 ) -> CommitOutcome {
+    // Roots prove effects, not a V5 body's authorizing data. Recover a malformed current body
+    // before consuming it, including the first fast block; keep the final commit-boundary check.
+    if next.is_some() {
+        if let Err(error) = check::block_commitment_is_valid_for_chain_history(
+            ordered_block.0.block.clone(),
+            &finalized_state.network(),
+            &finalized_state.db.history_tree(),
+            ordered_block.0.precomputed_auth_data_root(),
+        ) {
+            if error.is_auth_commitment_mismatch() {
+                ordered_block = match replace_checkpoint_body(
+                    ordered_block,
+                    error,
+                    finalized_state,
+                    invalid_block_reset_sender,
+                ) {
+                    Ok(replacement) => replacement,
+                    Err(outcome) => return outcome,
+                };
+            }
+        }
+    }
     let committed_permit = match ordered_block
         .2
         .as_ref()
@@ -283,7 +323,7 @@ fn commit_checkpoint_verified(
         Ok(permit) => permit.flatten(),
         Err(error) => {
             // Publish the reset before replying so an immediate retry can make progress.
-            let _ = invalid_block_reset_sender.send((
+            let _ = invalid_block_reset_sender.send(FinalizedWriteFeedback::Reset(
                 finalized_state.db.finalized_tip_height(),
                 finalized_state.db.finalized_tip_hash(),
             ));
@@ -310,14 +350,16 @@ fn commit_checkpoint_verified(
         None => CheckpointCommit::Normal(checkpoint_verified),
     };
 
-    let (result, frozen_sizes) = match commit {
+    let (result, frozen_sizes, successor_error) = match commit {
         CheckpointCommit::Fast {
             block,
             frozen_sizes,
+            successor_error,
         } => (
             finalized_state
                 .commit_finalized_fast(*block, prev_finalized_note_commitment_trees.take()),
             frozen_sizes,
+            successor_error,
         ),
         CheckpointCommit::Normal(block) => {
             assert!(
@@ -328,11 +370,15 @@ fn commit_checkpoint_verified(
                 finalized_state
                     .commit_finalized(block, prev_finalized_note_commitment_trees.take()),
                 None,
+                None,
             )
         }
-        CheckpointCommit::Rejected => (
-            Err(CommitBlockError::TreeRootsRejected { height }.into()),
-            None,
+        CheckpointCommit::Stalled(height) => panic!(
+            "fast checkpoint sync stalled at {height:?}: no authenticated tree roots for 120 seconds. \
+             Connect to peers advertising NODE_TREE_ROOTS and restart. Turning off \
+             state.fast_tree_sync cannot thaw this database; alternatively restore a backup from \
+             before fast sync, or delete this network's state cache under state.cache_dir and \
+             resync with state.fast_tree_sync = false."
         ),
         CheckpointCommit::Shutdown => return CommitOutcome::Shutdown,
     };
@@ -358,7 +404,7 @@ fn commit_checkpoint_verified(
                 "committing a block to the finalized state failed, resetting state queue",
             );
 
-            let send_result = invalid_block_reset_sender.send((
+            let send_result = invalid_block_reset_sender.send(FinalizedWriteFeedback::Reset(
                 finalized_state.db.finalized_tip_height(),
                 finalized_state.db.finalized_tip_hash(),
             ));
@@ -373,7 +419,7 @@ fn commit_checkpoint_verified(
     };
 
     let outcome = if result.is_ok() {
-        CommitOutcome::Committed
+        CommitOutcome::Committed(successor_error)
     } else {
         CommitOutcome::Failed
     };
@@ -383,6 +429,84 @@ fn commit_checkpoint_verified(
     let _ = rsp_tx.send(result);
 
     outcome
+}
+
+/// Rejects a malformed successor on its own completion, preserving queued descendants.
+///
+/// Only the exact checkpoint hash can use the one-slot reply. Waiting does not drain or reset
+/// the ordinary block channel. Expiry resets the queue without stopping the writer.
+fn replace_checkpoint_body(
+    mut queued: QueuedCheckpointVerified,
+    mut error: ValidateContextError,
+    finalized_state: &FinalizedState,
+    feedback: &UnboundedSender<FinalizedWriteFeedback>,
+) -> Result<QueuedCheckpointVerified, CommitOutcome> {
+    let hash = queued.0.hash;
+    let deadline = Instant::now() + BODY_RECOVERY_TIMEOUT;
+    loop {
+        assert!(
+            error.is_auth_commitment_mismatch(),
+            "only authorizing data is replaceable"
+        );
+        tracing::warn!(malformed_body_hash = ?hash, %error, "rejected checkpoint authorizing data");
+        let (replacement, receiver) = std::sync::mpsc::sync_channel(1);
+        let recovery_requested = feedback
+            .send(FinalizedWriteFeedback::InvalidBody { hash, replacement })
+            .is_ok();
+        let (block, response, notifications) = queued;
+        drop((block, notifications));
+        let reported_error = if recovery_requested {
+            crate::CommitCheckpointVerifiedError::targeted_body_recovery(error)
+        } else {
+            error.into()
+        };
+        let _ = response.send(Err(reported_error));
+        if !recovery_requested {
+            return Err(CommitOutcome::Shutdown);
+        }
+        queued = loop {
+            if feedback.is_closed() {
+                return Err(CommitOutcome::Shutdown);
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                tracing::warn!(
+                    ?hash,
+                    "checkpoint body recovery expired, resetting state queue"
+                );
+                if feedback
+                    .send(FinalizedWriteFeedback::Reset(
+                        finalized_state.db.finalized_tip_height(),
+                        finalized_state.db.finalized_tip_hash(),
+                    ))
+                    .is_err()
+                {
+                    return Err(CommitOutcome::Shutdown);
+                }
+                return Err(CommitOutcome::Failed);
+            }
+            match receiver.recv_timeout(remaining.min(std::time::Duration::from_secs(1))) {
+                Ok(queued) => break queued,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(CommitOutcome::Shutdown);
+                }
+            }
+        };
+        assert_eq!(
+            queued.0.hash, hash,
+            "the state routes only the exact requested replacement"
+        );
+        match check::block_commitment_is_valid_for_chain_history(
+            queued.0.block.clone(),
+            &finalized_state.network(),
+            &finalized_state.db.history_tree(),
+            queued.0.precomputed_auth_data_root(),
+        ) {
+            Ok(()) => return Ok(queued),
+            Err(next_error) => error = next_error,
+        }
+    }
 }
 
 impl WriteBlockWorkerTask {
@@ -413,7 +537,9 @@ impl WriteBlockWorkerTask {
         let mut prev_finalized_note_commitment_trees = None;
         let mut fast_tree_sync = FastTreeSyncWriter::new(
             &finalized_state.db,
-            tree_roots_cache.clone(),
+            tree_roots_cache
+                .take()
+                .expect("only the writer takes ownership of tree roots"),
             finalized_state.network(),
         );
         // Fast checkpoint sync holds a block until the next block, which verifies its tree roots.
@@ -421,7 +547,7 @@ impl WriteBlockWorkerTask {
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+        while let Some(mut ordered_block) = finalized_block_write_receiver.blocking_recv() {
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -470,7 +596,19 @@ impl WriteBlockWorkerTask {
                     chain_tip_sender,
                     invalid_block_reset_sender,
                 ) {
-                    CommitOutcome::Committed => {}
+                    CommitOutcome::Committed(Some(error)) => {
+                        ordered_block = match replace_checkpoint_body(
+                            ordered_block,
+                            error,
+                            finalized_state,
+                            invalid_block_reset_sender,
+                        ) {
+                            Ok(replacement) => replacement,
+                            Err(CommitOutcome::Failed) => continue,
+                            Err(_) => return,
+                        };
+                    }
+                    CommitOutcome::Committed(None) => {}
                     // Drop this child of the failed block.
                     CommitOutcome::Failed => continue,
                     CommitOutcome::Shutdown => return,

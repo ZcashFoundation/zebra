@@ -326,7 +326,9 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::TreeRoots`](super::Response::TreeRoots), with at most `count` roots.
+    /// Returns attributed [`Response::TreeRootsFromPeer`](super::Response::TreeRootsFromPeer)
+    /// on outbound success, or [`Response::TreeRoots`](super::Response::TreeRoots) on refusal.
+    /// Inbound services return `Response::TreeRoots`, with at most `count` complete root proofs.
     TreeRoots {
         /// The height of the first block.
         start_height: block::Height,
@@ -334,6 +336,8 @@ pub enum Request {
         final_hash: block::Hash,
         /// The number of blocks.
         count: u32,
+        /// A source whose roots failed header authentication; never route this retry to it.
+        excluded_peer: Option<PeerSocketAddr>,
     },
 
     /// Drive local peer-set maintenance without sending a request to a remote peer.

@@ -317,6 +317,11 @@ where
     /// a later connection reuses its address.
     find_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
 
+    /// Independent rotation of root-serving connections, preserved while peers are busy.
+    ///
+    /// Shares the find queue's connection lifecycle, but unrelated find traffic cannot move it.
+    tree_root_peer_queue: VecDeque<(D::Key, Arc<ConnectionInfo>)>,
+
     /// Find requests waiting for a serving peer, in request order.
     ///
     /// After [`FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`], any ready peer can receive the request.
@@ -516,6 +521,7 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             find_peer_queue: VecDeque::new(),
+            tree_root_peer_queue: VecDeque::new(),
             queued_find_requests: VecDeque::new(),
             queued_find_request_timer: None,
             inventory_registry: InventoryRegistry::new(inv_stream),
@@ -695,14 +701,16 @@ where
         // Check for failures in ready peers, removing newly errored or disconnected peers.
         // So it needs to run after `poll_unready()`.
         let ready_peers = self.poll_ready_peer_errors(cx);
-        self.find_peer_queue.retain(|(key, _)| {
-            let connected =
-                self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
-            if !connected {
-                self.find_response_stalls.clear(*key);
-            }
-            connected
-        });
+        for queue in [&mut self.find_peer_queue, &mut self.tree_root_peer_queue] {
+            queue.retain(|(key, _)| {
+                let connected =
+                    self.ready_services.contains_key(key) || self.cancel_handles.contains_key(key);
+                if !connected {
+                    self.find_response_stalls.clear(*key);
+                }
+                connected
+            });
+        }
         ready_peers.map(Ok)
     }
 
@@ -989,6 +997,13 @@ where
 
                     self.find_peer_queue
                         .push_back((key, svc.connection_info().clone()));
+                    if svc
+                        .remote_services()
+                        .contains(PeerServices::NODE_TREE_ROOTS)
+                    {
+                        self.tree_root_peer_queue
+                            .push_back((key, svc.connection_info().clone()));
+                    }
                     self.block_advert_senders.send_modify(|peers| {
                         peers.insert(
                             key,
@@ -1013,9 +1028,11 @@ where
     fn disconnect_from_ineligible_peers(&mut self) {
         let minimum_version = self.minimum_peer_version.current();
         let bans = self.bans_receiver.borrow();
-        self.find_peer_queue.retain(|(key, info)| {
-            !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
-        });
+        for queue in [&mut self.find_peer_queue, &mut self.tree_root_peer_queue] {
+            queue.retain(|(key, info)| {
+                !bans.is_banned(key.ip()) && info.remote.version >= minimum_version
+            });
+        }
         self.ready_services.retain(|key, service| {
             let eligible = !bans.is_banned(key.ip()) && service.remote_version() >= minimum_version;
             if !eligible {
@@ -1126,6 +1143,7 @@ where
     fn remove(&mut self, key: &D::Key) {
         self.find_response_stalls.clear(*key);
         self.find_peer_queue.retain(|(addr, _)| addr != key);
+        self.tree_root_peer_queue.retain(|(addr, _)| addr != key);
         self.zcashd_compat_peer_keys.remove(key);
         self.serving_peer_keys.remove(key);
         self.block_advert_senders.send_modify(|peers| {
@@ -1194,6 +1212,7 @@ where
             self.find_response_stalls.clear(key);
             // Reject delayed response events before the next peer-set poll.
             self.find_peer_queue.retain(|(addr, _)| *addr != key);
+            self.tree_root_peer_queue.retain(|(addr, _)| *addr != key);
             self.block_advert_senders.send_modify(|peers| {
                 peers.remove(&key);
             });
@@ -1415,20 +1434,31 @@ where
     }
 
     /// Routes a tree roots request to a ready peer that advertised
-    /// [`PeerServices::NODE_TREE_ROOTS`], using P2C, or fails without queueing if there is none.
+    /// [`PeerServices::NODE_TREE_ROOTS`] in fair rotation, or fails without queueing if none is ready.
     fn route_tree_roots(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        let serving_peers = self
-            .ready_services
+        let Request::TreeRoots { excluded_peer, .. } = &req else {
+            unreachable!("only tree root requests use this route");
+        };
+        let peer = self
+            .tree_root_peer_queue
             .iter()
-            .filter(|(_, svc)| {
-                svc.remote_services()
-                    .contains(PeerServices::NODE_TREE_ROOTS)
+            .position(|(key, _)| {
+                Some(*key) != *excluded_peer && self.ready_services.contains_key(key)
             })
-            .map(|(key, _)| *key)
-            .collect();
+            .map(|index| {
+                let key = self.tree_root_peer_queue[index].0;
+                self.tree_root_peer_queue.rotate_left(index + 1);
+                key
+            });
 
-        match self.select_p2c_peer_from_list(&serving_peers) {
-            Some(key) => self.call_ready_peer(key, req),
+        match peer {
+            Some(key) => self
+                .call_ready_peer(key, req)
+                .map_ok(move |response| match response {
+                    Response::TreeRoots(Some(roots)) => Response::TreeRootsFromPeer(roots, key),
+                    response => response,
+                })
+                .boxed(),
             None => {
                 future::ready(Err(SharedPeerError::from(PeerError::NoReadyPeers).into())).boxed()
             }

@@ -754,7 +754,7 @@ impl Service<zn::Request> for Inbound {
                 })
                     .boxed()
             }
-            zn::Request::TreeRoots { start_height, final_hash, count } => {
+            zn::Request::TreeRoots { start_height, final_hash, count, .. } => {
                 let Some((_, read_state)) = self.compact_relay.clone() else {
                     return async { Ok(zn::Response::TreeRoots(None)) }.boxed();
                 };

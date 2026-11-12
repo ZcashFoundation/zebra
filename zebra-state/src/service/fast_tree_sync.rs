@@ -18,16 +18,17 @@
 use std::{
     collections::BTreeMap,
     io::{self, Read},
+    net::SocketAddr,
     ops::RangeInclusive,
-    sync::{Arc, Condvar, Mutex},
-    time::Duration,
+    sync::{mpsc, Arc},
+    time::{Duration, Instant},
 };
 
 use zebra_chain::{
     block::{self, Height},
     history_tree::{HistoryTree, HistoryTreeError},
     orchard,
-    parallel::tree::{NoteCommitmentTrees, TreeRoots},
+    parallel::tree::{NoteCommitmentTrees, TreeRoots, TreeRootsProof},
     parameters::{Network, NetworkUpgrade},
     sapling,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -62,154 +63,189 @@ pub const TREE_ROOTS_WINDOW: u32 = 20_000;
 /// The embedded Mainnet note commitment trees and subtrees.
 const MAINNET_TREES: &[u8] = include_bytes!("fast_tree_sync/mainnet-trees.bin");
 
-/// Peer-supplied, unverified note commitment tree roots, shared by the state service, which
-/// stores them, and the block writer, which verifies and uses them.
+/// A bounded batch of unverified roots and the peer that supplied them.
+pub(crate) type TreeRootsMessage = (Height, Vec<TreeRootsProof>, SocketAddr);
+
+/// The next range of roots wanted by the writer.
+pub(crate) type WantedTreeRoots = Option<RangeInclusive<Height>>;
+
+/// Unverified roots owned exclusively by the block writer.
 #[derive(Debug)]
 pub(crate) struct TreeRootsCache {
-    /// The cache contents.
-    state: Mutex<CacheState>,
-    /// Notifies the writer about supplied roots.
-    supplied: Condvar,
-}
-
-/// The contents of a [`TreeRootsCache`].
-#[derive(Debug)]
-struct CacheState {
-    /// Unverified roots by the height of their block.
-    roots: BTreeMap<Height, TreeRoots>,
-    /// The height of the next block the writer commits.
+    roots: BTreeMap<Height, (TreeRootsProof, SocketAddr)>,
     next_height: Height,
-    /// The trees fast sync ends with, or `None` if fast sync is unavailable or finished.
+    first_missing: Height,
     trees: Option<Arc<EmbeddedTrees>>,
-    /// The first height fast sync can use roots for.
     first_height: Height,
+    supplied: mpsc::Receiver<TreeRootsMessage>,
+    sender: mpsc::SyncSender<TreeRootsMessage>,
+    wanted_sender: tokio::sync::watch::Sender<WantedTreeRoots>,
+    rejection_sender: mpsc::SyncSender<SocketAddr>,
+    rejected_sources: Option<mpsc::Receiver<SocketAddr>>,
+    rejected: Option<SocketAddr>,
 }
 
 impl TreeRootsCache {
-    /// Returns a cache for a writer whose next block is at `next_height`, which ends fast sync at
-    /// `trees`.
+    /// Creates the writer-owned cache and its bounded input channel.
     pub(crate) fn new(trees: Option<Arc<EmbeddedTrees>>, next_height: Height) -> Self {
-        let trees = trees.filter(|trees| trees.height >= next_height);
-
-        Self {
-            state: Mutex::new(CacheState {
-                roots: BTreeMap::new(),
-                next_height,
-                trees,
-                first_height: Height(0),
-            }),
-            supplied: Condvar::new(),
-        }
-    }
-
-    /// Returns the trees fast sync ends with, or `None` if it is unavailable or finished.
-    pub(crate) fn embedded_trees(&self) -> Option<Arc<EmbeddedTrees>> {
-        self.lock().trees.clone()
-    }
-
-    /// Stores the roots after each block from `start_height` that fast sync still needs.
-    pub(crate) fn supply(&self, start_height: Height, roots: Vec<TreeRoots>) {
-        let mut state = self.lock();
-        let Some(window) = state.window() else {
-            return;
+        let (sender, supplied) = mpsc::sync_channel(1);
+        let (wanted_sender, _) = tokio::sync::watch::channel(None);
+        let (rejection_sender, rejected_sources) = mpsc::sync_channel(
+            usize::try_from(TREE_ROOTS_WINDOW + 1).expect("the roots window fits in usize"),
+        );
+        let mut cache = Self {
+            roots: BTreeMap::new(),
+            next_height,
+            first_missing: next_height,
+            trees: trees.filter(|trees| trees.height >= next_height),
+            first_height: Height(0),
+            supplied,
+            sender,
+            wanted_sender,
+            rejected: None,
+            rejection_sender,
+            rejected_sources: Some(rejected_sources),
         };
+        cache.publish();
+        cache
+    }
 
+    /// Returns the state service's input and progress channels.
+    pub(crate) fn channels(
+        &mut self,
+    ) -> (
+        mpsc::SyncSender<TreeRootsMessage>,
+        tokio::sync::watch::Receiver<WantedTreeRoots>,
+        mpsc::Receiver<SocketAddr>,
+    ) {
+        (
+            self.sender.clone(),
+            self.wanted_sender.subscribe(),
+            self.rejected_sources
+                .take()
+                .expect("the state takes rejection reports once"),
+        )
+    }
+
+    fn embedded_trees(&self) -> Option<Arc<EmbeddedTrees>> {
+        self.trees.clone()
+    }
+
+    fn receive(&mut self, (start_height, roots, source): TreeRootsMessage) {
+        let Some(window) = self.window() else { return };
+        if self.rejected == Some(source) {
+            return;
+        }
         for (height, roots) in (start_height.0..).map(Height).zip(roots) {
             if height > *window.end() {
                 break;
             }
             if window.contains(&height) {
-                state.roots.insert(height, roots);
+                self.roots.entry(height).or_insert((roots, source));
             }
         }
-
-        self.supplied.notify_all();
+        self.publish();
     }
 
-    /// Returns the heights fast sync needs roots for first, or `None` if it needs none.
-    pub(crate) fn wanted(&self) -> Option<RangeInclusive<Height>> {
-        let state = self.lock();
-        let window = state.window()?;
+    #[cfg(test)]
+    fn supply(&mut self, start_height: Height, roots: Vec<TreeRootsProof>) {
+        self.receive((start_height, roots, "127.0.0.1:8233".parse().unwrap()));
+    }
 
-        let first_missing = (window.start().0..=window.end().0)
+    fn wanted(&self) -> Option<RangeInclusive<Height>> {
+        let window = self.window()?;
+        let first = (window.start().0.max(self.first_missing.0)..=window.end().0)
             .map(Height)
-            .find(|height| !state.roots.contains_key(height))?;
-        let last_missing = state
-            .roots
-            .range(first_missing..=*window.end())
-            .next()
-            .map_or(*window.end(), |(height, _)| {
-                height
-                    .previous()
-                    .expect("heights above a missing height are positive")
-            });
-
-        Some(first_missing..=last_missing)
+            .find(|height| !self.roots.contains_key(height))?;
+        let last =
+            self.roots
+                .range(first..=*window.end())
+                .next()
+                .map_or(*window.end(), |(height, _)| {
+                    height
+                        .previous()
+                        .expect("heights above a missing height are positive")
+                });
+        Some(first..=last)
     }
 
-    /// Records that the writer will commit `next_height` next, and drops the roots below it.
-    pub(crate) fn set_next_height(&self, next_height: Height) {
-        let mut state = self.lock();
-        state.next_height = next_height;
-        state.roots = state.roots.split_off(&next_height);
+    fn publish(&mut self) {
+        let wanted = self.wanted();
+        self.first_missing = wanted
+            .as_ref()
+            .map(|range| *range.start())
+            .or_else(|| *self.window()?.end() + 1)
+            .unwrap_or(self.next_height);
+        self.wanted_sender.send_replace(wanted);
+    }
 
-        if state
+    fn set_next_height(&mut self, next_height: Height) {
+        self.next_height = next_height;
+        self.roots = self.roots.split_off(&next_height);
+        if self
             .trees
             .as_ref()
             .is_some_and(|trees| trees.height < next_height)
         {
-            state.trees = None;
-            state.roots.clear();
+            self.trees = None;
+            self.roots.clear();
+        }
+        self.publish();
+    }
+
+    fn wait_for_roots(&mut self, height: Height, timeout: Duration) -> Option<TreeRootsProof> {
+        let deadline = Instant::now() + timeout;
+        while self.roots(height).is_none() {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            let message = self
+                .supplied
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .ok()?;
+            self.receive(message);
+        }
+        self.roots(height)
+    }
+
+    fn roots(&mut self, height: Height) -> Option<TreeRootsProof> {
+        if let Ok(message) = self.supplied.try_recv() {
+            self.receive(message);
+        }
+        self.roots.get(&height).map(|(roots, _)| *roots)
+    }
+
+    /// Rejects only unverified roots from the authenticated bad-root source.
+    fn reject(&mut self, height: Height) {
+        let source = self.roots[&height].1;
+        self.roots.retain(|_, (_, peer)| *peer != source);
+        self.rejected = Some(source);
+        self.first_missing = self.next_height;
+        // Publish replacement demand before the fetcher observes the rejected source.
+        self.publish();
+        // The sole fetcher reads one report before every batch it supplies. Outstanding reports
+        // are bounded by the cached roots plus the single pending batch.
+        if let Err(error) = self.rejection_sender.try_send(source) {
+            assert!(
+                matches!(error, mpsc::TrySendError::Disconnected(_)),
+                "the roots window bounds outstanding rejection reports"
+            );
         }
     }
 
-    /// Waits up to `timeout` for the supplied roots after the block at `height`.
-    pub(crate) fn wait_for_roots(&self, height: Height, timeout: Duration) -> Option<TreeRoots> {
-        let state = self.lock();
-        let (state, _timeout) = self
-            .supplied
-            .wait_timeout_while(state, timeout, |state| !state.roots.contains_key(&height))
-            .expect("the tree roots cache lock is never poisoned");
-
-        state.roots.get(&height).copied()
-    }
-
-    /// Returns the supplied roots after the block at `height`, if there are any.
-    pub(crate) fn roots(&self, height: Height) -> Option<TreeRoots> {
-        self.lock().roots.get(&height).copied()
-    }
-
-    /// Drops the roots after the block at `height`, which failed verification, and the roots after
-    /// it, which usually came in the same response.
-    pub(crate) fn reject(&self, height: Height) {
-        self.lock()
-            .roots
-            .retain(|roots_height, _| *roots_height < height);
-    }
-
-    /// Makes the cache ignore roots below `first_height`, where fast sync can't use them.
-    pub(crate) fn with_first_height(self, first_height: Height) -> Self {
-        self.lock().first_height = first_height;
+    /// Ignores roots below the first height whose trees can be skipped.
+    pub(crate) fn with_first_height(mut self, first_height: Height) -> Self {
+        self.first_height = first_height;
+        self.publish();
         self
     }
 
-    /// Locks the cache contents.
-    fn lock(&self) -> std::sync::MutexGuard<'_, CacheState> {
-        self.state
-            .lock()
-            .expect("the tree roots cache lock is never poisoned")
-    }
-}
-
-impl CacheState {
-    /// Returns the heights fast sync keeps roots for, or `None` if it needs none.
     fn window(&self) -> Option<RangeInclusive<Height>> {
         let end = self.trees.as_ref()?.height;
         let start = self.next_height.max(self.first_height);
-        let window_end = (start + i64::from(TREE_ROOTS_WINDOW - 1))
+        let end = (start + i64::from(TREE_ROOTS_WINDOW - 1))
             .map_or(end, |window_end| window_end.min(end));
-
-        (start <= window_end).then_some(start..=window_end)
+        (start <= end).then_some(start..=end)
     }
 }
 
@@ -218,15 +254,14 @@ impl CacheState {
 /// A state that stopped in the middle of fast sync must finish it. Otherwise, fast sync can only
 /// start if `enabled`, and only once, so the fast-synced heights stay one range.
 pub(crate) fn embedded_trees_for_state(
-    network: &Network,
+    trees: Option<Arc<EmbeddedTrees>>,
     db: &ZebraDb,
     enabled: bool,
     max_checkpoint_height: Height,
 ) -> Option<Arc<EmbeddedTrees>> {
     // The block after the embedded trees verifies their block's roots, so it must also be
     // checkpoint-verified.
-    let trees =
-        EmbeddedTrees::for_network(network).filter(|trees| trees.height < max_checkpoint_height)?;
+    let trees = trees.filter(|trees| trees.height < max_checkpoint_height)?;
 
     match db.fast_sync_tree_heights() {
         Some(heights) if Some(*heights.end()) == db.finalized_tip_height() => Some(trees),
@@ -235,8 +270,12 @@ pub(crate) fn embedded_trees_for_state(
     }
 }
 
-/// How long the block writer waits for missing roots before it logs that it is still waiting.
-const ROOTS_WAIT_LOG_INTERVAL: Duration = Duration::from_secs(10);
+/// Bounds a frozen writer's wait, including after restarting with fast sync disabled.
+#[cfg(not(test))]
+const ROOTS_STALL_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const ROOTS_STALL_TIMEOUT: Duration = Duration::from_secs(2);
+const ROOTS_WAIT_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How the block writer commits a checkpoint-verified block.
 pub(crate) enum CheckpointCommit {
@@ -247,12 +286,13 @@ pub(crate) enum CheckpointCommit {
         /// The tree sizes after the block if the trees stay frozen, or `None` if fast sync ends
         /// with the block.
         frozen_sizes: Option<[u64; 3]>,
+        /// A malformed successor body, rejected separately from this authenticated block.
+        successor_error: Option<ValidateContextError>,
     },
     /// Commit the block with tree updates.
     Normal(CheckpointVerifiedBlock),
-    /// The supplied roots failed verification while the trees are frozen, so the block can't be
-    /// committed now. Either the roots or the next block can be wrong, so both are fetched again.
-    Rejected,
+    /// Frozen trees cannot advance because roots have been unavailable for the stall timeout.
+    Stalled(Height),
     /// The state is shutting down, so the block won't be committed.
     Shutdown,
 }
@@ -260,7 +300,7 @@ pub(crate) enum CheckpointCommit {
 /// The block writer's fast checkpoint sync state.
 pub(crate) struct FastTreeSyncWriter {
     /// The peer-supplied roots.
-    cache: Arc<TreeRootsCache>,
+    cache: TreeRootsCache,
     /// The network.
     network: Network,
     /// The tree sizes after the last committed block, if the writer committed it without updating
@@ -277,7 +317,7 @@ impl FastTreeSyncWriter {
     /// # Panics
     ///
     /// If `db` stopped in the middle of fast sync, and this Zebra version can't finish it.
-    pub(crate) fn new(db: &ZebraDb, cache: Arc<TreeRootsCache>, network: Network) -> Self {
+    pub(crate) fn new(db: &ZebraDb, cache: TreeRootsCache, network: Network) -> Self {
         let frozen_sizes = db
             .fast_sync_tree_heights()
             .filter(|heights| Some(*heights.end()) == db.finalized_tip_height())
@@ -304,7 +344,7 @@ impl FastTreeSyncWriter {
 
     /// Returns `true` if the writer should hold `block` until the next block arrives, which
     /// verifies the block's tree roots.
-    pub(crate) fn defers(&self, block: &CheckpointVerifiedBlock) -> bool {
+    pub(crate) fn defers(&mut self, block: &CheckpointVerifiedBlock) -> bool {
         let Some(trees) = self.cache.embedded_trees() else {
             return false;
         };
@@ -321,10 +361,9 @@ impl FastTreeSyncWriter {
     /// after it.
     ///
     /// `history_tree` is the chain history tree before `block`, and `trees` are the note
-    /// commitment trees the writer has. While the trees are frozen, waits for roots until
-    /// `is_shutting_down` returns `true`.
+    /// commitment trees the writer has. Frozen trees wait boundedly for replacement roots.
     pub(crate) fn checkpoint_commit(
-        &self,
+        &mut self,
         block: CheckpointVerifiedBlock,
         next: &CheckpointVerifiedBlock,
         history_tree: &Arc<HistoryTree>,
@@ -332,43 +371,45 @@ impl FastTreeSyncWriter {
         is_shutting_down: impl Fn() -> bool,
     ) -> CheckpointCommit {
         let height = block.height;
+        let deadline = Instant::now() + ROOTS_STALL_TIMEOUT;
 
         loop {
-            let roots = if self.frozen_sizes.is_some() {
-                match self.cache.wait_for_roots(height, ROOTS_WAIT_LOG_INTERVAL) {
+            if is_shutting_down() {
+                return CheckpointCommit::Shutdown;
+            }
+            let proof = match self.cache.roots(height) {
+                Some(proof) => proof,
+                None if self.frozen_sizes.is_none() => return CheckpointCommit::Normal(block),
+                None if Instant::now() >= deadline => return CheckpointCommit::Stalled(height),
+                None => match self.cache.wait_for_roots(
+                    height,
+                    ROOTS_WAIT_LOG_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+                ) {
                     Some(roots) => roots,
-                    None if is_shutting_down() => return CheckpointCommit::Shutdown,
-                    None => {
-                        tracing::info!(
-                            ?height,
-                            "waiting for peers to supply note commitment tree roots"
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                match self.cache.roots(height) {
-                    Some(roots) => roots,
-                    None => return CheckpointCommit::Normal(block),
-                }
+                    None => continue,
+                },
             };
 
             let history_tree =
-                match verify_tree_roots(&self.network, &block, &roots, history_tree, next) {
+                match verify_tree_roots(&self.network, &block, &proof, history_tree, next) {
                     Ok(history_tree) => history_tree,
                     Err(error) => {
                         tracing::warn!(?height, %error, "rejected peer-supplied tree roots");
                         self.cache.reject(height);
 
-                        // Until the trees are frozen, updating them is still possible. After
-                        // that, the next block's body can be the wrong one, so retry both.
-                        return if self.frozen_sizes.is_none() {
-                            CheckpointCommit::Normal(block)
-                        } else {
-                            CheckpointCommit::Rejected
-                        };
+                        // This source supplied the entire commitment preimage. An unrelated
+                        // successor body's authorizing data cannot invalidate its proof.
+                        continue;
                     }
                 };
+            let roots = proof.roots;
+            let successor_error = check::block_commitment_is_valid_for_chain_history(
+                next.block.clone(),
+                &self.network,
+                &history_tree,
+                next.precomputed_auth_data_root(),
+            )
+            .err();
 
             let [sapling_size, orchard_size, ironwood_size] = self.sizes_after(&block, trees);
             let embedded_trees = self
@@ -382,6 +423,7 @@ impl FastTreeSyncWriter {
             }
 
             return CheckpointCommit::Fast {
+                successor_error,
                 frozen_sizes: embedded_trees.is_none().then_some([
                     sapling_size,
                     orchard_size,
@@ -477,6 +519,13 @@ pub(crate) enum TreeRootsError {
         source: ValidateContextError,
     },
 
+    /// A ZIP-244 successor header requires an independently supplied authorizing-data root.
+    #[error("the proof after block {height:?} omits the successor authorizing-data root")]
+    MissingAuthDataRoot {
+        /// The height whose proof is incomplete.
+        height: Height,
+    },
+
     /// The embedded trees have different roots or sizes than the chain.
     #[error("the embedded note commitment trees don't match the chain at {height:?}")]
     EmbeddedTrees {
@@ -485,18 +534,19 @@ pub(crate) enum TreeRootsError {
     },
 }
 
-/// Verifies `roots`, the supplied roots after `block`, and returns the chain history tree after
-/// `block`.
+/// Verifies the supplier's complete `proof` against checkpoint-authenticated headers and returns
+/// the chain history tree after `block`, without trusting `next`'s authorizing data.
 ///
-/// `history_tree` is the chain history tree before `block`, and `next` is the block after it.
+/// `history_tree` is the history before `block`; `next` is its checkpoint-authenticated successor.
 pub(crate) fn verify_tree_roots(
     network: &Network,
     block: &CheckpointVerifiedBlock,
-    roots: &TreeRoots,
+    proof: &TreeRootsProof,
     history_tree: &Arc<HistoryTree>,
     next: &CheckpointVerifiedBlock,
 ) -> Result<Arc<HistoryTree>, TreeRootsError> {
     let height = block.height;
+    let roots = &proof.roots;
     let empty = TreeRoots::empty();
     let is_active = |upgrade: NetworkUpgrade| {
         upgrade
@@ -548,13 +598,44 @@ pub(crate) fn verify_tree_roots(
         )
         .map_err(|error: HistoryTreeError| commitment_error(Arc::new(error).into()))?;
 
-    check::block_commitment_is_valid_for_chain_history(
-        next.block.clone(),
-        network,
-        &history_tree,
-        next.precomputed_auth_data_root(),
-    )
-    .map_err(commitment_error)?;
+    if let block::Commitment::ChainHistoryBlockTxAuthCommitment(actual) = next
+        .block
+        .commitment(network)
+        .map_err(|error| commitment_error(error.into()))?
+    {
+        let auth_root = proof
+            .successor_auth_data_root
+            .ok_or(TreeRootsError::MissingAuthDataRoot { height })?;
+        let history_root = history_tree.hash().unwrap_or_else(|| {
+            assert_eq!(
+                NetworkUpgrade::Heartwood.activation_height(network),
+                Some(next.height),
+                "only Heartwood activation has no preceding history root",
+            );
+            block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+        });
+        let expected = block::ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            &history_root,
+            &auth_root,
+        );
+        if actual != expected {
+            return Err(commitment_error(
+                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment {
+                    actual: actual.into(),
+                    expected: expected.into(),
+                }
+                .into(),
+            ));
+        }
+    } else {
+        check::block_commitment_is_valid_for_chain_history(
+            next.block.clone(),
+            network,
+            &history_tree,
+            None,
+        )
+        .map_err(commitment_error)?;
+    }
 
     Ok(history_tree)
 }
