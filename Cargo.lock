@@ -5143,8 +5143,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 [[package]]
 name = "sinsemilla"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72744738b764bb3bb7bb5dcf71b62d19c2de8a09f850a7388f6088f244037299"
+source = "git+https://github.com/zcash/sinsemilla?rev=a88967c97e49ad11e6e674f58849622073393ba9#a88967c97e49ad11e6e674f58849622073393ba9"
 dependencies = [
  "group",
  "pasta_curves",

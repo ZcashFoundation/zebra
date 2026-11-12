@@ -400,3 +400,4 @@ result_large_err = "allow"
 [patch.crates-io]
 reddsa = { git = "https://github.com/ZcashFoundation/reddsa", rev = "7e610c3f8a63294975932bca901da95893aa895a" }
 pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "b1f9cfc6c9109d580f2aa0742bc86e22f539236d" }
+sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "a88967c97e49ad11e6e674f58849622073393ba9" }
