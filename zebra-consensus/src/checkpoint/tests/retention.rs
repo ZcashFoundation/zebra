@@ -390,6 +390,43 @@ async fn trusted_custom_gap_larger_than_default_budget_completes() {
 }
 
 #[tokio::test]
+async fn decoded_checkpoint_byte_limit_is_admitted() {
+    let _init_guard = zebra_test::init();
+    let mut block = block_at(MAX_CHECKPOINT_HEIGHT_GAP, block::Hash([7; 32]));
+    let mut outputs = block.transactions[0].outputs();
+    // Keep the script length's CompactSize prefix five bytes wide while filling the block.
+    outputs[0].lock_script = transparent::Script::new(&vec![0; 65_536]);
+    let block_mut = Arc::make_mut(&mut block);
+    block_mut.transactions[0] = Arc::new(
+        block_mut.transactions[0]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(outputs.clone()),
+    );
+    let overhead = block.zcash_serialized_size() - 65_536;
+    let limit = usize::try_from(block::MAX_BLOCK_BYTES).unwrap();
+    outputs[0].lock_script = transparent::Script::new(&vec![0; limit - overhead]);
+    let block_mut = Arc::make_mut(&mut block);
+    block_mut.transactions[0] = Arc::new(
+        block_mut.transactions[0]
+            .as_ref()
+            .clone()
+            .with_transparent_outputs(outputs),
+    );
+    Arc::make_mut(&mut block_mut.header).merkle_root =
+        block_mut.transactions.iter().map(|tx| tx.hash()).collect();
+    let bytes = block.zcash_serialize_to_vec().unwrap();
+    assert_eq!(bytes.len(), limit);
+    let decoded = Arc::<Block>::zcash_deserialize(&bytes[..]).unwrap();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut verifier =
+        CheckpointVerifier::from_list(sparse_checkpoints(), &network_without_pow(), None, state)
+            .unwrap();
+    assert!(verifier.call(decoded).now_or_never().is_none());
+    assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
 async fn oversized_internal_checkpoint_body_is_not_retained() {
     let _init_guard = zebra_test::init();
     let mut block = block_at(MAX_CHECKPOINT_HEIGHT_GAP, block::Hash([7; 32]));
@@ -409,6 +446,8 @@ async fn oversized_internal_checkpoint_body_is_not_retained() {
             .unwrap();
 
     let response = verifier.call(block).now_or_never();
+    assert_eq!(verifier.retained_blocks.load(Ordering::Relaxed), 0);
+    assert!(verifier.queued.is_empty());
     drop(verifier);
     assert_bodies_released(&[body]).await;
     assert!(

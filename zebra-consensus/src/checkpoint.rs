@@ -728,7 +728,7 @@ where
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
         self.check_height(height)?;
 
-        // Network decoding enforces this limit, but internal Arc<Block> callers bypass decoding.
+        // Decoded transactions retain exact sizes; only internally rebuilt bodies need counting.
         let block_size = u64::try_from(block.zcash_serialized_size())
             .map_err(|_| VerifyBlockError::OversizedBlock)?;
         if block_size > block::MAX_BLOCK_BYTES {

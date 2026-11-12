@@ -9,7 +9,7 @@ use hex::{FromHex, FromHexError};
 use crate::{
     block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
     serialization::{
-        CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
+        CompactSize64, CompactSizeMessage, ReadZcashExt, SerializationError, ZcashDeserialize,
         ZcashDeserializeInto, ZcashSerialize,
     },
     work::{difficulty::CompactDifficulty, equihash},
@@ -143,6 +143,20 @@ impl ZcashSerialize for Block {
         self.header.zcash_serialize(&mut writer)?;
         self.transactions.zcash_serialize(&mut writer)?;
         Ok(())
+    }
+
+    fn zcash_serialized_size(&self) -> usize {
+        let header_size = match self.header.solution {
+            equihash::Solution::Common(_) => Header::SERIALIZED_SIZE,
+            equihash::Solution::Regtest(_) => Header::REGTEST_SERIALIZED_SIZE,
+        };
+        let count = CompactSize64::from(
+            u64::try_from(self.transactions.len()).expect("transaction counts fit u64"),
+        );
+        self.transactions.iter().fold(
+            header_size + count.zcash_serialized_size(),
+            |size, transaction| size.saturating_add(transaction.zcash_serialized_size()),
+        )
     }
 }
 

@@ -10,4 +10,6 @@ mod preallocate;
 #[cfg(test)]
 mod prop;
 #[cfg(test)]
+mod size;
+#[cfg(test)]
 mod vectors;
