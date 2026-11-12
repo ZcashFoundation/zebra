@@ -66,7 +66,7 @@ use crate::{
 pub(crate) type MiningCandidate = (
     Arc<block::Block>,
     Arc<crate::GetBlockTemplateChainInfo>,
-    watch::Receiver<Arc<OwnedSemaphorePermit>>,
+    watch::Sender<Option<Arc<OwnedSemaphorePermit>>>,
     tokio::time::Instant,
 );
 
@@ -1345,14 +1345,19 @@ impl Service<Request> for StateService {
                 };
                 let state = self.read_service.clone();
                 let mut tip_change = self.latest_chain_tip.clone();
-                // Keep the slot reserved until verification ends, even after early work expires.
-                let (guard, mut cancelled) = watch::channel(Arc::new(permit));
+                // Published work reserves the slot until verification ends, even after expiry.
+                let (cancelled, guard) = watch::channel(Some(Arc::new(permit)));
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 tokio::spawn(async move {
                     let compute_state = state.clone();
                     let candidate_block = block.clone();
                     let parent = block.header.previous_block_hash;
-                    let compute_permit = cancelled.borrow().clone();
+                    // Queued or running blocking work keeps its permit after cancellation or timeout.
+                    let compute_permit = cancelled
+                        .borrow()
+                        .as_ref()
+                        .expect("the newly admitted candidate owns its slot")
+                        .clone();
                     let compute = tokio::task::spawn_blocking(move || {
                         let _permit = compute_permit;
                         if !compute_state.mining_candidate_is_allowed(hash) {
@@ -1365,20 +1370,28 @@ impl Service<Request> for StateService {
                             block,
                         )
                     });
+                    // Drop the guard's permit reference before notifying waiting receivers.
                     let info = tokio::select! {
                         biased;
-                        _ = cancelled.changed() => return,
-                        _ = tokio::time::sleep_until(deadline) => return,
+                        _ = cancelled.closed() => return,
+                        _ = tokio::time::sleep_until(deadline) => {
+                            cancelled.send_modify(|permit| *permit = None);
+                            return;
+                        },
                         result = compute => match result {
                             Ok(Some(info)) => Arc::new(info),
-                            _ => return,
+                            _ => {
+                                cancelled.send_modify(|permit| *permit = None);
+                                return;
+                            },
                         },
                     };
-                    if cancelled.has_changed().is_err()
+                    if cancelled.is_closed()
                         || tokio::time::Instant::now() >= deadline
                         || state.best_tip().map(|(_, hash)| hash) != Some(parent)
                         || !state.mining_candidate_is_allowed(hash)
                     {
+                        cancelled.send_modify(|permit| *permit = None);
                         return;
                     }
                     state.mining_candidate.send_replace(Some((
@@ -1388,7 +1401,7 @@ impl Service<Request> for StateService {
                         deadline,
                     )));
                     tokio::select! {
-                        _ = cancelled.changed() => {}
+                        _ = cancelled.closed() => {}
                         _ = tokio::time::sleep_until(deadline) => {}
                         _ = async {
                             while state.best_tip().map(|(_, hash)| hash) == Some(parent) {
@@ -1851,7 +1864,7 @@ impl Service<ReadRequest> for ReadStateService {
                 let candidate = state.mining_candidate.borrow().clone();
                 Ok(ReadResponse::MiningCandidate(candidate.and_then(
                     |(parent, info, cancelled, deadline)| {
-                        (cancelled.has_changed().is_ok()
+                        (!cancelled.is_closed()
                             && tokio::time::Instant::now() < deadline
                             && state.mining_candidate_is_allowed(info.tip_hash)
                             && state.best_tip().map(|(_, hash)| hash)

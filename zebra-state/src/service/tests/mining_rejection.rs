@@ -19,7 +19,7 @@ use crate::{
     ReadStateService, Request, Response,
 };
 
-async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
+pub(super) async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
     let network = Network::new_regtest(
         ConfiguredActivationHeights {
             canopy: Some(1),
@@ -57,7 +57,11 @@ async fn state(finalized_only: bool) -> (StateService, ReadStateService) {
 /// Uses real Merkle and NU5 authorizing-data commitments, with an optional missing-input failure.
 ///
 /// Higher ranks select later satisfying nonces, giving siblings that differ only by nonce.
-async fn candidate(read: &ReadStateService, missing_input: bool, rank: usize) -> Arc<Block> {
+pub(super) async fn candidate(
+    read: &ReadStateService,
+    missing_input: bool,
+    rank: usize,
+) -> Arc<Block> {
     let ReadResponse::ChainInfo(info) = read.clone().oneshot(ReadRequest::ChainInfo).await.unwrap()
     else {
         panic!("state returns template context");
@@ -132,7 +136,7 @@ async fn candidate(read: &ReadStateService, missing_input: bool, rank: usize) ->
     Arc::new(block)
 }
 
-async fn subscribe(read: &ReadStateService) -> MiningCandidateChanges {
+pub(super) async fn subscribe(read: &ReadStateService) -> MiningCandidateChanges {
     let ReadResponse::MiningCandidateChanges(changes) = read
         .clone()
         .oneshot(ReadRequest::MiningCandidateChanges)
@@ -186,7 +190,7 @@ fn rejection_during_queued_mining_computation_prevents_publication() {
                 let _ = released.blocking_recv();
             });
             running.await.unwrap();
-            let Response::MiningCandidate(Some(guard)) = state
+            let Response::MiningCandidate(Some(mut guard)) = state
                 .ready()
                 .await
                 .unwrap()
@@ -197,7 +201,7 @@ fn rejection_during_queued_mining_computation_prevents_publication() {
                 panic!("the first candidate reserves the computation slot");
             };
             // The queued blocking computation retains a clone of the publication's slot permit.
-            while Arc::strong_count(&guard.0.borrow()) < 2 {
+            while Arc::strong_count(guard.0.borrow().as_ref().unwrap()) < 2 {
                 tokio::task::yield_now().await;
             }
             // The sole async worker must finish polling publication before running this task,
@@ -211,7 +215,7 @@ fn rejection_during_queued_mining_computation_prevents_publication() {
             tokio::select! {
                 biased;
                 _ = changes.changed() => panic!("a rejected queued candidate must never publish"),
-                _ = guard.0.closed() => {}
+                _ = async { while guard.0.changed().await.is_ok() {} } => {}
             }
             assert!(!changes.is_current(block.hash()));
             assert!(changes.block(block.hash()).is_none());
