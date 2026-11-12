@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Reduced allocations on the peer message path by only building the connection state metric label when the state changes.
+time: 2026-11-12T17:56:20.10433965Z
