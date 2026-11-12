@@ -216,7 +216,7 @@ fn connection_state_commands_omit_serialization_details() {
         let handler = Handler::Finished(Err(PeerError::Serialization(
             std::io::Error::other(detail).into(),
         )));
-        assert_eq!(handler.command(), "Finished(Serialization)");
+        assert_eq!(handler.name().to_string(), "Finished(Serialization)");
         assert!(
             handler.to_string().contains(detail),
             "logs retain error details",

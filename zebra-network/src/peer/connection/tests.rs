@@ -106,16 +106,3 @@ fn new_test_connection<A>() -> (
         shared_error_slot,
     )
 }
-
-#[test]
-fn formats_to_matches_only_the_exact_formatted_text() {
-    let command = "AwaitingRequest";
-    let extra = format_args!("In::Req::{}", "Peers");
-
-    let matches = |expected: &str| super::formats_to(expected, format_args!("{command}::{extra}"));
-
-    assert!(matches("AwaitingRequest::In::Req::Peers"));
-    assert!(!matches("AwaitingRequest::In::Req::Ping"));
-    assert!(!matches("AwaitingRequest::In::Req::Peers::More"));
-    assert!(!matches("AwaitingRequest::In::Req"));
-}
