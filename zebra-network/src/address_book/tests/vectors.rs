@@ -42,6 +42,15 @@ fn address_book_empty() {
     assert_eq!(address_book.len(), 0);
 }
 
+/// Returns the addresses that `address_book` gossips to peers.
+fn gossiped_addrs(address_book: &AddressBook) -> Vec<PeerSocketAddr> {
+    address_book
+        .sanitized(Utc::now())
+        .into_iter()
+        .map(|meta_addr| meta_addr.addr)
+        .collect()
+}
+
 /// Make sure the address book gossips the configured external address as its own,
 /// instead of a local listener address that peers can't reach or that is unspecified.
 #[test]
@@ -60,15 +69,45 @@ fn address_book_gossips_external_addr_instead_of_local_listener() {
         address_book.set_external_addr(Some(external_addr));
 
         for address_book in [address_book.clone(), address_book] {
-            let gossiped_addrs: Vec<PeerSocketAddr> = address_book
-                .sanitized(Utc::now())
-                .into_iter()
-                .map(|meta_addr| meta_addr.addr)
-                .collect();
+            assert_eq!(gossiped_addrs(&address_book), vec![external_addr.into()]);
 
-            assert_eq!(gossiped_addrs, vec![external_addr.into()]);
+            // The local listener accessors still return the address Zebra is bound to.
             assert_eq!(address_book.local_listener_socket_addr(), local_listener);
+            assert_eq!(
+                address_book.local_listener_meta_addr(Utc::now()).addr,
+                local_listener.into(),
+            );
         }
+    }
+}
+
+/// Make sure the address book keeps gossiping its local listener address
+/// when peers can't connect to the configured external address.
+#[test]
+fn address_book_gossips_local_listener_when_external_addr_is_unusable() {
+    let local_listener: SocketAddr = "198.51.100.7:8233".parse().unwrap();
+
+    for unusable_external_addr in [
+        // An unspecified port
+        "203.0.113.42:0",
+        // Unspecified IP addresses, including an IPv4-mapped one
+        "0.0.0.0:8233",
+        "[::]:8233",
+        "[::ffff:0.0.0.0]:8233",
+    ] {
+        let mut address_book = AddressBook::new(
+            local_listener,
+            &Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::current(),
+        );
+        address_book.set_external_addr(Some(unusable_external_addr.parse().unwrap()));
+
+        assert_eq!(
+            gossiped_addrs(&address_book),
+            vec![local_listener.into()],
+            "unusable external address {unusable_external_addr} should be ignored",
+        );
     }
 }
 

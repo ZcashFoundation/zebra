@@ -1,4 +1,0 @@
-project: zebrad
-kind: Fixed
-body: 'A node with `network.external_addr` set now lists that address as its own when peers ask it for addresses. Before, it listed the local listener address, or left itself out when listening on an unspecified address, so peers could only learn the external address from handshakes.'
-time: 2026-11-12T22:00:01.000000000Z

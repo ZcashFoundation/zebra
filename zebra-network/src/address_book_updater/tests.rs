@@ -15,11 +15,50 @@ use crate::{
     constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_PEER_MISBEHAVIOR_SCORE},
     protocol::types::PeerServices,
     types::MetaAddr,
-    AddressBook,
+    AddressBook, Config,
 };
 
 /// The number of candidate peers used in the concurrency test.
 const TEST_PEER_COUNT: usize = 8;
+
+/// Test that the address book updater passes the configured external address
+/// to its address book, so Zebra gossips that address as its own.
+#[tokio::test]
+async fn address_book_updater_gossips_configured_external_addr() {
+    let _init_guard = zebra_test::init();
+
+    let local_listener = SocketAddr::from_str("0.0.0.0:8233").unwrap();
+    let external_addr = SocketAddr::from_str("203.0.113.42:8233").unwrap();
+
+    let config = Config {
+        network: Mainnet,
+        listen_addr: local_listener,
+        external_addr: Some(external_addr),
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        _change_sender,
+        _address_book_service,
+        _address_metrics,
+        _updater_guard,
+    ) = AddressBookUpdater::spawn(&config, local_listener);
+
+    let address_book = address_book
+        .lock()
+        .expect("unexpected panic in address book");
+
+    let gossiped_addrs: Vec<_> = address_book
+        .fresh_get_addr_response()
+        .into_iter()
+        .map(|meta_addr| meta_addr.addr)
+        .collect();
+
+    assert_eq!(gossiped_addrs, vec![external_addr.into()]);
+    assert_eq!(address_book.local_listener_socket_addr(), local_listener);
+}
 
 /// Test that the address book service serves each request variant,
 /// with the matching response variant.

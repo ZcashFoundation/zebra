@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Fixed
-body: 'Include the configured `network.external_addr` as the node''s own address in replies to peer address requests. Zebra already sent it in handshakes, but its address replies used the local listener address, which peers can not reach behind a firewall, load balancer or NAT, or left the node out when it listens on an unspecified address.'
-time: 2026-11-12T22:00:00.000000000Z

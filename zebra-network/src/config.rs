@@ -89,6 +89,7 @@ pub struct Config {
     /// ("\[::\]:port"), which is not advertised to other nodes.
     ///
     /// To advertise a different address, set [`Config::external_addr`].
+    /// Zebra then advertises that address instead of the listener address.
     ///
     /// Zebra does not currently support
     /// [auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
@@ -104,6 +105,11 @@ pub struct Config {
     /// is behind a firewall, load balancer or NAT. This field can be used to
     /// advertise a different address to peers making it possible to receive inbound
     /// connections and contribute to the P2P network from behind a firewall, load balancer, or NAT.
+    ///
+    /// Zebra sends this address in `Version` messages, and gives it as its own address
+    /// when peers ask it for peer addresses. If peers can't connect to this address,
+    /// for example because its port is 0, Zebra logs a warning at startup, and gives
+    /// its listener address to peers that ask for addresses instead.
     pub external_addr: Option<SocketAddr>,
 
     /// The network to connect to.

@@ -19,6 +19,7 @@ use crate::{
     connection_metrics::network_kind_label,
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
+    peer::address_is_valid_for_outbound_connections,
     protocol::external::{canonical_peer_addr, canonical_socket_addr, connection_limit_key},
     types::MetaAddr,
     AddressBookPeers, BanList, PeerAddrState, PeerSocketAddr,
@@ -87,9 +88,9 @@ pub struct AddressBook {
     /// The local listener address.
     local_listener: SocketAddr,
 
-    /// The configured external address, if any.
+    /// The configured external address, if it is an address peers can connect to.
     ///
-    /// Zebra gossips this address to peers instead of `local_listener`,
+    /// Zebra gossips this address to peers as its own instead of `local_listener`,
     /// because peers can't reach a listener address that is behind a
     /// firewall, load balancer, or NAT.
     external_addr: Option<SocketAddr>,
@@ -275,33 +276,68 @@ impl AddressBook {
         self.local_listener = addr;
     }
 
-    /// Set the external address that Zebra gossips to peers instead of its
-    /// local listener address.
+    /// Set the external address that Zebra gossips to peers as its own,
+    /// instead of its local listener address.
+    ///
+    /// An external address that peers can't connect to is ignored with a warning,
+    /// so Zebra keeps gossiping its local listener address.
     pub(crate) fn set_external_addr(&mut self, external_addr: Option<SocketAddr>) {
-        self.external_addr = external_addr;
+        let span = self.span.clone();
+        let _guard = span.enter();
+
+        self.external_addr = external_addr
+            .map(canonical_socket_addr)
+            .filter(|&external_addr| {
+                // Sanitization applies the same check, so an address that fails it
+                // would silently remove this node from its own gossip.
+                let validity = address_is_valid_for_outbound_connections(
+                    external_addr.into(),
+                    self.network.clone(),
+                );
+
+                if let Err(reason) = validity {
+                    tracing::warn!(
+                        ?external_addr,
+                        local_listener = ?self.local_listener,
+                        reason,
+                        "peers can not connect to the configured external address, \
+                         gossiping the local listener address instead"
+                    );
+                }
+
+                validity.is_ok()
+            });
     }
 
-    /// Get the address that Zebra gossips to peers as its own: the configured
-    /// external address, or the local listener address if there isn't one.
+    /// Get the local listener address.
     ///
     /// This address contains minimal state, but it is not sanitized.
     pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
-        let now: DateTime32 = now.try_into().expect("will succeed until 2038");
-
-        // The handshake makes the same choice for the address in `Version` messages.
-        MetaAddr::new_local_listener_change(self.external_addr.unwrap_or(self.local_listener))
-            .local_listener_into_new_meta_addr(now)
+        Self::own_meta_addr(self.local_listener, now)
     }
 
-    /// Get the local listener [`SocketAddr`] that Zebra is bound to.
+    /// Get the address that Zebra gossips to peers as its own: the external address,
+    /// or the local listener address if there is no usable external address.
     ///
-    /// This is never the configured external address.
+    /// This address contains minimal state, but it is not sanitized.
+    pub(crate) fn advertised_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
+        Self::own_meta_addr(self.external_addr.unwrap_or(self.local_listener), now)
+    }
+
+    /// Returns a [`MetaAddr`] for `addr`, which must be one of this node's own addresses.
+    fn own_meta_addr(addr: SocketAddr, now: chrono::DateTime<Utc>) -> MetaAddr {
+        let now: DateTime32 = now.try_into().expect("will succeed until 2038");
+
+        MetaAddr::new_local_listener_change(addr).local_listener_into_new_meta_addr(now)
+    }
+
+    /// Get the local listener [`SocketAddr`].
     pub fn local_listener_socket_addr(&self) -> SocketAddr {
         self.local_listener
     }
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
-    /// including our local listener address.
+    /// including the address we advertise as our own.
     ///
     /// Limited to the number of peer addresses Zebra should give out per `GetAddr` request.
     pub fn fresh_get_addr_response(&self) -> Vec<MetaAddr> {
@@ -314,18 +350,18 @@ impl AddressBook {
     }
 
     /// Get the active addresses in `self` in random order with sanitized timestamps,
-    /// including our local listener address.
+    /// including the address we advertise as our own.
     pub(crate) fn sanitized(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
         use rand::seq::SliceRandom;
         let _guard = self.span.enter();
 
         let mut peers = self.by_addr.clone();
 
-        // Unconditionally add our external or local listener address to the advertised peers,
+        // Unconditionally add the address we advertise as our own to the gossiped peers,
         // to replace any self-connection failures. The address book and change
         // constructors make sure that the SocketAddr is canonical.
-        let local_listener = self.local_listener_meta_addr(now);
-        peers.insert(local_listener.addr, local_listener);
+        let advertised_addr = self.advertised_meta_addr(now);
+        peers.insert(advertised_addr.addr, advertised_addr);
 
         // Then sanitize and shuffle
         let mut peers: Vec<MetaAddr> = peers
