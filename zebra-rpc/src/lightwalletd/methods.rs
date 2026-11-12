@@ -386,10 +386,31 @@ where
                         }
 
                         let request = mempool::Request::TransactionsById(change.into_tx_ids());
-                        let Ok(mempool::Response::Transactions(transactions)) =
-                            mempool.clone().oneshot(request).await
-                        else {
-                            return;
+                        let transactions = match mempool.clone().oneshot(request).await {
+                            Ok(mempool::Response::Transactions(transactions)) => transactions,
+                            Ok(_) => {
+                                tracing::error!("unexpected mempool response type");
+                                let _ = send_bounded(
+                                    &response_sender,
+                                    Err(Status::internal("unexpected mempool response")),
+                                )
+                                .await;
+                                return;
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    ?error,
+                                    "mempool query failed; closing the stream with an error"
+                                );
+                                let _ = send_bounded(
+                                    &response_sender,
+                                    Err(Status::internal(format!(
+                                        "mempool query failed: {error}"
+                                    ))),
+                                )
+                                .await;
+                                return;
+                            }
                         };
 
                         for tx in transactions {
