@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 
 use super::{catalog, describe_all, HISTOGRAM_BUCKETS};
 
+#[cfg(all(feature = "prometheus", feature = "sentry"))]
+mod backends;
 mod call_sites;
 #[cfg(feature = "prometheus")]
 mod exporter;
@@ -275,6 +277,27 @@ fn catalog_file_is_current() {
         "{CATALOG_FILE} is out of date. Regenerate it with:\n\
          {UPDATE_CATALOG_ENV}=1 cargo nextest run -p zebrad catalog_file_is_current",
     );
+}
+
+/// Only histograms have event attributes, because backends keep a value for each counter and gauge
+/// label set for the life of the process.
+#[cfg(any(feature = "prometheus", feature = "sentry"))]
+#[test]
+fn only_histograms_have_event_attributes() {
+    let _init_guard = zebra_test::init();
+
+    for (name, entry) in &Catalog::build().0 {
+        for key in &entry.labels {
+            if key.starts_with(super::event_labels::EVENT_LABEL_PREFIX) {
+                assert_eq!(
+                    entry.kind,
+                    Kind::Histogram,
+                    "{name} is a {} with the event attribute {key}, which only histograms can have",
+                    entry.kind,
+                );
+            }
+        }
+    }
 }
 
 /// Every described metric has a unit and a description.
