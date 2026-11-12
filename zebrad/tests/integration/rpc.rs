@@ -61,6 +61,13 @@ async fn metrics_endpoint() -> Result<()> {
     )?;
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
 
+    output.any_output_line_contains(
+        "# TYPE process_resident_memory_bytes gauge",
+        &body,
+        "metrics exporter response",
+        "the process metrics",
+    )?;
+
     output.assert_was_killed()?;
 
     Ok(())
