@@ -64,7 +64,7 @@ tracing = { workspace = true }
 
 sapling-crypto = { workspace = true }
 
-zebra-node-services = { path = "../zebra-node-services", version = "13.0.1" }
+zebra-node-services = { path = "../zebra-node-services", version = "14.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "16.0.0", features = ["async-error"] }
 
 # prod feature progress-bar

@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 7.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.1.0) - 2026-11-12
+
+### Breaking Changes
+
+- Remove the experimental `elasticsearch` feature, which exported finalized blocks to Elasticsearch and slowed down syncing. A config that still has `elasticsearch_url`, `elasticsearch_username` or `elasticsearch_password` in the `[state]` section now fails to load: delete those fields.
+
+### Added
+
+- Added stack traces to Sentry error events, with Zebra's frames marked in-app, so Sentry can show suspect commits. Sentry now groups logged errors by stack trace, so existing issues may reappear as new ones ([#11645](https://github.com/ZcashFoundation/zebra/issues/11645)).
+- Added the `zcash.chain.tip.block_delay_seconds` histogram, which measures how long after its header time each new tip block is accepted, and sent it to Sentry as a distribution, with the block's height, when `SENTRY_DSN` is set. Metrics sent to Sentry also carry the network upgrade at the tip and the process uptime.
+- Added sync stall diagnosis. Sync restarts now log why they happened, block download and verify errors include a `kind`, and the "chain updates have stalled" warning includes the latest restart reason and the age of the oldest in-flight block. The new `sync.restart.count`, `sync.block.error.count`, and `sync.downloads.oldest_age_seconds` metrics are exported to Prometheus, and sent to Sentry once a minute when Sentry is enabled.
+- Added the verified block counts, the mempool size, and the database disk size to the metrics sent to Sentry once a minute when `SENTRY_DSN` is set, to help compare nodes.
+
+### Changed
+
+- Disabled Nagle's algorithm (`TCP_NODELAY`) on peer connections, like zcashd does. This removes delays of 40ms or more when Zebra sends several small messages in a row, for example when it relays mempool transactions to zcashd peers.
+- Block queue and commit spans no longer include whole verified-block payloads; compact height and hash context remains.
+- Routine state-service spans now use DEBUG, and per-input, per-transaction and chain-tip getter spans use TRACE. INFO events and their fields are unchanged.
+- A node with no outbound peers and no peer addresses to try now resolves its DNS seeders, reloads its configured and cached peers, and retries peers that failed, at most once every 5 minutes, instead of staying without peers until it is restarted. It logs a warning each time ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+- Zebra now starts with its cached peers when DNS resolution of the initial peers fails, instead of waiting for DNS to succeed ([#11807](https://github.com/ZcashFoundation/zebra/pull/11807)).
+- Bound metric labels: `mempool.failed.verify.tasks.total` uses error kinds for `reason` (retaining `timeout`), `zebra.net.in.errors` uses error kinds for `error`, and handshake protocol-version labels use known versions or `other`. Update custom selectors that match full error messages or unknown protocol versions.
+- Prevent requests from starting wire writes to peers banned, or made obsolete by a network upgrade, after readiness checking, including while waiting for the connection to become writable.
+- With `ephemeral = true`, `zebrad` no longer leaves empty directories in the temporary directory each time it starts.
+- Read-write nodes now report incomplete stored block bodies through block RPC and peer requests instead of serving empty or partial blocks.
+- Updated the `pulldown-cmark` build dependency to 0.13.6, clearing RUSTSEC-2026-0414 and RUSTSEC-2026-0433. Zebra isn't affected; it only runs the crate at build time, on the doc comments of its own protobuf files.
+- Updated the `libz-sys` build dependency to 1.1.31, clearing RUSTSEC-2026-0418. Zebra isn't affected: the leak needs `cc` 1.6.0 or later, and Zebra's lockfile uses `cc` 1.2.61.
+- Changed the log for a sync round that ends with an error without advancing the chain tip from INFO to WARN, so it reaches Sentry Logs and WARN-level alerts. The separate INFO `temporary error obtaining tips` and `temporary error extending tips` lines are gone, because the warning includes their error.
+- Zebra no longer gossips peer addresses as full nodes (`NODE_NETWORK`) when it never learned their services, and gossips an inbound peer's listener address with the services that peer advertised.
+- Checkpoint sync commits blocks with transparent outputs faster.
+- Reduce CPU work when updating mempool rejection metrics.
+- Reduce build dependencies without changing node behavior.
+
+### Fixed
+
+- Misbehaving peers reach the ban threshold reliably under load, because score increments are no longer lost while earlier scores are being applied ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).
+- Failed client connections to the tracing filter endpoint (built with the `filter-reload` feature) are now logged as warnings instead of errors, so they no longer create Sentry issues when Sentry is enabled.
+- Fixed the startup panic when the state database cannot be opened: it now shows the underlying error, and only blames another running zebrad process when the database lock is actually held. Other I/O errors, such as an unmounted, unwritable, or full cache directory, get their own message.
+- Fixed `zebrad tip-height` and `zebrad copy-state` leaving a `zebra-secondary_state-*` directory in the system temporary directory each time they ran. These directories are now removed on exit. Existing ones can be deleted safely when no zebrad command is running.
+
+### Security
+
+- Update `ctutils` to 0.4.5 to fix RUSTSEC-2026-0385, non-constant-time mask generation and `u128` comparisons. Zebra holds no keys and uses the affected hashing and signature code on public data.
+- Update tokio to 1.54.1 to fix RUSTSEC-2026-0386, safe `AsyncFd` constructors that violate I/O safety. Zebra doesn't use `AsyncFd`.
+
 ## [Zebra 7.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v7.0.0) - 2026-10-22
 
 This release supports the NU7 network upgrade on Mainnet, which activates at

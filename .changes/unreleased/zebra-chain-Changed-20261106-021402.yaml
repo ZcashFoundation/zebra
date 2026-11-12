@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: Reduce large block transaction-ID and authorizing-data Merkle tree levels in parallel without changing their roots or public APIs.
-time: 2026-11-06T02:14:02.703966365+01:00
