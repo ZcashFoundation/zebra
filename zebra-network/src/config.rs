@@ -88,9 +88,10 @@ pub struct Config {
     /// it to other nodes. But by default, Zebra uses an unspecified address
     /// ("\[::\]:port"), which is not advertised to other nodes.
     ///
-    /// Zebra does not currently support:
-    /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
-    /// - [Auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
+    /// To advertise a different address, set [`Config::external_addr`].
+    ///
+    /// Zebra does not currently support
+    /// [auto-discovering its own external IP address #1893](https://github.com/ZcashFoundation/zebra/issues/1893).
     ///
     /// However, other Zebra instances compensate for unspecified or incorrect
     /// listener addresses by adding the external IP addresses of peers to

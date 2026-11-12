@@ -304,12 +304,13 @@ impl AddressBookUpdater {
         watch::Receiver<AddressMetrics>,
         JoinHandle<Result<(), BoxError>>,
     ) {
-        let address_book = AddressBook::new(
+        let mut address_book = AddressBook::new(
             local_listener,
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),
         );
+        address_book.set_external_addr(config.external_addr);
 
         // Use an update channel and buffer based on the maximum number of
         // inbound and outbound peers.

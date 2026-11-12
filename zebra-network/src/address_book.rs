@@ -87,6 +87,13 @@ pub struct AddressBook {
     /// The local listener address.
     local_listener: SocketAddr,
 
+    /// The configured external address, if any.
+    ///
+    /// Zebra gossips this address to peers instead of `local_listener`,
+    /// because peers can't reach a listener address that is behind a
+    /// firewall, load balancer, or NAT.
+    external_addr: Option<SocketAddr>,
+
     /// The configured Zcash network.
     network: Network,
 
@@ -160,6 +167,7 @@ impl AddressBook {
         let mut new_book = AddressBook {
             by_addr: IndexMap::new(),
             local_listener: canonical_socket_addr(local_listener),
+            external_addr: None,
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             span,
@@ -267,17 +275,27 @@ impl AddressBook {
         self.local_listener = addr;
     }
 
-    /// Get the local listener address.
+    /// Set the external address that Zebra gossips to peers instead of its
+    /// local listener address.
+    pub(crate) fn set_external_addr(&mut self, external_addr: Option<SocketAddr>) {
+        self.external_addr = external_addr;
+    }
+
+    /// Get the address that Zebra gossips to peers as its own: the configured
+    /// external address, or the local listener address if there isn't one.
     ///
     /// This address contains minimal state, but it is not sanitized.
     pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
         let now: DateTime32 = now.try_into().expect("will succeed until 2038");
 
-        MetaAddr::new_local_listener_change(self.local_listener)
+        // The handshake makes the same choice for the address in `Version` messages.
+        MetaAddr::new_local_listener_change(self.external_addr.unwrap_or(self.local_listener))
             .local_listener_into_new_meta_addr(now)
     }
 
-    /// Get the local listener [`SocketAddr`].
+    /// Get the local listener [`SocketAddr`] that Zebra is bound to.
+    ///
+    /// This is never the configured external address.
     pub fn local_listener_socket_addr(&self) -> SocketAddr {
         self.local_listener
     }
@@ -303,7 +321,7 @@ impl AddressBook {
 
         let mut peers = self.by_addr.clone();
 
-        // Unconditionally add our local listener address to the advertised peers,
+        // Unconditionally add our external or local listener address to the advertised peers,
         // to replace any self-connection failures. The address book and change
         // constructors make sure that the SocketAddr is canonical.
         let local_listener = self.local_listener_meta_addr(now);
@@ -943,7 +961,7 @@ impl Extend<MetaAddrChange> for AddressBook {
 }
 
 impl Clone for AddressBook {
-    /// Clone the addresses, address limit, local listener address, and span.
+    /// Clone the addresses, address limit, local listener and external addresses, and span.
     ///
     /// Cloned address books have a separate metrics struct watch channel, and an empty last address log.
     ///
@@ -957,6 +975,7 @@ impl Clone for AddressBook {
         AddressBook {
             by_addr: self.by_addr.clone(),
             local_listener: self.local_listener,
+            external_addr: self.external_addr,
             network: self.network.clone(),
             addr_limit: self.addr_limit,
             span: self.span.clone(),

@@ -1,7 +1,7 @@
 //! Fixed test vectors for the address book.
 
 use std::{
-    net::IpAddr,
+    net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
 };
 
@@ -20,7 +20,7 @@ use crate::{
     },
     meta_addr::{MetaAddr, MetaAddrChange},
     protocol::external::types::PeerServices,
-    AddressBook,
+    AddressBook, PeerSocketAddr,
 };
 
 /// Make sure an empty address book is actually empty.
@@ -40,6 +40,36 @@ fn address_book_empty() {
         None
     );
     assert_eq!(address_book.len(), 0);
+}
+
+/// Make sure the address book gossips the configured external address as its own,
+/// instead of a local listener address that peers can't reach or that is unspecified.
+#[test]
+fn address_book_gossips_external_addr_instead_of_local_listener() {
+    let external_addr: SocketAddr = "203.0.113.42:8233".parse().unwrap();
+
+    for local_listener in ["10.0.0.1:8233", "0.0.0.0:8233"] {
+        let local_listener: SocketAddr = local_listener.parse().unwrap();
+
+        let mut address_book = AddressBook::new(
+            local_listener,
+            &Mainnet,
+            DEFAULT_MAX_CONNS_PER_IP,
+            Span::current(),
+        );
+        address_book.set_external_addr(Some(external_addr));
+
+        for address_book in [address_book.clone(), address_book] {
+            let gossiped_addrs: Vec<PeerSocketAddr> = address_book
+                .sanitized(Utc::now())
+                .into_iter()
+                .map(|meta_addr| meta_addr.addr)
+                .collect();
+
+            assert_eq!(gossiped_addrs, vec![external_addr.into()]);
+            assert_eq!(address_book.local_listener_socket_addr(), local_listener);
+        }
+    }
 }
 
 /// Helper: build a `MetaAddrChange::NewGossiped` for a given address and
