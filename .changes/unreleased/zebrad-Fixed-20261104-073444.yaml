@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: The mempool no longer panics if it rejects a transaction again while an earlier rejection is still remembered.
+time: 2026-11-04T07:34:44.470754581+01:00
