@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 pub mod catalog;
 
+// `metrics-process` describes fewer metrics on Windows, so the catalog only matches elsewhere.
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests;
+
 /// How often the process metrics are sampled.
 const PROCESS_METRICS_INTERVAL: Duration = Duration::from_secs(15);
 
