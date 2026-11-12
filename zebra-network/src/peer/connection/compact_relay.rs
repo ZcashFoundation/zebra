@@ -17,13 +17,11 @@ use zebra_chain::{
     chain_tip::ChainTip,
     serialization::{CompactSizeMessage, SerializationError, ZcashSerialize},
 };
+use zebra_node_services::compact::ReconstructedBlock;
 
 use super::{Connection, Handler, InventoryResponse, State};
 use crate::{
-    compact::{
-        BlockTransactions, BlockTransactionsRequest, CompactBlock, ReconstructedBlock,
-        Reconstruction,
-    },
+    compact::{BlockTransactions, BlockTransactionsRequest, CompactBlock, Reconstruction},
     constants,
     protocol::external::Message,
     BlockAuthorization, BoxError, PeerError, Request, Response,
