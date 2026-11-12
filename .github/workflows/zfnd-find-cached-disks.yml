@@ -117,7 +117,13 @@ jobs:
           SCOPE: ${{ github.repository == 'ZcashFoundation/zebra' && env.GITHUB_REF_POINT_SLUG_URL || format('r{0}', github.repository_id) }}
         run: |
           echo "NETWORK=${NETWORK_INPUT,,}" >> "$GITHUB_ENV"
-          echo "CACHE_SCOPE=${SCOPE:0:12}" >> "$GITHUB_ENV"
+          cache_scope="${SCOPE:0:12}"
+          # The lookup skips `r<digits>` scopes in ZcashFoundation/zebra as copies' images,
+          # so a branch slug of that shape gets a prefix.
+          if [[ "${GITHUB_REPOSITORY}" == "ZcashFoundation/zebra" && "${cache_scope}" =~ ^r[0-9]+$ ]]; then
+            cache_scope="b${cache_scope:0:11}"
+          fi
+          echo "CACHE_SCOPE=${cache_scope}" >> "$GITHUB_ENV"
 
       # Check if there are cached state disks available for subsequent jobs to use.
       - name: Check if cached state disks exists

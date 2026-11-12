@@ -372,8 +372,11 @@ The [lookup script](https://github.com/ZcashFoundation/zebra/blob/main/.github/w
 requires a `READY` image matching purpose, database major, network, and
 state kind. It tries the current branch's truncated ref slug followed by a
 commit SHA, then `main`, then any branch, selecting the newest match in each
-query. Branch slugs can collide after truncation; selection does not require
-the current commit. Inspect the chosen image in the job output.
+query. If none of these finds an image for the current database major, the
+same search runs on the previous major when zebrad can upgrade it in place,
+and the job logs a warning. Branch slugs can collide after truncation;
+selection does not require the current commit. Inspect the chosen image in
+the job output.
 
 The `allow_missing` input permits an empty selected name, not a failed
 image-list query. List recent v29 Mainnet tip images with:

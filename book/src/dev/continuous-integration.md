@@ -157,7 +157,9 @@ The [cached-disk workflow](https://github.com/ZcashFoundation/zebra/blob/main/.g
 searches Compute Engine images using the database major version from
 `zebra-state/src/constants.rs` and the lowercased network. It reports Zebra
 checkpoint, Zebra tip, and combined lightwalletd/Zebra tip availability.
-Tests create private disks from the selected image.
+Tests create private disks from the selected image. If no image exists for the
+current database major, the workflow uses the newest image from the previous
+major when zebrad can upgrade it in place.
 
 When state saving is selected, `create-state-image` runs after successful
 `test-result`. It saves updated images when the height exceeds the input

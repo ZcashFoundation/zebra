@@ -176,7 +176,7 @@ jobs:
             type=semver,pattern={{version}},enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
-            type=schedule
+            type=schedule,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
 
       - name: Authenticate to Google Cloud
         id: auth
@@ -330,14 +330,14 @@ jobs:
             #
             type=semver,pattern={{version}},enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             # - `edge`: Points to the most recent pre-release from `next`, which is any pre-release except a release candidate (release candidates are cut from `main`).
-            type=raw,value=edge,enable=${{ contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
+            type=raw,value=edge,enable=${{ github.repository == 'ZcashFoundation/zebra' && contains(github.event.release.tag_name, '-') && !contains(github.event.release.tag_name, '-rc') }}
             # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
             # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
             # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
             # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
             type=ref,event=pr,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             type=ref,event=branch,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
-            type=schedule
+            type=schedule,enable=${{ github.repository == 'ZcashFoundation/zebra' }}
             # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
             # Applied to every build except releases, to ensure CI tests use the exact image from the last commit.
             # metadata-action ignores `event=` on `type=sha`, so `enable` is what limits it.
