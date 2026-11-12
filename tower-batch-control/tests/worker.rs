@@ -7,10 +7,40 @@
 
 use std::time::Duration;
 
-use tokio_test::{assert_pending, assert_ready, assert_ready_err, task};
+use tokio_test::{assert_pending, assert_ready, assert_ready_err, assert_ready_ok, task};
 use tower::{Service, ServiceExt};
-use tower_batch_control::{error, Batch};
+use tower_batch_control::{error, Batch, BatchControl};
 use tower_test::mock;
+
+#[tokio::test]
+async fn zero_max_batches_processes_requests() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (inner, mut handle) = mock::pair::<BatchControl<()>, ()>();
+        let (mut service, worker) = Batch::pair(inner, 1, Some(0), Duration::from_secs(1));
+        let mut worker = task::spawn(worker.run());
+
+        assert_pending!(worker.poll());
+        let mut response = task::spawn(service.ready().await.unwrap().call(()));
+        assert_pending!(worker.poll());
+
+        let (request, sender) = handle.next_request().await.unwrap();
+        assert!(matches!(request, BatchControl::Item(())));
+        sender.send_response(());
+        assert_pending!(worker.poll());
+
+        let (request, sender) = handle.next_request().await.unwrap();
+        assert!(matches!(request, BatchControl::Flush));
+        sender.send_response(());
+        assert_pending!(worker.poll());
+        assert_ready_ok!(response.poll());
+
+        drop(service);
+        assert_ready!(worker.poll());
+    })
+    .await
+    .expect("batch processing must not stall");
+}
 
 #[tokio::test]
 async fn wakes_pending_waiters_on_close() {
