@@ -98,6 +98,51 @@ async fn healthy_and_ready_ok() {
 }
 
 #[tokio::test]
+async fn aborting_health_task_closes_listener_and_connections() {
+    let (_metrics_sender, metrics_receiver) = ChainTipMetrics::channel();
+    let (task, address) = init(
+        config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)),
+        Network::Mainnet,
+        metrics_receiver,
+        MockSyncStatus::default(),
+        peers_with_count(1),
+    )
+    .await;
+    let address = address.unwrap();
+    let mut connection = tokio::net::TcpStream::connect(address).await.unwrap();
+    connection
+        .write_all(b"GET /healthy HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    let mut status = [0; 12];
+    timeout(Duration::from_secs(2), connection.read_exact(&mut status))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&status, b"HTTP/1.1 200");
+
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(
+        tokio::net::TcpListener::bind(address).await.is_ok(),
+        "aborting the health task must release its listener"
+    );
+    timeout(Duration::from_secs(2), async {
+        let mut buffer = [0; 128];
+        loop {
+            match connection.read(&mut buffer).await {
+                Ok(0) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Ok(_) => {}
+                Err(error) => panic!("health connection read failed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("aborting the health task must close existing connections");
+}
+
+#[tokio::test]
 async fn not_ready_when_syncing_or_lagging() {
     let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
 

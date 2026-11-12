@@ -107,7 +107,7 @@ use crate::{
             self, record_tip_block_delay, show_block_chain_progress,
             VERIFICATION_PIPELINE_SCALING_MULTIPLIER,
         },
-        tokio::{RuntimeRun, TokioComponent},
+        tokio::{run_until_shutdown, shutdown, RuntimeRun, TokioComponent},
         zcashd_compat, ChainSync, Inbound,
     },
     config::ZebradConfig,
@@ -263,6 +263,25 @@ impl StartCmd {
     }
 
     async fn start(&self) -> Result<(), Report> {
+        let (initialized_tx, initialized_rx) = oneshot::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        // Runtime shutdown cancels any tasks spawned by incomplete startup.
+        run_until_shutdown(
+            self.start_with_shutdown(initialized_tx, shutdown_rx),
+            shutdown(),
+            initialized_rx,
+            shutdown_tx,
+        )
+        .await
+    }
+
+    /// Initializes the node and runs it until a task exits or shutdown is requested.
+    async fn start_with_shutdown(
+        &self,
+        initialized: oneshot::Sender<()>,
+        mut shutdown: oneshot::Receiver<()>,
+    ) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
         let config = APPLICATION.config();
@@ -520,41 +539,6 @@ impl StartCmd {
             tokio::spawn(std::future::pending().in_current_span())
         };
 
-        let zcashd_compat_shutdown_timeout =
-            Self::zcashd_compat_supervisor_shutdown_timeout(&config);
-        let (zcashd_compat_shutdown_tx, zcashd_compat_shutdown_rx) = watch::channel(false);
-        let mut zcashd_compat_task_handle = if let Some(resolved_zcashd_path) = resolved_zcashd_path
-        {
-            let local_listener = address_book
-                .lock()
-                .expect("unexpected panic in address book mutex guard")
-                .local_listener_socket_addr();
-            let supervisor_config = zcashd_compat::SupervisorConfig::new(
-                &config.zcashd_compat,
-                resolved_zcashd_path,
-                &config.state.cache_dir,
-                config.network.network.kind(),
-                Self::zcashd_compat_p2p_connect_addr(&config, local_listener),
-            );
-
-            info!(
-                connect = %supervisor_config.zebra_p2p_addr,
-                "zcashd-compat mode enabled"
-            );
-
-            tokio::spawn(
-                zcashd_compat::run_supervisor(supervisor_config, zcashd_compat_shutdown_rx)
-                    .in_current_span(),
-            )
-        } else {
-            if config.zcashd_compat.enabled {
-                zcashd_compat::set_supervision_config_disabled_metrics();
-                info!("zcashd-compat mode enabled: zcashd supervision disabled");
-            }
-
-            tokio::spawn(std::future::pending().in_current_span())
-        };
-
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
         let indexer_rpc_task_handle = {
@@ -732,7 +716,44 @@ impl StartCmd {
         let miner_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
             tokio::spawn(std::future::pending().in_current_span());
 
+        // Start supervision only after initialization can no longer be cancelled.
+        let zcashd_compat_shutdown_timeout =
+            Self::zcashd_compat_supervisor_shutdown_timeout(&config);
+        let (zcashd_compat_shutdown_tx, zcashd_compat_shutdown_rx) = watch::channel(false);
+        let mut zcashd_compat_task_handle = if let Some(resolved_zcashd_path) = resolved_zcashd_path
+        {
+            let local_listener = address_book
+                .lock()
+                .expect("unexpected panic in address book mutex guard")
+                .local_listener_socket_addr();
+            let supervisor_config = zcashd_compat::SupervisorConfig::new(
+                &config.zcashd_compat,
+                resolved_zcashd_path,
+                &config.state.cache_dir,
+                config.network.network.kind(),
+                Self::zcashd_compat_p2p_connect_addr(&config, local_listener),
+            );
+
+            info!(
+                connect = %supervisor_config.zebra_p2p_addr,
+                "zcashd-compat mode enabled"
+            );
+
+            tokio::spawn(
+                zcashd_compat::run_supervisor(supervisor_config, zcashd_compat_shutdown_rx)
+                    .in_current_span(),
+            )
+        } else {
+            if config.zcashd_compat.enabled {
+                zcashd_compat::set_supervision_config_disabled_metrics();
+                info!("zcashd-compat mode enabled: zcashd supervision disabled");
+            }
+
+            tokio::spawn(std::future::pending().in_current_span())
+        };
+
         info!("spawned initial Zebra tasks");
+        let _ = initialized.send(());
 
         // TODO: put tasks into an ongoing FuturesUnordered and a startup FuturesUnordered?
 
@@ -773,6 +794,10 @@ impl StartCmd {
             let mut exit_when_task_finishes = true;
 
             let result = select! {
+                // Poll shutdown first so busy tasks cannot delay it.
+                biased;
+                _ = &mut shutdown => Ok(()),
+
                 rpc_join_result = &mut rpc_task_handle => {
                     let rpc_server_result = rpc_join_result
                         .expect("unexpected panic in the rpc task");
@@ -893,11 +918,13 @@ impl StartCmd {
             }
         };
 
-        info!("exiting Zebra because an ongoing task exited: asking other tasks to stop");
+        info!("exiting Zebra: asking tasks to stop");
 
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        indexer_rpc_task_handle.abort();
+        lightwalletd_rpc_task_handle.abort();
         block_template_task_handle.abort();
         health_task_handle.abort();
         tip_delay_task_handle.abort();
