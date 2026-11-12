@@ -399,6 +399,6 @@ result_large_err = "allow"
 
 [patch.crates-io]
 pasta_curves = { git = "https://github.com/zcash/pasta_curves", rev = "3407048e1b268d6d05a0f6f29f44f9f87e864bd1" }
-halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
-halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
-halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "ad44368697bd1bbfaa8e7bb7eb58454e69850803" }
+halo2_proofs = { git = "https://github.com/zcash/halo2", rev = "9c24eb9f51fe5e26cec3340705056294c74edbf3" }
+halo2_gadgets = { git = "https://github.com/zcash/halo2", rev = "9c24eb9f51fe5e26cec3340705056294c74edbf3" }
+halo2_poseidon = { git = "https://github.com/zcash/halo2", rev = "9c24eb9f51fe5e26cec3340705056294c74edbf3" }
