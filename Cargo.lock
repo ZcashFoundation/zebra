@@ -3606,8 +3606,7 @@ dependencies = [
 [[package]]
 name = "pasta_curves"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ed53ba43531a06e1f82020907cf192fc3c25d7c0baf5c49c547b74e7103b62"
+source = "git+https://github.com/zcash/pasta_curves?rev=945bdf231d43cce9f4c6499161361a2b8d93280a#945bdf231d43cce9f4c6499161361a2b8d93280a"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -7566,6 +7565,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "pasta_curves",
  "pin-project",
  "proptest",
  "proptest-derive",
