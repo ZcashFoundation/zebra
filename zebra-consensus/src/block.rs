@@ -678,6 +678,30 @@ where
             let coinbase_tx = check::coinbase_is_first(&block)?;
             check::no_duplicate_transparent_spends(&block)?;
 
+            // From the NSM reissuance height, the block subsidy depends on the
+            // NSM value balance after the parent block, which is not committed yet while
+            // blocks are verified concurrently. The state checks the subsidy, funding streams,
+            // and miner fees during contextual validation instead, where the parent's chain value
+            // pools are known.
+            let nsm_reissuance_is_active =
+                zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &network);
+
+            let expected_subsidy_and_deferred_pool_balance_change = if nsm_reissuance_is_active {
+                None
+            } else {
+                let expected_block_subsidy =
+                    zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+
+                // See [ZIP-1015](https://zips.z.cash/zip-1015).
+                let deferred_pool_balance_change =
+                    check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+
+                Some((expected_block_subsidy, deferred_pool_balance_change))
+            };
+
+            // Bound shielded work before output recovery or proof verification.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+
             // Keep early work alive while the remaining checks and state commit run.
             let _mining_candidate = if request.is_proposal() {
                 None
@@ -728,30 +752,6 @@ where
 
             let transaction_hashes =
                 transaction_hashes.expect("cache hits return after committing the block");
-
-            // From the NSM reissuance height, the block subsidy depends on the
-            // NSM value balance after the parent block, which is not committed yet while
-            // blocks are verified concurrently. The state checks the subsidy, funding streams,
-            // and miner fees during contextual validation instead, where the parent's chain value
-            // pools are known.
-            let nsm_reissuance_is_active =
-                zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &network);
-
-            let expected_subsidy_and_deferred_pool_balance_change = if nsm_reissuance_is_active {
-                None
-            } else {
-                let expected_block_subsidy =
-                    zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
-
-                // See [ZIP-1015](https://zips.z.cash/zip-1015).
-                let deferred_pool_balance_change =
-                    check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
-
-                Some((expected_block_subsidy, deferred_pool_balance_change))
-            };
-
-            // Bound shielded work before output recovery or proof verification.
-            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
 
             // Now do the slower checks
 
