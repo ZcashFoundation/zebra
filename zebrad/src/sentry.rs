@@ -30,7 +30,7 @@ use crate::{
     components::{
         metrics::{
             node_context::{self, ChainPosition},
-            sentry_policy::SentryPolicy,
+            sentry_policy::{SentryPolicy, TRANSPORT_QUEUE_ENVELOPES},
         },
         sync::progress,
     },
@@ -132,6 +132,8 @@ impl Metadata {
         let started_at = Instant::now();
         let options = ClientOptions::new()
             .release(release)
+            // The Sentry metrics flush budget is a share of this queue.
+            .transport_channel_capacity(TRANSPORT_QUEUE_ENVELOPES)
             // Suspect commits need in-app stack frames. Only ERROR events and panics are sent as
             // events, so capturing the stack stays off the common paths.
             .attach_stacktrace(true)
@@ -310,13 +312,13 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Sends the metrics recorded since the last flush, ends the release health session with
-/// `status`, then closes the client.
+/// Sends the metrics that are due without waiting between envelopes, ends the release health
+/// session with `status`, then closes the client.
 ///
 /// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
 /// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
-    metrics_adapter::flush();
+    metrics_adapter::flush_at_exit();
     end_session(status);
 
     let guard = CLIENT_GUARD
@@ -655,7 +657,10 @@ mod tests {
         parameters::{Network, NetworkUpgrade},
     };
 
-    use crate::{application::build_version, components::metrics::sentry_policy::SentryPolicy};
+    use crate::{
+        application::build_version,
+        components::metrics::sentry_policy::{SentryPolicy, TRANSPORT_QUEUE_ENVELOPES},
+    };
 
     use super::{
         add_chain_tags, add_metric_attributes, chain_log_attributes, end_session, is_zebra_source,
@@ -879,6 +884,11 @@ mod tests {
         assert!(!options.auto_session_tracking);
         assert_eq!(options.environment.as_deref(), Some("stage"));
         assert_eq!(options.release.as_deref(), Some("zebrad@test"));
+        assert_eq!(
+            options.transport_channel_capacity.map(usize::from),
+            Some(TRANSPORT_QUEUE_ENVELOPES),
+            "the metrics flush budget leaves room in this queue",
+        );
     }
 
     #[test]

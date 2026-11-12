@@ -58,20 +58,51 @@ When Sentry is active, Zebra sends:
 Zebra sends metrics to Sentry once a minute, and again when it shuts down or
 panics. Each time, it sends:
 
-- for each counter, its increase since the previous minute, once for each set
-  of labels that increased. A counter that holds a running total, such as
+- for each counter, its increase since it was last sent, once for each set of
+  labels that increased. A counter that holds a running total, such as
   `process_cpu_seconds_total`, also sends its increase;
-- for each gauge, its latest value, once for each set of labels;
+- for each gauge, its latest value, once for each set of labels whose value
+  changed since it was last sent. A gauge that doesn't change is sent again
+  every 5 minutes, so charts with an interval of 5 minutes or more show its
+  steady value;
 - for each histogram, at most 20 of the values recorded since the previous
   minute for each set of labels, as distributions. When more values were
   recorded, Zebra picks 20 spread across the minute. Histograms recorded about
   once per block near the chain tip, such as
   `zcash.chain.tip.block_delay_seconds`, send every value.
 
-These limits keep one minute of metrics within the Sentry SDK's queue, even
-during an initial sync. If Zebra can't start the thread that sends them, it logs
-an error and sends no metrics to Sentry, while the Prometheus endpoint keeps
-working.
+Each minute sends at most 1,500 metrics. The Sentry SDK sends metrics in
+envelopes of 100, and queues at most 30 envelopes for events, logs, release
+health sessions, and metrics together, so one minute of metrics never takes
+more than half of that queue. Zebra also waits a second between envelopes,
+except when it shuts down, so the SDK can send each one before the next is
+queued. The SDK drops any envelope that arrives while its queue is full, and
+counts it in the client reports it sends to Sentry.
+
+When more than 1,500 metrics are due in a minute, Zebra sends counters first,
+then gauges that changed, then gauges due for their 5-minute refresh, then
+histogram values. A counter or gauge that doesn't fit is sent in a later minute,
+with its whole increase or its latest value. Histogram values that don't fit are
+dropped.
+
+Zebra sends at most 256 sets of labels for each metric to Sentry. Values for any
+other set of labels aren't sent to Sentry, but the Prometheus endpoint still
+exports them. Zebra's labels have a fixed set of values, so a metric only reaches
+this limit if one of its labels keeps taking new values.
+
+The `zebrad.sentry.metrics.dropped.total` counter counts the values Zebra didn't
+send to Sentry when they were due, by `reason`:
+
+- `flush_budget`: the minute already had 1,500 metrics;
+- `label_set_cap`: the value was recorded for a set of labels over the limit.
+
+Like every other metric, this counter reaches both Sentry and the Prometheus
+endpoint. When Zebra starts leaving values out, it logs a warning with the
+counts and the names of any metrics that reached the label limit. While values
+keep being left out, it repeats the warning at most once an hour.
+
+If Zebra can't start the thread that sends metrics, it logs an error and sends
+no metrics to Sentry, while the Prometheus endpoint keeps working.
 
 Sentry metrics carry each metric's labels as attributes, including the DNS
 seeder host names from your network configuration in the `seed` label of
