@@ -9,7 +9,7 @@
 mod tests;
 
 use core::fmt;
-use std::sync::Arc;
+use std::{io, sync::Arc};
 
 use thiserror::Error;
 
@@ -18,8 +18,9 @@ use libzcash_script::ZcashScript;
 use zcash_script::{opcode::PossiblyBad, script, script::Evaluable as _, Opcode};
 use zcash_transparent::bundle as zp_transparent;
 use zebra_chain::{
-    parameters::NetworkUpgrade,
-    transaction::{HashType, SigHasher},
+    parameters::{ConsensusBranchId, NetworkUpgrade},
+    serialization::{sha256d, CompactSizeMessage, ZcashSerialize},
+    transaction::{HashType, SigHasher, UnminedTxId},
     transparent,
 };
 
@@ -91,6 +92,10 @@ pub struct CachedFfiTransaction {
 
     /// The sighasher context to use to compute sighashes.
     sighasher: SigHasher,
+
+    /// The commitment returned by [`Self::context_digest`], computed by [`Self::new`] when an
+    /// input script can pass verification.
+    context_digest: Option<[u8; 32]>,
 }
 
 impl CachedFfiTransaction {
@@ -103,11 +108,30 @@ impl CachedFfiTransaction {
         nu: NetworkUpgrade,
     ) -> Result<Self, Error> {
         let sighasher = SigHasher::new(&transaction, nu, all_previous_outputs.clone())?;
-        Ok(Self {
+        // `SigHasher::new` has already rejected network upgrades without a consensus branch ID.
+        let branch_id = nu
+            .branch_id()
+            .ok_or(zebra_chain::Error::InvalidConsensusBranchId)?;
+        let mut cached = Self {
             transaction,
             all_previous_outputs,
             sighasher,
-        })
+            context_digest: None,
+        };
+
+        // `is_valid` rejects every input of a coinbase transaction, or of a transaction whose
+        // spent outputs don't match its inputs, so there is no success to commit to.
+        if !cached.transaction.is_coinbase()
+            && !cached.vin().is_empty()
+            && cached.all_previous_outputs.len() == cached.vin().len()
+        {
+            let mut digest = sha256d::Writer::default();
+            if cached.write_context(branch_id, &mut digest).is_ok() {
+                cached.context_digest = Some(digest.finish());
+            }
+        }
+
+        Ok(cached)
     }
 
     /// Returns the transparent inputs of this transaction, borrowed from the underlying
@@ -139,6 +163,51 @@ impl CachedFfiTransaction {
     /// Return the sighasher being used for this transaction.
     pub fn sighasher(&self) -> &SigHasher {
         &self.sighasher
+    }
+
+    /// Returns a commitment to everything [`Self::is_valid`] reads except the input index.
+    ///
+    /// It commits to the transaction's [`UnminedTxId`], whose legacy hash or authorizing data
+    /// digest covers every signature script, to the consensus branch ID that sighashes are
+    /// computed under, and to the number of spent outputs and each one's value and length-prefixed
+    /// `scriptPubKey`, in input order. The script verification flags are fixed, so they need no
+    /// commitment. Callers can remember a successful [`Self::is_valid`] under this digest and the
+    /// input index.
+    ///
+    /// [`Self::new`] computes the digest alongside the sighash precomputation, so this only copies
+    /// it. It is `None` for coinbase transactions, transactions without transparent inputs, spent
+    /// outputs that don't match the inputs one to one, and spent outputs too large to encode.
+    pub fn context_digest(&self) -> Option<[u8; 32]> {
+        self.context_digest
+    }
+
+    /// Writes the verification context that [`Self::context_digest`] commits to, with sighashes
+    /// computed under `branch_id`.
+    ///
+    /// Every field is fixed-size or length-prefixed, so different contexts never write the same
+    /// bytes.
+    fn write_context(
+        &self,
+        branch_id: ConsensusBranchId,
+        mut writer: impl io::Write,
+    ) -> io::Result<()> {
+        match self.transaction.unmined_id() {
+            UnminedTxId::Legacy(id) => {
+                writer.write_all(&[0])?;
+                writer.write_all(&id.0)?;
+            }
+            UnminedTxId::Witnessed(id) => {
+                writer.write_all(&[1])?;
+                writer.write_all(&id.as_bytes())?;
+            }
+        }
+        writer.write_all(&u32::from(branch_id).to_le_bytes())?;
+        CompactSizeMessage::try_from(self.all_previous_outputs.len())?
+            .zcash_serialize(&mut writer)?;
+        for output in self.all_previous_outputs.iter() {
+            output.zcash_serialize(&mut writer)?;
+        }
+        Ok(())
     }
 
     /// Returns the total number of P2SH sigops across all inputs of this transaction.

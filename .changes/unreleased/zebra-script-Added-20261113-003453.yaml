@@ -1,0 +1,4 @@
+project: zebra-script
+kind: Added
+body: Added `CachedFfiTransaction::context_digest()`, a commitment to the transaction, consensus branch and spent outputs that `is_valid()` reads, so callers can remember successful script verifications. `CachedFfiTransaction::new()` computes it by hashing the spent outputs once, except for transactions none of whose inputs can pass `is_valid()` ([#11939](https://github.com/ZcashFoundation/zebra/pull/11939)).
+time: 2026-11-13T00:34:53.705449295+01:00
