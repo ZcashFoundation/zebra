@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Zebra caches successful transparent script verifications, so an input script verified when its transaction entered the mempool is not verified again when a block mines that transaction with the same spent outputs and network upgrade. Every other block and transaction check still runs. The cache is reported by the `zebra.consensus.cache.*` metrics with the `transparent_script` verifier label ([#11939](https://github.com/ZcashFoundation/zebra/pull/11939)).
+time: 2026-11-13T00:40:05.580381551+01:00

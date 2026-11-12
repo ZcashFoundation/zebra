@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Successful transparent script verifications are cached for the same transaction, spent outputs and network upgrade, without skipping other block checks. The cache uses `parking_lot 0.12` and reports under `zebra.consensus.cache.*` with the `transparent_script` verifier label ([#11939](https://github.com/ZcashFoundation/zebra/pull/11939)).
+time: 2026-11-13T00:44:16.742071368+01:00

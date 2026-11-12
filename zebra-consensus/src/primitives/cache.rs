@@ -1,9 +1,12 @@
-//! A bounded cache of shielded bundle verifications that have already succeeded.
+//! A bounded cache of shielded bundle and transparent script verifications that have already
+//! succeeded.
 //!
-//! Zebra verifies a transaction's shielded proofs and signatures when the transaction arrives
-//! over mempool gossip, and again when it arrives in a block. This service skips the second
-//! verification. The Halo2 Orchard and Ironwood verifiers ([`super::halo2`]) and the Sapling
-//! verifier ([`super::sapling`]) share it, and key their entries the same way.
+//! Zebra verifies a transaction's shielded proofs and signatures and its transparent input scripts
+//! when the transaction arrives over mempool gossip, and again when it arrives in a block. This
+//! service skips the second verification. The Halo2 Orchard and Ironwood verifiers
+//! ([`super::halo2`]) and the Sapling verifier ([`super::sapling`]) share it, and key their
+//! entries the same way. The transparent script verifier ([`crate::script`]) has its own cache and
+//! key.
 //!
 //! # Why this is not the mempool bypass
 //!
@@ -15,7 +18,9 @@
 //! pool. A hit still runs the whole transaction verifier against the block's height, time and
 //! spent outputs, and skips only the proof and signature checks. Each Orchard circuit era has its
 //! own cache, which binds an entry to its verifying key (see [`super::halo2::orchard_v5_verifier_for`]);
-//! Sapling has one verifying key pair for all of history, so one cache covers it.
+//! Sapling has one verifying key pair for all of history, so one cache covers it. A transparent
+//! script is remembered by the transaction ID, consensus branch and spent outputs it was verified
+//! with, and its input index, and a hit skips only that input's script execution.
 //!
 //! Only `Ok` results are cached. A batch error is not per-item evidence, because
 //! [`Fallback`](tower_fallback::Fallback) re-verifies failures singly, and it may not be a verdict
@@ -37,24 +42,26 @@ use crate::BoxError;
 #[cfg(test)]
 mod tests;
 
-/// The number of verified-bundle keys retained per cache.
+/// The number of verified keys retained per cache: one per bundle, or one per transparent input.
 ///
 /// Sized to hold several blocks of history plus a full mempool, so that a transaction gossiped
-/// well before the block that mines it is still remembered.
+/// well before the block that mines it is still remembered. Transparent inputs share the same
+/// bound; a key evicted early only costs a re-verification.
 ///
-/// Each key is a 98-byte transaction ID, sighash and pool tag, held twice — once in the lookup
-/// set and once in the eviction queue — so a full cache costs about 5 MiB, and about 20 MiB
-/// across the three Orchard circuit eras and Sapling. Only the eras a node actually verifies pay
-/// it, because each cache is built with its verifier on first use.
-pub(super) const CACHE_CAPACITY: usize = 20_000;
+/// Each key is about 100 bytes, held twice — once in the lookup set and once in the eviction
+/// queue — so a full cache costs about 5 MiB, and about 25 MiB across the three Orchard circuit
+/// eras, Sapling and transparent scripts. Only the caches a node actually uses pay it, because
+/// each cache is built with its verifier on first use.
+pub(crate) const CACHE_CAPACITY: usize = 20_000;
 
 /// The label naming which verifier's cache a metric belongs to.
 ///
-/// One cache instance per Orchard circuit era and one for Sapling all report under the same
-/// metric names, so every series carries this label. Its values are `halo2_pre_nu6_2`,
-/// `halo2_nu6_2`, `halo2_nu6_3_onward` and `groth16_sapling`. Only Sapling's matches the
-/// `verifier` label of its `zebra.consensus.batch.duration_seconds` series as well; the Halo2
-/// batch metric reports all three eras as one `halo2` series.
+/// One cache instance per Orchard circuit era, one for Sapling and one for transparent scripts all
+/// report under the same metric names, so every series carries this label. Its values are
+/// `halo2_pre_nu6_2`, `halo2_nu6_2`, `halo2_nu6_3_onward`, `groth16_sapling` and
+/// `transparent_script`. Only Sapling's matches the `verifier` label of its
+/// `zebra.consensus.batch.duration_seconds` series as well; the Halo2 batch metric reports all
+/// three eras as one `halo2` series.
 const VERIFIER_LABEL: &str = "verifier";
 
 /// Counts verifications answered from a cache.
@@ -79,7 +86,7 @@ const CACHE_SIZE: &str = "zebra.consensus.cache.size";
 /// Ironwood caches at NU6.3 onward are the same cache, so this tag is what keeps their entries
 /// apart; Sapling has its own cache and its tag is defence in depth.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) enum ShieldedPool {
+pub(crate) enum ShieldedPool {
     /// The Sapling value pool.
     Sapling,
 
@@ -99,12 +106,12 @@ impl From<orchard::ValuePool> for ShieldedPool {
     }
 }
 
-/// A transaction, sighash and shielded pool whose bundle has verified.
+/// A verification that has succeeded: a shielded bundle, or a transparent input's script.
 ///
 /// # Correctness
 ///
-/// A hit replaces a verification, so the key must determine every input that verification reads:
-/// the bundle and the sighash.
+/// A hit replaces a verification, so the key must determine every input that verification reads.
+/// For a shielded bundle, those are the bundle and the sighash.
 ///
 /// The transaction ID determines the bundle, in both of the forms it takes:
 ///
@@ -126,23 +133,43 @@ impl From<orchard::ValuePool> for ShieldedPool {
 /// The verifying key is absent on purpose. Each Orchard circuit era has its own cache, so an
 /// entry is only ever read back under the key it was written against, and Sapling has one key
 /// pair for all of history.
+///
+/// A transparent script reads its transaction, the consensus branch its sighashes are computed
+/// under, every spent output and its input index. Its context digest commits to the transaction's
+/// unmined ID, which covers the signature scripts in the same two forms as above, the consensus
+/// branch ID, and the value and `scriptPubKey` of every spent output in input order: a v5 or v6
+/// signature can commit to other inputs' spent outputs, and a v4 sighash to the consensus branch,
+/// so neither the transaction ID nor the input's own spent output is enough.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) struct CacheKey {
-    /// The ID of the transaction the bundle was parsed from.
-    tx_id: UnminedTxId,
+pub(crate) enum CacheKey {
+    /// A shielded bundle.
+    Shielded {
+        /// The ID of the transaction the bundle was parsed from.
+        tx_id: UnminedTxId,
 
-    /// The signature digest used to verify the bundle's signatures.
-    sighash: [u8; 32],
+        /// The signature digest used to verify the bundle's signatures.
+        sighash: [u8; 32],
 
-    /// The bundle slot verified for this transaction.
-    pool: ShieldedPool,
+        /// The bundle slot verified for this transaction.
+        pool: ShieldedPool,
+    },
+
+    /// A transparent input's script.
+    Transparent {
+        /// The [`zebra_script::CachedFfiTransaction::context_digest`] the script was verified
+        /// with.
+        context: [u8; 32],
+
+        /// The index of the verified input.
+        input_index: usize,
+    },
 }
 
 impl CacheKey {
     /// Returns the key for `pool`'s bundle in the transaction identified by `tx_id`, verified
     /// against `sighash`.
     pub(super) fn new(tx_id: UnminedTxId, sighash: [u8; 32], pool: ShieldedPool) -> Self {
-        Self {
+        Self::Shielded {
             tx_id,
             sighash,
             pool,
@@ -158,17 +185,17 @@ impl CacheKey {
 /// # Correctness
 ///
 /// An implementer promises that the returned key determines every input the item's verification
-/// reads: the bundle, and the sighash it is checked against. [`Cached`] answers any later item
-/// with an equal key from the remembered `Ok` without verifying it, so a key that two different
-/// bundles can share accepts a bundle this node never checked. An implementer that cannot offer
-/// a complete key returns `None`, and the item is verified every time.
-pub(super) trait CachedItem {
+/// reads, as [`CacheKey`] describes. [`Cached`] answers any later item with an equal key from the
+/// remembered `Ok` without verifying it, so a key that two different items can share accepts an
+/// item this node never checked. An implementer that cannot offer a complete key returns `None`,
+/// and the item is verified every time.
+pub(crate) trait CachedItem {
     /// Returns the key this item's successful verification is remembered under, or `None` if the
     /// item must always be verified.
     ///
     /// The key is a pure function of the item: two calls on one item return the same key, and two
-    /// items with equal keys have identical verification inputs. [`CacheKey`] derives why a
-    /// transaction ID, a sighash and a shielded pool are enough.
+    /// items with equal keys have identical verification inputs. [`CacheKey`] derives what each
+    /// kind of key has to name.
     fn cache_key(&self) -> Option<CacheKey>;
 }
 
@@ -317,10 +344,11 @@ impl CacheMetrics {
     }
 }
 
-/// A service that skips inner verification for items whose bundle has already verified.
+/// A service that skips inner verification for items that have already verified.
 ///
-/// This wraps one verifier's batch-and-fallback stack. The cache is shared between clones, so
-/// every handle to a global verifier sees the same set of verified bundles.
+/// This wraps one verifier's batch-and-fallback stack, or the transparent script verifier. The
+/// cache is shared between clones, so every handle to a global verifier sees the same set of
+/// verified items.
 ///
 /// The public Halo2 services retain their uncached types.
 pub(crate) struct Cached<S> {
@@ -357,9 +385,9 @@ impl<S: Clone> Clone for Cached<S> {
 }
 
 impl<S> Cached<S> {
-    /// Wraps `inner` in a cache that retains at most `capacity` verified-bundle keys and reports
-    /// its metrics under the `verifier` label `verifier_name`.
-    pub(super) fn new(inner: S, capacity: usize, verifier_name: &'static str) -> Self {
+    /// Wraps `inner` in a cache that retains at most `capacity` verified keys and reports its
+    /// metrics under the `verifier` label `verifier_name`.
+    pub(crate) fn new(inner: S, capacity: usize, verifier_name: &'static str) -> Self {
         Self {
             inner,
             verified: Arc::new(Mutex::new(VerifiedBundles::new(capacity))),
@@ -405,7 +433,7 @@ impl<S> Cached<S> {
     /// Readiness failures are not counted: an item that never reached the inner service was never
     /// verified by it.
     #[cfg(test)]
-    pub(super) fn inner_calls_for<I: CachedItem>(&self, item: &I) -> usize {
+    pub(crate) fn inner_calls_for<I: CachedItem>(&self, item: &I) -> usize {
         let Some(key) = item.cache_key() else {
             return 0;
         };

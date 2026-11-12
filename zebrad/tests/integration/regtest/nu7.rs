@@ -570,7 +570,7 @@ async fn nu7_nsm_mining_reorg_and_restart() -> Result<()> {
 }
 
 /// The kebab-cased reason a block proposal was rejected for.
-async fn rejected(client: &RpcRequestClient, block: &Block) -> Result<String> {
+pub(super) async fn rejected(client: &RpcRequestClient, block: &Block) -> Result<String> {
     match proposal(client, block).await? {
         BlockProposalResponse::Rejected(reason) => Ok(reason),
         BlockProposalResponse::Valid => Err(eyre!("the proposal was accepted")),
