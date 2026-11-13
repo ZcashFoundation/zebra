@@ -42,6 +42,8 @@ unit_tests:
   - "**/Cargo.toml"
   - "**/Cargo.lock"
   - ".config/nextest.toml"
+  # zebrad's metric catalog tests read the dashboards, alert rules, and catalog here.
+  - "docker/observability/**"
   - ".github/workflows/tests-unit.yml"
   - ".github/actions/setup-zebra-build/**"
   - ".github/scripts/apt-install.sh"

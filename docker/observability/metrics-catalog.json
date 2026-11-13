@@ -1,0 +1,2682 @@
+{
+  "metrics": [
+    {
+      "name": "candidate_set.disconnected",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers that stopped responding recently.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_disconnected"
+        ]
+      }
+    },
+    {
+      "name": "candidate_set.failed",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers whose latest connection attempt failed.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_failed"
+        ]
+      }
+    },
+    {
+      "name": "candidate_set.gossiped",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers gossiped by other peers that Zebra hasn't tried yet.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_gossiped"
+        ]
+      }
+    },
+    {
+      "name": "candidate_set.pending",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers with a connection attempt in progress.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_pending"
+        ]
+      }
+    },
+    {
+      "name": "candidate_set.recently_live",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers that were live recently.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_recently_live"
+        ]
+      }
+    },
+    {
+      "name": "candidate_set.responded",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Address book peers that responded to Zebra recently.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "candidate_set_responded"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.processing.next.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the next checkpoint the checkpoint verifier is waiting to reach.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_processing_next_height"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.queued.continuous.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the end of the continuous run of queued blocks after the verified tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_queued_continuous_height"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.queued.max.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Highest block height queued in the checkpoint verifier, or NaN when none are queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_queued_max_height"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.queued_slots",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Number of heights with blocks queued in the checkpoint verifier.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_queued_slots"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.verified.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks verified against checkpoints.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "checkpoint_verified_block_count"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.verified.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Number of checkpoints verified so far.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_verified_count"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.verified.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest block verified by the checkpoint verifier.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "checkpoint_verified_height"
+        ]
+      }
+    },
+    {
+      "name": "checkpoint.waiting.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Times the checkpoint verifier waited for more blocks before it could verify a range.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "checkpoint_waiting_count"
+        ]
+      }
+    },
+    {
+      "name": "crawler.in_flight_handshakes",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Outbound handshakes the peer crawler has in progress.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "crawler_in_flight_handshakes"
+        ]
+      }
+    },
+    {
+      "name": "gossip.already.queued.dropped.block.hash.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped block hashes ignored because they were already queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_already_queued_dropped_block_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.cancelled.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped block downloads or verifications cancelled.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_cancelled_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.downloaded.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped blocks downloaded.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_downloaded_block_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.full.queue.dropped.block.hash.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped block hashes ignored because the download queue was full.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_full_queue_dropped_block_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.max.height.limit.dropped.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped blocks dropped because they are too far above the state tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_max_height_limit_dropped_block_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.min.height.limit.dropped.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Downloaded blocks dropped because they are behind the finalized tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_min_height_limit_dropped_block_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.no.height.dropped.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped blocks dropped because they have no coinbase height.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_no_height_dropped_block_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.peer.limit.dropped.block.hash.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped block hashes ignored because the peer already had a download in progress.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_peer_limit_dropped_block_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.queued.block.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Gossiped blocks queued for download and verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "gossip_queued_block_count"
+        ]
+      }
+    },
+    {
+      "name": "gossip.verified.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Gossiped blocks verified.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "gossip_verified_block_count"
+        ]
+      }
+    },
+    {
+      "name": "mempool.cancelled.verify.tasks.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Mempool download and verify tasks cancelled.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_cancelled_verify_tasks_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.currently.queued.transactions",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Transactions queued for mempool download and verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "mempool_currently_queued_transactions"
+        ]
+      }
+    },
+    {
+      "name": "mempool.downloaded.transactions.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions downloaded for the mempool, by transaction version.",
+      "labels": [
+        "version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_downloaded_transactions_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.failed.verify.tasks.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Mempool download and verify tasks that failed, by reason.",
+      "labels": [
+        "reason"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_failed_verify_tasks_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.full_queue.per_peer.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions ignored because their peer already had too many queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_full_queue_per_peer_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.gossiped.transactions.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Mempool transaction IDs gossiped to peers.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_gossiped_transactions_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.pushed.transactions.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions submitted to the mempool directly, such as by RPC, by transaction version.",
+      "labels": [
+        "version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_pushed_transactions_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.queued.transactions.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions queued for mempool download and verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_queued_transactions_total"
+        ]
+      }
+    },
+    {
+      "name": "mempool.rejected.transaction.ids",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Transaction IDs in the mempool's rejected lists.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "mempool_rejected_transaction_ids"
+        ]
+      }
+    },
+    {
+      "name": "mempool.rejected.transaction.ids.bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Approximate memory used by the mempool's rejected lists.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "mempool_rejected_transaction_ids_bytes"
+        ]
+      }
+    },
+    {
+      "name": "mempool.verified.transactions.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions verified for the mempool, by transaction version.",
+      "labels": [
+        "version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "mempool_verified_transactions_total"
+        ]
+      }
+    },
+    {
+      "name": "peer.canceled",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Requests to peers canceled before they were sent.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "peer_canceled"
+        ]
+      }
+    },
+    {
+      "name": "pool.closed.inbound.timeout",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Peer connections closed because Zebra timed out handling an inbound request.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_closed_inbound_timeout"
+        ]
+      }
+    },
+    {
+      "name": "pool.closed.loadshed",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Peer connections closed because Zebra was overloaded with inbound requests.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_closed_loadshed"
+        ]
+      }
+    },
+    {
+      "name": "pool.ignored.inbound.timeout",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Inbound requests ignored because Zebra timed out handling them.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_ignored_inbound_timeout"
+        ]
+      }
+    },
+    {
+      "name": "pool.ignored.loadshed",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Inbound requests ignored because Zebra was overloaded.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_ignored_loadshed"
+        ]
+      }
+    },
+    {
+      "name": "pool.inventory.dropped",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Times the inventory registry fell behind and dropped inventory changes.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_inventory_dropped"
+        ]
+      }
+    },
+    {
+      "name": "pool.inventory.dropped.messages",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Inventory changes dropped because the inventory registry fell behind.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "pool_inventory_dropped_messages"
+        ]
+      }
+    },
+    {
+      "name": "pool.num_ready",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Peers in the peer set that are ready for a request.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "pool_num_ready"
+        ]
+      }
+    },
+    {
+      "name": "pool.num_unready",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Peers in the peer set that are busy or not yet ready.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "pool_num_unready"
+        ]
+      }
+    },
+    {
+      "name": "process_cpu_seconds_total",
+      "kind": "counter",
+      "unit": "seconds",
+      "description": "Total user and system CPU time spent in seconds.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "process_cpu_seconds_total"
+        ]
+      }
+    },
+    {
+      "name": "process_max_fds",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Maximum number of open file descriptors.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_max_fds"
+        ]
+      }
+    },
+    {
+      "name": "process_open_fds",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Number of open file descriptors.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_open_fds"
+        ]
+      }
+    },
+    {
+      "name": "process_resident_memory_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Resident memory size in bytes.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_resident_memory_bytes"
+        ]
+      }
+    },
+    {
+      "name": "process_start_time_seconds",
+      "kind": "gauge",
+      "unit": "seconds",
+      "description": "Start time of the process since unix epoch in seconds.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_start_time_seconds"
+        ]
+      }
+    },
+    {
+      "name": "process_threads",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Number of OS threads in the process.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_threads"
+        ]
+      }
+    },
+    {
+      "name": "process_virtual_memory_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Virtual memory size in bytes.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_virtual_memory_bytes"
+        ]
+      }
+    },
+    {
+      "name": "process_virtual_memory_max_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Maximum amount of virtual memory available in bytes.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "process_virtual_memory_max_bytes"
+        ]
+      }
+    },
+    {
+      "name": "proofs.halo2.invalid",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Halo2 proofs that failed verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "proofs_halo2_invalid"
+        ]
+      }
+    },
+    {
+      "name": "proofs.halo2.verified",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Halo2 proofs that passed batch verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "proofs_halo2_verified"
+        ]
+      }
+    },
+    {
+      "name": "proofs.sapling.invalid",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Sapling Groth16 proofs that failed verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "proofs_sapling_invalid"
+        ]
+      }
+    },
+    {
+      "name": "proofs.sapling.verified",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Sapling Groth16 proofs that passed batch verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "proofs_sapling_verified"
+        ]
+      }
+    },
+    {
+      "name": "rpc.active_requests",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "JSON-RPC requests currently being handled.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "rpc_active_requests"
+        ]
+      }
+    },
+    {
+      "name": "rpc.errors.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "JSON-RPC requests that returned an error, by method and error code.",
+      "labels": [
+        "method",
+        "error_code"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "rpc_errors_total"
+        ]
+      }
+    },
+    {
+      "name": "rpc.request.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to handle a JSON-RPC request.",
+      "labels": [
+        "method"
+      ],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.001,
+          0.005,
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.0,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "rpc_request_duration_seconds_bucket",
+          "rpc_request_duration_seconds_sum",
+          "rpc_request_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "rpc.requests.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "JSON-RPC requests handled, by method and status.",
+      "labels": [
+        "method",
+        "status"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "rpc_requests_total"
+        ]
+      }
+    },
+    {
+      "name": "signatures.ed25519.invalid",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Ed25519 signatures that failed verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_ed25519_invalid"
+        ]
+      }
+    },
+    {
+      "name": "signatures.ed25519.validated",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Ed25519 signatures that passed batch verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_ed25519_validated"
+        ]
+      }
+    },
+    {
+      "name": "signatures.redjubjub.invalid",
+      "kind": "counter",
+      "unit": "count",
+      "description": "RedJubjub signatures that failed verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_redjubjub_invalid"
+        ]
+      }
+    },
+    {
+      "name": "signatures.redjubjub.validated",
+      "kind": "counter",
+      "unit": "count",
+      "description": "RedJubjub signatures that passed batch verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_redjubjub_validated"
+        ]
+      }
+    },
+    {
+      "name": "signatures.redpallas.invalid",
+      "kind": "counter",
+      "unit": "count",
+      "description": "RedPallas signatures that failed verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_redpallas_invalid"
+        ]
+      }
+    },
+    {
+      "name": "signatures.redpallas.validated",
+      "kind": "counter",
+      "unit": "count",
+      "description": "RedPallas signatures that passed batch verification.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "signatures_redpallas_validated"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.error.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Checkpoint-verified blocks that failed to commit to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_checkpoint_error_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.error.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest checkpoint-verified block that failed to commit.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_checkpoint_error_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.finalized.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Checkpoint-verified blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_checkpoint_finalized_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.finalized.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest checkpoint-verified block committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_checkpoint_finalized_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.queued.block.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Checkpoint-verified blocks queued for the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_checkpoint_queued_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.queued.max.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Highest checkpoint-verified block height queued for the finalized state, or NaN when none are queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_checkpoint_queued_max_height"
+        ]
+      }
+    },
+    {
+      "name": "state.checkpoint.sent.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest checkpoint-verified block sent to the block write task.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_checkpoint_sent_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the finalized tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.chain_supply.total",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Total value in all pools at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_chain_supply_total"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.orchard_nullifiers",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Orchard nullifiers revealed by blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_orchard_nullifiers"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.sapling_nullifiers",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Sapling nullifiers revealed by blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_sapling_nullifiers"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.sprout_nullifiers",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Sprout nullifiers revealed by blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_sprout_nullifiers"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.transactions",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transactions in blocks committed to the finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_transactions"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.transparent_newouts",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transparent outputs created by blocks committed to the finalized state, after genesis.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_transparent_newouts"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.cumulative.transparent_prevouts",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Transparent outputs spent by blocks committed to the finalized state, after genesis.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_finalized_cumulative_transparent_prevouts"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.deferred",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Deferred lockbox pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_deferred"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.ironwood",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Ironwood pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_ironwood"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.orchard",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Orchard pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_orchard"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.sapling",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Sapling pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_sapling"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.sprout",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Sprout pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_sprout"
+        ]
+      }
+    },
+    {
+      "name": "state.finalized.value_pool.transparent",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Transparent pool balance at the finalized tip, in zatoshis.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_finalized_value_pool_transparent"
+        ]
+      }
+    },
+    {
+      "name": "state.full_verifier.committed.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Fully verified blocks committed to the state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_full_verifier_committed_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.full_verifier.committed.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest fully verified block committed to the state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_full_verifier_committed_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.best.chain.length",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks in the best chain of the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_best_chain_length"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.best.committed.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks committed to the best chain in the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_memory_best_committed_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.best.committed.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest block committed to the best chain in the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_best_committed_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.chain.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Chains in the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_chain_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.committed.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks committed to any chain in the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_memory_committed_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.committed.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest block committed to any chain in the non-finalized state.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_committed_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.queued.block.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Fully verified blocks waiting for their parent.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_queued_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.queued.max.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Highest height of fully verified blocks waiting for their parent, or NaN when none are queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_queued_max_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.queued.min.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Lowest height of fully verified blocks waiting for their parent, or NaN when none are queued.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_queued_min_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Fully verified blocks sent to the block write task.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_memory_sent_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest fully verified block sent to the block write task.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_sent_block_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.cache.batch.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Batches in the cache of sent blocks.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_sent_cache_batch_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.cache.block.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks in the cache of sent blocks.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_sent_cache_block_count"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.cache.max.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Highest height in the cache of sent blocks, or NaN when it is empty.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_sent_cache_max_height"
+        ]
+      }
+    },
+    {
+      "name": "state.memory.sent.cache.min.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Lowest height in the cache of sent blocks, or NaN when it is empty.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "state_memory_sent_cache_min_height"
+        ]
+      }
+    },
+    {
+      "name": "state.requests",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Requests to the state and read state services, by request type.",
+      "labels": [
+        "service",
+        "type"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "state_requests"
+        ]
+      }
+    },
+    {
+      "name": "sync.already.queued.dropped.block.hash.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block hashes the syncer ignored because they were already queued for download.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_already_queued_dropped_block_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.block.download.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to download a block during sync.",
+      "labels": [
+        "result"
+      ],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "sync_block_download_duration_seconds",
+          "sync_block_download_duration_seconds_sum",
+          "sync_block_download_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.block.error.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block download and verify errors, by kind.",
+      "labels": [
+        "kind"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_block_error_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.block.verify.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to verify a downloaded block during sync.",
+      "labels": [
+        "result"
+      ],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "sync_block_verify_duration_seconds",
+          "sync_block_verify_duration_seconds_sum",
+          "sync_block_verify_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.cancelled.download.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block downloads cancelled by a sync restart.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_cancelled_download_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.cancelled.verify.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block verifications cancelled by a sync restart.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_cancelled_verify_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.cancelled.verify.ready.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Block verifications cancelled while waiting for the verifier to be ready.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_cancelled_verify_ready_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.downloaded.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks downloaded by the syncer.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_downloaded_block_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.downloads.in_flight",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Blocks the syncer is downloading or verifying.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_downloads_in_flight"
+        ]
+      }
+    },
+    {
+      "name": "sync.downloads.oldest_age_seconds",
+      "kind": "gauge",
+      "unit": "seconds",
+      "description": "How long the oldest block still being downloaded or verified has waited, or 0 when none are.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_downloads_oldest_age_seconds"
+        ]
+      }
+    },
+    {
+      "name": "sync.estimated_distance_to_tip",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Estimated number of blocks between the state tip and the network's chain tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_estimated_distance_to_tip"
+        ]
+      }
+    },
+    {
+      "name": "sync.estimated_network_tip_height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Estimated height of the network's chain tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_estimated_network_tip_height"
+        ]
+      }
+    },
+    {
+      "name": "sync.extend.queued.hash.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Block hashes queued for download after extending tips.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_extend_queued_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.extend.response.hash.count",
+      "kind": "histogram",
+      "unit": "count",
+      "description": "Block hashes in each peer response while extending tips.",
+      "labels": [],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "sync_extend_response_hash_count",
+          "sync_extend_response_hash_count_sum",
+          "sync_extend_response_hash_count_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.max.height.limit.paused.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Times downloads paused because the syncer got too far ahead of the state tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_max_height_limit_paused_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.max.height.limit.reset.attempt.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Attempts to resume downloads after the state tip caught up with the syncer.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_max_height_limit_reset_attempt_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.max.height.limit.reset.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Times downloads resumed after the state tip caught up with the syncer.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_max_height_limit_reset_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.no.height.dropped.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Downloaded blocks dropped because they have no coinbase height.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_no_height_dropped_block_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.obtain.queued.hash.count",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Block hashes queued for download after obtaining tips.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_obtain_queued_hash_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.obtain.response.hash.count",
+      "kind": "histogram",
+      "unit": "count",
+      "description": "Block hashes in each peer response while obtaining tips.",
+      "labels": [],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "sync_obtain_response_hash_count",
+          "sync_obtain_response_hash_count_sum",
+          "sync_obtain_response_hash_count_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.prospective_tips.len",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Chain tips the syncer is following.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "sync_prospective_tips_len"
+        ]
+      }
+    },
+    {
+      "name": "sync.restart.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Sync rounds that ended, by why they ended and whether the state tip advanced.",
+      "labels": [
+        "reason",
+        "made_progress"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_restart_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.stage.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken by each stage of a sync round.",
+      "labels": [
+        "stage"
+      ],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "sync_stage_duration_seconds",
+          "sync_stage_duration_seconds_sum",
+          "sync_stage_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "sync.verified.block.count",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks verified after the syncer downloaded them.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "sync_verified_block_count"
+        ]
+      }
+    },
+    {
+      "name": "zcash.chain.tip.block_delay_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time from a block's header time until it became this node's best chain tip.",
+      "labels": [],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "zcash_chain_tip_block_delay_seconds",
+          "zcash_chain_tip_block_delay_seconds_sum",
+          "zcash_chain_tip_block_delay_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "zcash.chain.verified.block.height",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Height of the latest block committed to the state, by either verifier.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_chain_verified_block_height"
+        ]
+      }
+    },
+    {
+      "name": "zcash.chain.verified.block.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Blocks committed to the state, by either verifier.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_chain_verified_block_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.actions.paid",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Paid actions in the mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_actions_paid"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.actions.unpaid",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Unpaid actions in the mempool in each fee weight ratio bucket.",
+      "labels": [
+        "bk"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_actions_unpaid"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.cost.bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Total ZIP-401 eviction cost of the transactions in the mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_cost_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.size.bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Serialized size of the transactions in the mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.size.transactions",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Transactions in the mempool.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_size_transactions"
+        ]
+      }
+    },
+    {
+      "name": "zcash.mempool.size.weighted",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Serialized size of the mempool transactions in each fee weight ratio bucket.",
+      "labels": [
+        "bk"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_mempool_size_weighted"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.connection.attempts.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "TCP connection attempts started.",
+      "labels": [
+        "network",
+        "direction",
+        "address_family"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_connection_attempts_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.connection.outcomes.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Finished connection attempts, by the stage they reached and how they ended.",
+      "labels": [
+        "network",
+        "direction",
+        "address_family",
+        "stage",
+        "outcome"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_connection_outcomes_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.in.bytes.total",
+      "kind": "counter",
+      "unit": "bytes",
+      "description": "Bytes of protocol messages received from peers.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_in_bytes_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.in.messages",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Protocol messages received from peers, by command.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_in_messages"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.out.bytes.total",
+      "kind": "counter",
+      "unit": "bytes",
+      "description": "Bytes of protocol messages sent to peers.",
+      "labels": [],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_out_bytes_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.out.messages",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Protocol messages sent to peers, by command.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_out_messages"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer.handshake.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to complete or fail a peer handshake.",
+      "labels": [
+        "result"
+      ],
+      "prometheus": {
+        "type": "histogram",
+        "buckets": [
+          0.01,
+          0.025,
+          0.05,
+          0.1,
+          0.25,
+          0.5,
+          1.0,
+          2.0,
+          3.0,
+          5.0,
+          10.0,
+          30.0
+        ],
+        "series": [
+          "zcash_net_peer_handshake_duration_seconds_bucket",
+          "zcash_net_peer_handshake_duration_seconds_sum",
+          "zcash_net_peer_handshake_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer.handshake.failures.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Failed peer handshakes, by reason.",
+      "labels": [
+        "reason"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_handshake_failures_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer.version.messages.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Version messages decoded from peers during handshakes.",
+      "labels": [
+        "network",
+        "direction",
+        "address_family",
+        "implementation"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_version_messages_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer.version.outcomes.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Handshakes that decoded a peer's version message, by how they ended.",
+      "labels": [
+        "network",
+        "direction",
+        "address_family",
+        "implementation",
+        "outcome"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_version_outcomes_total"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer_set.find_fallback",
+      "kind": "counter",
+      "unit": "count",
+      "description": "FindBlocks and FindHeaders requests sent to a peer that might not serve them, by reason.",
+      "labels": [
+        "reason",
+        "network"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_set_find_fallback"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer_set.find_queued",
+      "kind": "counter",
+      "unit": "count",
+      "description": "FindBlocks and FindHeaders requests queued until a peer that serves them is ready.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_set_find_queued"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer_set.inventory_queued",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Inventory requests waiting for a busy peer that might have the inventory.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_set_inventory_queued"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peer_set.inventory_refusal",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Inventory requests failed because no peer that might have the inventory could take them.",
+      "labels": [
+        "kind",
+        "network"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peer_set_inventory_refusal"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Peers connected to the peer set, ready or busy.",
+      "labels": [
+        "network"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_net_peers"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.cache",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Peer addresses written to the peer cache file.",
+      "labels": [
+        "cache"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peers_cache"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.connected",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Successful peer handshakes, by protocol version.",
+      "labels": [
+        "remote_version",
+        "negotiated_version",
+        "min_version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peers_connected"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.initial",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Initial peer addresses from each DNS seeder and the peer cache.",
+      "labels": [
+        "seed",
+        "cache"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peers_initial"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.missing_services",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Handshakes rejected because the peer doesn't advertise the required services.",
+      "labels": [
+        "remote_services"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peers_missing_services"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.obsolete",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Handshakes rejected because the peer's protocol version is obsolete.",
+      "labels": [
+        "remote_version",
+        "min_version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zcash_net_peers_obsolete"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.version.connected",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Protocol version of the peer in the most recent successful handshake.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_net_peers_version_connected"
+        ]
+      }
+    },
+    {
+      "name": "zcash.net.peers.version.obsolete",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Protocol version of the peer in the most recent handshake rejected as obsolete.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_net_peers_version_obsolete"
+        ]
+      }
+    },
+    {
+      "name": "zcash.pool.notes.created",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Note commitments in each shielded pool's tree at the best chain tip.",
+      "labels": [
+        "name"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_pool_notes_created"
+        ]
+      }
+    },
+    {
+      "name": "zcash.pool.value.zatoshis",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Value in each pool at the best chain tip, in zatoshis.",
+      "labels": [
+        "name"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcash_pool_value_zatoshis"
+        ]
+      }
+    },
+    {
+      "name": "zcashd.compat.supervisor.active",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "1 while zebrad is supervising a zcashd child process, otherwise 0.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcashd_compat_supervisor_active"
+        ]
+      }
+    },
+    {
+      "name": "zcashd.compat.supervisor.disabled",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "1 when zcashd supervision is turned off or has stopped, otherwise 0.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcashd_compat_supervisor_disabled"
+        ]
+      }
+    },
+    {
+      "name": "zcashd.compat.supervisor.exhausted",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "1 when zcashd supervision stopped after too many restarts, otherwise 0.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zcashd_compat_supervisor_exhausted"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.batch.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to verify one batch of signatures or proofs.",
+      "labels": [
+        "verifier",
+        "result"
+      ],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "zebra_consensus_batch_duration_seconds",
+          "zebra_consensus_batch_duration_seconds_sum",
+          "zebra_consensus_batch_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.cache.evict",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Keys dropped from a verification cache to stay within its capacity.",
+      "labels": [
+        "verifier"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_consensus_cache_evict"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.cache.hit",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Verifications answered from a verification cache.",
+      "labels": [
+        "verifier"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_consensus_cache_hit"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.cache.insert",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Keys recorded as verified in a verification cache.",
+      "labels": [
+        "verifier"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_consensus_cache_insert"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.cache.miss",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Verifications that a verification cache passed to its verifier.",
+      "labels": [
+        "verifier"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_consensus_cache_miss"
+        ]
+      }
+    },
+    {
+      "name": "zebra.consensus.cache.size",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Number of keys a verification cache currently remembers.",
+      "labels": [
+        "verifier"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_consensus_cache_size"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.connection.state",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "Live peer connections in each connection state.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_net_connection_state"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.in.errors",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Messages from peers that failed to deserialize, by error kind.",
+      "labels": [
+        "error"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_in_errors"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.in.requests",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Requests received from peers, by request.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_in_requests"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.in.responses",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Responses received from peers, by response.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_in_responses"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.out.requests",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Requests sent to peers, by request.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_out_requests"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.out.requests.canceled",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Requests to peers canceled before they were sent, by request.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_out_requests_canceled"
+        ]
+      }
+    },
+    {
+      "name": "zebra.net.out.responses",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Responses sent to peers, by response.",
+      "labels": [
+        "command"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebra_net_out_responses"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.batch_commit.duration_seconds",
+      "kind": "histogram",
+      "unit": "seconds",
+      "description": "Time taken to write one block's batch to RocksDB.",
+      "labels": [],
+      "prometheus": {
+        "type": "summary",
+        "series": [
+          "zebra_state_rocksdb_batch_commit_duration_seconds",
+          "zebra_state_rocksdb_batch_commit_duration_seconds_sum",
+          "zebra_state_rocksdb_batch_commit_duration_seconds_count"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.block_cache_usage_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Memory used by the RocksDB block cache.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_block_cache_usage_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.cf_disk_size_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Disk space used by each RocksDB column family.",
+      "labels": [
+        "cf"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_cf_disk_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.cf_memory_size_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Memory used by each RocksDB column family's memtables.",
+      "labels": [
+        "cf"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_cf_memory_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.compaction.pending_bytes",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "1 when RocksDB has at least one compaction pending, otherwise 0.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_compaction_pending_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.compaction.running",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "RocksDB compactions currently running.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_compaction_running"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.live_data_size_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Estimated size of the live data in all RocksDB column families.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_live_data_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.num_files_at_level",
+      "kind": "gauge",
+      "unit": "count",
+      "description": "RocksDB files at each level.",
+      "labels": [
+        "level"
+      ],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_num_files_at_level"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.total_disk_size_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Disk space used by all RocksDB column families.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_total_disk_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebra.state.rocksdb.total_memory_size_bytes",
+      "kind": "gauge",
+      "unit": "bytes",
+      "description": "Memory used by all RocksDB memtables.",
+      "labels": [],
+      "prometheus": {
+        "type": "gauge",
+        "series": [
+          "zebra_state_rocksdb_total_memory_size_bytes"
+        ]
+      }
+    },
+    {
+      "name": "zebrad.build.info",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Always 1, with the running zebrad version as a label.",
+      "labels": [
+        "version"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebrad_build_info"
+        ]
+      }
+    }
+  ]
+}

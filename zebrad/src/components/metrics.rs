@@ -8,8 +8,33 @@ use abscissa_core::{Component, FrameworkError, FrameworkErrorKind};
 use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
+pub mod catalog;
+
+// `metrics-process` describes fewer metrics on Windows, so the catalog only matches elsewhere.
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests;
+
 /// How often the process metrics are sampled.
 const PROCESS_METRICS_INTERVAL: Duration = Duration::from_secs(15);
+
+/// The histograms that Prometheus exports as histograms with these bucket upper bounds, in
+/// seconds. Every other histogram is exported as a summary with quantiles.
+///
+/// Adding a histogram here removes its `quantile` series, which breaks queries that use them.
+pub const HISTOGRAM_BUCKETS: &[(&str, &[f64])] = &[
+    (
+        "rpc.request.duration_seconds",
+        &[
+            0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0,
+        ],
+    ),
+    (
+        "zcash.net.peer.handshake.duration_seconds",
+        &[
+            0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0,
+        ],
+    ),
+];
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
@@ -33,6 +58,8 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
+            describe_all();
+            zebra_consensus::metrics::register_failure_counters();
             spawn_process_metrics()?;
         }
 
@@ -49,8 +76,10 @@ impl MetricsEndpoint {
     {
         info!("Trying to open metrics endpoint at {}...", addr);
 
-        let builder =
-            metrics_exporter_prometheus::PrometheusBuilder::new().with_http_listener(addr);
+        let builder = prometheus_builder()
+            .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
+            .with_http_listener(addr);
+
         let endpoint_result = match other {
             Some(other) => install_alongside(builder, other),
             None => builder.install().map_err(Into::into),
@@ -98,13 +127,25 @@ impl MetricsEndpoint {
     }
 }
 
+/// Describes every metric Zebra records to the current recorder.
+///
+/// Call this right after installing the global recorder: descriptions sent while no recorder is
+/// installed are lost.
+pub fn describe_all() {
+    zebra_consensus::metrics::describe();
+    zebra_network::metrics::describe();
+    zebra_state::metrics::describe();
+    zebra_rpc::metrics::describe();
+    catalog::describe();
+    metrics_process::Collector::default().describe();
+}
+
 /// Records the process metrics through the global recorder, which must already be installed.
 ///
 /// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
 /// the readings neither depend on a backend nor run on a Tokio worker.
 fn spawn_process_metrics() -> Result<(), FrameworkError> {
     let collector = metrics_process::Collector::default();
-    collector.describe();
     collector.collect();
 
     std::thread::Builder::new()
@@ -124,6 +165,22 @@ where
 {
     metrics::set_global_recorder(recorder)
         .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
+}
+
+/// Returns the Prometheus exporter's configuration, before its endpoint is added.
+#[cfg(feature = "prometheus")]
+fn prometheus_builder(
+) -> Result<metrics_exporter_prometheus::PrometheusBuilder, metrics_exporter_prometheus::BuildError>
+{
+    HISTOGRAM_BUCKETS.iter().try_fold(
+        metrics_exporter_prometheus::PrometheusBuilder::new(),
+        |builder, (name, buckets)| {
+            builder.set_buckets_for_metric(
+                metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
+                buckets,
+            )
+        },
+    )
 }
 
 /// Installs the Prometheus recorder from `builder` and `other` as one recorder.
