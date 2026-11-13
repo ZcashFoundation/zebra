@@ -92,7 +92,7 @@ One rule governs every backend: **every recorded signal reaches every enabled ba
 
 The parity test enforces the rule for Prometheus and Sentry (part 5), so it doesn't depend on contributors remembering each backend.
 
-Phases 0 to 3 of the migration plan implement parts 1 to 3, the drift checks of part 5, and the performance work of part 8. The implementation is not merged. Its first PR is #12434, and the rest is on commits based on `1ab1f8db2`. Where the parts below say what Zebra does, they describe commit `25d92faed`, the end of phase 3. Work that commit leaves open is marked in the part that needs it and listed in the migration plan.
+Phases 0 to 3 of the migration plan implement parts 1 to 3, the drift checks of part 5, and the performance work of part 8. The implementation is not merged. Its first PR is #12434, and the rest is on commits based on `1ab1f8db2`. Where the parts below say what Zebra does, they describe commit #12439, the end of phase 3. Work that commit leaves open is marked in the part that needs it and listed in the migration plan.
 
 The design has eight parts.
 
@@ -110,7 +110,7 @@ Call sites use string literal names, so each name stays searchable where it is r
 - three in `zebrad/src/components/zcashd_compat/supervisor.rs`;
 - one in `zebra-network/src/peer/connection/state_label.rs`.
 
-`zebrad.build.info` is built with `concat!`. The call-site check reads only literal names and literal label keys. For a call with a constant or built name, it checks only that the call's literal label keys appear in some `LABELS` table. So, for these fourteen names, nothing checks that they are in the catalog, that they are recorded as the cataloged kind, or that their label keys are in their own `LABELS` entry, and nothing checks constant label keys at all. All fourteen are cataloged at `25d92faed`. The parity test checks that every cataloged metric reaches Prometheus and Sentry, but it doesn't read call sites. Closing the gap, by inlining the constants or by making the check resolve them, is open.
+`zebrad.build.info` is built with `concat!`. The call-site check reads only literal names and literal label keys. For a call with a constant or built name, it checks only that the call's literal label keys appear in some `LABELS` table. So, for these fourteen names, nothing checks that they are in the catalog, that they are recorded as the cataloged kind, or that their label keys are in their own `LABELS` entry, and nothing checks constant label keys at all. All fourteen are cataloged at #12439. The parity test checks that every cataloged metric reaches Prometheus and Sentry, but it doesn't read call sites. Closing the gap, by inlining the constants or by making the check resolve them, is open.
 
 `describe_all()` in `zebrad/src/components/metrics.rs` calls every crate's `describe()` and describes the `metrics-process` metrics. `zebrad` calls it immediately after it installs the global recorder, before any component records. Descriptions issued while no recorder is installed go to the `metrics` crate's no-op recorder and are lost. If no backend is enabled, there is nothing to describe to.
 
@@ -183,7 +183,7 @@ The policy records this counter through the facade, so every backend receives it
 
 **Build info.** `zebrad.build.info` is recorded whenever any backend is installed, including Sentry alone. It is recorded right after the descriptions, before Zebra logs that the metrics endpoint is open.
 
-**Evidence.** The parity and volume tests run the Sentry policy over the whole catalog (part 5). The build at `25d92faed` was also run with both backends on, in four settings:
+**Evidence.** The parity and volume tests run the Sentry policy over the whole catalog (part 5). A build of #12439, before its last review fixes, was also run with both backends on, in four settings:
 
 | Run | What it covered |
 |---|---|
@@ -231,7 +231,7 @@ Spans and log events are recorded once through `tracing`, and each backend's lay
 - Spans go only to a backend that sends traces.
 - A condition operators need to alert on is never available only as a log or a Sentry issue. It also has a metric (part 6), so Prometheus users can alert on it too.
 
-Most of this part is phase 4 of the migration, which is not started. At `25d92faed`:
+Most of this part is phase 4 of the migration, which is not started. At #12439:
 
 - The shared list of log targets doesn't exist. The Sentry tracing layer's own filter (`zebrad/src/sentry.rs`) sends WARN and ERROR events, and INFO events from one target, the sync progress log (`progress::LOG_TARGET`).
 - Panics have no metric, so release health is available only in Sentry until a panic counter exists. Start time is `process_start_time_seconds`, and uptime follows from it. The `process.uptime_seconds` attribute is added only to Sentry metrics.
@@ -244,7 +244,7 @@ Most of this part is phase 4 of the migration, which is not started. At `25d92fa
 
 ### 5. Drift checks: the catalog is a generated, checked file
 
-The catalog is checked in at `docker/observability/metrics-catalog.json`, beside the dashboards and alert rules it is checked against. It holds 192 metrics at `25d92faed`. Each entry has the name, kind, unit, description, label keys, and the Prometheus type and series names the exporter renders.
+The catalog is checked in at `docker/observability/metrics-catalog.json`, beside the dashboards and alert rules it is checked against. It holds 192 metrics at #12439. Each entry has the name, kind, unit, description, label keys, and the Prometheus type and series names the exporter renders.
 
 The `catalog_file_is_current` test in `zebrad/src/components/metrics/tests.rs` generates it. The test installs a small recorder that keeps every `describe_*` call, calls `describe_all()`, merges in each crate's `LABELS`, and fails if the checked-in file differs. `metrics-util`'s `DebuggingRecorder` doesn't fit, because its snapshots leave out metrics that are described but never recorded. Every change to a signal shows up in review as a catalog diff. When the file is stale, the test prints the command that regenerates it:
 
@@ -307,7 +307,7 @@ Checking was chosen over generating dashboards and rules from the catalog. Gener
 
 When an alert or dashboard needs to know that something happened, the call site that logs it also records a metric in the catalog, usually a counter. The log line stays for context. Zebra's shipped alert rules, and the alerts it documents for any backend, use these metrics rather than log text, so rewording a message can't silently break an alert, and a Prometheus user can alert on the same conditions as a Sentry user.
 
-At `25d92faed`, these signals follow the rule:
+At #12439, these signals follow the rule:
 
 - Block verification failures: `ZebraHighErrorRate` fires on `sync.block.error.count`.
 - Node starts: the `zebrad.build.info` series plus `process_start_time_seconds`.
@@ -345,11 +345,11 @@ Parity must not mean that running several backends slows the node, or that a bac
 
 Costs paid while everything was off: label strings built on peer-message paths (`connection.rs` formatted a state name twice per message), the state sampling RocksDB properties every 30 seconds, and two Sentry threads started when `SENTRY_DSN` is set but the client is disabled.
 
-**At `25d92faed`.** The Sentry tracing layer has `span_filter(|_| false)`, so it builds no Sentry spans (#12434). Sentry's session rotation and metrics flush threads start only for an enabled client. The connection-state gauge uses `Copy` label keys made of static strings, and caches one gauge handle per label per thread (`zebra-network/src/peer/connection/state_label.rs`), so a peer message formats a label only the first time a thread sees it. The RocksDB sampler is as it was at `1ab1f8db2`.
+**At #12439.** The Sentry tracing layer has `span_filter(|_| false)`, so it builds no Sentry spans (#12434). Sentry's session rotation and metrics flush threads start only for an enabled client. The connection-state gauge uses `Copy` label keys made of static strings, and caches one gauge handle per label per thread (`zebra-network/src/peer/connection/state_label.rs`), so a peer message formats a label only the first time a thread sees it. The RocksDB sampler is as it was at `1ab1f8db2`.
 
 **Observer effects.** Before the span filter, the per-poll Sentry span work fell inside the peer handshake duration and message handling, so those timings reported part of Sentry's own overhead. RPC request durations may include OpenTelemetry span work, depending on middleware order. Batch verifier durations stop the clock before recording, so recording isn't included, but they include time queued for blocking threads, which telemetry threads compete for. These estimates come from reading the code, not from measurement.
 
-**Requirements.** Each requirement is part of the decision. Where `25d92faed` doesn't meet one, the requirement says so, and the migration plan lists the work.
+**Requirements.** Each requirement is part of the decision. Where #12439 doesn't meet one, the requirement says so, and the migration plan lists the work.
 
 1. **A disabled backend installs nothing:** no recorder, layer, thread, or sampler. With every backend off, telemetry costs one atomic load per fixed-name call site and nothing else. The Prometheus recorder, the Sentry recorder, its threads, its tracing layer, and the process sampler meet this. Two tasks don't:
    - The RocksDB sampler runs with every backend off.
@@ -364,7 +364,7 @@ Costs paid while everything was off: label strings built on peer-message paths (
 5. **`event.` keys never enter a keyed map.** Every backend splits them off before its registry, so they never create a series or a label set. The value travels as a label in the key, and splitting copies the key's labels on every record. Event attributes are therefore allowed only on histograms recorded at most about once per block.
 6. **Background work stays off the async runtime:** flushes, scrapes, `/proc` sampling, and span export run on their own threads. The Sentry flush and transport check threads, the Prometheus exporter's HTTP thread, and the process sampler meet this. The RocksDB sampler runs on Tokio, which is open.
 7. **Each backend sends spans only when asked.** The Sentry tracing layer has a span filter that captures nothing. OpenTelemetry should filter spans before building their attributes. That filter is open.
-8. **Cost doesn't grow with each backend.** The fanout stays for now: the handles kept at `25d92faed` are counters and gauges, and those meet the per-backend target. A kept histogram doesn't: it costs about 22 ns with Prometheus alone. That cost is Prometheus's own record path, so the choice between the fanout and a shared registry doesn't change it. Whether to relax the target for histograms, or which work brings them under it, is open. It has to be settled before per-proof histograms keep handles. The next step is keeping handles at the hot per-message call sites, with the order test from requirement 3. Sentry and the OTLP adapter switch to one shared registry read at flush time only if hot call sites can't keep handles, or if kept-handle cost still exceeds the targets on a quiet host. Zakura's own Prometheus recorder is precedent for replacing the exporter behind the facade.
+8. **Cost doesn't grow with each backend.** The fanout stays for now: the handles kept at #12439 are counters and gauges, and those meet the per-backend target. A kept histogram doesn't: it costs about 22 ns with Prometheus alone. That cost is Prometheus's own record path, so the choice between the fanout and a shared registry doesn't change it. Whether to relax the target for histograms, or which work brings them under it, is open. It has to be settled before per-proof histograms keep handles. The next step is keeping handles at the hot per-message call sites, with the order test from requirement 3. Sentry and the OTLP adapter switch to one shared registry read at flush time only if hot call sites can't keep handles, or if kept-handle cost still exceeds the targets on a quiet host. Zakura's own Prometheus recorder is precedent for replacing the exporter behind the facade.
 
 `describe()` runs once at startup, and the catalog, parity, and volume tests are test-only, so neither costs anything at runtime.
 
@@ -431,7 +431,7 @@ Performance targets, with the status from the measurements above. They are targe
 
 ## Migration plan
 
-Each phase is one or more public PRs that stand alone. Phases 0 to 3 are implemented at `25d92faed` and not merged. Their first PR is #12434, which is in review. Each phase's open items are work that phase didn't complete.
+Each phase is one or more public PRs that stand alone. Phases 0 to 3 are implemented at #12439 and not merged. Their first PR is #12434, which is in review. Each phase's open items are work that phase didn't complete.
 
 | Phase | Change | Result | Status |
 | --- | --- | --- | --- |
@@ -486,4 +486,4 @@ Not verified: Sentry's metric quotas, cardinality limits, and retention, which d
 ## Revision History
 
 - 2026-11-12: Proposed.
-- 2026-11-13: Updated to the design as built in phases 0 to 3, at commit `25d92faed`: call-site names and the gaps in their check, the Sentry policy's shaping and volume limits, including the fixed-size random sample each histogram label set keeps between flushes, drop accounting, label rules, measured costs, and the requirement 8 decision. Limited the parity rule to Prometheus and Sentry until phase 6, made the rename period apply in every backend, and made the performance thresholds targets rather than release gates. Marked unfinished work, including most of parts 4 and 6, as open. Added the Testnet and hosted Sentry validation results. Described z3 as a consumer whose copies of the dashboards and rules match a release only if it copies them at each bump, and defined the published catalog of phase 5: release attachments, format version, deprecation fields, JSON Schema, and the scope of the stability promise. Defined `chain.near_tip`, added the health endpoints as a consumer contract, and recorded the open OpenTelemetry resource and sampler defects, the missing promtool checks, and the unpinned observability images.
+- 2026-11-13: Updated to the design as built in phases 0 to 3, in #12439: call-site names and the gaps in their check, the Sentry policy's shaping and volume limits, including the fixed-size random sample each histogram label set keeps between flushes, drop accounting, label rules, measured costs, and the requirement 8 decision. Limited the parity rule to Prometheus and Sentry until phase 6, made the rename period apply in every backend, and made the performance thresholds targets rather than release gates. Marked unfinished work, including most of parts 4 and 6, as open. Added the Testnet and hosted Sentry validation results. Described z3 as a consumer whose copies of the dashboards and rules match a release only if it copies them at each bump, and defined the published catalog of phase 5: release attachments, format version, deprecation fields, JSON Schema, and the scope of the stability promise. Defined `chain.near_tip`, added the health endpoints as a consumer contract, and recorded the open OpenTelemetry resource and sampler defects, the missing promtool checks, and the unpinned observability images.
