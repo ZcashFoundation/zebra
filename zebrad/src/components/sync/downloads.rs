@@ -22,7 +22,7 @@ use tokio::{
     time::{timeout, timeout_at, Instant},
 };
 use tower::{Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Height, HeightDiff},

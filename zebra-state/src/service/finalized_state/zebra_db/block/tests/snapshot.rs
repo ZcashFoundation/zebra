@@ -166,13 +166,8 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
 
-    let mut state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let mut state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     // Assert that empty databases are the same, regardless of the network.
     let mut settings = insta::Settings::clone_current();
@@ -269,6 +264,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .expect("hashes up to tip have heights");
             let stored_block = state
                 .block(query_height.into())
+                .expect("stored block body is complete")
                 .expect("heights up to tip have blocks");
 
             // Check the shielded note commitment trees.

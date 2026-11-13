@@ -1,7 +1,6 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fmt,
     fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -20,40 +19,6 @@ use crate::{
     service::finalized_state::restorable_db_versions,
     state_database_format_version_in_code, BoxError,
 };
-
-#[cfg(test)]
-mod tests;
-
-/// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
-/// are not written to logs by types that derive `Debug`.
-///
-/// Serialization is unaffected, so the value still round-trips through the config file. Use
-/// [`RedactedString::as_str()`] to reach the contents deliberately.
-#[derive(Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct RedactedString(String);
-
-impl fmt::Debug for RedactedString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("[REDACTED]")
-    }
-}
-
-impl RedactedString {
-    /// Return the wrapped string, which exposes its sensitive contents.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<S> From<S> for RedactedString
-where
-    S: Into<String>,
-{
-    fn from(value: S) -> Self {
-        Self(value.into())
-    }
-}
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -160,28 +125,6 @@ pub struct Config {
     /// This is intended for testing scenarios where blocks are committed rapidly and the
     /// async backup task may not flush all blocks before shutdown.
     pub debug_skip_non_finalized_state_backup_task: bool,
-
-    // Elasticsearch configs
-    //
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database url.
-    pub elasticsearch_url: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database username.
-    pub elasticsearch_username: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database password.
-    pub elasticsearch_password: RedactedString,
-
-    #[cfg(feature = "elasticsearch")]
-    /// Skip TLS certificate validation when connecting to Elasticsearch.
-    ///
-    /// Defaults to `false`, so the server certificate is validated. Set to `true` only for a
-    /// trusted local cluster with a self-signed certificate: it exposes the connection, including
-    /// authentication credentials, to interception.
-    pub elasticsearch_skip_cert_validation: bool,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -251,18 +194,6 @@ impl Config {
             ..Config::default()
         }
     }
-
-    /// Returns how the Elasticsearch server certificate is validated.
-    #[cfg(feature = "elasticsearch")]
-    pub(crate) fn elasticsearch_cert_validation(
-        &self,
-    ) -> elasticsearch::cert::CertificateValidation {
-        if self.elasticsearch_skip_cert_validation {
-            elasticsearch::cert::CertificateValidation::None
-        } else {
-            elasticsearch::cert::CertificateValidation::Default
-        }
-    }
 }
 
 impl Default for Config {
@@ -275,14 +206,6 @@ impl Default for Config {
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_url: "https://localhost:9200".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_username: "elastic".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_password: RedactedString::default(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_skip_cert_validation: false,
         }
     }
 }

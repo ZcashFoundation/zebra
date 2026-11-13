@@ -1,0 +1,67 @@
+/* IBM Plex Sans and IBM Plex Mono, licensed under the SIL Open Font License
+   1.1. See IBM-PLEX-LICENSE.txt in this directory.
+
+   Self-hosted on purpose: a plain page view must not request anything from a
+   font CDN. Providing this directory replaces mdBook's built-in Open Sans and
+   Source Code Pro, so neither is emitted into the built book any more.
+
+   Plex Sans ships as a single variable file per style, covering every weight
+   the book uses. Plex Mono has no variable build, so its two weights are
+   separate files. Only latin and latin-ext are shipped (mono: latin only);
+   text outside those ranges falls back to the stacks in theme/css/custom.css.
+*/
+
+/* IBM Plex Sans 100 700 italic - latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: italic;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-sans-var-italic-latin-ext.woff2" }}') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* IBM Plex Sans 100 700 italic - latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: italic;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-sans-var-italic-latin.woff2" }}') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* IBM Plex Sans 100 700 - latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-sans-var-latin-ext.woff2" }}') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* IBM Plex Sans 100 700 - latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-sans-var-latin.woff2" }}') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* IBM Plex Mono 400 - latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-mono-400-latin.woff2" }}') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* IBM Plex Mono 600 - latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('{{ resource "fonts/ibm-plex-mono-600-latin.woff2" }}') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}

@@ -10,7 +10,7 @@ use futures::{
     TryFutureExt,
 };
 use tokio::time::timeout;
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{parameters::Network::*, serialization::ZcashDeserialize};
 use zebra_test::mock_service::MockService;
