@@ -1686,6 +1686,26 @@ pub enum ReadRequest {
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
 
+    /// Checks the height and the contextual difficulty and time of a header that is a direct child
+    /// of the committed best tip.
+    ///
+    /// Returns [`ReadResponse::ValidBestTipHeader`] or an error, without caching a verdict.
+    /// Callers must independently check proof of work and bound compact block resources.
+    CheckBestTipHeader {
+        /// The candidate header.
+        header: Arc<block::Header>,
+        /// The height from the candidate's coinbase transaction.
+        height: block::Height,
+    },
+
+    /// Checks the history and authorizing data commitments of an NU5 or later block that is a
+    /// direct child of the committed best tip.
+    ///
+    /// Callers must first bound the block and check its transaction Merkle root.
+    /// Returns [`ReadResponse::ValidBestTipBlockCommitments`] or an error, without caching a
+    /// verdict. Success does not imply the block or its transactions are valid.
+    CheckBestTipBlockCommitments(Arc<Block>),
+
     /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
     /// allowing the caller to listen for new blocks in the non-finalized state.
     NonFinalizedBlocksListener {
@@ -1750,6 +1770,8 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
+            ReadRequest::CheckBestTipHeader { .. } => "check_best_tip_header",
+            ReadRequest::CheckBestTipBlockCommitments(_) => "check_best_tip_block_commitments",
             ReadRequest::NonFinalizedBlocksListener { .. } => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
         }

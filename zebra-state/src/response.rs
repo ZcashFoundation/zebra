@@ -547,6 +547,12 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 
+    /// Successful response to [`ReadRequest::CheckBestTipHeader`].
+    ValidBestTipHeader,
+
+    /// Successful response to [`ReadRequest::CheckBestTipBlockCommitments`].
+    ValidBestTipBlockCommitments,
+
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 
@@ -668,7 +674,10 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
-            ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
+            ReadResponse::SolutionRate(_)
+            | ReadResponse::TipBlockSize(_)
+            | ReadResponse::ValidBestTipHeader
+            | ReadResponse::ValidBestTipBlockCommitments => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }
