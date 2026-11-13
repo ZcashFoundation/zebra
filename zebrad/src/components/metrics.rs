@@ -59,6 +59,7 @@ impl MetricsEndpoint {
 
         if recorder_installed {
             describe_all();
+            zebra_consensus::metrics::register_failure_counters();
             spawn_process_metrics()?;
         }
 
