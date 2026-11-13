@@ -423,6 +423,7 @@ impl TransactionError {
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
             | CoinbaseExpiryBlockHeight { .. }
+            | MaximumExpiryHeight { .. }
             | IncorrectFee
             | Subsidy(_)
             | WrongVersion
@@ -443,6 +444,12 @@ impl TransactionError {
             | BothVPubsNonZero
             | DisabledAddToSproutPool
             | NegativeOrchardValueBalance
+            // Structural consensus rules, invalid on every node; matches zcashd (100).
+            | DuplicateTransparentSpend(_)
+            | DuplicateSproutNullifier(_)
+            | DuplicateSaplingNullifier(_)
+            | DuplicateOrchardNullifier(_)
+            | DuplicateIronwoodNullifier(_)
             | NotEnoughOrchardFlags
             | NotEnoughIronwoodFlags
             | WrongConsensusBranchId
@@ -450,10 +457,27 @@ impl TransactionError {
             | LockedUntilAfterBlockHeight(_)
             | LockedUntilAfterBlockTime(_) => 100,
 
-            // Standardness (policy) rejections must not be punished: non-standard
-            // transactions are consensus-valid, and zcashd relays a reject message
-            // without a DoS score for them.
-            _other => 0,
+            // Policy rejections: consensus-valid, zcashd gives no DoS score.
+            Zip317(_)
+            | TooManyShieldedActions { .. }
+            | NonStandardScriptSigSize { .. }
+            | NonStandardScriptSigNotPushOnly { .. }
+            | NonStandardInputs
+            // Depend on the receiving node's view, so honest relays can hit them.
+            | TransparentInputNotFound
+            | ValidateContextError(_)
+            | ValidateMempoolLockTimeError(_)
+            | ExpiredTransaction { .. }
+            | UnsupportedByNetworkUpgrade(_, _)
+            // Local or internal errors, not evidence about the peer.
+            | NotCoinbase
+            | CoinbaseConstruction(_)
+            | InternalDowncastError(_)
+            | Io(_)
+            | TryFromSlice(_)
+            | Amount(_)
+            | Balance(_)
+            | Other(_) => 0,
         }
     }
 }
