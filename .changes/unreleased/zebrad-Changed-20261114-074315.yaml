@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce allocation and unused diagnostic bookkeeping overhead during checkpoint synchronization.
+time: 2026-11-14T07:43:15.559504222+01:00
