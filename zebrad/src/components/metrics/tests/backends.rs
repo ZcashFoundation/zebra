@@ -25,6 +25,8 @@ const LABEL_VALUES: &[(&str, usize)] = &[
     // A node runs on one network, at one network upgrade.
     ("network", 1),
     ("chain.network_upgrade", 1),
+    // One network's default DNS seeders, plus `custom` for every other initial peer.
+    ("seed", 6),
     ("min_version", 1),
     ("missing_service", 1),
     ("direction", 2),

@@ -233,4 +233,4 @@ The `seed` label of `zcash.net.peers.initial` names an entry from
 is one of the default DNS seeders that Zebra ships, such as
 `dnsseed.z.cash:8233`. Every other entry, including a custom host name or an IP
 address and port, has the value `custom`, so private peer addresses don't reach
-Prometheus or [Sentry](tracing.md#sentry-production-monitoring).
+metrics in Prometheus or [Sentry](tracing.md#sentry-production-monitoring).

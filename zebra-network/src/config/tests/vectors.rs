@@ -723,4 +723,14 @@ fn initial_peer_metric_labels_only_name_default_seeders() {
     );
     assert_eq!(seed_metric_label("seed.example.internal:18233"), "custom");
     assert_eq!(seed_metric_label("100.64.0.1:18233"), "custom");
+
+    // Near misses of a default seeder are custom entries too.
+    for near_miss in [
+        "DNSSEED.Z.CASH:8233",
+        "dnsseed.z.cash.:8233",
+        "dnsseed.z.cash:18233",
+        "dnsseed.z.cash:8233x",
+    ] {
+        assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
+    }
 }
