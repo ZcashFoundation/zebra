@@ -4899,6 +4899,8 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
     let connected_addr = connected_change.addr();
     let open_addr: PeerSocketAddr = "127.1.2.2:8233".parse().unwrap();
     let config = Config {
+        // The crawler only skips when the node has a version 2 endpoint.
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
         crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
@@ -5015,6 +5017,91 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         ),
         "the skipped candidate is a candidate again after the reconnection delay"
     );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// A node without a version 2 endpoint dials a candidate whose IP is at the per-IP limit, as it
+/// did before the version 2 protocol: the handshake verifies the candidate's listener, and the
+/// peer set drops the connection afterwards.
+#[tokio::test]
+async fn legacy_only_crawler_dials_a_candidate_whose_ip_is_connected() {
+    let _init_guard = zebra_test::init();
+
+    // The peer set has a connection from another port of the candidate's IP.
+    let candidate_addr: PeerSocketAddr = "127.1.2.1:8233".parse().unwrap();
+    let connected_addr: PeerSocketAddr = "127.1.2.1:40000".parse().unwrap();
+    let config = Config {
+        v2_listen_addr: None,
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    let change = MetaAddr::new_gossiped_meta_addr(
+        candidate_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::now(),
+    )
+    .new_gossiped_change()
+    .expect("a gossiped address can be added to the address book");
+    address_book.lock().unwrap().update(change);
+
+    let (dialled_tx, mut dialled_rx) = mpsc::unbounded();
+    let outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let dialled_tx = dialled_tx.clone();
+        async move {
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+            dialled_tx
+                .unbounded_send((req.addr, req.connection_tracker))
+                .expect("the test holds the receiver");
+            Ok::<_, BoxError>((req.addr, fake_client))
+        }
+    });
+
+    let empty_peer_set = service_fn(|req| async move {
+        match req {
+            Request::Peers => Ok::<_, BoxError>(Response::Peers(Vec::new())),
+            _ => unreachable!("unexpected request: {req:?}"),
+        }
+    });
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), empty_peer_set);
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, _peerset_rx) = mpsc::channel::<DiscoveredPeer>(channel_size);
+    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(channel_size);
+    demand_tx.try_send(MorePeers).expect("the channel has room");
+
+    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+        ConnectedPeers::new(keys, 1),
+    ));
+
+    let (dialled, _tracker) = tokio::time::timeout(CRAWLER_TEST_DURATION, dialled_rx.next())
+        .await
+        .expect("a legacy-only crawler dials a candidate whose IP is at the per-IP limit")
+        .expect("the crawler holds the connector");
+    assert_eq!(dialled, candidate_addr);
 
     stop_crawler(crawl_task_handle).await;
 }

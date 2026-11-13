@@ -1,4 +1,4 @@
 project: zebrad
 kind: Changed
-body: 'Zebra no longer dials a peer address whose IP is already at the `network.max_connections_per_ip` limit, or that is already connected over version 2, and counts these skips in the new `zcash.net.peers.dial.skipped` metric. Before, it dialled such peers, then dropped the new connection. This also applies when version 2 is disabled.'
+body: 'When the version 2 protocol is enabled with `network.v2_listen_addr`, Zebra no longer dials a peer address whose IP is already at the `network.max_connections_per_ip` limit, or that is already connected over version 2, and counts these skips in the new `zcash.net.peers.dial.skipped` metric. Before, it dialled such peers, then dropped the new connection, as it still does when version 2 is disabled.'
 time: 2026-11-05T12:00:50.000000000+01:00
