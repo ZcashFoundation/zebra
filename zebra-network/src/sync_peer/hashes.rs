@@ -158,12 +158,19 @@ fn transport(error: impl std::fmt::Display) -> Failure {
     Failure::Peer(SyncPeerError::Transport(error.to_string()))
 }
 
-/// Maps a read error, recognizing the responder's `REFUSED` and `CANCELLED`
-/// resets.
+/// Maps a read error, recognizing the responder's `REFUSED`, `BUSY` and
+/// `CANCELLED` resets. `INTERNAL_ERROR` is treated as `BUSY` (draft,
+/// "Application Error Codes").
 fn read_error(error: ReadError) -> SyncPeerError {
     match error {
         ReadError::Reset(code) if code == app_error_code(ErrorCode::Refused) => {
             SyncPeerError::Refused
+        }
+        ReadError::Reset(code)
+            if code == app_error_code(ErrorCode::Busy)
+                || code == app_error_code(ErrorCode::InternalError) =>
+        {
+            SyncPeerError::Busy
         }
         ReadError::Reset(code) if code == app_error_code(ErrorCode::Cancelled) => {
             SyncPeerError::Cancelled

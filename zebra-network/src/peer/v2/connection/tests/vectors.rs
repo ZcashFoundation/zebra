@@ -4346,9 +4346,9 @@ async fn excess_get_hashes_streams_are_refused() {
             started_rx.recv().await.expect("the lookup starts");
         }
 
-        // One more is refused at once, and never reaches the inbound service.
+        // One more is refused at once, as busy, and never reaches the inbound service.
         let mut excess = raw_get_hashes(&raw.connection, 10, 1).await;
-        assert_reset(excess.read_to_end(1024).await, ErrorCode::Refused);
+        assert_reset(excess.read_to_end(1024).await, ErrorCode::Busy);
         assert!(
             started_rx.try_recv().is_err(),
             "the refused lookup never starts"

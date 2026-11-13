@@ -146,7 +146,7 @@ struct Permits {
 }
 
 /// Takes a permit from the peer's `peer_permits` and from the node's
-/// `global_permits`, or refuses the stream with `REFUSED` if either is exhausted, or
+/// `global_permits`, or refuses the stream with `BUSY` if either is exhausted, or
 /// if the peer's `backoff` after a stalled response has not ended.
 ///
 /// # Security
@@ -160,8 +160,10 @@ fn try_acquire(
     backoff: &StallBackoff,
     global_permits: &Arc<Semaphore>,
 ) -> Result<Permits, Outcome> {
+    // At a limit, not unwilling: `BUSY` tells the requester to retry after a
+    // short delay, here or with another peer (draft, "Request Streams").
     try_acquire_at(peer_permits, backoff, global_permits, Instant::now())
-        .ok_or(Outcome::Refuse(ErrorCode::Refused))
+        .ok_or(Outcome::Refuse(ErrorCode::Busy))
 }
 
 /// [`try_acquire`] at `now`.
