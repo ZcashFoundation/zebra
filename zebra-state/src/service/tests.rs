@@ -645,11 +645,11 @@ async fn mining_candidate_is_published_only_after_its_body_is_bound() {
         else {
             panic!("the first candidate must reserve the available slot");
         };
-        // The computation holds a clone of the slot permit until it finishes, so wait for it to
-        // start, then to finish.
-        while Arc::strong_count(&guard.0.borrow()) < 2 {
-            tokio::task::yield_now().await;
-        }
+        // The computation holds a clone of the slot permit until it finishes. The candidate task
+        // was spawned before the response arrived, so on this single-threaded runtime one yield
+        // runs it until the computation starts. The computation can finish before this task runs
+        // again, so waiting to see the clone could wait forever. Then wait for it to finish.
+        tokio::task::yield_now().await;
         while Arc::strong_count(&guard.0.borrow()) > 1 {
             tokio::task::yield_now().await;
         }
