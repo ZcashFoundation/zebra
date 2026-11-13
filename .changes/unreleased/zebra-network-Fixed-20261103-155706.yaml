@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Fixed
+body: 'Remove banned and outdated connections before admitting new peers, so obsolete connections do not block eligible replacements in the same IPv4 address or IPv6 /64 group ([#12109](https://github.com/ZcashFoundation/zebra/issues/12109)).'
+time: 2026-11-03T15:57:06Z
