@@ -162,7 +162,9 @@ pub struct Config {
     /// protocols. Each protocol's dialer skips a host the other protocol is
     /// already connected to, so while Zebra has a legacy connection to a host
     /// listed in `initial_v2_peers`, it dials that host over version 2 only
-    /// after the legacy connection closes. Configured version 2 peers are
+    /// after the legacy connection closes. The legacy peer crawler does not
+    /// dial the IP addresses of the hosts in `initial_v2_peers`, so it does
+    /// not make such a connection itself. Configured version 2 peers are
     /// redialled after a disconnection. Version 2 connections add up to half of
     /// each legacy connection limit, on top of it.
     pub v2_listen_addr: Option<SocketAddr>,

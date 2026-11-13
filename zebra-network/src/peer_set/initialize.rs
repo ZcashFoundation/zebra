@@ -1202,7 +1202,9 @@ where
                             //
                             // The peer set would drop this connection, because the address is
                             // connected over the other protocol, or its IP is at the per-IP
-                            // limit, so it's skipped. That isn't a failure of the peer, so the
+                            // limit, or its IP is a configured version 2 peer's, which a legacy
+                            // connection would keep the version 2 dialer from, so it's skipped.
+                            // That isn't a failure of the peer, so the
                             // address book isn't told: a failed entry without a recent last-seen
                             // time, like an initial peer, would never be a candidate again. It
                             // stays attempt pending, so the crawler only offers it again after
@@ -1213,7 +1215,7 @@ where
                             // peer set then drops is what verifies the candidate's listener, so
                             // it can be gossiped and cached.
                             let blocked = v2_enabled
-                                .then(|| connected_peers.blocks_dial(candidate.addr))
+                                .then(|| connected_peers.blocks_legacy_dial(candidate.addr))
                                 .flatten();
                             if let Some(reason) = blocked {
                                 debug!(?candidate.addr, reason, "skipping outbound connection");

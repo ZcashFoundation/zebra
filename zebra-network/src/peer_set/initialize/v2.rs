@@ -772,6 +772,10 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
                     round.extend(addrs.iter().copied());
                     newly_resolved.push((host, addrs));
                 }
+                // The legacy crawler leaves these to this dialer: the peer set would keep a
+                // legacy connection it made first, and this dialer would then defer the peer
+                // for as long as that connection lasted.
+                shared.connected_peers.prefer_v2(round.iter().copied());
                 // Kept out of discovered dialling. Sent once per round, even when nothing
                 // resolved, because the discovered peer dialer waits for the end of the first
                 // round: until then, a cached configured peer could be dialled as discovered.

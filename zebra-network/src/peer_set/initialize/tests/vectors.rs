@@ -3639,6 +3639,64 @@ async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
     assert!(!logs_contain("wait for a connection to fail or end"));
 }
 
+/// The version 2 dialer tells the legacy crawler to leave the resolved configured version 2
+/// peers to it, so a legacy connection the crawler makes first cannot keep it from them.
+#[tokio::test]
+async fn v2_dialer_keeps_the_legacy_crawler_from_its_configured_peers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let configured = test_v2_addr(1);
+    let config = v2_test_config(any_udp_addr(), &[*configured]);
+    let endpoint = crate::quic::bind(&config.network, any_udp_addr()).expect("a UDP port is free");
+    let identity = LocalIdentity {
+        user_agent: "v2 test node".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    let connected_peers = ConnectedPeers::unconnected();
+    let legacy_addr: PeerSocketAddr = SocketAddr::new(configured.ip(), 8233).into();
+    assert_eq!(connected_peers.blocks_legacy_dial(legacy_addr), None);
+
+    let (shared, _open_inbound_tx) = v2::Shared::new(
+        &config,
+        endpoint,
+        identity,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        misbehavior_tx,
+        no_bans(),
+        V2_TEST_RECONNECTION_DELAY,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        crate::v2_address_book::V2BookHandle::new(tokio::sync::mpsc::channel(1).0),
+        connected_peers.clone(),
+    );
+    let (peerset_tx, _peerset_rx) = mpsc::channel(1);
+    let dialer_task = tokio::spawn(v2::keep_initial_peers_connected(
+        shared,
+        config.initial_v2_peers,
+        1,
+        no_bans(),
+        peerset_tx,
+        watch::channel(Default::default()).0,
+    ));
+
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, async {
+        while connected_peers.blocks_legacy_dial(legacy_addr) != Some("configured v2 peer") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the dialer reserves its resolved configured peers");
+
+    dialer_task.abort();
+}
+
 /// The version 2 listener refuses connections over its share of the inbound limit.
 #[tokio::test]
 async fn v2_listener_refuses_connections_over_inbound_limit() {
@@ -4891,9 +4949,32 @@ async fn crawler_skip_does_not_fail_an_initial_peer() {
 }
 
 /// Checks that the crawler skips the candidate `connected_change` adds, which the peer set is
-/// connected to, dials another one, and leaves the skipped one eligible after the reconnection
-/// delay.
+/// connected to.
 async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr::MetaAddrChange) {
+    let connected_addr = connected_change.addr();
+    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
+    crawler_skips_a_blocked_candidate(connected_change, ConnectedPeers::new(keys, 1)).await;
+}
+
+/// The legacy crawler of a node with a version 2 endpoint leaves a configured version 2 peer's
+/// IP to the version 2 dialer, whatever the candidate's port, and does not mark it failed.
+#[tokio::test]
+async fn crawler_skips_candidates_on_a_configured_v2_peer_ip() {
+    let connected_peers = ConnectedPeers::unconnected();
+    connected_peers.prefer_v2(["127.1.2.1:18233".parse().unwrap()]);
+    crawler_skips_a_blocked_candidate(
+        MetaAddr::new_initial_peer("127.1.2.1:8233".parse().unwrap()),
+        connected_peers,
+    )
+    .await;
+}
+
+/// Checks that the crawler skips the candidate `blocked_change` adds, which `connected_peers`
+/// blocks, dials another one, and leaves the skipped one eligible after the reconnection delay.
+async fn crawler_skips_a_blocked_candidate(
+    connected_change: crate::meta_addr::MetaAddrChange,
+    connected_peers: ConnectedPeers,
+) {
     let _init_guard = zebra_test::init();
 
     let connected_addr = connected_change.addr();
@@ -4951,7 +5032,6 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         demand_tx.try_send(MorePeers).expect("the channel has room");
     }
 
-    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
     let crawl_task_handle = tokio::spawn(crawl_and_dial(
         config,
         demand_tx,
@@ -4963,7 +5043,7 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         peerset_tx,
         ActiveConnectionCounter::new_counter(),
         address_book_updater,
-        ConnectedPeers::new(keys, 1),
+        connected_peers,
     ));
 
     let (dialled, _tracker) = tokio::time::timeout(CRAWLER_TEST_DURATION, dialled_rx.next())

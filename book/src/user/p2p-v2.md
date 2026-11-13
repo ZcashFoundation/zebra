@@ -136,7 +136,14 @@ version 2 peers are recorded in a separate version 2 address book.
   at once; Zebra then keeps the first connection and drops the other. An existing
   legacy connection is not replaced with a version 2 one: while Zebra has a
   legacy connection to a version 2 peer, configured or discovered, it dials
-  that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
+  that peer over version 2 only after the legacy connection closes. So that
+  the hosts in `initial_v2_peers` are used over version 2, the legacy peer
+  crawler never dials their IP addresses once they have resolved, on any port:
+  such a host has no legacy fallback while version 2 is enabled, unless it is
+  also in the legacy initial peers, which are dialled at startup, or it
+  connects to Zebra itself. A legacy connection made either of those ways is
+  still kept until it closes. Discovered version 2 peers get no such
+  preference. `max_connections_per_ip`
   still applies across both protocols. Version 2 connections add up to half of
   each legacy connection limit on top of it.
 - **Blocks are not announced to version 2 peers.** A version 2 block
