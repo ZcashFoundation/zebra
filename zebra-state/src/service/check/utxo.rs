@@ -41,7 +41,7 @@ use crate::{
 pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
     non_finalized_chain: &Chain,
-    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    non_finalized_chain_spent_utxos: &imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
@@ -131,7 +131,7 @@ fn transparent_spend_chain_order(
     spend_tx_index_in_block: usize,
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain: &Chain,
-    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    non_finalized_chain_spent_utxos: &imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {

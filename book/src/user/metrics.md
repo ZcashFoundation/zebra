@@ -155,7 +155,7 @@ one total per minute, and each gauge's latest value once a minute.
 | `process.memory.rss_fraction` | gauge | `process.memory.rss_bytes` as a fraction of the memory `zebrad` can use: the tightest memory limit on its cgroup or any parent cgroup, or the machine's memory if that is smaller. The kernel stops the process near 1. |
 | `state.memory.chain.count` | gauge | Non-finalized chains, the best chain and its forks |
 | `state.memory.best.chain.length` | gauge | Blocks in the best non-finalized chain. Above the 1,000-block reorg limit, older blocks are waiting to be written to the database. |
-| `state.memory.index.entries` | gauge | Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all non-finalized chains, counting the outputs that chains share once |
+| `state.memory.index.entries` | gauge | Blocks, transactions, transparent outputs and spends, and nullifiers indexed across all non-finalized chains, counting the blocks that chains share once |
 | `state.memory.best.chain.index.entries` | gauge | The same count for the best chain only |
 | `state.memory.fork.evicted.count` | counter | Forks dropped because the node tracked too many |
 | `state.memory.backup.restored.block.count` | gauge | Blocks restored from the non-finalized backup at startup |

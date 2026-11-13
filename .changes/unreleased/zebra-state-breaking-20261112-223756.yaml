@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: The non-finalized `Chain::tx_loc_by_hash` field is no longer public. Its transaction, spend, and nullifier indexes are persistent maps, so committing a block or forking a chain no longer copies them.
+time: 2026-11-12T22:37:56.486828014Z

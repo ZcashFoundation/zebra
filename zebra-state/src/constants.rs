@@ -123,7 +123,7 @@ pub(crate) const MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT: u32 = 100;
 /// The maximum total number of index entries in all non-finalized chains on test networks.
 ///
 /// Chains index their blocks, transactions, transparent outputs and spends, and nullifiers, at
-/// about 1 KB per entry, and count the outputs they share with other chains once. When the total
+/// about 1 KB per entry, and count the blocks they share with other chains once. When the total
 /// passes this limit, Zebra drops the chain with the lowest work, but keeps the best chain and the
 /// most recently inserted chain.
 ///

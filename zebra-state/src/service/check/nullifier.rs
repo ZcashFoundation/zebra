@@ -1,6 +1,6 @@
 //! Checks for nullifier uniqueness.
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use tracing::trace;
 use zebra_chain::transaction::Transaction;
@@ -172,7 +172,7 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// callers of this function.
 #[tracing::instrument(level = "trace", skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
+    chain_nullifiers: &mut imbl::HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
     revealing_tx_id: SpendingTransactionId,
 ) -> Result<(), ValidateContextError>
@@ -219,10 +219,10 @@ where
 /// [`Chain`].
 #[tracing::instrument(level = "trace", skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
+    chain_nullifiers: &mut imbl::HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = NullifierT>,
 ) where
-    NullifierT: std::fmt::Debug + Eq + std::hash::Hash,
+    NullifierT: Copy + std::fmt::Debug + Eq + std::hash::Hash,
 {
     for nullifier in shielded_data_nullifiers.into_iter() {
         trace!(?nullifier, "removing nullifier");

@@ -4,7 +4,7 @@
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ops::{Deref, DerefMut, RangeBounds, RangeInclusive},
+    ops::{Bound, Deref, DerefMut, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -71,6 +71,12 @@ pub struct Chain {
     /// diagnostics only use the best chain, and others need to modify the Chain state, but that's
     /// difficult with `Arc<Chain>`s.
     pub(super) last_fork_height: Option<Height>,
+
+    /// An estimate of the transaction, spend, and nullifier entries this chain no longer shares
+    /// with other chains, because it removed blocks from its maps separately from them.
+    ///
+    /// It is not checked for equality.
+    pub(crate) detached_index_entries: usize,
 }
 
 /// Spending transaction id type when the `indexer` feature is selected.
@@ -94,8 +100,12 @@ pub struct ChainInner {
     /// An index of block heights for each block hash in `blocks`.
     pub height_by_hash: HashMap<block::Hash, block::Height>,
 
+    // Indexes that grow with the transactions, spends, and nullifiers in `blocks` are persistent
+    // maps. Every commit and fork clones its parent chain, because readers' snapshots still hold
+    // it, and these clones share the unchanged entries instead of copying them.
+    //
     /// An index of [`TransactionLocation`]s for each transaction hash in `blocks`.
-    pub tx_loc_by_hash: HashMap<transaction::Hash, TransactionLocation>,
+    pub(crate) tx_loc_by_hash: imbl::HashMap<transaction::Hash, TransactionLocation>,
 
     // Transparent outputs and spends
     //
@@ -103,7 +113,7 @@ pub struct ChainInner {
     /// including spent outputs created by earlier transactions or blocks in the chain.
     ///
     /// Note: Spending transaction ids are only tracked when the `indexer` feature is selected.
-    pub(crate) spent_utxos: HashMap<transparent::OutPoint, SpendingTransactionId>,
+    pub(crate) spent_utxos: imbl::HashMap<transparent::OutPoint, SpendingTransactionId>,
 
     // Note commitment trees
     //
@@ -208,16 +218,16 @@ pub struct ChainInner {
     //
     /// The Sprout nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
-    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, SpendingTransactionId>,
+    pub(crate) sprout_nullifiers: imbl::HashMap<sprout::Nullifier, SpendingTransactionId>,
     /// The Sapling nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
-    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, SpendingTransactionId>,
+    pub(crate) sapling_nullifiers: imbl::HashMap<sapling::Nullifier, SpendingTransactionId>,
     /// The Orchard nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
-    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, SpendingTransactionId>,
+    pub(crate) orchard_nullifiers: imbl::HashMap<orchard::Nullifier, SpendingTransactionId>,
     /// The Ironwood nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
-    pub(crate) ironwood_nullifiers: HashMap<ironwood::Nullifier, SpendingTransactionId>,
+    pub(crate) ironwood_nullifiers: imbl::HashMap<ironwood::Nullifier, SpendingTransactionId>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -225,6 +235,9 @@ pub struct ChainInner {
     /// The transparent address changes of each block in `blocks`, shared with every chain that
     /// contains the block.
     pub(crate) transparent_transfers_by_height: BTreeMap<Height, Arc<BlockTransparentTransfers>>,
+
+    /// The transaction, spend, and nullifier index entries that each block in `blocks` adds.
+    pub(crate) index_entries_by_height: BTreeMap<Height, usize>,
 
     // Chain Work
     //
@@ -296,6 +309,7 @@ impl Chain {
             orchard_nullifiers: Default::default(),
             ironwood_nullifiers: Default::default(),
             transparent_transfers_by_height: Default::default(),
+            index_entries_by_height: Default::default(),
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
@@ -306,6 +320,7 @@ impl Chain {
             network: network.clone(),
             inner,
             last_fork_height: None,
+            detached_index_entries: 0,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -361,7 +376,11 @@ impl Chain {
     #[instrument(level = "debug", skip(self, block), fields(block = %block.block))]
     pub fn push(mut self, block: ContextuallyVerifiedBlock) -> Result<Chain, ValidateContextError> {
         // update cumulative data members
+        let entries_before = self.shared_map_entry_count();
         self.update_chain_tip_with(&block)?;
+        let block_entries = self.shared_map_entry_count() - entries_before;
+        self.index_entries_by_height
+            .insert(block.height, block_entries);
 
         tracing::debug!(block = %block.block, "adding block to chain");
         self.blocks.insert(block.height, Arc::new(block));
@@ -398,6 +417,7 @@ impl Chain {
             .blocks
             .remove(&block_height)
             .expect("only called while blocks is populated");
+        self.index_entries_by_height.remove(&block_height);
 
         // Update cumulative data members.
         self.revert_chain_with(block.as_ref(), RevertPosition::Root);
@@ -445,6 +465,11 @@ impl Chain {
 
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
+            forked.detached_index_entries += forked
+                .index_entries_by_height
+                .get(&forked.non_finalized_tip_height())
+                .copied()
+                .unwrap_or_default();
             forked.pop_tip();
 
             forked.last_fork_height = Some(forked.non_finalized_tip_height());
@@ -1453,6 +1478,7 @@ impl Chain {
             .blocks
             .remove(&block_height)
             .expect("only called while blocks is populated");
+        self.index_entries_by_height.remove(&block_height);
 
         // If the popped block completed a Sapling or Orchard subtree, remove the corresponding
         // subtree from this chain too. Subtrees are inserted by `push` keyed by the highest subtree
@@ -1524,23 +1550,146 @@ impl Chain {
 
     /// Returns the number of blocks, transactions, transparent outputs and spends, and
     /// nullifiers in this chain.
-    ///
-    /// Forks share the created outputs of their common blocks, but each fork has its own copy of
-    /// the indexes that [`Chain::unshared_index_entry_count`] counts.
     pub(crate) fn index_entry_count(&self) -> usize {
-        self.unshared_index_entry_count()
-            + self
-                .blocks
-                .values()
-                .map(|block| block.new_outputs.len())
-                .sum::<usize>()
+        self.blocks
+            .values()
+            .map(|block| self.block_index_entry_count(block))
+            .sum()
     }
 
-    /// Returns [`Chain::index_entry_count`] without the created outputs, which chains share
-    /// through their blocks.
-    pub(crate) fn unshared_index_entry_count(&self) -> usize {
-        self.blocks.len()
-            + self.tx_loc_by_hash.len()
+    /// Returns the index entries that `block` adds to this chain, counting the block itself.
+    ///
+    /// Chains that contain the same block share these entries.
+    pub(crate) fn block_index_entry_count(&self, block: &ContextuallyVerifiedBlock) -> usize {
+        1 + block.new_outputs.len()
+            + self
+                .index_entries_by_height
+                .get(&block.height)
+                .copied()
+                .unwrap_or_default()
+    }
+
+    /// Returns the height of the highest block that this chain and `other` share, if they share
+    /// their root block.
+    fn common_tip_height(&self, other: &Chain) -> Option<Height> {
+        self.blocks
+            .iter()
+            .zip(other.blocks.iter())
+            .take_while(|((height, block), (other_height, other_block))| {
+                height == other_height && block.hash == other_block.hash
+            })
+            .last()
+            .map(|((height, _), _)| *height)
+    }
+
+    /// Returns the transaction, spend, and nullifier entries in the blocks above `height`.
+    fn index_entries_above(&self, height: Height) -> usize {
+        self.index_entries_by_height
+            .range((Bound::Excluded(height), Bound::Unbounded))
+            .map(|(_, entries)| entries)
+            .sum()
+    }
+
+    /// Returns the transaction, spend, and nullifier entries in the blocks that this chain and
+    /// `other` don't share, or `None` if they don't share their root block.
+    pub(crate) fn divergent_index_entries(&self, other: &Chain) -> Option<usize> {
+        let common_tip = self.common_tip_height(other)?;
+        Some(self.index_entries_above(common_tip) + other.index_entries_above(common_tip))
+    }
+
+    /// Rebuilds this chain's transaction, spend, and nullifier maps from `other`'s, so they share
+    /// the entries of the blocks the chains have in common.
+    ///
+    /// The maps keep the same contents. Does nothing if the chains don't share their root block.
+    pub(crate) fn share_indexes_with(&mut self, other: &Chain) {
+        let Some(common_tip) = self.common_tip_height(other) else {
+            return;
+        };
+        let above = (Bound::Excluded(common_tip), Bound::Unbounded);
+        let other_blocks: Vec<_> = other.blocks.range(above).map(|(_, block)| block).collect();
+        let own_blocks: Vec<_> = self.blocks.range(above).map(|(_, block)| block).collect();
+        let transactions = |blocks: &[&Arc<ContextuallyVerifiedBlock>]| -> Vec<Arc<Transaction>> {
+            blocks
+                .iter()
+                .flat_map(|block| block.block.transactions.iter().cloned())
+                .collect()
+        };
+        let (other_transactions, own_transactions) =
+            (transactions(&other_blocks), transactions(&own_blocks));
+
+        let tx_loc_by_hash = rebase_map(
+            &other.tx_loc_by_hash,
+            &self.tx_loc_by_hash,
+            other_blocks
+                .iter()
+                .flat_map(|block| block.transaction_hashes.iter().copied()),
+            own_blocks
+                .iter()
+                .flat_map(|block| block.transaction_hashes.iter().copied()),
+        );
+        let spent_utxos = rebase_map(
+            &other.spent_utxos,
+            &self.spent_utxos,
+            other_transactions
+                .iter()
+                .flat_map(|tx| tx.spent_outpoints()),
+            own_transactions.iter().flat_map(|tx| tx.spent_outpoints()),
+        );
+        let sprout_nullifiers = rebase_map(
+            &other.sprout_nullifiers,
+            &self.sprout_nullifiers,
+            other_transactions
+                .iter()
+                .flat_map(|tx| tx.sprout_nullifiers()),
+            own_transactions
+                .iter()
+                .flat_map(|tx| tx.sprout_nullifiers()),
+        );
+        let sapling_nullifiers = rebase_map(
+            &other.sapling_nullifiers,
+            &self.sapling_nullifiers,
+            other_transactions
+                .iter()
+                .flat_map(|tx| tx.sapling_nullifiers()),
+            own_transactions
+                .iter()
+                .flat_map(|tx| tx.sapling_nullifiers()),
+        );
+        let orchard_nullifiers = rebase_map(
+            &other.orchard_nullifiers,
+            &self.orchard_nullifiers,
+            other_transactions
+                .iter()
+                .flat_map(|tx| tx.orchard_nullifiers()),
+            own_transactions
+                .iter()
+                .flat_map(|tx| tx.orchard_nullifiers()),
+        );
+        let ironwood_nullifiers = rebase_map(
+            &other.ironwood_nullifiers,
+            &self.ironwood_nullifiers,
+            other_transactions
+                .iter()
+                .flat_map(|tx| tx.ironwood_nullifiers()),
+            own_transactions
+                .iter()
+                .flat_map(|tx| tx.ironwood_nullifiers()),
+        );
+
+        self.tx_loc_by_hash = tx_loc_by_hash;
+        self.spent_utxos = spent_utxos;
+        self.sprout_nullifiers = sprout_nullifiers;
+        self.sapling_nullifiers = sapling_nullifiers;
+        self.orchard_nullifiers = orchard_nullifiers;
+        self.ironwood_nullifiers = ironwood_nullifiers;
+
+        // Removing `other`'s blocks copied the paths to their entries.
+        self.detached_index_entries = other.index_entries_above(common_tip);
+    }
+
+    /// Returns the number of entries in the transaction, spend, and nullifier indexes.
+    fn shared_map_entry_count(&self) -> usize {
+        self.tx_loc_by_hash.len()
             + self.spent_utxos.len()
             + self.sprout_nullifiers.len()
             + self.sapling_nullifiers.len()
@@ -1954,6 +2103,37 @@ impl Chain {
 
         Ok(())
     }
+}
+
+/// Returns `base` without the `removed` keys, and with the `added` keys and their values in `own`.
+///
+/// The result shares its other entries with `base`. In tests, it must equal `own`.
+fn rebase_map<K, V>(
+    base: &imbl::HashMap<K, V>,
+    own: &imbl::HashMap<K, V>,
+    removed: impl IntoIterator<Item = K>,
+    added: impl IntoIterator<Item = K>,
+) -> imbl::HashMap<K, V>
+where
+    K: Clone + Eq + std::hash::Hash + std::fmt::Debug,
+    V: Clone + Eq + std::fmt::Debug,
+{
+    let mut rebased = base.clone();
+    for key in removed {
+        rebased.remove(&key);
+    }
+    for key in added {
+        let value = own
+            .get(&key)
+            .expect("a chain indexes the entries of its own blocks")
+            .clone();
+        rebased.insert(key, value);
+    }
+
+    #[cfg(test)]
+    assert_eq!(&rebased, own, "rebuilt maps keep their contents");
+
+    rebased
 }
 
 impl Deref for Chain {

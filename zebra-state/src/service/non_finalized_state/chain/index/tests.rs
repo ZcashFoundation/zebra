@@ -22,16 +22,33 @@ struct ExpectedTransfers {
 /// The caller also compares complete chain snapshots after tip rollback and reapplication.
 pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Chain) {
     let mut created = HashMap::new();
-    let mut spent = HashMap::new();
+    let mut spent = imbl::HashMap::new();
     let mut addresses: HashMap<transparent::Address, ExpectedTransfers> = HashMap::new();
-    let mut locations = HashMap::new();
+    let mut locations = imbl::HashMap::new();
     let mut heights = HashMap::new();
-    let mut sprout = HashMap::new();
-    let mut sapling = HashMap::new();
-    let mut orchard = HashMap::new();
-    let mut ironwood = HashMap::new();
+    let mut sprout = imbl::HashMap::new();
+    let mut sapling = imbl::HashMap::new();
+    let mut orchard = imbl::HashMap::new();
+    let mut ironwood = imbl::HashMap::new();
     for block in chain.blocks.values() {
         assert!(heights.insert(block.hash, block.height).is_none());
+        let block_entries: usize = block
+            .block
+            .transactions
+            .iter()
+            .map(|transaction| {
+                1 + transaction
+                    .inputs()
+                    .iter()
+                    .filter_map(|input| input.outpoint())
+                    .count()
+                    + transaction.sprout_nullifiers().count()
+                    + transaction.sapling_nullifiers().count()
+                    + transaction.orchard_nullifiers().count()
+                    + transaction.ironwood_nullifiers().count()
+            })
+            .sum();
+        assert_eq!(chain.index_entries_by_height[&block.height], block_entries);
         let transactions = block
             .block
             .transactions
@@ -107,6 +124,7 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
     assert_eq!(chain.spent_utxos, spent);
     assert_eq!(chain.tx_loc_by_hash, locations);
     assert_eq!(chain.height_by_hash, heights);
+    assert!(chain.index_entries_by_height.keys().eq(chain.blocks.keys()));
     assert_eq!(chain.sprout_nullifiers, sprout);
     assert_eq!(chain.sapling_nullifiers, sapling);
     assert_eq!(chain.orchard_nullifiers, orchard);

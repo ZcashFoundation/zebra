@@ -427,6 +427,9 @@ impl NonFinalizedState {
         // also obtain its associated treestate.
         let (best_chain_root, root_treestate) = mut_best_chain.pop_root();
 
+        // Side chains rebuild their maps from the best chain's, so they keep sharing them.
+        let shared_best_chain = best_chain.clone();
+
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
             self.insert(best_chain);
@@ -448,8 +451,24 @@ impl NonFinalizedState {
             let mut_side_chain = Arc::make_mut(&mut side_chain);
 
             // remove the first block from `chain`
+            let root_entries = mut_side_chain
+                .index_entries_by_height
+                .get(&best_chain_root.height)
+                .copied()
+                .unwrap_or_default();
             let (side_chain_root, _treestate) = mut_side_chain.pop_root();
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
+
+            // Popping the root separately from the best chain stopped sharing its map paths.
+            // Rebuilding costs about the entries the chains don't share, so wait until the chain
+            // has detached that many.
+            mut_side_chain.detached_index_entries += root_entries;
+            if mut_side_chain
+                .divergent_index_entries(&shared_best_chain)
+                .is_some_and(|divergent| mut_side_chain.detached_index_entries >= divergent)
+            {
+                mut_side_chain.share_indexes_with(&shared_best_chain);
+            }
 
             // add the chain back to `self.chain_set`
             if !side_chain.is_empty() {
@@ -850,22 +869,20 @@ impl NonFinalizedState {
             .map(|chain| chain.non_finalized_root_height())
     }
 
-    /// Returns the index entries in all chains, counting the outputs of blocks that chains share
-    /// once.
+    /// Returns the index entries in all chains, counting the entries of blocks that chains share
+    /// once, and the entries that chains have stopped sharing.
     pub(crate) fn index_entry_count(&self) -> usize {
         let mut seen_blocks = HashSet::new();
-        self.chain_set
-            .iter()
-            .map(|chain| {
-                let shared_outputs: usize = chain
-                    .blocks
-                    .values()
-                    .filter(|block| seen_blocks.insert(Arc::as_ptr(block)))
-                    .map(|block| block.new_outputs.len())
-                    .sum();
-                chain.unshared_index_entry_count() + shared_outputs
-            })
-            .sum()
+        let mut entries = 0;
+        for chain in &self.chain_set {
+            entries += chain.detached_index_entries;
+            for block in chain.blocks.values() {
+                if seen_blocks.insert(Arc::as_ptr(block)) {
+                    entries += chain.block_index_entry_count(block);
+                }
+            }
+        }
+        entries
     }
 
     /// Returns `true` if `hash` is contained in the non-finalized portion of any

@@ -697,6 +697,9 @@ fn different_blocks_different_chains() -> Result<()> {
                 // block data
                 chain1.block_info_by_height = chain2.block_info_by_height.clone();
 
+                // index sizes
+                chain1.index_entries_by_height = chain2.index_entries_by_height.clone();
+
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.
                 prop_assert!(

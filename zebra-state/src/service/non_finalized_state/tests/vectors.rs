@@ -1992,14 +1992,105 @@ fn finalizing_keeps_block_records_shared_between_chains() -> Result<()> {
     Ok(())
 }
 
-/// Forks over a busy block share its created outputs, so the state counts them once.
+/// Adds `count` transactions to `block`, each with one output that has no value.
+fn with_transactions(block: &Block, network: &Network, count: u32) -> Arc<Block> {
+    let mut block = block.clone();
+    let template = zebra_chain::transaction::Transaction::clone(&block.transactions[0])
+        .with_transparent_inputs(Vec::new());
+    for i in 0..count {
+        let mut pub_key_hash = [0xaa; 20];
+        pub_key_hash[..4].copy_from_slice(&i.to_le_bytes());
+        let output = transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash)
+                .script(),
+        };
+        block.transactions.push(Arc::new(
+            template.clone().with_transparent_outputs(vec![output]),
+        ));
+    }
+    Arc::new(block)
+}
+
+/// Returns a child of `parent` with a transaction that spends `outpoints`.
+fn spending_child(parent: &Arc<Block>, outpoints: &[transparent::OutPoint]) -> Arc<Block> {
+    let mut block = Block::clone(&parent.make_fake_child());
+    let spend = zebra_chain::transaction::Transaction::clone(&block.transactions[0])
+        .with_transparent_inputs(
+            outpoints
+                .iter()
+                .map(|outpoint| transparent::Input::PrevOut {
+                    outpoint: *outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: 0,
+                })
+                .collect(),
+        )
+        .with_transparent_outputs(Vec::new());
+    block.transactions.push(Arc::new(spend));
+    Arc::new(block)
+}
+
+/// Finalizing blocks with spends keeps side chains sharing the spend index with the best chain,
+/// instead of each chain removing the spends from its own copy.
 #[test]
-fn index_entries_count_shared_outputs_once() -> Result<()> {
+fn finalizing_keeps_side_chain_indexes_shared() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_default_testnet();
     let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
-    let busy = busy_child(&block1, &block1, &network, 5_000, 50);
+    let funding = with_transactions(&block1.make_fake_child(), &network, 50);
+    let outpoints: Vec<_> = funding.transactions[1..]
+        .iter()
+        .map(|transaction| transparent::OutPoint {
+            hash: transaction.hash(),
+            index: 0,
+        })
+        .collect();
+    let first_spends = spending_child(&funding, &outpoints[..25]);
+    let second_spends = spending_child(&first_spends, &outpoints[25..]);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in [&funding, &first_spends, &second_spends] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+    }
+    for i in 0..5u8 {
+        let sibling = busy_child(&second_spends, &block1, &network, 0, 1)
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    assert_eq!(5, state.chain_count());
+
+    for finalized in [&block1, &funding, &first_spends] {
+        assert_eq!(state.finalize().inner_block().hash(), finalized.hash());
+
+        let best = state.best_chain().unwrap().clone();
+        assert!(!best.spent_utxos.is_empty());
+        for chain in state.chain_iter() {
+            assert!(chain.spent_utxos.ptr_eq(&best.spent_utxos));
+            crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(chain);
+        }
+    }
+    assert_eq!(5, state.chain_count());
+
+    Ok(())
+}
+
+/// Forks over a busy block share its transactions and created outputs, so the state counts them
+/// once.
+#[test]
+fn index_entries_count_shared_blocks_once() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = with_transactions(
+        &busy_child(&block1, &block1, &network, 5_000, 50),
+        &network,
+        1_000,
+    );
     let (mut state, finalized_state) = new_invalidate_test_state(&network);
     state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
     state.commit_block(busy.clone().prepare(), &finalized_state)?;
@@ -2016,9 +2107,38 @@ fn index_entries_count_shared_outputs_once() -> Result<()> {
         .chain_iter()
         .map(|chain| chain.index_entry_count())
         .sum();
-    assert!(logical > 5 * 5_000);
-    // Each fork adds its own small tip block and the blocks and transactions it copied.
-    assert!(state.index_entry_count() < one_chain + 5 * 100);
+    assert!(logical > 5 * (5_000 + 1_000));
+    // Each fork adds only its own small tip block.
+    assert!(state.index_entry_count() < one_chain + 5 * 10);
+
+    // Each distinct block counts itself, its outputs, transactions, spends, and nullifiers.
+    let mut seen = std::collections::HashSet::new();
+    let block_entries: usize = state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        .filter(|block| seen.insert(block.hash))
+        .map(|block| {
+            let transactions = &block.block.transactions;
+            1 + block.new_outputs.len()
+                + transactions.len()
+                + transactions
+                    .iter()
+                    .map(|transaction| {
+                        transaction.spent_outpoints().count()
+                            + transaction.sprout_nullifiers().count()
+                            + transaction.sapling_nullifiers().count()
+                            + transaction.orchard_nullifiers().count()
+                            + transaction.ironwood_nullifiers().count()
+                    })
+                    .sum::<usize>()
+        })
+        .sum();
+    let detached: usize = state
+        .chain_iter()
+        .map(|chain| chain.detached_index_entries)
+        .sum();
+    assert!(block_entries > 6_000);
+    assert_eq!(state.index_entry_count(), block_entries + detached);
 
     Ok(())
 }
@@ -2475,4 +2595,59 @@ fn address_balance_from_a_height_skips_lower_blocks() -> Result<()> {
     );
 
     Ok(())
+}
+
+/// Measures the cost of the chain copy that every commit and fork still makes, with
+/// transaction-dense and input-dense blocks filling the window.
+///
+/// Run with `ZEBRA_TEST_MEASURE_MEMORY=1` and `--run-ignored=only --no-capture`.
+/// `ZEBRA_TEST_TX_ENTRIES` sets the transactions, and spent outputs, in the window.
+#[test]
+#[ignore]
+#[allow(clippy::print_stdout)]
+fn measure_plain_index_clone_cost() {
+    let _init_guard = zebra_test::init();
+    if !memory_measurement_requested() {
+        return;
+    }
+
+    let entries: u32 = std::env::var("ZEBRA_TEST_TX_ENTRIES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(2_500_000);
+    let mib = |bytes: u64| bytes / (1024 * 1024);
+
+    let start = resident_set_size();
+    let mut chain = Chain::default();
+    for i in 0..entries {
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&i.to_le_bytes());
+        let hash = zebra_chain::transaction::Hash(hash);
+        chain.tx_loc_by_hash.insert(
+            hash,
+            crate::TransactionLocation::from_usize(Height(i / 25_000), (i % 25_000) as usize),
+        );
+        #[cfg(feature = "indexer")]
+        let spending = hash;
+        #[cfg(not(feature = "indexer"))]
+        let spending = ();
+        chain
+            .spent_utxos
+            .insert(transparent::OutPoint { hash, index: 0 }, spending);
+    }
+    let filled = resident_set_size();
+
+    let timer = std::time::Instant::now();
+    let copy = chain.clone();
+    let elapsed = timer.elapsed();
+    let copied = resident_set_size();
+
+    println!(
+        "entries {entries}: RSS MiB start {}, filled {}, after one chain copy {}, copy took {:?}",
+        mib(start),
+        mib(filled),
+        mib(copied),
+        elapsed,
+    );
+    drop(copy);
 }
