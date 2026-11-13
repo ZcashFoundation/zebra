@@ -994,7 +994,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
     for height in 0..=5 {
         commit_checkpoint(&mut state, height);
     }
-    assert!(!state.checkpoint_handoff_is_ready(true));
+    assert!(!state.checkpoint_handoff_is_ready());
 
     // A child of the committed tip is rejected before it's queued.
     let rejected = state
@@ -1019,7 +1019,7 @@ fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
 
     // The honest switch still happens at the final checkpoint.
     commit_checkpoint(&mut state, 8);
-    assert!(state.checkpoint_handoff_is_ready(false));
+    assert!(state.checkpoint_handoff_is_ready());
     let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
     assert!(state.block_write_sender.finalized.is_none());
 

@@ -653,16 +653,11 @@ impl StateService {
 
             self.finalized_block_write_last_sent_hash = queued_block.0.hash;
 
-            // Below the final checkpoint, children are checkpoint verified, so a queued
-            // semantically verified child is invalid and would never be dequeued.
-            if self.max_checkpoint_height != block::Height::MAX
-                && last_sent_finalized_block_height < self.max_checkpoint_height
-            {
-                self.reject_queued_non_finalized_children(
-                    queued_block.0.hash,
-                    last_sent_finalized_block_height,
-                );
-            }
+            // A queued child that isn't at the next height is invalid and would never be dequeued.
+            self.reject_queued_non_finalized_children(
+                queued_block.0.hash,
+                last_sent_finalized_block_height,
+            );
 
             // If we're close to the final checkpoint, make the block's UTXOs available for
             // semantic block verification, even when it is in the channel.
@@ -896,12 +891,7 @@ impl StateService {
         // We've finished sending checkpoint verified blocks when:
         // - we've sent the verified block for the last checkpoint, and
         // - it has been successfully written to disk.
-        if self.block_write_sender.finalized.is_some()
-            && self.checkpoint_handoff_is_ready(
-                self.non_finalized_state_queued_blocks
-                    .has_queued_children(self.finalized_block_write_last_sent_hash),
-            )
-        {
+        if self.block_write_sender.finalized.is_some() && self.checkpoint_handoff_is_ready() {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
             std::mem::drop(self.block_write_sender.finalized.take());
@@ -946,15 +936,18 @@ impl StateService {
     /// Returns `true` if checkpoint verified blocks are written up to the final checkpoint,
     /// so the block write task can switch to non-finalized blocks.
     ///
-    /// `has_child` is only used when there is no final checkpoint (`Height::MAX`).
-    fn checkpoint_handoff_is_ready(&self, has_child: bool) -> bool {
+    /// With no final checkpoint (`Height::MAX`), it waits for a queued child of the last sent block.
+    fn checkpoint_handoff_is_ready(&self) -> bool {
         self.read_service.db.finalized_tip_hash() == self.finalized_block_write_last_sent_hash
             && (self
                 .read_service
                 .db
                 .finalized_tip_height()
                 .is_some_and(|tip_height| tip_height >= self.max_checkpoint_height)
-                || (self.max_checkpoint_height == block::Height::MAX && has_child))
+                || (self.max_checkpoint_height == block::Height::MAX
+                    && self
+                        .non_finalized_state_queued_blocks
+                        .has_queued_children(self.finalized_block_write_last_sent_hash)))
     }
 
     /// Rejects the queued non-finalized children of the finalized block `parent_hash` whose
