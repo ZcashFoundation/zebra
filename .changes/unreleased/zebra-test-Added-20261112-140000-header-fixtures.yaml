@@ -1,0 +1,4 @@
+project: zebra-test
+kind: Added
+body: 'Added two anchored, contiguous 160-header Mainnet fixtures covering Sprout and NU5 for offline header-verification and storage workloads.'
+time: 2026-11-12T14:00:00Z

@@ -77,10 +77,15 @@ Zebra has [Criterion] benchmarks in `zebra-chain/benches/` and
 | `zebra-consensus` | `groth16` | Sprout Groth16 proof verification | `cargo bench --locked -p zebra-consensus --bench groth16` |
 | `zebra-consensus` | `halo2` | Orchard Halo2 proof verification | `cargo bench --locked -p zebra-consensus --bench halo2` |
 | `zebra-consensus` | `sapling` | Sapling proof and signature verification | `cargo bench --locked -p zebra-consensus --bench sapling` |
+| `zebra-consensus` | `header` | Context-free Mainnet header verification | `cargo bench --locked -p zebra-consensus --bench header` |
 
 The transaction target uses version 1 through 5 vectors; the Halo2 target uses
 pre-NU6.2 Orchard vectors and its verifying key. Add representative inputs for
 paths these benchmarks omit.
+
+The header target measures blocking/async Sprout/NU5 batches (1/16/160 headers);
+setup and validation are untimed. Set `RAYON_NUM_THREADS` for worker scaling;
+result IDs include the effective worker count. The target is not registered in CI.
 
 To compare two revisions locally, save a Criterion baseline before changing
 the source:
