@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Stopped starting the Sentry session rotation and metrics flush threads when `SENTRY_DSN` is unset or the Sentry client is disabled.
+time: 2026-11-12T17:56:20.098451152Z

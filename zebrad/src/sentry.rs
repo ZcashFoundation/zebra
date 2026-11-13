@@ -222,11 +222,15 @@ pub(crate) fn init(network: &Network) {
     let guard = sentry::init(metadata.client_options());
     sentry::configure_scope(|scope| metadata.apply_to_scope(scope));
 
-    if guard.is_enabled() {
-        start_run_sessions();
+    let enabled = guard.is_enabled();
+    *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
+
+    // A disabled client has no sessions to rotate and no metrics to flush.
+    if !enabled {
+        return;
     }
 
-    *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
+    start_run_sessions();
 
     let rotation = thread::Builder::new()
         .name("sentry session rotation".to_owned())

@@ -147,25 +147,33 @@ impl PeerError {
     /// Returns the Zebra internal handler type as a string.
     pub fn kind(&self) -> Cow<'static, str> {
         match self {
-            PeerError::ConnectionClosed => "ConnectionClosed".into(),
-            PeerError::ConnectionDropped => "ConnectionDropped".into(),
-            PeerError::ClientDropped => "ClientDropped".into(),
-            PeerError::ClientCancelledHeartbeatTask => "ClientCancelledHeartbeatTask".into(),
-            PeerError::HeartbeatTaskExited(_) => "HeartbeatTaskExited".into(),
-            PeerError::ConnectionTaskExited => "ConnectionTaskExited".into(),
-            PeerError::ConnectionSendTimeout => "ConnectionSendTimeout".into(),
-            PeerError::ConnectionReceiveTimeout => "ConnectionReceiveTimeout".into(),
             // TODO: add error kinds or summaries to `SerializationError`
             PeerError::Serialization(inner) => format!("Serialization({inner})").into(),
-            PeerError::DuplicateHandshake => "DuplicateHandshake".into(),
-            PeerError::Overloaded => "Overloaded".into(),
-            PeerError::NoReadyPeers => "NoReadyPeers".into(),
-            PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
-            PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked".into(),
-            PeerError::InboundTimeout => "InboundTimeout".into(),
-            PeerError::ServiceShutdown => "ServiceShutdown".into(),
-            PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
-            PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
+            other => other.kind_name().into(),
+        }
+    }
+
+    /// Returns the name of this error's variant, without any error details.
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            PeerError::ConnectionClosed => "ConnectionClosed",
+            PeerError::ConnectionDropped => "ConnectionDropped",
+            PeerError::ClientDropped => "ClientDropped",
+            PeerError::ClientCancelledHeartbeatTask => "ClientCancelledHeartbeatTask",
+            PeerError::HeartbeatTaskExited(_) => "HeartbeatTaskExited",
+            PeerError::ConnectionTaskExited => "ConnectionTaskExited",
+            PeerError::ConnectionSendTimeout => "ConnectionSendTimeout",
+            PeerError::ConnectionReceiveTimeout => "ConnectionReceiveTimeout",
+            PeerError::Serialization(_) => "Serialization",
+            PeerError::DuplicateHandshake => "DuplicateHandshake",
+            PeerError::Overloaded => "Overloaded",
+            PeerError::NoReadyPeers => "NoReadyPeers",
+            PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService",
+            PeerError::AdvertAuthorizationRevoked => "AdvertAuthorizationRevoked",
+            PeerError::InboundTimeout => "InboundTimeout",
+            PeerError::ServiceShutdown => "ServiceShutdown",
+            PeerError::NotFoundResponse(_) => "NotFoundResponse",
+            PeerError::NotFoundRegistry(_) => "NotFoundRegistry",
         }
     }
 }

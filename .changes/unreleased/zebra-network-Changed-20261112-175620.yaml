@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: Removed per-message allocations from the `zebra.net.connection.state` gauge updates. The gauge keeps its name, labels, and values.
+time: 2026-11-12T17:56:20.10433965Z
