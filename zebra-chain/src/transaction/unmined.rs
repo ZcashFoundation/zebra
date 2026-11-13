@@ -222,13 +222,20 @@ pub struct UnminedTx {
     /// A unique identifier for this unmined transaction.
     pub id: UnminedTxId,
 
-    /// The size in bytes of the serialized transaction data
-    pub size: usize,
+    /// The size in bytes of the serialized transaction data.
+    size: usize,
 
     /// The height-independent conventional action count, as defined by [ZIP-317].
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#fee-calculation
     pub conventional_actions: u32,
+}
+
+impl UnminedTx {
+    /// Returns the size in bytes of the serialized transaction data.
+    pub fn size(&self) -> usize {
+        self.size
+    }
 }
 
 impl fmt::Debug for UnminedTx {
@@ -371,7 +378,7 @@ impl VerifiedUnminedTx {
         let unpaid_actions =
             zip317::unpaid_actions(&transaction, miner_fee, network, next_block_height);
 
-        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size)?;
+        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size())?;
 
         Ok(Self {
             transaction,
@@ -432,7 +439,7 @@ impl VerifiedUnminedTx {
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     pub fn cost(&self) -> u64 {
         std::cmp::max(
-            u64::try_from(self.transaction.size).expect("fits in u64"),
+            u64::try_from(self.transaction.size()).expect("fits in u64"),
             MEMPOOL_TRANSACTION_COST_THRESHOLD,
         )
     }

@@ -207,7 +207,7 @@ impl VerifiedSet {
         self.orchard_nullifiers.extend(tx.orchard_nullifiers());
         self.ironwood_nullifiers.extend(tx.ironwood_nullifiers());
 
-        self.transactions_serialized_size += transaction.transaction.size;
+        self.transactions_serialized_size += transaction.transaction.size();
         self.total_cost += transaction.cost();
         self.metrics.update(&transaction, true);
         transaction.time = Some(chrono::Utc::now());
@@ -323,7 +323,7 @@ impl VerifiedSet {
                     return None;
                 };
 
-                self.transactions_serialized_size -= removed_tx.transaction.size;
+                self.transactions_serialized_size -= removed_tx.transaction.size();
                 self.total_cost -= removed_tx.cost();
                 self.metrics.update(&removed_tx, false);
                 self.remove_outputs(&removed_tx.transaction);
@@ -482,10 +482,10 @@ impl MempoolMetrics {
             transaction.transaction.conventional_actions - transaction.unpaid_actions;
         if insert {
             self.paid_actions += paid_actions;
-            self.size_by_weight[size_bucket] += transaction.transaction.size;
+            self.size_by_weight[size_bucket] += transaction.transaction.size();
         } else {
             self.paid_actions -= paid_actions;
-            self.size_by_weight[size_bucket] -= transaction.transaction.size;
+            self.size_by_weight[size_bucket] -= transaction.transaction.size();
         }
 
         // Transactions with weight >= 1 have no unpaid actions.
