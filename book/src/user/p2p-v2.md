@@ -153,7 +153,7 @@ Serving is bounded so that it cannot crowd out the node's other work:
   streams hold at most about 64 MB of blocks in memory.
 - A stream is cancelled if its reader does not start taking the response
   within 5 seconds of sending its request, if it then takes the response at
-  less than 64 KiB/s (a reader that was faster keeps up to 10 seconds of
+  less than 256 KiB/s (a reader that was faster keeps up to 10 seconds of
   slack), or if the stream lasts longer than 5 minutes. Only the time Zebra
   waits for the reader counts, not the time Zebra takes to read the blocks.
 - A peer whose stream was cancelled for reading too slowly is answered with

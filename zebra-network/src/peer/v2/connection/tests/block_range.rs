@@ -29,10 +29,11 @@ use crate::{
         connection::{
             inbound::{
                 block_range::{
-                    RANGE_FIRST_WRITE_TIMEOUT, RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS,
-                    RANGE_STALL_ADDRS, RANGE_STALL_BACKOFF, RANGE_STALL_BACKOFF_MAX,
-                    RANGE_STREAMS_GLOBAL, RANGE_STREAMS_PER_ADDR, RANGE_STREAMS_PER_GROUP,
-                    RANGE_STREAMS_PER_PEER,
+                    RANGE_FIRST_WRITE_TIMEOUT, RANGE_MIN_SERVE_RATE, RANGE_PROGRESS_WINDOW,
+                    RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STALL_ADDRS,
+                    RANGE_STALL_BACKOFF, RANGE_STALL_BACKOFF_MAX, RANGE_STREAMS_GLOBAL,
+                    RANGE_STREAMS_PER_ADDR, RANGE_STREAMS_PER_GROUP, RANGE_STREAMS_PER_PEER,
+                    RANGE_STREAM_TIMEOUT,
                 },
                 global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
                 INBOUND_REQUEST_CONCURRENCY,
@@ -44,6 +45,7 @@ use crate::{
     protocol::{
         internal::{Request, Response},
         v2::{
+            constants::MAX_GET_BLOCK_RANGE_BYTES,
             request::{GetBlockRange, Request as WireRequest},
             types::ErrorCode,
         },
@@ -1334,6 +1336,21 @@ async fn node_block_range_permits_are_shared_between_addresses() {
     })
     .await
     .expect("the test completes");
+}
+
+/// A reader at the minimum rate takes a whole response of the draft's
+/// largest size within the stream deadline, so holding a node permit for the
+/// deadline costs a full response, and the first write deadline and slack
+/// are a small part of it.
+#[test]
+fn block_range_minimum_rate_serves_the_largest_response_within_the_stream_deadline() {
+    let _init_guard = zebra_test::init();
+    let largest = u64::from(MAX_GET_BLOCK_RANGE_BYTES);
+    let at_floor = Duration::from_secs(largest.div_ceil(RANGE_MIN_SERVE_RATE));
+
+    assert!(at_floor + RANGE_FIRST_WRITE_TIMEOUT <= RANGE_STREAM_TIMEOUT);
+    assert!(RANGE_FIRST_WRITE_TIMEOUT <= RANGE_PROGRESS_WINDOW);
+    assert!(RANGE_PROGRESS_WINDOW < RANGE_STALL_BACKOFF);
 }
 
 /// Requests the tip range of `chain` from a server whose reads answer wrongly

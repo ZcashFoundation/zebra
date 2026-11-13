@@ -140,7 +140,10 @@ pub(crate) const RANGE_READ_CHUNK_BLOCKS: u32 = 64;
 /// How long after its stream was accepted a `get-block-range` response must
 /// be complete, after which it is abandoned.
 ///
-/// At the draft's 64 MiB maximum, this serves a reader of about 220 KiB/s.
+/// A reader at [`RANGE_MIN_SERVE_RATE`] takes the draft's 64 MiB maximum in
+/// 256 s, so the minimum rate, not this deadline, is what bounds a reader.
+/// The deadline leaves the rest for this node's own reads, which are not
+/// counted against the reader, and bounds a stream whatever happens.
 pub(crate) const RANGE_STREAM_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The lowest rate, in response bytes per second, at which a peer must take
@@ -152,9 +155,20 @@ pub(crate) const RANGE_STREAM_TIMEOUT: Duration = Duration::from_secs(300);
 /// Without it, a reader could take each write just within a deadline and
 /// hold a node permit for the whole [`RANGE_STREAM_TIMEOUT`] at almost no
 /// cost: a few such peers would deny range serving to every other peer.
-/// 64 KiB/s is far below the rate a bulk sync requester needs, so this only
-/// abandons responses that are of little use to the requester anyway.
-pub(crate) const RANGE_MIN_SERVE_RATE: u64 = 64 * 1024;
+///
+/// A reader exactly at the floor still holds a permit for as long as the
+/// floor lets it, so the floor is high enough that it has to take a whole
+/// 64 MiB response within the stream deadline: holding a permit for the
+/// deadline costs the reader, and this node, the full response. At 64 KiB/s
+/// it cost a quarter of one.
+///
+/// 256 KiB/s is also the default rate below which Zebra's own block-range
+/// requester gives up on a peer (`sync.v2_min_peer_rate`), so a response
+/// abandoned here is one such a requester would have abandoned anyway. The
+/// cost is that a node whose uplink cannot give each stream it is serving
+/// this rate abandons the slowest of them, which frees its share for the
+/// others.
+pub(crate) const RANGE_MIN_SERVE_RATE: u64 = 256 * 1024;
 
 /// How long the peer has, from the moment its `get-block-range` request is
 /// complete, to start taking the response: the time the first write may wait
