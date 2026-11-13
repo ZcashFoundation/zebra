@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: Dropping the read-write state service releases the metrics exporter’s database handle before shutdown returns (#12371).
+time: 2026-11-08T06:52:47.873965476+01:00
