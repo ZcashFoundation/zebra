@@ -708,3 +708,106 @@ async fn failing_dns_returns_cached_peers() {
 
     assert_eq!(peers, cached_peers);
 }
+
+#[test]
+fn initial_peer_labels_only_name_default_seeders() {
+    use super::super::seed_metric_label;
+
+    assert_eq!(
+        seed_metric_label("dnsseed.z.cash:8233"),
+        "dnsseed.z.cash:8233"
+    );
+    assert_eq!(
+        seed_metric_label("testnet.seeder.zfnd.org:18233"),
+        "testnet.seeder.zfnd.org:18233"
+    );
+    assert_eq!(seed_metric_label("seed.example.internal:18233"), "custom");
+    assert_eq!(seed_metric_label("100.64.0.1:18233"), "custom");
+
+    // Near misses of a default seeder are custom entries too.
+    for near_miss in [
+        "DNSSEED.Z.CASH:8233",
+        "dnsseed.z.cash.:8233",
+        "dnsseed.z.cash:18233",
+        "dnsseed.z.cash:8233x",
+    ] {
+        assert_eq!(seed_metric_label(near_miss), "custom", "{near_miss}");
+    }
+}
+
+/// A [`tracing_subscriber::fmt::MakeWriter`] that keeps everything written to it.
+#[derive(Clone, Default)]
+struct CapturedLogs(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .expect("no test thread panics while holding the log lock")
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Configured initial peers can be private, and INFO logs become Sentry breadcrumbs,
+/// so logs above DEBUG must not name them.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn failed_initial_peer_logs_hide_custom_peers() {
+    let logs = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .with_writer(logs.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    // The `.invalid` top-level domain never resolves.
+    let private_peer = "private-seed.invalid:8233".to_string();
+    let config = Config {
+        initial_mainnet_peers: [private_peer].into(),
+        ..Config::default()
+    };
+
+    let peers =
+        Config::resolve_peers(&config.initial_mainnet_peers.into_iter().collect(), false).await;
+    assert!(peers.is_empty());
+
+    let logs = String::from_utf8(logs.0.lock().expect("the test is finished").clone())
+        .expect("logs are UTF-8");
+    assert!(logs.contains("Seed peer DNS resolution failed"), "{logs}");
+    assert!(
+        logs.contains("empty peer list after DNS resolution"),
+        "{logs}"
+    );
+    assert!(logs.contains("custom"), "{logs}");
+    assert!(!logs.contains("private-seed"), "{logs}");
+}
+
+/// The invalid address panic message becomes the Sentry issue title,
+/// so it must not name a custom peer.
+#[tokio::test]
+async fn invalid_initial_peer_panic_hides_custom_peer() {
+    let panic = tokio::spawn(Config::resolve_host_once("100.64.0.1"))
+        .await
+        .expect_err("an address without a port panics");
+    let panic = panic.into_panic();
+    let message = panic
+        .downcast_ref::<String>()
+        .expect("the panic message is formatted");
+
+    assert!(message.contains("addresses must have ports"), "{message}");
+    assert!(message.contains("custom"), "{message}");
+    assert!(!message.contains("100.64.0.1"), "{message}");
+}
