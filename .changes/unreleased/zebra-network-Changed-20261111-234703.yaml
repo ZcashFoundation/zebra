@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: "Replaced the `dnsseed.z.cash` and `dnsseed.testnet.z.cash` default DNS seeders with `mainnet.zodl.com` and `dnsseed.testnet.zodl.com`. Configured test networks still cannot use the z.cash seeders, which now resolve to the Zodl seeders."
+time: 2026-11-11T23:47:03.000000000Z

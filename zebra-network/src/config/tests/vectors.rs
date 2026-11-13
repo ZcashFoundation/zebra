@@ -618,6 +618,8 @@ fn incompatible_testnet_rejects_public_seed_aliases() {
         "DNSSEED.TESTNET.Z.CASH:18233",
         "dnsseed.testnet.z.cash.:18233",
         "DNSSEED.Z.CASH.:8233",
+        "MAINNET.ZODL.COM:8233",
+        "dnsseed.testnet.zodl.com.:18233",
     ] {
         let config = format!(
             "network = 'Testnet'\n\

@@ -58,16 +58,22 @@ const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 /// Public DNS seed endpoints, also used to isolate configured networks.
 const DEFAULT_MAINNET_PEERS: [&str; 5] = [
     "dnsseed.str4d.xyz:8233",
-    "dnsseed.z.cash:8233",
     "mainnet.seeder.shieldedinfra.net:8233",
     "mainnet.seeder.zfnd.org:8233",
+    "mainnet.zodl.com:8233",
     "seeder.zec.rocks:8233",
 ];
 const DEFAULT_TESTNET_PEERS: [&str; 3] = [
-    "dnsseed.testnet.z.cash:18233",
+    "dnsseed.testnet.zodl.com:18233",
     "seeder.testnet.zec.rocks:18233",
     "testnet.seeder.zfnd.org:18233",
 ];
+
+/// Former default DNS seeds that still resolve to public peers.
+///
+/// The z.cash seeders are aliases of the Zodl seeders, so they are no longer
+/// defaults, but configured networks must still be isolated from them.
+const RETIRED_PUBLIC_PEERS: [&str; 2] = ["dnsseed.testnet.z.cash:18233", "dnsseed.z.cash:8233"];
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -907,6 +913,7 @@ fn is_default_initial_peer(peer: &str) -> bool {
     DEFAULT_MAINNET_PEERS
         .iter()
         .chain(&DEFAULT_TESTNET_PEERS)
+        .chain(&RETIRED_PUBLIC_PEERS)
         .any(|default| peer_host.eq_ignore_ascii_case(hostname(default)))
 }
 
