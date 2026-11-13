@@ -151,6 +151,11 @@ Serving is bounded so that it cannot crowd out the node's other work:
   less than 64 KiB/s (a reader that was faster keeps up to 10 seconds of
   slack), or if the stream lasts longer than 5 minutes. Only the time Zebra
   waits for the reader counts, not the time Zebra takes to read the blocks.
+- A peer whose stream was cancelled for reading too slowly is answered with
+  `BUSY` for the next minute, on its connection and on any other connection
+  from the same IP address (the same `/64` for IPv6). The delay doubles each
+  time it happens again, up to 16 minutes, and starts again at one minute
+  once the address has gone 16 minutes without another cancelled stream.
 
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
 request, with the `REFUSED` error code, which tells the peer not to ask again.

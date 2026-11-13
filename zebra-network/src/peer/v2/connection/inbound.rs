@@ -63,7 +63,7 @@ use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 
 pub(crate) mod block_range;
 
-pub(crate) use block_range::{global_block_range_permits, BlockRangeServing};
+pub(crate) use block_range::{global_block_range_permits, BlockRangeServing, NodeRangeLimits};
 
 use block_range::{serve_block_range, PendingRange};
 
@@ -211,8 +211,8 @@ pub(super) async fn serve<S>(
                 &mut response,
                 range,
                 inbound_service,
-                accepted + block_ranges.stream_timeout(),
-                block_ranges.min_progress(),
+                accepted,
+                &block_ranges,
             )
             .await
         }

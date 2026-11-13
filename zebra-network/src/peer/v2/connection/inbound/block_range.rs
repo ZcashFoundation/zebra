@@ -42,8 +42,20 @@
 //! hold only their own peer's permits. Each stream
 //! holds at most one chunk of blocks, so the memory and disk reads of range
 //! serving are bounded whatever the number of peers.
+//!
+//! A response abandoned because its reader fell behind has held a node permit
+//! for almost nothing, and without a cost the peer could open the next stream
+//! at once and hold the permit again. So that peer's further range streams
+//! are answered with `BUSY` for [`RANGE_STALL_BACKOFF`], doubling each time
+//! it happens again, both on the connection and for its address (see
+//! [`NodeRangeLimits`]), so a new connection does not clear it.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
@@ -56,6 +68,7 @@ use zebra_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH, serialization:
 use crate::{
     constants::REQUEST_TIMEOUT,
     protocol::{
+        external::connection_limit_key,
         internal::{Request, Response},
         v2::{
             request::GetBlockRange,
@@ -137,11 +150,156 @@ pub(crate) const RANGE_FIRST_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// letting a reader that started fast hold a permit while it reads nothing.
 pub(crate) const RANGE_PROGRESS_WINDOW: Duration = Duration::from_secs(10);
 
-/// Returns the node-wide `get-block-range` stream permits,
-/// [`RANGE_STREAMS_GLOBAL`] of them, to be shared by every version 2
+/// How long a peer's `get-block-range` streams are answered with `BUSY`
+/// after one of its responses was abandoned because it fell behind its
+/// minimum progress. Each further abandoned response doubles it, up to
+/// [`RANGE_STALL_BACKOFF_MAX`].
+///
+/// # Security
+///
+/// A stalled response holds a node permit for at least
+/// [`RANGE_FIRST_WRITE_TIMEOUT`] at the cost of one request. With the
+/// backoff, an address that stalls every response it is served holds a
+/// permit for a small and shrinking share of the time, so holding the
+/// node's permits takes many addresses, not a few.
+pub(crate) const RANGE_STALL_BACKOFF: Duration = Duration::from_secs(60);
+
+/// The longest [`RANGE_STALL_BACKOFF`] grows to, and how long after a
+/// backoff ends the next abandoned response still doubles it.
+pub(crate) const RANGE_STALL_BACKOFF_MAX: Duration = Duration::from_secs(16 * 60);
+
+/// The most addresses whose stalled responses the node remembers.
+///
+/// # Security
+///
+/// The table is bounded so that peers cannot grow it: when it is full, the
+/// entry whose backoff ends first is dropped for a new one. An entry is a
+/// few dozen bytes.
+pub(crate) const RANGE_STALL_ADDRS: usize = 4096;
+
+/// Returns the node-wide `get-block-range` serving state, with
+/// [`RANGE_STREAMS_GLOBAL`] stream permits, to be shared by every version 2
 /// connection.
-pub(crate) fn global_block_range_permits() -> Arc<Semaphore> {
-    Arc::new(Semaphore::new(RANGE_STREAMS_GLOBAL))
+pub(crate) fn global_block_range_permits() -> Arc<NodeRangeLimits> {
+    Arc::new(NodeRangeLimits {
+        permits: Arc::new(Semaphore::new(RANGE_STREAMS_GLOBAL)),
+        addrs: Mutex::new(AddrState::default()),
+    })
+}
+
+/// The `get-block-range` serving state every version 2 connection of a node
+/// shares: its stream permits, and what it remembers about remote addresses.
+///
+/// Addresses are keyed by [`connection_limit_key`], like connection limits
+/// and bans, so an IPv6 host cannot get a fresh key from its own subnet.
+#[derive(Debug)]
+pub(crate) struct NodeRangeLimits {
+    /// The node's permits, [`RANGE_STREAMS_GLOBAL`] of them.
+    permits: Arc<Semaphore>,
+
+    /// What the node remembers about remote addresses. The lock is only held
+    /// for a table lookup or update, never across an await.
+    addrs: Mutex<AddrState>,
+}
+
+/// What a node remembers about the remote addresses it serves ranges to.
+#[derive(Debug, Default)]
+struct AddrState {
+    /// The addresses whose responses were abandoned because they fell
+    /// behind, at most [`RANGE_STALL_ADDRS`] of them.
+    stalls: HashMap<IpAddr, Stall>,
+}
+
+impl NodeRangeLimits {
+    /// How many of the node's stream permits are free.
+    #[cfg(test)]
+    pub(crate) fn available_permits(&self) -> usize {
+        self.permits.available_permits()
+    }
+
+    /// How many addresses' stalled responses are remembered.
+    #[cfg(test)]
+    pub(crate) fn remembered_stalls(&self) -> usize {
+        self.lock().stalls.len()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, AddrState> {
+        self.addrs
+            .lock()
+            .expect("the lock is only held for map operations, which do not panic")
+    }
+
+    /// Whether `addr`'s range streams are answered with `BUSY` at `now`.
+    pub(crate) fn backing_off(&self, addr: IpAddr, now: Instant) -> bool {
+        self.lock()
+            .stalls
+            .get(&connection_limit_key(addr))
+            .is_some_and(|stall| stall.backing_off(now))
+    }
+
+    /// Records that a response to `addr` was abandoned at `now` because the
+    /// reader fell behind, with a first backoff of `backoff`.
+    pub(crate) fn record_stall(&self, addr: IpAddr, now: Instant, backoff: Duration) {
+        let addr = connection_limit_key(addr);
+        let stalls = &mut self.lock().stalls;
+        let stall = Stall::after(stalls.get(&addr).copied(), now, backoff);
+        if !stalls.contains_key(&addr) && stalls.len() >= RANGE_STALL_ADDRS {
+            stalls.retain(|_addr, stall| !stall.forgotten(now));
+        }
+        if !stalls.contains_key(&addr) && stalls.len() >= RANGE_STALL_ADDRS {
+            let first_to_end = stalls
+                .iter()
+                .min_by_key(|(_addr, stall)| stall.until)
+                .map(|(addr, _stall)| *addr)
+                .expect("the table is full, so it is not empty");
+            stalls.remove(&first_to_end);
+        }
+        stalls.insert(addr, stall);
+    }
+}
+
+/// The backoff of a peer, or an address, whose range responses were
+/// abandoned because it fell behind its minimum progress.
+#[derive(Copy, Clone, Debug)]
+struct Stall {
+    /// When the backoff ends.
+    until: Instant,
+    /// How long the backoff is.
+    backoff: Duration,
+}
+
+impl Stall {
+    /// Whether range streams are answered with `BUSY` at `now`.
+    fn backing_off(&self, now: Instant) -> bool {
+        now < self.until
+    }
+
+    /// Whether the stall no longer affects the next one at `now`.
+    fn forgotten(&self, now: Instant) -> bool {
+        now >= self.until + RANGE_STALL_BACKOFF_MAX
+    }
+
+    /// The backoff after a response is abandoned at `now`, given the
+    /// `previous` one: `first` long, or twice the previous one, up to
+    /// [`RANGE_STALL_BACKOFF_MAX`], if that is not forgotten yet.
+    ///
+    /// A response abandoned during a backoff was admitted before it began,
+    /// like the one that began it, so it does not add to the backoff: the two
+    /// streams a peer may have at once count once when they stall together.
+    fn after(previous: Option<Stall>, now: Instant, first: Duration) -> Stall {
+        let backoff = match previous {
+            Some(previous) if previous.backing_off(now) => return previous,
+            Some(previous) if !previous.forgotten(now) => previous
+                .backoff
+                .saturating_mul(2)
+                .min(RANGE_STALL_BACKOFF_MAX),
+            _ => first,
+        };
+        Stall {
+            until: now + backoff,
+            backoff,
+        }
+    }
 }
 
 /// What serving one peer's `get-block-range` requests needs from its
@@ -155,9 +313,21 @@ pub(crate) struct BlockRangeServing {
     /// The peer's permits, [`RANGE_STREAMS_PER_PEER`] of them.
     peer_permits: Arc<Semaphore>,
 
-    /// The node's permits, shared by every connection (see
+    /// The node's serving state, shared by every connection (see
     /// [`global_block_range_permits`]).
-    global_permits: Arc<Semaphore>,
+    node: Arc<NodeRangeLimits>,
+
+    /// The peer's address, which the node's per-address state is kept for;
+    /// `None` keeps only this connection's state.
+    remote: Option<IpAddr>,
+
+    /// The backoff of this connection, if one of its responses was abandoned
+    /// because the peer fell behind. The lock is never held across an await.
+    stall: Arc<Mutex<Option<Stall>>>,
+
+    /// The first backoff after an abandoned response:
+    /// [`RANGE_STALL_BACKOFF`], except in tests.
+    stall_backoff: Duration,
 
     /// How long after its stream was accepted a response must be complete:
     /// [`RANGE_STREAM_TIMEOUT`], except in tests.
@@ -223,12 +393,18 @@ impl Pace {
 
 impl BlockRangeServing {
     /// Returns the serving state of a new connection: `enabled` from the
-    /// config, fresh permits for the peer, and the node's `global_permits`.
-    pub(crate) fn new(enabled: bool, global_permits: Arc<Semaphore>) -> Self {
+    /// config, fresh permits for the peer, and the `node`'s shared state.
+    ///
+    /// The node's per-address state is only used once the peer's address is
+    /// set with [`BlockRangeServing::for_remote`].
+    pub(crate) fn new(enabled: bool, node: Arc<NodeRangeLimits>) -> Self {
         Self {
             enabled,
             peer_permits: Arc::new(Semaphore::new(RANGE_STREAMS_PER_PEER)),
-            global_permits,
+            node,
+            remote: None,
+            stall: Arc::new(Mutex::new(None)),
+            stall_backoff: RANGE_STALL_BACKOFF,
             stream_timeout: RANGE_STREAM_TIMEOUT,
             min_progress: MinProgress {
                 rate: RANGE_MIN_SERVE_RATE,
@@ -236,6 +412,21 @@ impl BlockRangeServing {
                 window: RANGE_PROGRESS_WINDOW,
             },
         }
+    }
+
+    /// Returns this serving state for a peer at `remote`, which the node's
+    /// per-address state then applies to.
+    pub(crate) fn for_remote(mut self, remote: IpAddr) -> Self {
+        self.remote = Some(remote);
+        self
+    }
+
+    /// Returns these serving settings with a first stall backoff of
+    /// `stall_backoff` instead of [`RANGE_STALL_BACKOFF`].
+    #[cfg(test)]
+    pub(crate) fn with_stall_backoff(mut self, stall_backoff: Duration) -> Self {
+        self.stall_backoff = stall_backoff;
+        self
     }
 
     /// Returns these serving settings with a whole-stream deadline of
@@ -261,24 +452,48 @@ impl BlockRangeServing {
         self
     }
 
-    /// How long after its stream was accepted a response must be complete.
-    pub(super) fn stream_timeout(&self) -> Duration {
-        self.stream_timeout
+    fn lock_stall(&self) -> std::sync::MutexGuard<'_, Option<Stall>> {
+        self.stall
+            .lock()
+            .expect("the lock is only held to read or replace a value, which does not panic")
     }
 
-    /// How fast the peer must take a response.
-    pub(super) fn min_progress(&self) -> MinProgress {
-        self.min_progress
+    /// Whether the peer's range streams are answered with `BUSY` now,
+    /// because a response on this connection, or to its address, was
+    /// abandoned for falling behind.
+    fn backing_off(&self) -> bool {
+        let now = Instant::now();
+        self.lock_stall()
+            .is_some_and(|stall| stall.backing_off(now))
+            || self
+                .remote
+                .is_some_and(|remote| self.node.backing_off(remote, now))
+    }
+
+    /// Records that a response to the peer was abandoned because it fell
+    /// behind its minimum progress.
+    fn record_stall(&self) {
+        let now = Instant::now();
+        {
+            let mut stall = self.lock_stall();
+            *stall = Some(Stall::after(*stall, now, self.stall_backoff));
+        }
+        if let Some(remote) = self.remote {
+            self.node.record_stall(remote, now, self.stall_backoff);
+        }
     }
 
     /// Claims a peer permit for one `get-block-range` stream, before its
     /// request is read, or refuses the stream: with `REFUSED` if serving is
-    /// disabled, and with `BUSY` if the peer's permits are exhausted. Never
-    /// waits.
+    /// disabled, and with `BUSY` if the peer is backing off after a stalled
+    /// response or its permits are exhausted. Never waits.
     pub(super) fn claim_peer(&self) -> Result<PeerRangePermit, Outcome> {
         if !self.enabled {
             tracing::debug!("refusing get-block-range stream: serving is disabled");
             return Err(Outcome::Refuse(ErrorCode::Refused));
+        }
+        if self.backing_off() {
+            return Err(busy("stall backoff"));
         }
         let peer = self
             .peer_permits
@@ -299,7 +514,8 @@ impl BlockRangeServing {
     /// own permits, and cannot deny range serving to every other peer.
     pub(super) fn claim_node(&self, peer: PeerRangePermit) -> Result<RangePermits, Outcome> {
         let node = self
-            .global_permits
+            .node
+            .permits
             .clone()
             .try_acquire_owned()
             .map_err(|_| busy("node limit"))?;
@@ -341,9 +557,10 @@ pub(super) struct PendingRange {
 }
 
 /// Serves a `get-block-range` request, writing the whole response and
-/// finishing the stream, by `stream_deadline` at the latest, each inbound
-/// service call within [`REQUEST_TIMEOUT`], and with the peer taking it at
-/// `min_progress` or faster.
+/// finishing the stream, within `serving`'s stream deadline of `accepted` at
+/// the latest, each inbound service call within [`REQUEST_TIMEOUT`], and with
+/// the peer taking it at `serving`'s minimum progress or faster. A peer that
+/// falls behind starts its stall backoff.
 ///
 /// The response is finished early, which the draft allows (the requester
 /// resumes from the last block's parent), at genesis, when the inbound
@@ -355,8 +572,8 @@ pub(super) async fn serve_block_range<S>(
     response: &mut ResponseSend,
     range: PendingRange,
     service: Inbound<'_, S>,
-    stream_deadline: Instant,
-    min_progress: MinProgress,
+    accepted: Instant,
+    serving: &BlockRangeServing,
 ) -> Result<(), Outcome>
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone,
@@ -365,17 +582,43 @@ where
         request,
         permits: _permits,
     } = range;
+    let mut writer = RangeWriter {
+        response,
+        stream_deadline: accepted + serving.stream_timeout,
+        pace: Pace::new(serving.min_progress),
+    };
+    let served = write_block_range(&mut writer, &request, service).await;
+    if writer.pace.stalled {
+        serving.record_stall();
+    }
+    served?;
+
+    metrics::counter!(
+        "zebra.net.out.responses",
+        "command" => StreamType::GetBlockRange.name(),
+    )
+    .increment(1);
+
+    // `finish` only fails if the stream was already closed, which the peer may do at will.
+    let _ = writer.response.send.finish();
+    Ok(())
+}
+
+/// Writes the whole response to `request`.
+async fn write_block_range<S>(
+    writer: &mut RangeWriter<'_>,
+    request: &GetBlockRange,
+    service: Inbound<'_, S>,
+) -> Result<(), Outcome>
+where
+    S: Service<Request, Response = Response, Error = BoxError> + Clone,
+{
     let mut progress = Progress {
         next: request.final_hash,
         delivered: 0,
         delivered_bytes: 0,
         raw: Vec::new(),
         element: Vec::new(),
-    };
-    let mut writer = RangeWriter {
-        response,
-        stream_deadline,
-        pace: Pace::new(min_progress),
     };
 
     // `count = 0` is a valid request, answered with no blocks.
@@ -386,20 +629,11 @@ where
     }
 
     while progress.delivered < request.count {
-        match serve_chunk(&mut writer, &request, service.clone(), &mut progress).await? {
+        match serve_chunk(writer, request, service.clone(), &mut progress).await? {
             Continue::More => {}
             Continue::Done => break,
         }
     }
-
-    metrics::counter!(
-        "zebra.net.out.responses",
-        "command" => StreamType::GetBlockRange.name(),
-    )
-    .increment(1);
-
-    // `finish` only fails if the stream was already closed, which the peer may do at will.
-    let _ = writer.response.send.finish();
     Ok(())
 }
 

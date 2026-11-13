@@ -5,6 +5,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    net::{IpAddr, Ipv4Addr},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -29,6 +30,7 @@ use crate::{
             inbound::{
                 block_range::{
                     RANGE_FIRST_WRITE_TIMEOUT, RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS,
+                    RANGE_STALL_ADDRS, RANGE_STALL_BACKOFF, RANGE_STALL_BACKOFF_MAX,
                     RANGE_STREAMS_GLOBAL, RANGE_STREAMS_PER_PEER,
                 },
                 global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
@@ -1076,6 +1078,179 @@ async fn unread_block_range_responses_are_abandoned_within_seconds() {
     })
     .await
     .expect("the test completes");
+}
+
+/// A peer whose response was abandoned because it did not read it has its
+/// further range streams answered with `BUSY` for the stall backoff, at once
+/// and without a read, on that connection and on a new connection from the
+/// same address. Other addresses are still served, and so is the peer once
+/// the backoff ends.
+#[tokio::test]
+async fn stalled_block_range_readers_are_answered_busy_for_a_backoff() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let tip = chain.len() - 1;
+    let global = global_block_range_permits();
+    let stalling: IpAddr = "203.0.113.7".parse().expect("an address");
+    let other: IpAddr = "198.51.100.9".parse().expect("an address");
+    let backoff = Duration::from_secs(3);
+    let serving = |remote| {
+        BlockRangeServing::new(true, global.clone())
+            .for_remote(remote)
+            .with_min_progress(4 * 1024, Duration::from_millis(300))
+            .with_stall_backoff(backoff)
+    };
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (service, mut requests) = ChainService::new(&chain).service();
+
+        // The peer never reads its response, which is abandoned.
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 256).await;
+        let _server = spawn_server(responder, service.clone(), serving(stalling));
+        let mut recv = request_range(&requester, tip_range(&chain)).await;
+        let reset = recv.received_reset().await.expect("the stream is open");
+        assert_eq!(
+            reset.map(quinn::VarInt::into_inner),
+            Some(ErrorCode::Cancelled.code())
+        );
+        let stalled_at = Instant::now();
+        assert_eq!(reads(&mut requests).len(), 1, "the response was started");
+
+        // Its next stream is answered with BUSY, on the same connection...
+        let busy = request_range(&requester, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+
+        // ...and on a new one from the same address.
+        let (reconnected, responder, _e3, _e4) = connected_pair(&network).await;
+        let _server = spawn_server(responder, service.clone(), serving(stalling));
+        let busy = request_range(&reconnected, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+        assert!(
+            stalled_at.elapsed() < backoff,
+            "answered within the backoff"
+        );
+
+        // A peer at another address is served.
+        let (bystander, responder, _e5, _e6) = connected_pair(&network).await;
+        let _server = spawn_server(responder, service.clone(), serving(other));
+        let recv = request_range(&bystander, tip_range(&chain)).await;
+        assert_eq!(
+            read_response(recv).await,
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+        assert_eq!(
+            reads(&mut requests).len(),
+            1,
+            "only the bystander's stream made a read"
+        );
+
+        // Once the backoff ends, so is the peer.
+        tokio::time::sleep_until(stalled_at + backoff).await;
+        let recv = request_range(&reconnected, tip_range(&chain)).await;
+        assert_eq!(
+            read_response(recv).await,
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A response abandoned by this node's own slow read, not by its reader, does
+/// not start a stall backoff: the peer's next stream is served.
+///
+/// This takes `REQUEST_TIMEOUT` of real time.
+#[tokio::test]
+async fn block_range_read_timeouts_start_no_stall_backoff() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+    let remote: IpAddr = "203.0.113.7".parse().expect("an address");
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, _requests) = chain_service.service();
+        let serving = BlockRangeServing::new(true, global.clone()).for_remote(remote);
+        let _server = spawn_server(responder, service, serving);
+
+        let recv = request_range(&requester, tip_range(&chain)).await;
+        assert_reset(recv, ErrorCode::Refused).await;
+        assert_eq!(global.remembered_stalls(), 0);
+        assert!(!global.backing_off(remote, Instant::now()));
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// The stall backoff doubles each time an address stalls again, up to
+/// [`RANGE_STALL_BACKOFF_MAX`], counts responses that stall together once,
+/// starts again once the address has been clear for long enough, and applies
+/// to an IPv6 address's whole subnet.
+#[test]
+fn block_range_stall_backoff_doubles_up_to_its_cap() {
+    let _init_guard = zebra_test::init();
+    let limits = global_block_range_permits();
+    let addr: IpAddr = "2001:db8:1:2::7".parse().expect("an address");
+    let neighbour: IpAddr = "2001:db8:1:2:ffff::1".parse().expect("an address");
+    let other: IpAddr = "2001:db8:1:3::7".parse().expect("an address");
+    let mut now = Instant::now();
+    let moment = Duration::from_millis(1);
+
+    let mut backoff = RANGE_STALL_BACKOFF;
+    for _ in 0..8 {
+        limits.record_stall(addr, now, RANGE_STALL_BACKOFF);
+        // A second stream that stalls with the first does not add to the backoff.
+        limits.record_stall(neighbour, now + moment, RANGE_STALL_BACKOFF);
+        assert!(limits.backing_off(addr, now + backoff - moment));
+        assert!(limits.backing_off(neighbour, now + backoff - moment));
+        assert!(!limits.backing_off(other, now + moment));
+        assert!(!limits.backing_off(addr, now + backoff));
+        now += backoff;
+        backoff = (backoff * 2).min(RANGE_STALL_BACKOFF_MAX);
+    }
+    assert_eq!(
+        backoff, RANGE_STALL_BACKOFF_MAX,
+        "the backoff reached its cap"
+    );
+
+    // After a clear period, the backoff starts again.
+    now += RANGE_STALL_BACKOFF_MAX;
+    limits.record_stall(addr, now, RANGE_STALL_BACKOFF);
+    assert!(limits.backing_off(addr, now + RANGE_STALL_BACKOFF - moment));
+    assert!(!limits.backing_off(addr, now + RANGE_STALL_BACKOFF));
+}
+
+/// The stalled addresses a node remembers are bounded: more addresses than
+/// [`RANGE_STALL_ADDRS`] replace the ones whose backoff ends first.
+#[test]
+fn block_range_stall_table_is_bounded() {
+    let _init_guard = zebra_test::init();
+    let limits = global_block_range_permits();
+    let start = Instant::now();
+    let addr = |index: usize| -> IpAddr {
+        let index = u32::try_from(index).expect("the test uses few addresses");
+        Ipv4Addr::from(0x0A00_0000 + index).into()
+    };
+
+    for index in 0..RANGE_STALL_ADDRS + 10 {
+        let now = start + Duration::from_millis(u64::try_from(index).expect("small"));
+        limits.record_stall(addr(index), now, RANGE_STALL_BACKOFF);
+    }
+    assert_eq!(limits.remembered_stalls(), RANGE_STALL_ADDRS);
+
+    let now = start + Duration::from_secs(30);
+    assert!(
+        !limits.backing_off(addr(0), now),
+        "the first addresses were dropped"
+    );
+    assert!(
+        limits.backing_off(addr(RANGE_STALL_ADDRS + 9), now),
+        "the last addresses are remembered"
+    );
 }
 
 /// Requests the tip range of `chain` from a server whose reads answer wrongly

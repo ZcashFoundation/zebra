@@ -117,9 +117,9 @@ pub struct ConnectionParams<S> {
     /// (`network.v2_serve_block_ranges`).
     pub serve_block_ranges: bool,
 
-    /// The node-wide `get-block-range` stream permits, shared by every
+    /// The node-wide `get-block-range` serving state, shared by every
     /// version 2 connection: [`global_block_range_permits`].
-    pub block_range_permits: Arc<Semaphore>,
+    pub block_range_permits: Arc<inbound::NodeRangeLimits>,
 }
 
 pub(crate) use inbound::global_block_range_permits;
@@ -456,7 +456,8 @@ where
     let block_ranges = inbound::BlockRangeServing::new(
         params.serve_block_ranges,
         params.block_range_permits.clone(),
-    );
+    )
+    .for_remote(connection.remote_address().ip());
     let task = ConnectionTask {
         connection: connection.clone(),
         is_inbound,
