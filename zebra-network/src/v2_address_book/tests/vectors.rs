@@ -22,7 +22,7 @@ use crate::{
 use super::super::{
     actor::{
         V2Book, GET_ADDR_SNAPSHOT_BASE_INTERVAL, GET_ADDR_SNAPSHOT_JITTER,
-        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_TRIED,
+        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_SEEDED, V2_MAX_TRIED,
     },
     buckets::{Group, V2_GOSSIP_BUCKET_SIZE, V2_GOSSIP_CAPACITY, V2_SOURCE_GROUP_SPAN},
     cache::v2_peer_cache_updater_with,
@@ -782,6 +782,78 @@ fn seeds_skip_known_entries_unless_they_failed_long_ago() {
     book.seed(vec![relayed], Provenance::Configured, Instant::now());
     assert_eq!(book.buckets.len(), 0);
     assert_eq!(book.trusted.get(&relayed), Some(&Provenance::Configured));
+}
+
+/// At the seeded entry limit, a new seed replaces the seeded entry that failed longest ago
+/// without ever answering, and nothing else.
+#[test]
+fn new_seeds_replace_failed_seeds_at_the_limit() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let fail = |book: &mut V2Book, addr: PeerSocketAddr| {
+        book.change(MetaAddr::new_reconnect(addr), Instant::now());
+        book.change(MetaAddr::new_errored(addr, None), Instant::now());
+        assert_eq!(state(book, addr), Some(PeerAddrState::Failed));
+    };
+    let seed_addr = |index: u16| -> PeerSocketAddr {
+        let [a, b] = index.to_be_bytes();
+        SocketAddr::new(Ipv4Addr::new(100, 1, a, b).into(), 8233).into()
+    };
+
+    let configured = addr("192.0.2.10:8233");
+    book.seed(vec![configured], Provenance::Configured, Instant::now());
+    fail(&mut book, configured);
+
+    let limit = u16::try_from(V2_MAX_SEEDED).expect("the limit is small");
+    let seeds: Vec<PeerSocketAddr> = (0..limit).map(seed_addr).collect();
+    book.seed(seeds.clone(), Provenance::DnsSeed, Instant::now());
+    assert_eq!(book.stats().trusted, V2_MAX_SEEDED + 1);
+
+    // With no failed seed, a new seed has no room.
+    let [first, second, third, fourth] = [0, 1, 2, 3].map(|index| seed_addr(limit + index));
+    book.seed(vec![first], Provenance::DnsSeed, Instant::now());
+    assert_eq!(
+        state(&mut book, first),
+        None,
+        "a full segment drops the seed"
+    );
+
+    // Two seeds failed, in address order, and one answered before it failed.
+    fail(&mut book, seeds[0]);
+    fail(&mut book, seeds[1]);
+    make_tried(&mut book, seeds[2]);
+    book.change(MetaAddr::new_errored(seeds[2], None), Instant::now());
+    assert_eq!(state(&mut book, seeds[2]), Some(PeerAddrState::Failed));
+
+    book.seed(vec![first], Provenance::Cache, Instant::now());
+    assert!(state(&mut book, first).is_some(), "the new seed has room");
+    assert_eq!(book.trusted.get(&first), Some(&Provenance::Cache));
+    assert_eq!(
+        state(&mut book, seeds[0]),
+        None,
+        "the oldest failure is evicted"
+    );
+    assert!(!book.trusted.contains_key(&seeds[0]));
+    assert!(state(&mut book, seeds[1]).is_some());
+
+    // A failed seed that is in the new results is not evicted for them: it would only be
+    // added again.
+    book.seed(vec![second, seeds[1]], Provenance::DnsSeed, Instant::now());
+    assert_eq!(state(&mut book, second), None);
+    assert_eq!(state(&mut book, seeds[1]), Some(PeerAddrState::Failed));
+
+    book.seed(vec![third], Provenance::DnsSeed, Instant::now());
+    assert!(state(&mut book, third).is_some());
+    assert_eq!(state(&mut book, seeds[1]), None);
+
+    // Configured entries, entries that answered, and entries that were never attempted stay.
+    book.seed(vec![fourth], Provenance::DnsSeed, Instant::now());
+    assert_eq!(state(&mut book, fourth), None);
+    assert_eq!(state(&mut book, configured), Some(PeerAddrState::Failed));
+    assert_eq!(state(&mut book, seeds[2]), Some(PeerAddrState::Failed));
+    assert_eq!(book.stats().trusted, V2_MAX_SEEDED + 1);
+    book.publish_stats();
 }
 
 /// The version 2 peer cache round-trips through `<network>.v2-peers`, and leaves the legacy peer

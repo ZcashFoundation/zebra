@@ -95,7 +95,9 @@ version 2 peers are recorded in a separate version 2 address book.
   every 30 minutes. Configured peers keep the first claim on the outbound
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
-  results fail to connect, which Zebra logs at the `debug` level.
+  results fail to connect, which Zebra logs at the `debug` level. Zebra keeps
+  up to 1,000 DNS seed and cached addresses: past that, a new one replaces the
+  one whose connection failed longest ago and that never answered.
 - Relaying version 2 addresses. Zebra relays each fresh full-node address a
   version 2 peer announces to two of its other version 2 peers, and limits each peer to
   about one announced address every 10 seconds, dropping the rest. It also

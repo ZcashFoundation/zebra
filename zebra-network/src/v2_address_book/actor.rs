@@ -4,7 +4,7 @@
 //! no other task can observe the book mid-change, and the book needs no lock.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     net::SocketAddr,
     time::{Duration, Instant},
 };
@@ -44,7 +44,8 @@ pub(super) const GET_ADDR_SNAPSHOT_JITTER: Duration = Duration::from_secs(6 * 60
 pub(super) const GET_ADDR_SNAPSHOT_MIN_ADDRS: usize = PEER_ADDR_RESPONSE_LIMIT / 4;
 
 /// The most DNS seed and cached entries the segment trusts. Configured entries are always
-/// trusted, on top of these.
+/// trusted, on top of these. Past this, a new seed replaces a seeded entry that failed and never
+/// answered.
 pub(super) const V2_MAX_SEEDED: usize = 1000;
 
 /// The most tried entries the segment keeps: past this, the entries that failed longest ago are
@@ -172,22 +173,47 @@ impl V2Book {
     ///
     /// An address the segment already has is only marked as trusted, unless its entry failed at
     /// least [`V2_DNS_RETRY_FAILED_AFTER`] before `now`, which makes it a candidate again.
+    ///
+    /// When the segment has [`V2_MAX_SEEDED`] DNS seed and cached entries, a new one replaces
+    /// the seeded entry that failed longest ago without ever answering, and is dropped if there
+    /// is none. Most DNS seed results do not accept QUIC, so without the replacement the failed
+    /// ones would fill the segment, and later seeds would be dropped until a restart.
     pub(super) fn seed(
         &mut self,
         addrs: Vec<PeerSocketAddr>,
         provenance: Provenance,
         now: Instant,
     ) {
-        for addr in addrs {
-            let addr = canonical_peer_addr(*addr);
+        let addrs: Vec<PeerSocketAddr> = addrs
+            .into_iter()
+            .map(|addr| canonical_peer_addr(*addr))
+            .collect();
+        let mut seeded = self.seeded_count();
+        // The seeded entries that can make room, newest failure first. Listed once, when the
+        // first seed finds the segment full.
+        let mut evictable: Option<Vec<(Instant, PeerSocketAddr)>> = None;
+
+        for &addr in &addrs {
             if self.bans.is_banned(addr.ip()) {
                 continue;
             }
-            if provenance != Provenance::Configured
-                && !self.trusted.contains_key(&addr)
-                && self.seeded_count() >= V2_MAX_SEEDED
-            {
-                continue;
+            let is_new_seed =
+                provenance != Provenance::Configured && !self.trusted.contains_key(&addr);
+            if is_new_seed && seeded >= V2_MAX_SEEDED {
+                let evictable = evictable.get_or_insert_with(|| self.evictable_seeds(&addrs, now));
+                let Some((_, evicted)) = evictable.pop() else {
+                    metrics::counter!("zcash.net.v2.addresses.seeds.dropped").increment(1);
+                    tracing::debug!(
+                        ?addr,
+                        ?provenance,
+                        "dropped a v2 seed: the segment has {V2_MAX_SEEDED} seeded entries, \
+                         and none of them can be evicted",
+                    );
+                    continue;
+                };
+                self.book.remove(evicted);
+                self.trusted.remove(&evicted);
+                seeded = seeded.saturating_sub(1);
             }
 
             let reseed = match self.book.get(addr) {
@@ -210,12 +236,52 @@ impl V2Book {
             }
 
             self.buckets.remove(addr);
-            let entry = self.trusted.entry(addr).or_insert(provenance);
-            // The operator's word outranks the other sources.
-            if provenance == Provenance::Configured {
-                *entry = Provenance::Configured;
+            match self.trusted.entry(addr) {
+                Entry::Vacant(entry) => {
+                    entry.insert(provenance);
+                    if provenance != Provenance::Configured {
+                        seeded = seeded.saturating_add(1);
+                    }
+                }
+                // The operator's word outranks the other sources.
+                Entry::Occupied(mut entry) => {
+                    if provenance == Provenance::Configured
+                        && entry.insert(Provenance::Configured) != Provenance::Configured
+                    {
+                        seeded = seeded.saturating_sub(1);
+                    }
+                }
             }
         }
+    }
+
+    /// Returns the seeded entries that a new seed can replace, sorted so the one that failed
+    /// longest ago is last: the DNS seed and cached entries whose last attempt failed and that
+    /// never answered, other than the `incoming` seeds, which would only be added again.
+    ///
+    /// Configured entries, entries that answered, and entries that are waiting for their first
+    /// attempt or have one in progress are never listed.
+    fn evictable_seeds(
+        &self,
+        incoming: &[PeerSocketAddr],
+        now: Instant,
+    ) -> Vec<(Instant, PeerSocketAddr)> {
+        let incoming: HashSet<&PeerSocketAddr> = incoming.iter().collect();
+        let mut evictable: Vec<(Instant, PeerSocketAddr)> = self
+            .book
+            .state_peers(PeerAddrState::Failed)
+            .filter(|peer| {
+                peer.last_response().is_none()
+                    && !incoming.contains(&peer.addr)
+                    && self
+                        .trusted
+                        .get(&peer.addr)
+                        .is_some_and(|provenance| *provenance != Provenance::Configured)
+            })
+            .map(|peer| (peer.last_failure().unwrap_or(now), peer.addr))
+            .collect();
+        evictable.sort_by_key(|entry| std::cmp::Reverse(*entry));
+        evictable
     }
 
     /// Returns an entry due for an attempt that is not in `exclude`, nor in one of the
