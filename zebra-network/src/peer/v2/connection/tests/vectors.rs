@@ -18,6 +18,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, UnminedTxId},
+    work::difficulty::ParameterDifficulty,
 };
 
 use crate::{
@@ -27,7 +28,7 @@ use crate::{
         v2::{
             addr_relay::{AddrRelay, AddrRelayHandle, Timings},
             connection::{
-                announcements::AnnouncementWriter,
+                announcements::{AnnouncementWriter, BLOCK_ANNOUNCEMENT_BURST},
                 inbound::{
                     serve as serve_request_stream, INBOUND_REQUEST_CONCURRENCY,
                     MAX_LOOKUP_CALLS_PER_RESPONSE, RESPONSE_BYTES_LIMIT,
@@ -63,6 +64,7 @@ use crate::{
             },
             txref::{ShortTxId, TxRef},
             types::{ErrorCode, StreamType},
+            wire::WireError,
         },
     },
     quic::app_error_code,
@@ -272,6 +274,7 @@ fn spawn_node_scored(
         ConnectionParams {
             inbound_service,
             inv_collector: inv_tx,
+            target_difficulty_limit: Network::Mainnet.target_difficulty_limit(),
             genesis_hash: Network::Mainnet.genesis_hash(),
             misbehavior: misbehavior.clone(),
             discovery: relaying.address_book.is_some(),
@@ -480,7 +483,7 @@ async fn raw_peer_node_scored(
     let (completed, hs_recv) = tokio::join!(
         run_handshake(&inbound, Role::Responder, network, &b, &nonces),
         async {
-            let mut framed = tokio_util::codec::FramedRead::new(hs_recv, RecordCodec);
+            let mut framed = tokio_util::codec::FramedRead::new(hs_recv, RecordCodec::default());
             let payload = framed.next().await.expect("init").expect("valid");
             assert_eq!(payload[0], INIT_RECORD_KIND);
             framed.into_inner()
@@ -725,7 +728,7 @@ async fn dropping_a_client_closes_the_connection() {
 /// and the client reports the matching error.
 ///
 /// Not covered here: a request stream that waits for a permit past
-/// `REQUEST_TIMEOUT` (refused with `REFUSED`), which
+/// `REQUEST_TIMEOUT` (reset with `BUSY`), which
 /// `stalled_requests_end_at_the_request_timeout` covers; and a request that
 /// decodes to misbehavior rather than a violation, which no request format
 /// can produce (misbehavior is a response-side rule).
@@ -745,6 +748,9 @@ async fn violations_close_the_connection() {
             "duplicate announcement stream",
             "nonconforming announcement record",
             "oversized announcement prefix",
+            "announcement record longer than its type allows",
+            "oversized record of an unknown kind then second init",
+            "oversized second init",
             "bi stream finished before type byte",
             "uni stream finished before type byte",
             "oversize request",
@@ -838,6 +844,37 @@ async fn violations_close_the_connection() {
                     std::mem::forget(send);
                     Some((ErrorCode::Flood, "ProtocolViolation"))
                 }
+                "announcement record longer than its type allows" => {
+                    // One byte more than a transaction announcement can be: the violation is
+                    // the length prefix, so the payload is never sent.
+                    let mut send = raw.connection.open_uni().await.expect("opens");
+                    send.write_all(&[StreamType::TransactionAnnouncements.code()])
+                        .await
+                        .expect("writes");
+                    send.write_all(&66u32.to_le_bytes()).await.expect("writes");
+                    std::mem::forget(send);
+                    Some((ErrorCode::ProtocolError, "ProtocolViolation"))
+                }
+                "oversized record of an unknown kind then second init" => {
+                    // A maximum-size record of an unknown kind is skipped as it arrives, and
+                    // ignored like a short one.
+                    let mut unknown = vec![0xEE; MAX_RECORD_PAYLOAD_LEN];
+                    unknown[0] = 0x07;
+                    let unknown = RecordCodec::encode_record(&unknown).expect("valid");
+                    raw.hs_send.write_all(&unknown).await.expect("writes");
+                    raw.hs_send
+                        .write_all(&raw.init_record)
+                        .await
+                        .expect("writes");
+                    Some((ErrorCode::ProtocolError, "DuplicateHandshake"))
+                }
+                "oversized second init" => {
+                    // Longer than any `init` record: rejected from its prefix and kind byte.
+                    let mut record = 4096u32.to_le_bytes().to_vec();
+                    record.push(INIT_RECORD_KIND);
+                    raw.hs_send.write_all(&record).await.expect("writes");
+                    Some((ErrorCode::ProtocolError, "ProtocolViolation"))
+                }
                 "bi stream finished before type byte" => {
                     let (mut send, _recv) = raw.connection.open_bi().await.expect("opens");
                     send.finish().expect("finishes");
@@ -914,6 +951,71 @@ async fn violations_close_the_connection() {
     })
     .await
     .expect("the test completes well within the timeout");
+}
+
+/// A record that is still incomplete a while after its first byte arrived
+/// ends its stream with a `FLOOD` error, whether it is being buffered or
+/// skipped, and a stream with no record part way through can stay quiet for
+/// as long as it likes.
+#[tokio::test(start_paused = true)]
+async fn incomplete_records_are_not_held_past_their_timeout() {
+    use tokio::io::AsyncWriteExt;
+
+    use crate::peer::v2::connection::records::{RecordReader, INCOMPLETE_RECORD_TIMEOUT};
+
+    let reader = |recv, codec| RecordReader::new(tokio_util::codec::FramedRead::new(recv, codec));
+
+    // A quiet stream is not timed, before or after a complete record.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(recv, RecordCodec::with_max_payload_len(65));
+    let quiet = tokio::time::timeout(10 * INCOMPLETE_RECORD_TIMEOUT, records.next()).await;
+    assert!(quiet.is_err(), "a stream with no record is not timed");
+    let record = RecordCodec::encode_record([1, 2, 3]).expect("valid");
+    send.write_all(&record).await.expect("writes");
+    let read = records.next().await.expect("open").expect("well-formed");
+    assert_eq!(read.as_ref(), [1, 2, 3]);
+    let quiet = tokio::time::timeout(10 * INCOMPLETE_RECORD_TIMEOUT, records.next()).await;
+    assert!(quiet.is_err(), "a stream between records is not timed");
+
+    // The first bytes of a record start its timeout, and later bytes do not extend it.
+    send.write_all(&record[..2]).await.expect("writes");
+    let started = Instant::now();
+    let waiting = tokio::time::timeout(INCOMPLETE_RECORD_TIMEOUT / 2, records.next()).await;
+    assert!(waiting.is_err(), "the record has time to arrive");
+    send.write_all(&record[2..5]).await.expect("writes");
+    let stalled = records.next().await.expect("the stream is open");
+    assert!(
+        matches!(stalled, Err(WireError::Stalled { what: "record" })),
+        "got {stalled:?}"
+    );
+    assert_eq!(stalled.expect_err("stalled").close_code(), ErrorCode::Flood);
+    assert_eq!(started.elapsed(), INCOMPLETE_RECORD_TIMEOUT);
+
+    // A reader that stops reading does not count that time against the peer.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(recv, RecordCodec::with_max_payload_len(65));
+    send.write_all(&record[..2]).await.expect("writes");
+    assert!(records.next().now_or_never().is_none());
+    tokio::time::sleep(2 * INCOMPLETE_RECORD_TIMEOUT).await;
+    records.pause();
+    send.write_all(&record[2..]).await.expect("writes");
+    let read = records.next().await.expect("open").expect("well-formed");
+    assert_eq!(read.as_ref(), [1, 2, 3]);
+
+    // A record that is being skipped holds nothing, and is timed all the same.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(
+        recv,
+        RecordCodec::skipping_unknown_kinds(16, INIT_RECORD_KIND),
+    );
+    let mut long = 1000u32.to_le_bytes().to_vec();
+    long.extend_from_slice(&[0x07; 100]);
+    send.write_all(&long).await.expect("writes");
+    let stalled = records.next().await.expect("the stream is open");
+    assert!(
+        matches!(stalled, Err(WireError::Stalled { what: "record" })),
+        "got {stalled:?}"
+    );
 }
 
 /// Asserts that a read of a request stream's response failed because the
@@ -1364,7 +1466,7 @@ async fn mempool_snapshot_is_capped() {
         let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(service))).await;
 
         let recv = raw_request(&raw.connection, &WireRequest::Mempool).await;
-        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec::default());
         let mut count = 0;
         while let Some(record) = records.next().await {
             record.expect("well-formed record");
@@ -1401,7 +1503,7 @@ async fn mempool_snapshot_and_unserved_requests() {
             .await
             .expect("writes");
         send.finish().expect("finishes");
-        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec::default());
         let mut ids = Vec::new();
         while let Some(record) = records.next().await {
             let payload = record.expect("well-formed record");
@@ -1465,6 +1567,71 @@ fn not_found() -> Vec<u8> {
     bytes
 }
 
+/// The node checks each object when its entry arrives, not when the response
+/// ends: a peer that delivers the wrong block or transaction and then keeps
+/// the response open is closed with `PROTOCOL_ERROR` at once, well before
+/// the request would time out, and without the rest of the response.
+#[tokio::test]
+async fn outbound_responses_are_verified_as_entries_arrive() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let block_1 = fixture.blocks[1].clone();
+        let block_2 = fixture.blocks[2].clone();
+        let coinbase_1 = UnminedTxId::from(block_1.transactions[0].as_ref().clone());
+        let coinbase_2 = UnminedTxId::from(block_2.transactions[0].as_ref().clone());
+
+        for case in ["wrong first block", "wrong first transaction"] {
+            let mut raw = raw_peer_node(&network).await;
+
+            // Two objects are requested, so a first entry does not complete the response. Both
+            // of the peer's objects are wrong for either order of the request.
+            let genesis = &fixture.blocks[0];
+            let (request, first_entry) = match case {
+                "wrong first block" => (
+                    Request::BlocksByHash([block_1.hash(), block_2.hash()].into_iter().collect()),
+                    found(genesis),
+                ),
+                "wrong first transaction" => (
+                    Request::TransactionsById([coinbase_1, coinbase_2].into_iter().collect()),
+                    found(&genesis.transactions[0]),
+                ),
+                _ => unreachable!(),
+            };
+
+            let started = Instant::now();
+            let (result, _response_stream) =
+                tokio::join!(call(&mut raw.node.client, request), async {
+                    let (_, mut send, recv) = accept_request(&raw.connection).await;
+                    send.write_all(&first_entry).await.expect("writes");
+                    // The response stays open: the peer neither sends the next entry nor
+                    // finishes.
+                    (send, recv)
+                });
+            let error = result.expect_err(case);
+            assert!(
+                error.inner_debug().contains("ProtocolViolation"),
+                "{case}: got {}",
+                error.inner_debug()
+            );
+            let close = raw.connection.closed().await;
+            assert!(
+                matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
+                    if close.error_code.into_inner() == ErrorCode::ProtocolError.code()),
+                "{case}: got {close:?}"
+            );
+            assert!(
+                started.elapsed() < REQUEST_TIMEOUT / 2,
+                "{case}: the entry is checked when it arrives, not at the request timeout"
+            );
+        }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// How the raw peer answers one of the node's requests.
 enum Reply {
     /// Writes these bytes, then finishes the stream.
@@ -1478,7 +1645,9 @@ enum Reply {
 /// header chain is misbehavior; an explicit all-not-found response is the
 /// legacy `NotFoundResponse` and registers the objects as missing; and a
 /// response finished before its first entry, or refused, fails without
-/// claiming anything is missing.
+/// claiming anything is missing. A stream reset with `BUSY` or
+/// `INTERNAL_ERROR` fails with its own error, which tells the caller that the
+/// request can be retried.
 #[tokio::test]
 async fn outbound_responses_are_verified() {
     let _init_guard = zebra_test::init();
@@ -1500,6 +1669,8 @@ async fn outbound_responses_are_verified() {
             "finished before the first transaction",
             "non-contiguous headers",
             "refused",
+            "busy",
+            "internal error",
         ] {
             let mut raw = raw_peer_node(&network).await;
 
@@ -1569,6 +1740,24 @@ async fn outbound_responses_are_verified() {
                     "RequestStreamFailed",
                     None,
                 ),
+                // A peer at a limit, or one that failed internally, can be asked again: the
+                // error tells the caller so, unlike a refusal.
+                "busy" => (
+                    Request::BlockDownload {
+                        hash: block_1.hash(),
+                        advertiser: None,
+                    },
+                    Reply::Reset(ErrorCode::Busy),
+                    "RequestStreamBusy",
+                    None,
+                ),
+                "internal error" => (
+                    Request::TransactionsById([coinbase_1].into_iter().collect()),
+                    Reply::Reset(ErrorCode::InternalError),
+                    "RequestStreamBusy",
+                    None,
+                ),
+
                 _ => unreachable!(),
             };
 
@@ -2230,7 +2419,7 @@ async fn cancelled_request_stops_its_stream() {
 /// `ConnectionReceiveTimeout` and cancels its stream with `CANCELLED`;
 /// requests from the peer that hold the node's request permits while the
 /// inbound service never answers, and one that waits for a busy permit, are
-/// all refused with `REFUSED` at their deadlines.
+/// all reset with `BUSY` at their deadlines.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
 /// unsafe with real sockets.
@@ -2285,7 +2474,7 @@ async fn stalled_requests_end_at_the_request_timeout() {
                 .collect::<Vec<_>>();
             // The requests holding the permits wait on the inbound service until their deadline,
             // and the extra one waits for a permit until its own, or until the others free their
-            // permits a moment before it: every one is refused at its deadline.
+            // permits a moment before it: every one is abandoned at its deadline.
             let mut codes = Vec::new();
             for read in futures::future::join_all(reads).await {
                 let error = read.expect_err("the stream is reset");
@@ -2296,8 +2485,8 @@ async fn stalled_requests_end_at_the_request_timeout() {
             }
             assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
             assert!(
-                codes.iter().all(|code| *code == ErrorCode::Refused.code()),
-                "every request is refused at its deadline: {codes:?}"
+                codes.iter().all(|code| *code == ErrorCode::Busy.code()),
+                "every request is abandoned as busy at its deadline: {codes:?}"
             );
         };
 
@@ -2531,6 +2720,88 @@ async fn inbound_announcements_reach_the_node() {
     .expect("the test completes well within the timeout");
 }
 
+/// Block announcements are acted on at a bounded rate, and only for headers
+/// that pass the difficulty filter: after a burst, the node stops reading the
+/// stream instead of closing the connection, and a header whose hash does not
+/// meet its own difficulty threshold is dropped without reaching the inbound
+/// service or the inventory registry.
+#[tokio::test]
+async fn block_announcements_are_filtered_and_rate_limited() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut raw = raw_peer_node(&network).await;
+        let block = Fixture::new().blocks[1].clone();
+
+        let mut valid = vec![BLOCK_ANNOUNCEMENT_HEADER];
+        block
+            .header
+            .zcash_serialize(&mut valid)
+            .expect("writes to a Vec");
+        // The same header with another nonce: it still parses, but its hash no longer meets
+        // its difficulty threshold. The nonce follows the kind byte and 108 bytes of fields.
+        let mut invalid = valid.clone();
+        invalid[1 + 108] ^= 0xFF;
+        let valid = RecordCodec::encode_record(&valid).expect("valid");
+        let invalid = RecordCodec::encode_record(&invalid).expect("valid");
+
+        let mut send = raw.connection.open_uni().await.expect("opens");
+        send.write_all(&[StreamType::BlockAnnouncements.code()])
+            .await
+            .expect("writes");
+        // The header that fails the filter uses up one record of the burst, and the valid
+        // headers after it are one more than the rest of the burst.
+        send.write_all(&invalid).await.expect("writes");
+        for _ in 0..BLOCK_ANNOUNCEMENT_BURST {
+            send.write_all(&valid).await.expect("writes");
+        }
+
+        for _ in 1..BLOCK_ANNOUNCEMENT_BURST {
+            let request = raw.node.inbound_rx.recv().await.expect("a request");
+            assert!(
+                matches!(request, Request::AdvertiseBlock(hash, Some(_)) if hash == block.hash()),
+                "only the valid header is forwarded, got {request}"
+            );
+            let change = raw.node.inv_rx.recv().await.expect("an inventory change");
+            assert!(
+                matches!(&change, InventoryChange::Available((hashes, _))
+                    if hashes.first() == &InventoryHash::Block(block.hash())),
+                "only the valid header is registered, got {change:?}"
+            );
+        }
+
+        // The record past the burst stays unread, and the connection stays open.
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            raw.node.inbound_rx.try_recv().is_err(),
+            "the announcement past the burst waits for the rate"
+        );
+        assert!(raw.node.inv_rx.try_recv().is_err());
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the rate is applied by backpressure, not by closing the connection"
+        );
+
+        // A replacement stream shares the connection's rate, so it does not start a new burst.
+        send.finish().expect("finishes");
+        let mut replacement = raw.connection.open_uni().await.expect("opens");
+        replacement
+            .write_all(&[StreamType::BlockAnnouncements.code()])
+            .await
+            .expect("writes");
+        replacement.write_all(&valid).await.expect("writes");
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            raw.node.inbound_rx.try_recv().is_err(),
+            "a replacement stream does not reset the rate"
+        );
+        assert!(raw.connection.close_reason().is_none());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// The node opens no transaction announcement stream to a peer whose `init`
 /// record declined relay.
 #[tokio::test]
@@ -2732,7 +3003,7 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
 
 /// An inbound service call is bounded by the request deadline too: a
 /// request the inbound service never answers has its stream reset with
-/// `REFUSED` at `REQUEST_TIMEOUT`, since none of the response was written,
+/// `BUSY` at `REQUEST_TIMEOUT`, since none of the response was written,
 /// and the connection stays open.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time.
@@ -2750,7 +3021,7 @@ async fn unanswered_lookups_end_at_the_request_deadline() {
             txrefs: vec![TxRef::Txid(transaction::Hash([0xCD; 32]))],
         });
         let mut recv = raw_request(&raw.connection, &request).await;
-        assert_reset(recv.read_to_end(1024).await, ErrorCode::Refused);
+        assert_reset(recv.read_to_end(1024).await, ErrorCode::Busy);
         assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
         assert!(
             raw.connection.close_reason().is_none(),
@@ -3161,8 +3432,8 @@ async fn assert_overload_close(raw: &mut RawPeer, expected_error: &str) {
 }
 
 /// A peer whose requests keep overloading the inbound service is
-/// disconnected, as on the legacy connection: each overload refuses its
-/// stream and may close the connection, more likely the more recent the
+/// disconnected, as on the legacy connection: each overload resets its
+/// stream with `BUSY` and may close the connection, more likely the more recent the
 /// last overload, so a peer that retries at once is soon closed with
 /// `NO_ERROR`, and the client's error is `Overloaded`.
 #[tokio::test]
@@ -3179,10 +3450,13 @@ async fn overloaded_requests_close_the_connection() {
         .encode()
         .expect("encodes");
 
-        // Each retry after an overload a moment ago is dropped with probability near one half,
-        // so 100 retries leave the connection open with negligible probability.
+        // The connection rolls once per overload protection interval, and a roll after an
+        // overload a moment ago drops it with probability near one half, so retrying for half
+        // the test timeout leaves the connection open with negligible probability.
         let mut refused = 0;
-        for _ in 0..100 {
+        let retry_until = Instant::now() + TEST_TIMEOUT / 2;
+        while Instant::now() < retry_until {
+            tokio::time::sleep(Duration::from_millis(20)).await;
             let Ok((mut send, mut recv)) = raw.connection.open_bi().await else {
                 break;
             };
@@ -3197,18 +3471,67 @@ async fn overloaded_requests_close_the_connection() {
             }
             match recv.read_to_end(1024).await {
                 Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code)))
-                    if code == app_error_code(ErrorCode::Refused) =>
+                    if code == app_error_code(ErrorCode::Busy) =>
                 {
                     refused += 1
                 }
                 _ => break,
             }
         }
-        assert!(refused > 0, "overloaded requests are refused");
+        assert!(refused > 0, "overloaded requests are reset with BUSY");
         assert_overload_close(&mut raw, "Overloaded").await;
     })
     .await
     .expect("the test completes well within the timeout");
+}
+
+/// The failures of one load-shed burst roll once: a version 2 connection can
+/// have several inbound service calls outstanding, and a burst that fails
+/// them all must not drop it more often than a legacy connection, which
+/// has one. Later bursts follow the legacy probability curve, measured from
+/// the connection's last overload.
+#[test]
+fn overloads_of_one_burst_roll_once() {
+    use crate::constants::{
+        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
+    };
+
+    let overloads = Overloads::new();
+    let start = std::time::Instant::now();
+
+    // A burst that fails six outstanding calls: only the first failure rolls, as a first
+    // overload does on a legacy connection.
+    assert_eq!(
+        overloads.drop_probability(start),
+        Some(MIN_OVERLOAD_DROP_PROBABILITY)
+    );
+    for call in 1..6 {
+        let failed_at = start + Duration::from_millis(call);
+        assert_eq!(overloads.drop_probability(failed_at), None);
+    }
+    // Still the same interval, however late in it.
+    let late = start + OVERLOAD_PROTECTION_INTERVAL - Duration::from_millis(2);
+    assert_eq!(overloads.drop_probability(late), None);
+
+    // The next interval rolls again, and the overload just before it counts: the probability
+    // is close to the maximum.
+    let next = start + OVERLOAD_PROTECTION_INTERVAL;
+    let probability = overloads
+        .drop_probability(next)
+        .expect("a failure in the next interval rolls");
+    assert!(
+        probability > 0.9 * MAX_OVERLOAD_DROP_PROBABILITY,
+        "got {probability}"
+    );
+    assert_eq!(overloads.drop_probability(next), None);
+
+    // A burst a full interval after the last overload is as unlikely to drop the connection
+    // as the first one.
+    let quiet = next + OVERLOAD_PROTECTION_INTERVAL;
+    assert_eq!(
+        overloads.drop_probability(quiet),
+        Some(MIN_OVERLOAD_DROP_PROBABILITY)
+    );
 }
 
 /// Announcements that time out in the inbound service count as overloads
@@ -3227,8 +3550,13 @@ async fn timed_out_announcements_close_the_connection() {
         send.write_all(&[StreamType::TransactionAnnouncements.code()])
             .await
             .expect("writes");
-        // One announcement at a time, so each is its own inbound service call.
-        for index in 0..100u8 {
+        // One announcement at a time, so each is its own inbound service call. The connection
+        // rolls once per overload protection interval, so the peer keeps announcing for up to
+        // half the test timeout.
+        let announce_until = Instant::now() + TEST_TIMEOUT / 2;
+        let mut index = 0u8;
+        while Instant::now() < announce_until {
+            index = index.wrapping_add(1);
             let id = UnminedTxId::Legacy(transaction::Hash([index; 32]));
             let record = RecordCodec::encode_record(encode_tx_record(id)).expect("valid");
             if send.write_all(&record).await.is_err() {
@@ -3681,7 +4009,7 @@ async fn accept_addr_stream(
     let mut type_byte = [0u8; 1];
     recv.read_exact(&mut type_byte).await.expect("reads");
     assert_eq!(type_byte[0], StreamType::AddressAnnouncements.code());
-    tokio_util::codec::FramedRead::new(recv, RecordCodec)
+    tokio_util::codec::FramedRead::new(recv, RecordCodec::default())
 }
 
 /// A hub that trickles relayed addresses out at once, and advertises

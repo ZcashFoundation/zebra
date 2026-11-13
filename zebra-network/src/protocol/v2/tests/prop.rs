@@ -50,7 +50,7 @@ fn encode_all(payloads: &[Vec<u8>]) -> BytesMut {
 /// Decodes every complete record currently in `src`.
 fn decode_available(src: &mut BytesMut) -> Vec<Bytes> {
     let mut records = Vec::new();
-    while let Some(record) = RecordCodec
+    while let Some(record) = RecordCodec::default()
         .decode(src)
         .expect("a well-formed stream never errors")
     {
@@ -260,7 +260,7 @@ proptest! {
         let mut wire = BytesMut::from(
             &RecordCodec::encode_record(&payload).expect("init records are far below the limit")[..],
         );
-        let framed = RecordCodec
+        let framed = RecordCodec::default()
             .decode(&mut wire)
             .expect("well-formed")
             .expect("complete");
@@ -285,7 +285,7 @@ proptest! {
     ) {
         let wire = encode_all(&payloads);
 
-        let decoded = decode_in_chunks(&mut RecordCodec, &wire, &chunk_lens).expect("well-formed");
+        let decoded = decode_in_chunks(&mut RecordCodec::default(), &wire, &chunk_lens).expect("well-formed");
 
         prop_assert_eq!(decoded.len(), payloads.len());
         for (record, payload) in decoded.iter().zip(&payloads) {
@@ -317,7 +317,7 @@ proptest! {
         let mut src = BytesMut::from(&wire[..cut]);
 
         let before_cut = decode_available(&mut src);
-        let eof = RecordCodec.decode_eof(&mut src);
+        let eof = RecordCodec::default().decode_eof(&mut src);
 
         // Every record that ends at or before the cut is yielded, whatever follows.
         let complete = boundaries.iter().filter(|&&b| b <= cut).count();

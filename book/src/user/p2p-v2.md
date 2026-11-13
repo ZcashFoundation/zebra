@@ -109,10 +109,19 @@ version 2 peers are recorded in a separate version 2 address book.
   `v2_listen_addr` if it is a specific address. An unspecified listener, like
   `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
-  announcements from peers are received and acted on.
+  announcements from peers are received and acted on. Zebra acts on a peer's
+  block announcements at a bounded rate, a burst of 16 and then one every 15
+  seconds, by not reading further announcements until then, and ignores an
+  announced header that fails the proof-of-work difficulty check.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
-  inbound and outbound limits of half the legacy ones. Protocol violations
-  close the connection with the draft's error codes.
+  inbound and outbound limits of half the legacy ones. For inbound version 2
+  connections, `max_connections_per_ip` and the limit of one connection
+  attempt per reconnection delay count an IPv6 address by its `/48` prefix,
+  not its `/64`, so nodes in the same `/48` share them. Protocol violations
+  close the connection with the draft's error codes. Zebra does not let a
+  peer move a connection to another address (QUIC connection migration), so
+  the bans and limits keep applying to the address the peer connected from. A
+  peer whose address changes reconnects.
 - Misbehavior scores as the draft describes them. A misbehaving response, such
   as a header chain that does not follow from the request, adds to the peer's
   score, which lasts across reconnections for about a ban duration. A peer

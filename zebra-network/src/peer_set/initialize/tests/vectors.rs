@@ -46,8 +46,9 @@ use crate::{
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
     peer::{
-        self, v2::handshake::LocalIdentity, ClientTestHarness, ConnectedAddr, HandshakeRequest,
-        OutboundConnectorRequest,
+        self,
+        v2::{handshake::LocalIdentity, rate::TokenBucket},
+        ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest,
     },
     peer_set::{
         crawler_services,
@@ -3714,6 +3715,152 @@ async fn v2_listener_refuses_connections_over_inbound_limit() {
     assert_eq!(listener_config.v2_inbound_connection_limit(), 1);
 
     assert_v2_listener_accepts_one_of_two_dialers(listener_config).await;
+}
+
+/// The listener's accept rate is a burst, then one token per interval, and taking a token never
+/// waits.
+#[test]
+fn v2_accept_rate_is_a_burst_then_one_per_interval() {
+    let interval = Duration::from_secs(1);
+    let start = tokio::time::Instant::now();
+    let mut rate = TokenBucket::new(interval, 3, start);
+
+    for _ in 0..3 {
+        assert!(rate.try_take(start), "the burst is available at once");
+    }
+    assert!(!rate.is_available(start));
+    assert!(!rate.try_take(start + interval / 2));
+
+    // One token per interval, counted from when the bucket was last full.
+    assert!(rate.try_take(start + interval));
+    assert!(!rate.try_take(start + interval + interval / 2));
+    assert!(rate.try_take(start + 2 * interval));
+
+    // A long quiet time refills no more than the burst.
+    let later = start + 100 * interval;
+    for _ in 0..3 {
+        assert!(rate.try_take(later));
+    }
+    assert!(!rate.try_take(later));
+
+    // An empty bucket's next token is one interval after the last one started to refill.
+    assert_eq!(rate.next_token_at(later), later + interval);
+    assert_eq!(rate.next_token_at(later + interval / 4), later + interval);
+    assert_eq!(rate.next_token_at(later + interval), later + interval);
+    assert!(rate.try_take(later + interval));
+
+    // A zero interval never limits.
+    let mut unlimited = TokenBucket::new(Duration::ZERO, 1, start);
+    assert!(unlimited.try_take(start));
+    assert!(unlimited.try_take(start));
+}
+
+/// The version 2 listener answers every connection attempt at once, whatever its accept rate:
+/// the attempts within the burst are accepted, and the next one is refused rather than left
+/// without a Retry until the dialer's connect timeout.
+#[tokio::test]
+async fn v2_listener_answers_attempts_beyond_its_accept_rate_at_once() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_addr = free_udp_addr();
+    let config = v2_test_config(listener_addr, &[]);
+    let (peerset_tx, _peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    // An accept interval far longer than the test, so the rate never refills.
+    let listener_task = v2::start_with_intervals(
+        config,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        "v2 test node".to_string(),
+        no_bans(),
+        misbehavior_tx,
+        peerset_tx,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+        Duration::from_secs(3600),
+    )
+    .expect("version 2 test configs listen");
+
+    let dialer = crate::quic::bind(&Mainnet, any_udp_addr()).expect("a UDP port is free");
+    let mut accepted = Vec::new();
+    for attempt in 0..v2::INBOUND_ACCEPT_BURST {
+        let connection = crate::quic::connect(&dialer, listener_addr)
+            .await
+            .unwrap_or_else(|error| panic!("attempt {attempt} is within the burst: {error:?}"));
+        accepted.push(connection);
+    }
+
+    let started = Instant::now();
+    let error = crate::quic::connect(&dialer, listener_addr)
+        .await
+        .expect_err("an attempt beyond the accept rate is refused");
+    assert!(
+        matches!(
+            error,
+            crate::quic::ConnectError::Handshake(quinn::ConnectionError::ConnectionClosed(_))
+        ),
+        "the attempt is refused, not left to time out, got {error:?}"
+    );
+    assert!(
+        started.elapsed() < constants::HANDSHAKE_TIMEOUT,
+        "the refusal arrives before the connect timeout"
+    );
+
+    listener_task.abort();
+}
+
+/// The version 2 listener's per-IP limits count an IPv6 address by its `/48`, so one site's
+/// allocation cannot take a slot for each of its 65,536 `/64`s, and an IPv4 address by itself.
+#[test]
+fn v2_inbound_limits_group_ipv6_by_48() {
+    let ip = |addr: &str| addr.parse::<IpAddr>().expect("a valid IP address");
+
+    let group = ip("2001:db8:1::");
+    for same_group in [
+        "2001:db8:1::1",
+        "2001:db8:1:1::1",
+        "2001:db8:1:ffff:ffff:ffff:ffff:ffff",
+    ] {
+        assert_eq!(v2::inbound_group(ip(same_group)), group, "{same_group}");
+    }
+    assert_ne!(v2::inbound_group(ip("2001:db8:2::1")), group);
+    // IPv4 addresses are their own groups, whichever way they are written.
+    assert_eq!(v2::inbound_group(ip("192.0.2.1")), ip("192.0.2.1"));
+    assert_eq!(v2::inbound_group(ip("::ffff:192.0.2.1")), ip("192.0.2.1"));
+    assert_ne!(v2::inbound_group(ip("192.0.2.2")), ip("192.0.2.1"));
+
+    // An attempt is only recent for an instant here, so only the open connections limit.
+    let mut groups = v2::InboundGroups::new(1, Some(Duration::ZERO));
+    let first = ip("2001:db8:1:1::1");
+    let other_64 = ip("2001:db8:1:2::1");
+    let other_48 = ip("2001:db8:2:1::1");
+    assert!(!groups.is_full(first));
+    let opened = groups.opened(first);
+    assert_eq!(opened, group);
+    assert!(
+        groups.is_full(other_64),
+        "another /64 of the same /48 shares its connection limit"
+    );
+    assert!(!groups.is_full(other_48));
+    assert!(!groups.is_full(ip("192.0.2.1")));
+    groups.closed(opened);
+    assert!(!groups.is_full(other_64));
+
+    // Recent attempts are counted by the same group.
+    let mut groups = v2::InboundGroups::new(1, None);
+    assert!(!groups.is_past_recent_limit_or_add(first));
+    assert!(
+        groups.is_past_recent_limit_or_add(other_64),
+        "another /64 of the same /48 shares its rate limit"
+    );
+    assert!(!groups.is_past_recent_limit_or_add(other_48));
+    assert!(!groups.is_past_recent_limit_or_add(ip("192.0.2.1")));
+    assert!(groups.is_past_recent_limit_or_add(ip("::ffff:192.0.2.1")));
 }
 
 /// The version 2 listener refuses a second connection from the same IP, like the legacy one.
