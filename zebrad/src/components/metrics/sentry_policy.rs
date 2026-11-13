@@ -1,15 +1,18 @@
 //! Shapes every metric for Sentry, which stores each value it receives.
 //!
 //! Recording a metric only updates atomics in a sharded registry: there is no lock on a kept
-//! handle, no allocation for an existing label set, and no call into the Sentry SDK. Once per
+//! handle, no allocation for an existing label set, and no call into the Sentry SDK. Only a
+//! histogram value recorded with [event attributes](super::event_labels) takes a short lock for
+//! its label set. Once per
 //! [`FLUSH_INTERVAL`], [`SentryPolicy::flush_if`] turns what was recorded into one batch of
 //! [`SentryMetric`]s and gives it to an adapter that sends it:
 //!
 //! - each counter's increase since it was last sent, for each label set that increased;
 //! - each gauge's latest value, for each label set whose value changed since it was last sent, or
 //!   that hasn't been sent for [`GAUGE_REFRESH_FLUSHES`] flushes;
-//! - at most [`HISTOGRAM_CAP`] of each histogram's values for each label set, spread evenly across
-//!   the values recorded since the previous flush.
+//! - at most [`HISTOGRAM_CAP`] of each histogram's values for each label set, chosen uniformly at
+//!   random from the values recorded since the previous flush. Each label set only keeps that
+//!   sample, so its memory doesn't grow with how often it is recorded.
 //!
 //! A batch holds at most [`FLUSH_BUDGET`] metrics. When more are due, counters go first, then
 //! gauges that changed, then gauges due for a refresh, then histogram values. Counters and gauges
@@ -36,6 +39,7 @@
 use std::{
     cell::Cell,
     collections::HashMap,
+    hash::{BuildHasher, RandomState},
     mem,
     ops::AddAssign,
     sync::{atomic::Ordering, Arc, Mutex, MutexGuard, PoisonError},
@@ -46,10 +50,7 @@ use metrics::{
     atomics::AtomicU64, Counter, CounterFn, Gauge, GaugeFn, Histogram, HistogramFn, Key, KeyName,
     Label, Metadata, Recorder, SharedString, Unit,
 };
-use metrics_util::{
-    registry::{Registry, Storage},
-    storage::AtomicBucket,
-};
+use metrics_util::registry::{Registry, Storage};
 
 use super::event_labels::{split_event_labels, EVENT_LABEL_PREFIX};
 
@@ -246,7 +247,7 @@ impl SentryPolicy {
 
         let mut histograms = Vec::new();
         self.registry.visit_histograms(|key, distribution| {
-            let values = distribution.take_capped(HISTOGRAM_CAP);
+            let values = distribution.take_sample(HISTOGRAM_CAP);
             if !values.is_empty() {
                 histograms.push((key.clone(), values));
             }
@@ -778,42 +779,200 @@ impl GaugeFn for GaugeValue {
     }
 }
 
-/// The values one histogram label set recorded since the previous flush.
+/// A uniform sample of the values one histogram label set recorded since the previous flush.
+///
+/// Each sample keeps at most [`HISTOGRAM_CAP`] values, so a histogram's memory and flush work stay
+/// the same however often it is recorded.
 #[derive(Default)]
 struct Distribution {
-    values: AtomicBucket<f64>,
+    /// Values recorded without event attributes.
+    values: Sample,
     /// Values recorded with event attributes, beside those attributes.
-    with_event_labels: AtomicBucket<(f64, Arc<[Label]>)>,
+    ///
+    /// Zebra records these about once per block, so a lock here costs little. The values that
+    /// some histograms record thousands of times a minute have no event attributes, and don't take
+    /// it.
+    with_event_labels: Mutex<SampleWithEventLabels>,
 }
 
 impl Distribution {
-    /// Takes the recorded values, and returns at most `cap` of the finite ones, spread evenly
-    /// across them, with their event attributes.
-    fn take_capped(&self, cap: usize) -> Vec<(f64, Option<Arc<[Label]>>)> {
-        let mut recorded = Vec::new();
-        self.values
-            .clear_with(|values| recorded.extend(values.iter().map(|value| (*value, None))));
-        self.with_event_labels.clear_with(|values| {
-            recorded.extend(
-                values
-                    .iter()
-                    .map(|(value, event_labels)| (*value, Some(event_labels.clone()))),
-            )
-        });
-        recorded.retain(|(value, _)| value.is_finite());
+    /// Takes the samples of the interval, and returns at most `cap` of their values, chosen
+    /// uniformly at random from every value recorded in the interval, with their event attributes.
+    fn take_sample(&self, cap: usize) -> Vec<(f64, Option<Arc<[Label]>>)> {
+        let (values, recorded) = self.values.take();
+        let SampleWithEventLabels {
+            recorded: recorded_with_event_labels,
+            values: with_event_labels,
+        } = mem::take(
+            &mut *self
+                .with_event_labels
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
 
-        let len = recorded.len();
-        let kept = len.min(cap);
-        (0..kept)
-            .map(|i| recorded[i * len / kept].clone())
-            .collect()
+        let mut values: Vec<_> = values.into_iter().map(|value| (value, None)).collect();
+        let mut with_event_labels: Vec<_> = with_event_labels
+            .into_iter()
+            .map(|(value, event_labels)| (value, Some(event_labels)))
+            .collect();
+        if values.len() + with_event_labels.len() <= cap {
+            values.append(&mut with_event_labels);
+            return values;
+        }
+
+        // Each sample is uniform over its own values, so drawing from each one in proportion to
+        // the values it hasn't drawn yet keeps the result uniform over all of them.
+        let mut left = [recorded, recorded_with_event_labels];
+        let mut samples = [values, with_event_labels];
+        let mut sample = Vec::with_capacity(cap);
+        while sample.len() < cap {
+            let from = usize::from(random_below(left[0].saturating_add(left[1])) >= left[0]);
+            // A value recorded while the previous flush took the sample can leave this sample
+            // with fewer values than its count, so draw from the other one when it runs out.
+            let from = if samples[from].is_empty() {
+                1 - from
+            } else {
+                from
+            };
+            if samples[from].is_empty() {
+                break;
+            }
+            left[from] = left[from].saturating_sub(1);
+            let len = u64::try_from(samples[from].len()).expect("a sample fits in u64");
+            let index =
+                usize::try_from(random_below(len)).expect("an index below a sample's len fits");
+            sample.push(samples[from].swap_remove(index));
+        }
+        sample
     }
 }
 
 impl HistogramFn for Distribution {
     fn record(&self, value: f64) {
-        self.values.push(value);
+        self.values.record(value);
     }
+}
+
+/// A uniform sample of at most [`HISTOGRAM_CAP`] values, kept with [Algorithm R], in atomic slots
+/// so that recording a value takes no lock and allocates nothing.
+///
+/// A value recorded while a flush takes the sample can land in the next interval's sample.
+///
+/// [Algorithm R]: https://en.wikipedia.org/wiki/Reservoir_sampling#Simple:_Algorithm_R
+struct Sample {
+    /// How many values were recorded in the interval.
+    recorded: AtomicU64,
+    /// The sampled values as `f64` bits, or [`EMPTY_SLOT`].
+    slots: [AtomicU64; HISTOGRAM_CAP],
+}
+
+/// A slot that holds no value. Samples only keep finite values, so NaN never stands for one.
+const EMPTY_SLOT: u64 = f64::NAN.to_bits();
+
+impl Default for Sample {
+    fn default() -> Self {
+        Self {
+            recorded: AtomicU64::new(0),
+            slots: std::array::from_fn(|_| AtomicU64::new(EMPTY_SLOT)),
+        }
+    }
+}
+
+impl Sample {
+    /// Adds `value` to the sample, unless it isn't finite, which Sentry can't store.
+    fn record(&self, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+
+        let index = self.recorded.fetch_add(1, Ordering::Relaxed);
+        if let Some(slot) = sample_slot(index) {
+            self.slots[slot].store(value.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// Takes the sampled values, with how many values were recorded, and starts a new interval.
+    fn take(&self) -> (Vec<f64>, u64) {
+        let recorded = self.recorded.swap(0, Ordering::Relaxed);
+        if recorded == 0 {
+            return (Vec::new(), 0);
+        }
+
+        let values = self
+            .slots
+            .iter()
+            .map(|slot| f64::from_bits(slot.swap(EMPTY_SLOT, Ordering::Relaxed)))
+            .filter(|value| value.is_finite())
+            .collect();
+        (values, recorded)
+    }
+}
+
+/// A uniform sample of at most [`HISTOGRAM_CAP`] values recorded with event attributes, beside
+/// those attributes, kept like a [`Sample`].
+#[derive(Default)]
+struct SampleWithEventLabels {
+    /// How many values were recorded in the interval.
+    recorded: u64,
+    values: Vec<(f64, Arc<[Label]>)>,
+}
+
+impl SampleWithEventLabels {
+    /// Adds `value` and its event attributes to the sample, unless the value isn't finite.
+    fn record(&mut self, value: f64, event_labels: &Arc<[Label]>) {
+        if !value.is_finite() {
+            return;
+        }
+
+        let index = self.recorded;
+        self.recorded = self.recorded.saturating_add(1);
+        match sample_slot(index) {
+            Some(slot) if slot < self.values.len() => {
+                self.values[slot] = (value, event_labels.clone());
+            }
+            Some(_) => self.values.push((value, event_labels.clone())),
+            None => {}
+        }
+    }
+}
+
+/// Returns the slot of a [`HISTOGRAM_CAP`]-value sample that the value numbered `index` in an
+/// interval replaces, if it is sampled: each of the first values takes the next slot, then each
+/// later value replaces a random slot with probability `HISTOGRAM_CAP / (index + 1)`.
+fn sample_slot(index: u64) -> Option<usize> {
+    if let Some(index) = usize::try_from(index)
+        .ok()
+        .filter(|index| *index < HISTOGRAM_CAP)
+    {
+        return Some(index);
+    }
+
+    usize::try_from(random_below(index.saturating_add(1)))
+        .ok()
+        .filter(|slot| *slot < HISTOGRAM_CAP)
+}
+
+thread_local! {
+    /// The state of this thread's [SplitMix64] generator, which only picks sampled values, so it
+    /// doesn't need to be cryptographically secure.
+    ///
+    /// [SplitMix64]: https://prng.di.unimi.it/splitmix64.c
+    static RANDOM_STATE: Cell<u64> = Cell::new(BuildHasher::hash_one(&RandomState::new(), 0_u8));
+}
+
+/// Returns a random number below `bound`, or zero if `bound` is zero.
+fn random_below(bound: u64) -> u64 {
+    let state = RANDOM_STATE.get().wrapping_add(0x9e37_79b9_7f4a_7c15);
+    RANDOM_STATE.set(state);
+
+    let mut random = state;
+    random = (random ^ (random >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    random = (random ^ (random >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    random ^= random >> 31;
+
+    // The high 64 bits of a 64-bit number times `bound` are below `bound`, so they fit in u64.
+    // This is biased by at most `bound / 2^64`, which doesn't matter for sampling.
+    ((u128::from(random) * u128::from(bound)) >> 64) as u64
 }
 
 /// A histogram handle that records its event attributes beside each value.
@@ -826,7 +985,9 @@ impl HistogramFn for WithEventLabels {
     fn record(&self, value: f64) {
         self.distribution
             .with_event_labels
-            .push((value, self.event_labels.clone()));
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .record(value, &self.event_labels);
     }
 }
 
@@ -1251,7 +1412,7 @@ mod tests {
     }
 
     #[test]
-    fn histograms_send_at_most_the_cap_spread_across_the_interval() {
+    fn histograms_send_at_most_the_cap_sampled_from_the_interval() {
         let policy = SentryPolicy::default();
         let cap = u32::try_from(HISTOGRAM_CAP).expect("the cap is small");
         let recorded = 10 * cap;
@@ -1279,9 +1440,8 @@ mod tests {
         capped.dedup();
         assert_eq!(capped.len(), HISTOGRAM_CAP, "distinct values up to the cap");
         assert!(
-            capped[0] < f64::from(recorded / 4)
-                && capped[HISTOGRAM_CAP - 1] >= f64::from(recorded * 3 / 4),
-            "values are spread across the interval: {capped:?}",
+            capped.iter().all(|value| *value < f64::from(recorded)),
+            "only recorded values are sent: {capped:?}",
         );
         assert!(sent
             .iter()
@@ -1291,6 +1451,133 @@ mod tests {
                 && metric.attributes == [("result".to_owned(), string("success"))]));
         assert_eq!(values("b.duration_seconds"), [1.5]);
         assert!(flush(&policy).is_empty(), "histograms only send new values");
+    }
+
+    #[test]
+    fn histogram_samples_stay_bounded_without_a_flush() {
+        let policy = SentryPolicy::default();
+        let recorded = 100_000_u32;
+
+        with_local_recorder(&policy, || {
+            let histogram = metrics::histogram!("a.duration_seconds");
+            for value in 0..recorded {
+                histogram.record(f64::from(value));
+            }
+            for height in 0..recorded / 10 {
+                metrics::histogram!(
+                    "a.duration_seconds",
+                    "event.chain.height" => height.to_string(),
+                )
+                .record(f64::from(height));
+            }
+        });
+
+        let distribution = policy
+            .registry
+            .get_histogram(&Key::from_name("a.duration_seconds"))
+            .expect("the label set was recorded");
+        let with_event_labels = distribution
+            .with_event_labels
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        assert_eq!(with_event_labels.recorded, u64::from(recorded / 10));
+        assert_eq!(
+            with_event_labels.values.len(),
+            HISTOGRAM_CAP,
+            "the sample keeps only the cap"
+        );
+        drop(with_event_labels);
+        assert_eq!(
+            distribution.values.recorded.load(Ordering::Relaxed),
+            u64::from(recorded),
+        );
+
+        assert_eq!(flush(&policy).len(), HISTOGRAM_CAP);
+        assert!(flush(&policy).is_empty(), "a flush starts a new interval");
+    }
+
+    #[test]
+    fn histogram_samples_are_uniform_over_the_interval() {
+        let policy = SentryPolicy::default();
+        let (intervals, recorded) = (200, 1_000_u32);
+
+        let mut sampled = Vec::new();
+        for _ in 0..intervals {
+            with_local_recorder(&policy, || {
+                let histogram = metrics::histogram!("a.duration_seconds");
+                for value in 0..recorded {
+                    histogram.record(f64::from(value));
+                }
+            });
+            sampled.extend(flush(&policy).into_iter().map(|metric| metric.value));
+        }
+
+        // 4,000 values: each tenth of the interval expects 400, with a standard deviation under
+        // 19, and the mean expects 499.5, with a standard deviation under 5. The bounds are more
+        // than 6 standard deviations wide, so the test doesn't fail by chance.
+        assert_eq!(sampled.len(), intervals * HISTOGRAM_CAP);
+        let mut tenths = [0_usize; 10];
+        for value in &sampled {
+            // The values are whole numbers below `recorded`, so the tenth is below 10.
+            tenths[(*value / f64::from(recorded / 10)) as usize] += 1;
+        }
+        assert!(
+            tenths.iter().all(|values| (280..=520).contains(values)),
+            "each tenth of the interval is sampled about as often: {tenths:?}",
+        );
+        let mean = sampled.iter().sum::<f64>() / count(sampled.len());
+        assert!((470.0..=530.0).contains(&mean), "mean: {mean}");
+    }
+
+    #[test]
+    fn values_with_and_without_event_attributes_share_one_sample() {
+        let policy = SentryPolicy::default();
+        let (intervals, recorded) = (50, 100_u32);
+
+        let mut with_event_labels = 0;
+        for _ in 0..intervals {
+            with_local_recorder(&policy, || {
+                let histogram = metrics::histogram!("a.delay_seconds", "kind" => "tip");
+                for value in 0..recorded {
+                    histogram.record(-f64::from(value) - 1.0);
+                    metrics::histogram!(
+                        "a.delay_seconds",
+                        "kind" => "tip",
+                        "event.chain.height" => value.to_string(),
+                    )
+                    .record(f64::from(value));
+                }
+            });
+
+            let sent = flush(&policy);
+            assert_eq!(sent.len(), HISTOGRAM_CAP, "the cap is for each label set");
+            for metric in sent {
+                let kind = ("kind".to_owned(), string("tip"));
+                if metric.value >= 0.0 {
+                    with_event_labels += 1;
+                    assert_eq!(
+                        metric.attributes,
+                        [
+                            kind,
+                            (
+                                "chain.height".to_owned(),
+                                // The values are small whole numbers.
+                                AttributeValue::Integer(metric.value as u64),
+                            ),
+                        ],
+                        "each value keeps its own event attributes",
+                    );
+                } else {
+                    assert_eq!(metric.attributes, [kind]);
+                }
+            }
+        }
+
+        // Half of 1,000 values, with a standard deviation under 16.
+        assert!(
+            (400..=600).contains(&with_event_labels),
+            "both kinds of values are sampled in proportion: {with_event_labels}",
+        );
     }
 
     #[test]

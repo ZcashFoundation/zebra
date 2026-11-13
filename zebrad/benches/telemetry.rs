@@ -94,6 +94,8 @@ impl Backend {
                 metrics::with_local_recorder(&recorder, || f(&handles))
             }
             Backend::PrometheusAndSentry => {
+                // The benchmark never flushes the policy, which stays bounded because it keeps a
+                // fixed-size sample of each histogram label set.
                 let recorder = FanoutBuilder::default()
                     .add_recorder(StripEventLabelsLayer.layer(prometheus()))
                     .add_recorder(SentryPolicy::default())
