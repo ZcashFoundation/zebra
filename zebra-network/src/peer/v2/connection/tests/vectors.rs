@@ -14,6 +14,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, UnminedTxId},
+    work::difficulty::ParameterDifficulty,
 };
 
 use crate::{
@@ -22,7 +23,7 @@ use crate::{
     peer::{
         v2::{
             connection::{
-                announcements::AnnouncementWriter,
+                announcements::{AnnouncementWriter, BLOCK_ANNOUNCEMENT_BURST},
                 inbound::{
                     serve as serve_request_stream, INBOUND_REQUEST_CONCURRENCY,
                     MAX_LOOKUP_CALLS_PER_RESPONSE, RESPONSE_BYTES_LIMIT,
@@ -233,6 +234,7 @@ fn spawn_node_scored(
         ConnectionParams {
             inbound_service,
             inv_collector: inv_tx,
+            target_difficulty_limit: Network::Mainnet.target_difficulty_limit(),
             genesis_hash: Network::Mainnet.genesis_hash(),
             misbehavior: misbehavior.clone(),
         },
@@ -2527,6 +2529,88 @@ async fn inbound_announcements_reach_the_node() {
             matches!(request, Request::AdvertiseBlock(hash, Some(_)) if hash == block.hash()),
             "got {request}"
         );
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
+/// Block announcements are acted on at a bounded rate, and only for headers
+/// that pass the difficulty filter: after a burst, the node stops reading the
+/// stream instead of closing the connection, and a header whose hash does not
+/// meet its own difficulty threshold is dropped without reaching the inbound
+/// service or the inventory registry.
+#[tokio::test]
+async fn block_announcements_are_filtered_and_rate_limited() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut raw = raw_peer_node(&network).await;
+        let block = Fixture::new().blocks[1].clone();
+
+        let mut valid = vec![BLOCK_ANNOUNCEMENT_HEADER];
+        block
+            .header
+            .zcash_serialize(&mut valid)
+            .expect("writes to a Vec");
+        // The same header with another nonce: it still parses, but its hash no longer meets
+        // its difficulty threshold. The nonce follows the kind byte and 108 bytes of fields.
+        let mut invalid = valid.clone();
+        invalid[1 + 108] ^= 0xFF;
+        let valid = RecordCodec::encode_record(&valid).expect("valid");
+        let invalid = RecordCodec::encode_record(&invalid).expect("valid");
+
+        let mut send = raw.connection.open_uni().await.expect("opens");
+        send.write_all(&[StreamType::BlockAnnouncements.code()])
+            .await
+            .expect("writes");
+        // The header that fails the filter uses up one record of the burst, and the valid
+        // headers after it are one more than the rest of the burst.
+        send.write_all(&invalid).await.expect("writes");
+        for _ in 0..BLOCK_ANNOUNCEMENT_BURST {
+            send.write_all(&valid).await.expect("writes");
+        }
+
+        for _ in 1..BLOCK_ANNOUNCEMENT_BURST {
+            let request = raw.node.inbound_rx.recv().await.expect("a request");
+            assert!(
+                matches!(request, Request::AdvertiseBlock(hash, Some(_)) if hash == block.hash()),
+                "only the valid header is forwarded, got {request}"
+            );
+            let change = raw.node.inv_rx.recv().await.expect("an inventory change");
+            assert!(
+                matches!(&change, InventoryChange::Available((hashes, _))
+                    if hashes.first() == &InventoryHash::Block(block.hash())),
+                "only the valid header is registered, got {change:?}"
+            );
+        }
+
+        // The record past the burst stays unread, and the connection stays open.
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            raw.node.inbound_rx.try_recv().is_err(),
+            "the announcement past the burst waits for the rate"
+        );
+        assert!(raw.node.inv_rx.try_recv().is_err());
+        assert!(
+            raw.connection.close_reason().is_none(),
+            "the rate is applied by backpressure, not by closing the connection"
+        );
+
+        // A replacement stream shares the connection's rate, so it does not start a new burst.
+        send.finish().expect("finishes");
+        let mut replacement = raw.connection.open_uni().await.expect("opens");
+        replacement
+            .write_all(&[StreamType::BlockAnnouncements.code()])
+            .await
+            .expect("writes");
+        replacement.write_all(&valid).await.expect("writes");
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            raw.node.inbound_rx.try_recv().is_err(),
+            "a replacement stream does not reset the rate"
+        );
+        assert!(raw.connection.close_reason().is_none());
     })
     .await
     .expect("the test completes well within the timeout");

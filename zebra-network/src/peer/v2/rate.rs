@@ -64,6 +64,16 @@ impl TokenBucket {
         self.tokens > 0
     }
 
+    /// Returns the earliest time a token can be taken: `now` if there is
+    /// one.
+    pub fn next_token_at(&mut self, now: Instant) -> Instant {
+        if self.is_available(now) {
+            now
+        } else {
+            self.refilled_at + self.interval
+        }
+    }
+
     /// Takes a token at `now`, and returns `false` if there is none.
     pub fn try_take(&mut self, now: Instant) -> bool {
         if !self.is_available(now) {

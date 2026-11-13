@@ -653,6 +653,8 @@ async fn connected_v2_client(network: &Network) -> (Client, (Client, [quinn::End
     let params = ConnectionParams {
         inbound_service: tower::service_fn(|_| async { Ok::<_, BoxError>(Response::Nil) }),
         inv_collector: tokio::sync::broadcast::channel(16).0,
+        target_difficulty_limit:
+            zebra_chain::work::difficulty::ParameterDifficulty::target_difficulty_limit(network),
         genesis_hash: network.genesis_hash(),
         misbehavior: MisbehaviorScores::spawn(tokio::sync::mpsc::channel(8).0, 8),
     };

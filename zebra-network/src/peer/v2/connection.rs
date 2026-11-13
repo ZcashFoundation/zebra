@@ -34,7 +34,10 @@ use tokio::{
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedTxId};
+use zebra_chain::{
+    block, diagnostic::task::CheckForPanics, transaction::UnminedTxId,
+    work::difficulty::ExpandedDifficulty,
+};
 
 use crate::{
     constants::OVERLOAD_PROTECTION_INTERVAL,
@@ -80,6 +83,10 @@ pub struct ConnectionParams<S> {
 
     /// Where advertised and missing inventory is registered for the peer set.
     pub inv_collector: tokio::sync::broadcast::Sender<InventoryChange>,
+
+    /// The easiest proof-of-work target the network allows, which a block
+    /// header a peer announces is checked against before it is acted on.
+    pub target_difficulty_limit: ExpandedDifficulty,
 
     /// The hash of the network's genesis block, which a `get-headers` response
     /// to a locator the peer does not know starts after (draft, "`get-headers`").
@@ -603,6 +610,7 @@ where
                             recv,
                             self.announcement_permits.clone(),
                             self.transient_addr,
+                            self.params.target_difficulty_limit,
                             self.params.inbound_service.clone(),
                             self.overloads.clone(),
                             self.params.inv_collector.clone(),

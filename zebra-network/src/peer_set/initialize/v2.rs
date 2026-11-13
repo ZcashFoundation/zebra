@@ -21,7 +21,10 @@ use tower::Service;
 use tracing::instrument;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network};
+use zebra_chain::{
+    chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network,
+    work::difficulty::ParameterDifficulty,
+};
 
 use crate::{
     connection_metrics::{
@@ -119,6 +122,7 @@ where
             connection_params: ConnectionParams {
                 inbound_service,
                 inv_collector,
+                target_difficulty_limit: config.network.target_difficulty_limit(),
                 genesis_hash: config.network.genesis_hash(),
                 misbehavior: MisbehaviorScores::spawn(
                     misbehavior_tx,

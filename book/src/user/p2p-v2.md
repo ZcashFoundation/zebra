@@ -68,7 +68,10 @@ peers are not recorded there (see below).
 - Exchanging peer addresses as the draft recommends: Zebra asks for addresses
   once, on connections it made, and answers once, on connections it accepted.
 - Transaction announcements in both directions. Block and address
-  announcements from peers are received and acted on.
+  announcements from peers are received and acted on. Zebra acts on a peer's
+  block announcements at a bounded rate, a burst of 16 and then one every 15
+  seconds, by not reading further announcements until then, and ignores an
+  announced header that fails the proof-of-work difficulty check.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
   inbound and outbound limits of half the legacy ones. Protocol violations
   close the connection with the draft's error codes. Zebra does not let a

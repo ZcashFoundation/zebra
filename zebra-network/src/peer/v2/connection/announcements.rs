@@ -1,7 +1,10 @@
 //! Announcement streams, in both directions (draft, "Announcement
 //! Streams").
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
@@ -9,13 +12,15 @@ use quinn::{Connection, RecvStream};
 use tokio::{
     sync::{broadcast, mpsc, Semaphore},
     task::JoinSet,
+    time::Instant,
 };
 use tokio_util::codec::FramedRead;
 use tower::Service;
 
-use zebra_chain::transaction::UnminedTxId;
+use zebra_chain::{block, transaction::UnminedTxId, work::difficulty::ExpandedDifficulty};
 
 use crate::{
+    peer::v2::rate::TokenBucket,
     peer_set::InventoryChange,
     protocol::{
         external::InventoryHash,
@@ -49,6 +54,30 @@ const STREAM_TYPE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The most transaction announcements folded into one inbound service call.
 const MAX_ANNOUNCEMENT_BATCH: usize = 1000;
+
+/// How many block announcement records a connection acts on in a row before
+/// it acts on one per [`BLOCK_ANNOUNCEMENT_INTERVAL`].
+///
+/// A peer announces each new block once, and a few at a time after a chain
+/// reorganization or when it catches up with the tip.
+pub(super) const BLOCK_ANNOUNCEMENT_BURST: u32 = 16;
+
+/// The time one block announcement's worth of a connection's rate takes to
+/// refill: a fifth of the 75-second target block spacing, so a conforming
+/// peer never waits.
+///
+/// # Security
+///
+/// Every block announcement record becomes an inbound service call, which
+/// can start a block download. Without a rate, a peer could make this node
+/// start them as fast as it writes 1.5 KiB records. Over the rate, the
+/// reader stops reading the stream, which applies backpressure without
+/// closing the connection (draft, "Announcement Streams": a receiver MAY
+/// bound the rate at which it reads announcement records by ceasing to read
+/// the stream, and SHOULD for block announcements). The peer's writes then
+/// stall on flow control, and announcements are best effort, so the records
+/// a peer cannot write are its to drop.
+const BLOCK_ANNOUNCEMENT_INTERVAL: Duration = Duration::from_secs(15);
 
 /// This node's announcement stream of one type to the peer, written by its
 /// own task; batches are queued without waiting and dropped when the queue
@@ -148,11 +177,17 @@ async fn write_bounded(
 /// type waits [`STREAM_TYPE_TIMEOUT`] for a reader to finish, since this
 /// node's readers may still be processing streams the peer already ended,
 /// and is then the draft's `PROTOCOL_ERROR` (draft, "Announcement Streams").
+///
+/// The block announcement readers also share the connection's block
+/// announcement rate, so a replacement stream starts with what the stream
+/// it replaces left of it.
 #[derive(Clone)]
 pub(super) struct AnnouncementPermits {
     blocks: Arc<Semaphore>,
     transactions: Arc<Semaphore>,
     addresses: Arc<Semaphore>,
+    /// Only locked to count a token, never across an await.
+    block_rate: Arc<Mutex<TokenBucket>>,
 }
 
 impl AnnouncementPermits {
@@ -162,6 +197,30 @@ impl AnnouncementPermits {
             blocks: Arc::new(Semaphore::new(2)),
             transactions: Arc::new(Semaphore::new(2)),
             addresses: Arc::new(Semaphore::new(2)),
+            block_rate: Arc::new(Mutex::new(TokenBucket::new(
+                BLOCK_ANNOUNCEMENT_INTERVAL,
+                BLOCK_ANNOUNCEMENT_BURST,
+                Instant::now(),
+            ))),
+        }
+    }
+
+    /// Waits until the connection's block announcement rate allows another
+    /// record, and counts it.
+    async fn block_announcement(&self) {
+        loop {
+            let next_token_at = {
+                let mut block_rate = self
+                    .block_rate
+                    .lock()
+                    .expect("no holder of the lock panics: it only counts tokens");
+                let now = Instant::now();
+                if block_rate.try_take(now) {
+                    return;
+                }
+                block_rate.next_token_at(now)
+            };
+            tokio::time::sleep_until(next_token_at).await;
         }
     }
 
@@ -183,10 +242,12 @@ impl AnnouncementPermits {
 /// are a `PROTOCOL_ERROR`. Transaction and address announcements that are
 /// already buffered are folded into one inbound service call or one cache
 /// update, as a legacy `inv` or `addr` message would be.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn serve<S>(
     mut recv: RecvStream,
     permits: AnnouncementPermits,
     transient_addr: Option<PeerSocketAddr>,
+    target_difficulty_limit: ExpandedDifficulty,
     inbound_service: S,
     overloads: Arc<Overloads>,
     inv_collector: broadcast::Sender<InventoryChange>,
@@ -297,9 +358,15 @@ pub(super) async fn serve<S>(
 
         let handled = match stream_type {
             StreamType::BlockAnnouncements => {
+                // Nothing is read from the stream while this waits: see
+                // `BLOCK_ANNOUNCEMENT_INTERVAL`.
+                if !payloads.is_empty() {
+                    permits.block_announcement().await;
+                }
                 handle_block_announcements(
                     &payloads,
                     transient_addr,
+                    target_difficulty_limit,
                     &mut inbound_service,
                     &inv_collector,
                 )
@@ -363,10 +430,32 @@ fn close_code(error: WireError) -> Handled {
     })
 }
 
-/// Acts on a batch of block announcement records.
+/// Returns `true` if `header`, which hashes to `hash`, passes the
+/// proof-of-work checks that need nothing but the header: its difficulty
+/// threshold is valid and no easier than `target_difficulty_limit`, and its
+/// hash meets the threshold.
+///
+/// These are comparisons, not the Equihash solution check, which the block's
+/// verification makes. A header that fails them is not a block any node
+/// accepts, so acting on its announcement would be wasted work.
+fn passes_difficulty_filter(
+    header: &block::Header,
+    hash: block::Hash,
+    target_difficulty_limit: ExpandedDifficulty,
+) -> bool {
+    header
+        .difficulty_threshold
+        .to_expanded()
+        .is_some_and(|threshold| threshold <= target_difficulty_limit && hash <= threshold)
+}
+
+/// Acts on a batch of block announcement records. A header that fails
+/// [`passes_difficulty_filter`] is dropped: nothing is registered or
+/// forwarded for it, and the connection stays open.
 async fn handle_block_announcements<S>(
     payloads: &[Bytes],
     transient_addr: Option<PeerSocketAddr>,
+    target_difficulty_limit: ExpandedDifficulty,
     inbound_service: &mut Inbound<'_, S>,
     inv_collector: &broadcast::Sender<InventoryChange>,
 ) -> Result<(), Handled>
@@ -376,6 +465,14 @@ where
     for payload in payloads {
         let header = decode_block_announcement(payload).map_err(close_code)?;
         let hash = header.hash();
+        if !passes_difficulty_filter(&header, hash, target_difficulty_limit) {
+            tracing::debug!(
+                ?hash,
+                "ignoring announced header that fails the difficulty filter"
+            );
+            metrics::counter!("zebra.net.in.announcements.dropped").increment(1);
+            continue;
+        }
         if let Some(addr) = transient_addr {
             let _ = inv_collector.send(InventoryChange::new_available(
                 InventoryHash::Block(hash),

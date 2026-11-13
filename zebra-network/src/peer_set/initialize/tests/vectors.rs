@@ -3663,6 +3663,12 @@ fn v2_accept_rate_is_a_burst_then_one_per_interval() {
     }
     assert!(!rate.try_take(later));
 
+    // An empty bucket's next token is one interval after the last one started to refill.
+    assert_eq!(rate.next_token_at(later), later + interval);
+    assert_eq!(rate.next_token_at(later + interval / 4), later + interval);
+    assert_eq!(rate.next_token_at(later + interval), later + interval);
+    assert!(rate.try_take(later + interval));
+
     // A zero interval never limits.
     let mut unlimited = TokenBucket::new(Duration::ZERO, 1, start);
     assert!(unlimited.try_take(start));
