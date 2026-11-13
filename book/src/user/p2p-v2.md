@@ -146,9 +146,11 @@ Serving is bounded so that it cannot crowd out the node's other work:
   part's first block, and keeps two buffers of up to one block each. With
   2 MB blocks that is at most about 8 MB of block data per stream, so eight
   streams hold at most about 64 MB of blocks in memory.
-- A stream is cancelled if its reader does not take each 2 MiB part within
-  20 seconds, if it is sent at less than 64 KiB/s on average over 20 seconds,
-  or if it lasts longer than 5 minutes.
+- A stream is cancelled if its reader does not start taking the response
+  within 5 seconds of sending its request, if it then takes the response at
+  less than 64 KiB/s (a reader that was faster keeps up to 10 seconds of
+  slack), or if the stream lasts longer than 5 minutes. Only the time Zebra
+  waits for the reader counts, not the time Zebra takes to read the blocks.
 
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
 request, with the `REFUSED` error code, which tells the peer not to ask again.

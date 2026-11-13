@@ -11,16 +11,19 @@
 //! A range can be up to 64 MiB, far more than a peer can be expected to read
 //! within one request deadline, so a range response is not bounded by the
 //! whole-exchange deadline of the other request types. Instead:
-//! - each chunk, from the inbound service call to the last write, must be
-//!   done within [`REQUEST_TIMEOUT`], so a stalled reader is cut off;
-//! - the response must keep writing at least [`RANGE_MIN_SERVE_RATE`] on
-//!   average over each [`RANGE_PROGRESS_WINDOW`], so a reader that takes
-//!   each small chunk just within its deadline cannot hold a permit for the
-//!   whole stream deadline;
+//! - each inbound service call must answer within [`REQUEST_TIMEOUT`], which
+//!   bounds this node's own reads;
+//! - the peer must take the response at [`RANGE_MIN_SERVE_RATE`] or faster,
+//!   measured from the moment its request is complete and over the time the
+//!   response's writes wait for it, with [`RANGE_FIRST_WRITE_TIMEOUT`] to
+//!   start and at most [`RANGE_PROGRESS_WINDOW`] of slack later (see
+//!   [`Pace`]). A write is abandoned at the moment the peer falls behind, so
+//!   a reader that grants no flow-control credit holds its permits for
+//!   seconds;
 //! - the whole stream must be done within [`RANGE_STREAM_TIMEOUT`] of being
-//!   accepted, so a slow reader cannot hold a permit indefinitely.
+//!   accepted, so no stream holds a permit indefinitely.
 //!
-//! A response that misses either deadline is abandoned like any other: reset
+//! A response that misses any of them is abandoned like any other: reset
 //! with `REFUSED` while nothing is written, and `CANCELLED` once it is (see
 //! the parent module).
 //!
@@ -104,25 +107,35 @@ pub(crate) const RANGE_READ_CHUNK_BLOCKS: u32 = 64;
 /// At the draft's 64 MiB maximum, this serves a reader of about 220 KiB/s.
 pub(crate) const RANGE_STREAM_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// The lowest average rate, in serialized block bytes per second, at which a
-/// `get-block-range` response must be written over each
-/// [`RANGE_PROGRESS_WINDOW`], after which it is abandoned.
+/// The lowest rate, in response bytes per second, at which a peer must take
+/// a `get-block-range` response, below which the response is abandoned (see
+/// [`Pace`]).
 ///
 /// # Security
 ///
-/// Without it, a reader of early-chain blocks of about 1.5 KB could take
-/// each 64-block chunk of about 100 KB just within [`REQUEST_TIMEOUT`],
-/// about 5 KB/s, and hold a node permit for the whole
-/// [`RANGE_STREAM_TIMEOUT`]: a few such peers would deny range serving to
-/// every other peer. 64 KiB/s is far below the rate a bulk sync requester
-/// needs, so this only abandons responses that are of little use to the
-/// requester anyway.
+/// Without it, a reader could take each write just within a deadline and
+/// hold a node permit for the whole [`RANGE_STREAM_TIMEOUT`] at almost no
+/// cost: a few such peers would deny range serving to every other peer.
+/// 64 KiB/s is far below the rate a bulk sync requester needs, so this only
+/// abandons responses that are of little use to the requester anyway.
 pub(crate) const RANGE_MIN_SERVE_RATE: u64 = 64 * 1024;
 
-/// The window over which a `get-block-range` response must average
-/// [`RANGE_MIN_SERVE_RATE`]: one chunk deadline, so that one chunk, of up to
-/// [`RANGE_READ_CHUNK`] bytes, can take the whole window.
-pub(crate) const RANGE_PROGRESS_WINDOW: Duration = REQUEST_TIMEOUT;
+/// How long the peer has, from the moment its `get-block-range` request is
+/// complete, to start taking the response: the time the first write may wait
+/// for the peer beyond what its bytes take at [`RANGE_MIN_SERVE_RATE`].
+///
+/// # Security
+///
+/// A peer that sends a request and grants no stream flow-control credit
+/// blocks the first write. This is how long it holds a node permit for the
+/// 41 bytes of its request, so it is a few seconds, not a request deadline.
+pub(crate) const RANGE_FIRST_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The most slack a `get-block-range` reader that is ahead of
+/// [`RANGE_MIN_SERVE_RATE`] keeps: how long it may then stop reading before
+/// the response is abandoned. It rides out a short network stall without
+/// letting a reader that started fast hold a permit while it reads nothing.
+pub(crate) const RANGE_PROGRESS_WINDOW: Duration = Duration::from_secs(10);
 
 /// Returns the node-wide `get-block-range` stream permits,
 /// [`RANGE_STREAMS_GLOBAL`] of them, to be shared by every version 2
@@ -150,25 +163,61 @@ pub(crate) struct BlockRangeServing {
     /// [`RANGE_STREAM_TIMEOUT`], except in tests.
     stream_timeout: Duration,
 
-    /// How fast a response must be written: [`RANGE_MIN_SERVE_RATE`] over
-    /// [`RANGE_PROGRESS_WINDOW`], except in tests.
+    /// How fast the peer must take a response: [`RANGE_MIN_SERVE_RATE`],
+    /// with [`RANGE_FIRST_WRITE_TIMEOUT`] to start and
+    /// [`RANGE_PROGRESS_WINDOW`] of slack, except in tests.
     min_progress: MinProgress,
 }
 
-/// The least progress a `get-block-range` response must make.
+/// The least progress the reader of a `get-block-range` response must make.
 #[derive(Copy, Clone, Debug)]
 pub(super) struct MinProgress {
-    /// The lowest average rate, in bytes per second.
+    /// The lowest rate, in bytes per second; zero for no rate floor, where
+    /// each write may wait for `window`.
     rate: u64,
-    /// The window the rate is averaged over.
+    /// How long the first write may wait beyond its bytes' time at `rate`.
+    first: Duration,
+    /// The most slack a reader ahead of `rate` keeps.
     window: Duration,
 }
 
-impl MinProgress {
-    /// The fewest bytes a response must write in `elapsed`.
-    fn min_bytes(&self, elapsed: Duration) -> u64 {
-        // A lossy cast is fine: it is a rate threshold.
-        (self.rate as f64 * elapsed.as_secs_f64()) as u64
+/// How far ahead of its [`MinProgress`] the reader of one response is.
+///
+/// The peer is only on the clock while a write waits for it, so the time
+/// this node takes to read blocks is never counted against the peer. Each
+/// write is allowed the time its bytes take at the floor rate, plus the
+/// slack the reader has left, and is abandoned at the moment that runs out:
+/// a write that blocks is cut off when the peer falls behind, not at the next
+/// check between writes.
+#[derive(Debug)]
+struct Pace {
+    min_progress: MinProgress,
+    /// How much longer than the floor rate allows the writes so far could
+    /// have waited: the slack the next write starts with.
+    slack: Duration,
+    /// Whether a write was abandoned because the peer fell behind.
+    stalled: bool,
+}
+
+impl Pace {
+    /// The pace of a response whose request has just been completed.
+    fn new(min_progress: MinProgress) -> Self {
+        Self {
+            min_progress,
+            slack: min_progress.first,
+            stalled: false,
+        }
+    }
+
+    /// How long a write of `len` bytes may wait for the peer.
+    fn allowance(&self, len: usize) -> Duration {
+        let MinProgress { rate, window, .. } = self.min_progress;
+        if rate == 0 {
+            return window;
+        }
+        let len = u64::try_from(len).unwrap_or(u64::MAX);
+        let at_rate = Duration::from_micros(len.saturating_mul(1_000_000) / rate);
+        self.slack.min(window).saturating_add(at_rate)
     }
 }
 
@@ -183,6 +232,7 @@ impl BlockRangeServing {
             stream_timeout: RANGE_STREAM_TIMEOUT,
             min_progress: MinProgress {
                 rate: RANGE_MIN_SERVE_RATE,
+                first: RANGE_FIRST_WRITE_TIMEOUT,
                 window: RANGE_PROGRESS_WINDOW,
             },
         }
@@ -196,12 +246,18 @@ impl BlockRangeServing {
         self
     }
 
-    /// Returns these serving settings with a minimum write rate of `rate`
-    /// bytes per second over `window`, instead of [`RANGE_MIN_SERVE_RATE`]
-    /// over [`RANGE_PROGRESS_WINDOW`].
+    /// Returns these serving settings with a minimum rate of `rate` bytes
+    /// per second, and `window` both for the first write and as the most
+    /// slack, instead of [`RANGE_MIN_SERVE_RATE`],
+    /// [`RANGE_FIRST_WRITE_TIMEOUT`] and [`RANGE_PROGRESS_WINDOW`]. A `rate`
+    /// of zero lets each write wait for `window`.
     #[cfg(test)]
     pub(crate) fn with_min_progress(mut self, rate: u64, window: Duration) -> Self {
-        self.min_progress = MinProgress { rate, window };
+        self.min_progress = MinProgress {
+            rate,
+            first: window,
+            window,
+        };
         self
     }
 
@@ -210,7 +266,7 @@ impl BlockRangeServing {
         self.stream_timeout
     }
 
-    /// How fast a response must be written.
+    /// How fast the peer must take a response.
     pub(super) fn min_progress(&self) -> MinProgress {
         self.min_progress
     }
@@ -285,8 +341,9 @@ pub(super) struct PendingRange {
 }
 
 /// Serves a `get-block-range` request, writing the whole response and
-/// finishing the stream, by `stream_deadline` at the latest, each chunk
-/// within [`REQUEST_TIMEOUT`], and at least `min_progress` on average.
+/// finishing the stream, by `stream_deadline` at the latest, each inbound
+/// service call within [`REQUEST_TIMEOUT`], and with the peer taking it at
+/// `min_progress` or faster.
 ///
 /// The response is finished early, which the draft allows (the requester
 /// resumes from the last block's parent), at genesis, when the inbound
@@ -315,54 +372,23 @@ where
         raw: Vec::new(),
         element: Vec::new(),
     };
+    let mut writer = RangeWriter {
+        response,
+        stream_deadline,
+        pace: Pace::new(min_progress),
+    };
 
     // `count = 0` is a valid request, answered with no blocks.
     if request.count == 0 {
         let mut answer = Vec::with_capacity(1);
         write_block_range_answer(&mut answer, BlockRangeAnswer::Found)?;
-        tokio::time::timeout_at(stream_deadline, response.write(&answer))
-            .await
-            .map_err(|_elapsed| Outcome::Refuse(response.abandon_code()))??;
+        writer.write(&answer).await?;
     }
 
-    // The start of the current progress window, and the bytes written by then.
-    let mut window = (Instant::now(), 0);
     while progress.delivered < request.count {
-        let now = Instant::now();
-        let elapsed = now.saturating_duration_since(window.0);
-        if elapsed >= min_progress.window {
-            let written = progress.delivered_bytes.saturating_sub(window.1);
-            if written < min_progress.min_bytes(elapsed) {
-                tracing::debug!(
-                    delivered = progress.delivered,
-                    delivered_bytes = progress.delivered_bytes,
-                    written,
-                    ?elapsed,
-                    "get-block-range response is too slow, abandoning it"
-                );
-                return Err(Outcome::Refuse(response.abandon_code()));
-            }
-            window = (now, progress.delivered_bytes);
-        }
-
-        let chunk_deadline = (Instant::now() + REQUEST_TIMEOUT).min(stream_deadline);
-        let chunk = tokio::time::timeout_at(
-            chunk_deadline,
-            serve_chunk(response, &request, service.clone(), &mut progress),
-        )
-        .await;
-        match chunk {
-            Ok(Ok(Continue::More)) => {}
-            Ok(Ok(Continue::Done)) => break,
-            Ok(Err(error)) => return Err(error),
-            Err(_elapsed) => {
-                tracing::debug!(
-                    delivered = progress.delivered,
-                    delivered_bytes = progress.delivered_bytes,
-                    "get-block-range response missed its deadline, abandoning it"
-                );
-                return Err(Outcome::Refuse(response.abandon_code()));
-            }
+        match serve_chunk(&mut writer, &request, service.clone(), &mut progress).await? {
+            Continue::More => {}
+            Continue::Done => break,
         }
     }
 
@@ -373,8 +399,49 @@ where
     .increment(1);
 
     // `finish` only fails if the stream was already closed, which the peer may do at will.
-    let _ = response.send.finish();
+    let _ = writer.response.send.finish();
     Ok(())
+}
+
+/// The response stream of one `get-block-range` request, with the bounds on
+/// how long its writes may wait for the peer.
+struct RangeWriter<'a> {
+    response: &'a mut ResponseSend,
+    /// When the whole response must be complete.
+    stream_deadline: Instant,
+    /// How far ahead of its minimum progress the peer is.
+    pace: Pace,
+}
+
+impl RangeWriter<'_> {
+    /// Writes `bytes` to the response stream, or abandons the response if
+    /// the peer does not take them within its [`Pace`], or by the stream
+    /// deadline.
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), Outcome> {
+        let allowance = self.pace.allowance(bytes.len());
+        let started = Instant::now();
+        let behind_at = started + allowance;
+        let written = tokio::time::timeout_at(
+            behind_at.min(self.stream_deadline),
+            self.response.write(bytes),
+        )
+        .await;
+        match written {
+            Ok(result) => {
+                self.pace.slack = allowance.saturating_sub(started.elapsed());
+                result
+            }
+            Err(_elapsed) => {
+                self.pace.stalled = behind_at <= self.stream_deadline;
+                tracing::debug!(
+                    stalled = self.pace.stalled,
+                    ?allowance,
+                    "get-block-range response was not taken in time, abandoning it"
+                );
+                Err(Outcome::Refuse(self.response.abandon_code()))
+            }
+        }
+    }
 }
 
 /// How far a `get-block-range` response has got.
@@ -402,7 +469,7 @@ enum Continue {
 
 /// Reads one chunk of the range from the inbound service and writes it.
 async fn serve_chunk<S>(
-    response: &mut ResponseSend,
+    writer: &mut RangeWriter<'_>,
     request: &GetBlockRange,
     service: Inbound<'_, S>,
     progress: &mut Progress,
@@ -429,15 +496,31 @@ where
         .expect("left is at most request.max_bytes, which is a u32")
         .min(RANGE_READ_CHUNK);
 
-    let answer = call_service(
-        service,
-        Request::BlockRange {
-            from_hash: progress.next,
-            count,
-            max_bytes,
-        },
+    // # Security
+    //
+    // The read is bounded on its own, so a read that never answers does not hold the stream's
+    // permits until the stream deadline. The peer is not on the clock while it runs.
+    let read_deadline = (Instant::now() + REQUEST_TIMEOUT).min(writer.stream_deadline);
+    let answer = tokio::time::timeout_at(
+        read_deadline,
+        call_service(
+            service,
+            Request::BlockRange {
+                from_hash: progress.next,
+                count,
+                max_bytes,
+            },
+        ),
     )
-    .await;
+    .await
+    .map_err(|_elapsed| {
+        tracing::debug!(
+            delivered = progress.delivered,
+            delivered_bytes = progress.delivered_bytes,
+            "get-block-range read missed its deadline, abandoning the response"
+        );
+        Outcome::Refuse(writer.response.abandon_code())
+    })?;
     let blocks = match answer {
         Ok(Response::BlockRange(blocks)) => blocks,
         // Any other answer, such as the `Nil` of an inbound service that is still starting, says
@@ -471,7 +554,7 @@ where
             // This node does not have `final_hash`: a not-found answer, with nothing following.
             progress.element.clear();
             write_block_range_answer(&mut progress.element, BlockRangeAnswer::NotFound)?;
-            response.write(&progress.element).await?;
+            writer.write(&progress.element).await?;
         }
         // Otherwise the inbound service has no more ancestors: finish early.
         return Ok(Continue::Done);
@@ -495,7 +578,7 @@ where
             if progress.delivered == 0 {
                 progress.element.clear();
                 write_block_range_answer(&mut progress.element, BlockRangeAnswer::NotFound)?;
-                response.write(&progress.element).await?;
+                writer.write(&progress.element).await?;
             }
             return Ok(Continue::Done);
         }
@@ -519,7 +602,7 @@ where
             write_block_range_answer(&mut progress.element, BlockRangeAnswer::Found)?;
         }
         write_block_range_element(&mut progress.element, &progress.raw)?;
-        response.write(&progress.element).await?;
+        writer.write(&progress.element).await?;
 
         progress.delivered += 1;
         progress.delivered_bytes = progress.delivered_bytes.saturating_add(block_len);

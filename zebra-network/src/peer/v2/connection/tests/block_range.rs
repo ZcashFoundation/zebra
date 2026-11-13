@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use quinn::{Connection, RecvStream};
+use quinn::{Connection, Endpoint, RecvStream};
 use tokio::{sync::Semaphore, task::JoinHandle, time::Instant};
 use tower::{service_fn, util::BoxCloneService};
 
@@ -28,15 +28,15 @@ use crate::{
         connection::{
             inbound::{
                 block_range::{
-                    RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STREAMS_GLOBAL,
-                    RANGE_STREAMS_PER_PEER,
+                    RANGE_FIRST_WRITE_TIMEOUT, RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS,
+                    RANGE_STREAMS_GLOBAL, RANGE_STREAMS_PER_PEER,
                 },
                 global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
                 INBOUND_REQUEST_CONCURRENCY,
             },
             Events, Overloads,
         },
-        tests::connected_pair,
+        tests::{connected_pair, connected_pair_with},
     },
     protocol::{
         internal::{Request, Response},
@@ -748,10 +748,7 @@ async fn block_range_responses_outlive_the_request_deadline() {
         let _server = spawn_server(
             responder,
             service,
-            // A few small blocks every 10 s are below the minimum rate, which is not what this
-            // test is about.
-            BlockRangeServing::new(true, global_block_range_permits())
-                .with_min_progress(0, REQUEST_TIMEOUT),
+            BlockRangeServing::new(true, global_block_range_permits()),
         );
 
         let started = Instant::now();
@@ -915,12 +912,44 @@ async fn slow_block_range_responses_are_cancelled_at_the_stream_deadline() {
     .expect("the test completes");
 }
 
-/// A range response that writes less than the minimum rate over a progress
-/// window is abandoned before its whole-stream deadline, even if every chunk
-/// is in time: reset with `CANCELLED`, since part of it was written.
+/// A connected pair whose requester grants the responder only `window` bytes
+/// of stream receive window, so the responder's writes wait for the
+/// requester's reads.
+async fn slow_reader_pair(
+    network: &Network,
+    window: u32,
+) -> (Connection, Connection, Endpoint, Endpoint) {
+    let client_config =
+        crate::quic::client_config_with_receive_windows(network, window, 4 * window);
+    connected_pair_with(network, Some(client_config)).await
+}
+
+/// Reads `recv` to its end, `chunk` bytes every `every`, and returns the
+/// bytes read and how the stream ended.
+async fn read_slowly(
+    mut recv: RecvStream,
+    chunk: usize,
+    every: Duration,
+) -> (Vec<u8>, Result<(), quinn::ReadError>) {
+    let mut bytes = Vec::new();
+    let mut buffer = vec![0; chunk];
+    loop {
+        match recv.read(&mut buffer).await {
+            Ok(Some(len)) => bytes.extend_from_slice(&buffer[..len]),
+            Ok(None) => return (bytes, Ok(())),
+            Err(error) => return (bytes, Err(error)),
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
+/// A range response whose reader takes it below the minimum rate is
+/// abandoned while its write waits, long before its stream deadline: reset
+/// with `CANCELLED`, since part of it was written.
 ///
-/// The rate and window are raised and shortened for the test, from
-/// [`RANGE_MIN_SERVE_RATE`] over [`RANGE_PROGRESS_WINDOW`].
+/// The rate, first write deadline and slack are shortened for the test, from
+/// [`RANGE_MIN_SERVE_RATE`], [`RANGE_FIRST_WRITE_TIMEOUT`] and
+/// [`RANGE_PROGRESS_WINDOW`].
 ///
 /// [`RANGE_MIN_SERVE_RATE`]: crate::peer::v2::connection::inbound::block_range::RANGE_MIN_SERVE_RATE
 /// [`RANGE_PROGRESS_WINDOW`]: crate::peer::v2::connection::inbound::block_range::RANGE_PROGRESS_WINDOW
@@ -932,27 +961,117 @@ async fn block_range_responses_below_the_minimum_rate_are_cancelled() {
     let window = Duration::from_secs(1);
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
-        let mut chain_service = ChainService::new(&chain);
-        chain_service.per_call = Some(1);
-        chain_service.delay = Duration::from_millis(300);
-        let (service, _requests) = chain_service.service();
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 1024).await;
+        let (service, _requests) = ChainService::new(&chain).service();
         let _server = spawn_server(
             responder,
             service,
             BlockRangeServing::new(true, global_block_range_permits())
-                .with_min_progress(10 * 1024 * 1024, window),
+                .with_min_progress(4 * 1024, window),
         );
 
-        // One small block every 300 ms is far below 10 MiB/s: the response is abandoned at the
-        // first chunk boundary after the window, long before its stream deadline.
+        // 100 bytes every 100 ms is 1 kB/s, a quarter of the floor: the reader uses up its
+        // slack, and the write that is waiting for it then is abandoned.
         let started = Instant::now();
         let recv = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(recv, ErrorCode::Cancelled).await;
+        let (bytes, end) = read_slowly(recv, 100, Duration::from_millis(100)).await;
         let elapsed = started.elapsed();
+        assert!(
+            matches!(&end, Err(quinn::ReadError::Reset(code))
+                if code.into_inner() == ErrorCode::Cancelled.code()),
+            "expected a CANCELLED reset, got {end:?}"
+        );
+        assert!(!bytes.is_empty(), "part of the response was read");
         assert!(
             elapsed >= window && elapsed < REQUEST_TIMEOUT / 2,
             "the stream was reset by the progress rule, but after {elapsed:?}"
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A reader that is slow, but takes the response above the minimum rate, is
+/// served the whole response, however many times the slack it lasts.
+#[tokio::test]
+async fn block_range_responses_above_the_minimum_rate_are_served() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let tip = chain.len() - 1;
+    let window = Duration::from_millis(500);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 1024).await;
+        let (service, _requests) = ChainService::new(&chain).service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global_block_range_permits())
+                .with_min_progress(1024, window),
+        );
+
+        // 256 bytes every 50 ms is about 5 kB/s, several times the floor of 1 KiB/s.
+        let started = Instant::now();
+        let recv = request_range(&requester, tip_range(&chain)).await;
+        let (bytes, end) = read_slowly(recv, 256, Duration::from_millis(50)).await;
+        assert_eq!(end, Ok(()), "the response is finished");
+        assert_eq!(
+            parse(&bytes),
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+        assert!(
+            started.elapsed() > 4 * window,
+            "the response outlived its slack several times"
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A peer that sends a request and never reads the response holds its node
+/// permit for [`RANGE_FIRST_WRITE_TIMEOUT`], not for a request deadline: the
+/// first write waits for flow-control credit that never comes, and is
+/// abandoned while it waits.
+///
+/// This takes `RANGE_FIRST_WRITE_TIMEOUT` of real time.
+#[tokio::test]
+async fn unread_block_range_responses_are_abandoned_within_seconds() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // Less receive window than the first block needs.
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 256).await;
+        let (service, _requests) = ChainService::new(&chain).service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global.clone()),
+        );
+
+        let started = Instant::now();
+        let mut recv = request_range(&requester, tip_range(&chain)).await;
+        // Wait for the reset without reading: reading would grant the responder credit.
+        let reset = recv.received_reset().await.expect("the stream is open");
+        let elapsed = started.elapsed();
+        assert_eq!(
+            reset.map(quinn::VarInt::into_inner),
+            Some(ErrorCode::Cancelled.code()),
+            "the first write had begun"
+        );
+        assert!(
+            elapsed >= RANGE_FIRST_WRITE_TIMEOUT
+                && elapsed < RANGE_FIRST_WRITE_TIMEOUT + Duration::from_secs(3),
+            "the response was abandoned at the first write deadline, but after {elapsed:?}"
+        );
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert_eq!(
+            global.available_permits(),
+            RANGE_STREAMS_GLOBAL,
+            "the abandoned stream released its node permit"
         );
     })
     .await
