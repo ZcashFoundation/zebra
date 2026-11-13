@@ -139,6 +139,9 @@ pub enum CommitHeadersError {
     #[error("the fork at {fork_parent:?} doesn't have more work than the header chain")]
     LessWork { fork_parent: Height },
 
+    #[error("a header below the fork at {fork_parent:?} is missing from the header chain")]
+    MissingContext { fork_parent: Height },
+
     #[error("header {height:?} is above the header lookahead limit {limit:?}")]
     AboveLookahead { height: Height, limit: Height },
 
@@ -511,6 +514,15 @@ fn check_contexts(
         .take(MAX_POW_ADJUSTMENT_BLOCK_SPAN)
         .map_while(|height| db.any_header(Height(height)))
         .collect();
+
+    // A shorter context would change the expected difficulty and time limits,
+    // so check every header against the full context or not at all.
+    let expected = usize::try_from(fork_parent.0).map_or(MAX_POW_ADJUSTMENT_BLOCK_SPAN, |height| {
+        height.saturating_add(1).min(MAX_POW_ADJUSTMENT_BLOCK_SPAN)
+    });
+    if context.len() < expected {
+        return Err(CommitHeadersError::MissingContext { fork_parent });
+    }
 
     for (offset, header) in headers.iter().enumerate() {
         let height = height_at(fork_parent, offset)?;

@@ -16,7 +16,7 @@ use crate::constants::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::{
     service::{
-        finalized_state::{FinalizedState, ZebraDb},
+        finalized_state::{DiskWriteBatch, FinalizedState, ZebraDb},
         read,
     },
     tests::FakeChainHelper,
@@ -191,6 +191,37 @@ fn disconnected_and_invalid_batches_are_rejected() {
         state.db.header_chain_tip(),
         Some((Height(0), genesis.hash()))
     );
+}
+
+#[test]
+fn a_missing_context_header_is_retryable() {
+    let _init_guard = zebra_test::init();
+
+    let network = regtest();
+    let (state, genesis) = genesis_state(&network);
+    let chain = headers_above(&genesis.header, Height(0), 6, 0);
+
+    commit_headers(&state.db, &network, chain[..5].to_vec())
+        .expect("the headers extend the genesis block");
+
+    // Leave a hole at height 3, below the parent of the next batch.
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_header_chain_truncate(&state.db, Height(3));
+    batch.prepare_header_chain_append(&state.db, Height(4), &chain[3..5]);
+    state
+        .db
+        .write_batch(batch)
+        .expect("writing to an ephemeral database should succeed");
+
+    let error = commit_headers(&state.db, &network, chain[5..].to_vec())
+        .expect_err("a context header is missing");
+    assert_eq!(
+        error,
+        CommitHeadersError::MissingContext {
+            fork_parent: Height(5)
+        }
+    );
+    assert!(!error.is_misbehavior());
 }
 
 #[test]
