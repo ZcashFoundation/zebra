@@ -140,6 +140,12 @@ pub const RECLAIM_COOLDOWN: Duration = Duration::from_secs(60);
 /// claim with would last until Zebra restarts.
 pub const BLAME_TTL: Duration = Duration::from_secs(10 * 60);
 
+/// The most IP addresses the supervisor keeps blame for. A run blames a
+/// handful of peers, and blame lapses after [`BLAME_TTL`], so only a flood of
+/// failing addresses reaches this; the blame that lapses soonest is then
+/// dropped first.
+pub const MAX_BLAMED: usize = 256;
+
 /// The capacity of the unit-length channel to the legacy syncer.
 const UNIT_LENGTHS_CAPACITY: usize = 64;
 
@@ -251,7 +257,7 @@ struct Supervisor<P, ZS, ZSTip> {
     hints_gate: Option<watch::Receiver<bool>>,
     charged: Charged,
     generation: u64,
-    /// The IP addresses of the peers the last run blamed for its lack of
+    /// The IP addresses of the peers that runs blamed for their lack of
     /// progress, and when each blame lapses: until then they do not count
     /// toward a claim, and a run does not use them, so that a few peers that
     /// keep failing the frontier cannot make the engine claim block
@@ -307,10 +313,23 @@ where
 
     /// Records the blame of a run that ended at `now`.
     fn blame(&mut self, blamed: BTreeSet<IpAddr>, now: time::Instant) {
-        // Only the last run's blame counts: a peer blamed earlier may have
-        // recovered, and the cooldown already limits how often a run can
-        // fail.
-        self.blamed = blamed.into_iter().map(|ip| (ip, now + BLAME_TTL)).collect();
+        // Blame from earlier runs is kept until it lapses: if only the last
+        // run's counted, two groups of peers could take turns failing the
+        // frontier, each cleared by the other's run, and make the engine
+        // claim and hand back for as long as they liked.
+        self.blamed.retain(|_, until| now < *until);
+        for ip in blamed {
+            self.blamed.insert(ip, now + BLAME_TTL);
+        }
+        while self.blamed.len() > MAX_BLAMED {
+            let soonest = self
+                .blamed
+                .iter()
+                .min_by_key(|(_, until)| **until)
+                .map(|(ip, _)| *ip)
+                .expect("a map above the limit is not empty");
+            self.blamed.remove(&soonest);
+        }
     }
 
     async fn run(mut self) -> Result<(), color_eyre::Report> {

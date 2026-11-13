@@ -197,8 +197,8 @@ How it works:
   every peer it can use. The legacy syncer then downloads the rest of the
   chain, including every block above the final checkpoint. If version 2 peers
   come back while the tip is still far behind, the engine takes over again a
-  minute later, without using peers at the IP addresses it blamed for its
-  last hand-back, even over new connections. Blame lasts 10 minutes.
+  minute later, without using peers at the IP addresses it blamed for a
+  hand-back in the last 10 minutes, even over new connections.
 - A peer that answers a request with `BUSY` is serving as many ranges as it
   allows. The engine asks it again after 5 seconds, and waits twice as long
   after each further `BUSY`, up to a minute, until the peer delivers a block.
