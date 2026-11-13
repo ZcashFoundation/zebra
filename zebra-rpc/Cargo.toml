@@ -51,7 +51,7 @@ hyper = { workspace = true }
 http-body-util = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
-serde_with = { workspace = true, features = ["hex"] }
+serde_with = { workspace = true, features = ["hex", "schemars_1"] }
 indexmap = { workspace = true, features = ["serde"] }
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 derive-new = { workspace = true }
@@ -92,7 +92,6 @@ nix = { workspace = true, features = ["signal"] }
 
 # For openrpc
 openrpsee = { workspace = true }
-phf = { workspace = true, features = ["macros"] }
 schemars = { workspace = true }
 
 orchard = { workspace = true }

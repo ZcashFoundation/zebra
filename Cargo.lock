@@ -3374,12 +3374,13 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openrpsee"
-version = "0.1.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faeb689cfe5fad5e7285f87b00c903366b307d97f41de53e894ec608968ca3a1"
+checksum = "a799f74f3fbfeb30ef447d33a409fc874caaf34107df593dd2989c453c316501"
 dependencies = [
  "documented",
  "jsonrpsee",
+ "phf",
  "quote",
  "schemars 1.2.1",
  "serde",
@@ -4739,6 +4740,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
  "dyn-clone",
+ "indexmap 2.14.0",
  "ref-cast",
  "schemars_derive",
  "serde",
@@ -7378,7 +7380,6 @@ dependencies = [
  "nix",
  "openrpsee",
  "orchard",
- "phf",
  "proptest",
  "prost",
  "rand 0.10.2",

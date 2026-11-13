@@ -25,7 +25,9 @@ use crate::methods::types::{
 /// The error response specification at <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
 /// seems to have a copy-paste issue, or it is under-specified. We follow the `zcashd`
 /// implementation instead, which returns a single raw string.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged, rename_all = "kebab-case")]
 pub enum BlockProposalResponse {
     /// Block proposal was rejected as invalid.

@@ -1,0 +1,4268 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "zebra-rpc",
+    "description": "A Zebra JSON Remote Procedure Call (JSON-RPC) interface",
+    "version": "19.0.0"
+  },
+  "methods": [
+    {
+      "name": "generatetoaddress",
+      "summary": "Mine blocks immediately, paying the coinbase to `address`. Returns the",
+      "description": "Mine blocks immediately, paying the coinbase to `address`. Returns the\nblock hashes of the generated blocks.\n\n# Parameters\n\n- `num_blocks`: (numeric, required, example=1) Number of blocks to generate.\n- `address`: (string, required) The transparent or shielded address to\n  pay the coinbase subsidy and fees to.\n\n# Notes\n\nOnly works if the network of the running zebrad process is `Regtest`.\nUnlike `Self::generate`, the coinbase is paid to `address` instead of\nthe configured `mining.miner_address`, which lets a test harness fund\nseveral wallets from one node.\n\nzcashd reference: [`generatetoaddress`](https://zcash.github.io/rpc/generatetoaddress.html)",
+      "params": [
+        {
+          "name": "num_blocks",
+          "summary": "The number of blocks to return.",
+          "description": "The number of blocks to return.",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "address",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "generatetoaddress_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/GetBlockHashResponse"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Generating"
+        }
+      ]
+    },
+    {
+      "name": "z_getsubtreesbyindex",
+      "summary": "Returns information about a range of Sapling or Orchard subtrees.",
+      "description": "Returns information about a range of Sapling or Orchard subtrees.\n\nzcashd reference: [`z_getsubtreesbyindex`](https://zcash.github.io/rpc/z_getsubtreesbyindex.html) - TODO: fix link\n\n# Parameters\n\n- `pool`: (string, required) The pool from which subtrees should be returned. Either \"sapling\" or \"orchard\".\n- `start_index`: (number, required) The index of the first 2^16-leaf subtree to return.\n- `limit`: (number, optional) The maximum number of subtree values to return.\n\n# Notes\n\nWhile Zebra is doing its initial subtree index rebuild, subtrees will become available\nstarting at the chain tip. This RPC will return an empty list if the `start_index` subtree\nexists, but has not been rebuilt yet. This matches `zcashd`'s behaviour when subtrees aren't\navailable yet. (But `zcashd` does its rebuild before syncing any blocks.)",
+      "params": [
+        {
+          "name": "pool",
+          "summary": "The pool from which subtrees should be returned. Either \"sapling\" or \"orchard\".",
+          "description": "The pool from which subtrees should be returned. Either \"sapling\" or \"orchard\".",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "start_index",
+          "summary": "The index of the first 2^16-leaf subtree to return.",
+          "description": "The index of the first 2^16-leaf subtree to return.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/NoteCommitmentSubtreeIndex"
+          }
+        },
+        {
+          "name": "limit",
+          "summary": "The maximum number of subtrees to return.",
+          "description": "The maximum number of subtrees to return.",
+          "schema": {
+            "$ref": "#/components/schemas/NoteCommitmentSubtreeIndex"
+          }
+        }
+      ],
+      "result": {
+        "name": "z_getsubtreesbyindex_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetSubtreesByIndexResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getnetworkhashps",
+      "summary": "Returns the estimated network solutions per second based on the last `num_blocks` before",
+      "description": "Returns the estimated network solutions per second based on the last `num_blocks` before\n`height`.\n\nThis method name is deprecated, use [`getnetworksolps`](Self::get_network_sol_ps) instead.\nSee that method for details.\n\nzcashd reference: [`getnetworkhashps`](https://zcash.github.io/rpc/getnetworkhashps.html)",
+      "params": [
+        {
+          "name": "num_blocks",
+          "summary": "The number of blocks to return.",
+          "description": "The number of blocks to return.",
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        {
+          "name": "height",
+          "summary": "The height of the block to return.",
+          "description": "The height of the block to return.",
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      ],
+      "result": {
+        "name": "getnetworkhashps_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "sendrawtransaction",
+      "summary": "Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.",
+      "description": "Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.\nReturns the `SentTransactionHash` for the transaction, as a JSON string.\n\nzcashd reference: [`sendrawtransaction`](https://zcash.github.io/rpc/sendrawtransaction.html)\n\n# Parameters\n\n- `raw_transaction_hex`: (string, required, example=\"signedhex\") The hex-encoded raw transaction bytes.\n- `allow_high_fees`: (bool, optional) A legacy parameter accepted by zcashd but ignored by Zebra.\n\n# Notes\n\nzcashd accepts an optional `allowhighfees` parameter. Zebra doesn't support this parameter,\nbecause lightwalletd doesn't use it.",
+      "params": [
+        {
+          "name": "raw_transaction_hex",
+          "summary": "The hex-encoded raw transaction bytes.",
+          "description": "The hex-encoded raw transaction bytes.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "_allow_high_fees",
+          "summary": "Whether to allow high fees.",
+          "description": "Whether to allow high fees.",
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "sendrawtransaction_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/SendRawTransactionResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Rawtransactions"
+        }
+      ]
+    },
+    {
+      "name": "z_converttex",
+      "summary": "Converts a transparent P2PKH address to a ZIP 320 TEX address.",
+      "description": "Converts a transparent P2PKH address to a ZIP 320 TEX address.\n\nzcashd reference: [`z_converttex`](https://zcash.github.io/rpc/z_converttex.html)\n\n# Parameters\n\n- `address`: (string, required) The transparent P2PKH address to convert.\n\n# Notes\n\n- Addresses that don't decode, or are for another network, return error `-5`; addresses\n  that decode but aren't transparent P2PKH return error `-8`. This follows zcashd for the\n  common cases, but not exactly: zcashd returns `-8` for Sprout addresses and for unified\n  addresses with unknown receivers, where Zebra returns `-5`, because Zebra's\n  `primitives::Address` can't represent them at all. Zallet differs from both.",
+      "params": [
+        {
+          "name": "address",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "z_converttex_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tags": [
+        {
+          "name": "Wallet"
+        }
+      ]
+    },
+    {
+      "name": "getaddresstxids",
+      "summary": "Returns the transaction ids made by the provided transparent addresses.",
+      "description": "Returns the transaction ids made by the provided transparent addresses.\n\nzcashd reference: [`getaddresstxids`](https://zcash.github.io/rpc/getaddresstxids.html)\n\n# Parameters\n\n- `request`: (required) Either:\n    - A single address string (e.g., `\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"`), or\n    - An object with the following named fields:\n        - `addresses`: (array of strings, required) The addresses to get transactions from.\n        - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).\n        - `end`: (numeric, optional) The upper height to stop looking for transactions (inclusive).\n\nExample of the object form:\n```json\n{\n  \"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"],\n  \"start\": 1000,\n  \"end\": 2000\n}\n```\n\n# Notes\n\n- Only the multi-argument format is used by lightwalletd and this is what we currently support:\n<https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>\n- It is recommended that users call the method with start/end heights such that the response can't be too large.\n- At most 10,000 addresses are accepted, and a query matching more than 100,000\n  transactions is rejected; narrow the height range instead.",
+      "params": [
+        {
+          "name": "request",
+          "summary": "The request object containing the parameters.",
+          "description": "The request object containing the parameters.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/GetAddressTxIdsRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "getaddresstxids_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Addressindex"
+        }
+      ]
+    },
+    {
+      "name": "getrawmempool",
+      "summary": "Returns all transaction ids in the memory pool, as a JSON array.",
+      "description": "Returns all transaction ids in the memory pool, as a JSON array.\n\n# Parameters\n\n- `verbose`: (boolean, optional, default=false) true for a json object, false for array of transaction ids.\n\nzcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)",
+      "params": [
+        {
+          "name": "verbose",
+          "summary": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "description": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "getrawmempool_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetRawMempoolResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "submitblock",
+      "summary": "Submits block to the node to be validated and committed.",
+      "description": "Submits block to the node to be validated and committed.\nReturns the `SubmitBlockResponse` for the operation, as a JSON string.\n\nzcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)\n\n# Parameters\n\n- `hexdata`: (string, required)\n- `jsonparametersobject`: (string, optional) - currently ignored\n\n# Notes\n\n - `jsonparametersobject` holds a single field, workid, that must be included in submissions if provided by the server.",
+      "params": [
+        {
+          "name": "hex_data",
+          "summary": "The hex-encoded data to return.",
+          "description": "The hex-encoded data to return.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/HexData"
+          }
+        },
+        {
+          "name": "_parameters",
+          "summary": "The parameters for the command.",
+          "description": "The parameters for the command.",
+          "schema": {
+            "$ref": "#/components/schemas/SubmitBlockParameters"
+          }
+        }
+      ],
+      "result": {
+        "name": "submitblock_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/SubmitBlockResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "getmempoolinfo",
+      "summary": "Returns details on the active state of the TX memory pool.",
+      "description": "Returns details on the active state of the TX memory pool.\n\nzcash reference: [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)",
+      "params": [],
+      "result": {
+        "name": "getmempoolinfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetMempoolInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getmininginfo",
+      "summary": "Returns mining-related information.",
+      "description": "Returns mining-related information.\n\nzcashd reference: [`getmininginfo`](https://zcash.github.io/rpc/getmininginfo.html)",
+      "params": [],
+      "result": {
+        "name": "getmininginfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetMiningInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "getblocktemplate",
+      "summary": "Returns a block template for mining new Zcash blocks.",
+      "description": "Returns a block template for mining new Zcash blocks.\n\n# Parameters\n\n- `jsonrequestobject`: (string, optional) A JSON object containing arguments.\n\nzcashd reference: [`getblocktemplate`](https://zcash-rpc.github.io/getblocktemplate.html)\n\n# Notes\n\nArguments to this RPC are currently ignored.\nLong polling, block proposals, server lists, and work IDs are not supported.\n\nMiners can make arbitrary changes to blocks, as long as:\n- the data sent to `submitblock` is a valid Zcash block, and\n- the parent block is a valid block that Zebra already has, or will receive soon.\n\nZebra verifies blocks in parallel, and keeps recent chains in parallel,\nso moving between chains and forking chains is very cheap.",
+      "params": [
+        {
+          "name": "parameters",
+          "summary": "The parameters for the command.",
+          "description": "The parameters for the command.",
+          "schema": {
+            "$ref": "#/components/schemas/GetBlockTemplateParameters"
+          }
+        }
+      ],
+      "result": {
+        "name": "getblocktemplate_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockTemplateResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "getnetworksolps",
+      "summary": "Returns the estimated network solutions per second based on the last `num_blocks` before",
+      "description": "Returns the estimated network solutions per second based on the last `num_blocks` before\n`height`.\n\nIf `num_blocks` is not supplied, uses 120 blocks. If it is 0 or -1, uses the difficulty\naveraging window.\nIf `height` is not supplied or is -1, uses the tip height.\n\nzcashd reference: [`getnetworksolps`](https://zcash.github.io/rpc/getnetworksolps.html)",
+      "params": [
+        {
+          "name": "num_blocks",
+          "summary": "The number of blocks to return.",
+          "description": "The number of blocks to return.",
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        {
+          "name": "height",
+          "summary": "The height of the block to return.",
+          "description": "The height of the block to return.",
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      ],
+      "result": {
+        "name": "getnetworksolps_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "getbestblockhash",
+      "summary": "Returns the hash of the current best blockchain tip block, as a `GetBlockHash` JSON string.",
+      "description": "Returns the hash of the current best blockchain tip block, as a `GetBlockHash` JSON string.\n\nzcashd reference: [`getbestblockhash`](https://zcash.github.io/rpc/getbestblockhash.html)",
+      "params": [],
+      "result": {
+        "name": "getbestblockhash_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockHashResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getblocksubsidy",
+      "summary": "Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.",
+      "description": "Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.\nReturns an error if `height` is less than the height of the first halving for the current network.\nOnce NSM reissuance starts, the preceding block must exist: future reserves cannot be forecast.\n\nzcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)\n\n# Parameters\n\n- `height`: (numeric, optional, example=1) A valid height; future heights are supported only\n  when their subsidy does not depend on an unknown parent reserve.\n\n# Notes\n\nIf `height` is not supplied, uses the tip height.",
+      "params": [
+        {
+          "name": "height",
+          "summary": "The height of the block to return.",
+          "description": "The height of the block to return.",
+          "schema": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        }
+      ],
+      "result": {
+        "name": "getblocksubsidy_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockSubsidyResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Mining"
+        }
+      ]
+    },
+    {
+      "name": "rpc.discover",
+      "summary": "Returns an OpenRPC schema as a description of this service.",
+      "description": "Returns an OpenRPC schema as a description of this service.",
+      "params": [],
+      "result": {
+        "name": "rpc.discover_result",
+        "summary": "An OpenRPC document.",
+        "description": "An OpenRPC document.",
+        "schema": {
+          "$ref": "#/components/schemas/OpenRpcDocument"
+        }
+      },
+      "tags": [
+        {
+          "name": "Control"
+        }
+      ]
+    },
+    {
+      "name": "z_listunifiedreceivers",
+      "summary": "Returns the list of individual payment addresses given a unified address.",
+      "description": "Returns the list of individual payment addresses given a unified address.\n\nzcashd reference: [`z_listunifiedreceivers`](https://zcash.github.io/rpc/z_listunifiedreceivers.html)\n\n# Parameters\n\n- `address`: (string, required) The zcash unified address to get the list from.\n\n# Notes\n\n- No notes",
+      "params": [
+        {
+          "name": "address",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "z_listunifiedreceivers_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/ZListUnifiedReceiversResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Wallet"
+        }
+      ]
+    },
+    {
+      "name": "getdeprecationinfo",
+      "summary": "Returns end of support information for this node release, as a",
+      "description": "Returns end of support information for this node release, as a\n`GetDeprecationInfoResponse` JSON struct.\n\nzcashd reference: [`getdeprecationinfo`](https://zcash.github.io/rpc/getdeprecationinfo.html)\n\n# Notes\n\nAs in zcashd, the `end_of_service` object is only present on Mainnet, where end of\nsupport is enforced. Zebra reports the estimated last height this release supports in\n`end_of_service.block_height`; the node halts when the tip goes past it.\n\nSome fields from the zcashd reference are missing from Zebra's response: `version` and\n`subversion` are available from `getinfo`, `deprecationheight` is deprecated in zcashd,\nand Zebra does not have zcashd's feature deprecation framework.\n\nThe estimate assumes the node is synced to the network tip; during initial sync it is\nsignificantly overestimated.",
+      "params": [],
+      "result": {
+        "name": "getdeprecationinfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetDeprecationInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Network"
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "summary": "Stop the running zebrad process.",
+      "description": "Stop the running zebrad process.\n\n# Notes\n\n- Works for non windows targets only.\n- Works only if the network of the running zebrad process is `Regtest`.\n\nzcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)",
+      "params": [],
+      "result": {
+        "name": "stop_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tags": [
+        {
+          "name": "Control"
+        }
+      ]
+    },
+    {
+      "name": "reconsiderblock",
+      "summary": "Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.",
+      "description": "Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.\n\n# Parameters\n\n- `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.",
+      "params": [
+        {
+          "name": "block_hash",
+          "summary": "The hash of the block to return.",
+          "description": "The hash of the block to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "reconsiderblock_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Hash"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "z_validateaddress",
+      "summary": "Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.",
+      "description": "Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.\nReturns information about the given address if valid.\n\nzcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)\n\n# Parameters\n\n- `address`: (string, required) The zcash address to validate.\n\n# Notes\n\n- No notes",
+      "params": [
+        {
+          "name": "address",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "z_validateaddress_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/ZValidateAddressResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Util"
+        }
+      ]
+    },
+    {
+      "name": "z_gettreestate",
+      "summary": "Returns information about the given block's Sapling & Orchard tree state.",
+      "description": "Returns information about the given block's Sapling & Orchard tree state.\n\nzcashd reference: [`z_gettreestate`](https://zcash.github.io/rpc/z_gettreestate.html)\n\n# Parameters\n\n- `hash | height`: (string, required, example=\"00000000febc373a1da2bd9f887b105ad79ddc26ac26c2b28652d64e5207c5b5\") The block hash or height.\n\n# Notes\n\nThe zcashd doc reference above says that the parameter \"`height` can be\nnegative where -1 is the last known valid block\". On the other hand,\n`lightwalletd` only uses positive heights, so Zebra does not support\nnegative heights.",
+      "params": [
+        {
+          "name": "hash_or_height",
+          "summary": "The block hash or height to return.",
+          "description": "The block hash or height to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "z_gettreestate_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetTreestateResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "addnode",
+      "summary": "Add or remove a node from the address book.",
+      "description": "Add or remove a node from the address book.\n\n# Parameters\n\n- `addr`: (string, required) The address of the node to add or remove.\n- `command`: (string, required) The command to execute, either \"add\", \"onetry\", or \"remove\".\n\n# Notes\n\nOnly the \"add\" command is currently supported.\n\nzcashd reference: [`addnode`](https://zcash.github.io/rpc/addnode.html)",
+      "params": [
+        {
+          "name": "addr",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/PeerSocketAddr"
+          }
+        },
+        {
+          "name": "command",
+          "summary": "The command to execute.",
+          "description": "The command to execute.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/AddNodeCommand"
+          }
+        }
+      ],
+      "result": {
+        "name": "addnode_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "tags": [
+        {
+          "name": "Network"
+        }
+      ]
+    },
+    {
+      "name": "getblock",
+      "summary": "Returns the requested block by hash or height, as a `GetBlock` JSON string.",
+      "description": "Returns the requested block by hash or height, as a `GetBlock` JSON string.\nIf the block is not in Zebra's state, returns\n[error code `-8`.](https://github.com/zcash/zcash/issues/5758) if a height was\npassed or -5 if a hash was passed.\n\nzcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)\n\n# Parameters\n\n- `hash_or_height`: (string, required, example=\"1\") The hash or height for the block to be returned.\n- `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, 2 for a json object with transaction data, and 3 for a json object with transaction data including prevout information for inputs.\n\n# Notes\n\nThe `size` field is only returned with verbosity>=2.\n\nVerbosity 3 adds a `prevout` object to each transparent input and a `fee` field to each\nnon-coinbase transaction, matching Bitcoin Core's `getblock` verbosity 3.\n\nVerbosity 3 resolves each spent output by reading its parent transaction, so it is more\nexpensive than lower verbosities.\n\nThe undocumented `chainwork` field is not returned.",
+      "params": [
+        {
+          "name": "hash_or_height",
+          "summary": "The block hash or height to return.",
+          "description": "The block hash or height to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "verbosity",
+          "summary": "Whether to include verbose output.",
+          "description": "Whether to include verbose output.",
+          "schema": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        }
+      ],
+      "result": {
+        "name": "getblock_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getaddressutxos",
+      "summary": "Returns all unspent outputs for a list of addresses.",
+      "description": "Returns all unspent outputs for a list of addresses.\n\nzcashd reference: [`getaddressutxos`](https://zcash.github.io/rpc/getaddressutxos.html)\n\n# Parameters\n\n- `request`: (required) Either:\n    - A single address string (e.g., `\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"`), or\n    - An object with the following named fields:\n        - `addresses`: (array, required, example=[\\\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\\\"]) The addresses to get outputs from.\n        - `chaininfo`: (boolean, optional, default=false) Include chain info with results\n        - `startHeight`: (numeric, optional, default=0) Only return outputs at or above this height\n        - `maxEntries`: (numeric, optional, default=0) Return at most this many outputs, zero for up to 100,000\n\n# Notes\n\n`startHeight` and `maxEntries` bound the index scan, not just the response, so a client\nthat pages through a large address does not make the node read the whole UTXO set each\ntime. Callers must set both or neither: `maxEntries` alone would truncate the outputs\nbefore the height filter ran.\n\nAt most 10,000 addresses are accepted. Without `maxEntries`, a query matching more than\n100,000 outputs is rejected, and so is a larger `maxEntries`.\n\nlightwalletd always uses the multi-address request, without chaininfo:\n<https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L402>",
+      "params": [
+        {
+          "name": "request",
+          "summary": "The request object containing the parameters.",
+          "description": "The request object containing the parameters.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/GetAddressUtxosRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "getaddressutxos_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetAddressUtxosResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Addressindex"
+        }
+      ]
+    },
+    {
+      "name": "getrawtransaction",
+      "summary": "Returns the raw transaction data, as a `GetRawTransaction` JSON string or structure.",
+      "description": "Returns the raw transaction data, as a `GetRawTransaction` JSON string or structure.\n\nzcashd reference: [`getrawtransaction`](https://zcash.github.io/rpc/getrawtransaction.html)\n\n# Parameters\n\n- `txid`: (string, required, example=\"mytxid\") The transaction ID of the transaction to be returned.\n- `verbose`: (number, optional, default=0, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.\n- `blockhash` (string, optional) The block in which to look for the transaction",
+      "params": [
+        {
+          "name": "txid",
+          "summary": "The transaction ID to return.",
+          "description": "The transaction ID to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "verbose",
+          "summary": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "description": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "schema": {
+            "type": "integer",
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0
+          }
+        },
+        {
+          "name": "block_hash",
+          "summary": "The hash of the block to return.",
+          "description": "The hash of the block to return.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "getrawtransaction_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetRawTransactionResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Rawtransactions"
+        }
+      ]
+    },
+    {
+      "name": "getaddressbalance",
+      "summary": "Returns the total balance of a provided `addresses` in an `AddressBalance` instance.",
+      "description": "Returns the total balance of a provided `addresses` in an `AddressBalance` instance.\n\nzcashd reference: [`getaddressbalance`](https://zcash.github.io/rpc/getaddressbalance.html)\n\n# Parameters\n\n- `address_strings`: (object, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]}) A JSON map with a single entry\n    - `addresses`: (array of strings) A list of base-58 encoded addresses.\n\n# Notes\n\nzcashd also accepts a single string parameter instead of an array of strings, but Zebra\ndoesn't because lightwalletd always calls this RPC with an array of addresses.\n\nzcashd also returns the total amount of Zatoshis received by the addresses, but Zebra\ndoesn't because lightwalletd doesn't use that information.\n\nThe RPC documentation says that the returned object has a string `balance` field, but\nzcashd actually [returns an\ninteger](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).",
+      "params": [
+        {
+          "name": "address_strings",
+          "summary": "The addresses to return.",
+          "description": "The addresses to return.",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/GetAddressBalanceRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "getaddressbalance_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetAddressBalanceResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Addressindex"
+        }
+      ]
+    },
+    {
+      "name": "ping",
+      "summary": "Requests that a ping be sent to all other nodes, to measure ping time.",
+      "description": "Requests that a ping be sent to all other nodes, to measure ping time.\n\nResults provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.\nPing command is handled in queue with all other commands, so it measures processing backlog, not just network ping.\n\nzcashd reference: [`ping`](https://zcash.github.io/rpc/ping.html)",
+      "params": [],
+      "result": {
+        "name": "ping_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "tags": [
+        {
+          "name": "Network"
+        }
+      ]
+    },
+    {
+      "name": "validateaddress",
+      "summary": "Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.",
+      "description": "Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.\nReturns information about the given address if valid.\n\nzcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)\n\n# Parameters\n\n- `address`: (string, required) The zcash address to validate.",
+      "params": [
+        {
+          "name": "address",
+          "summary": "The address to return.",
+          "description": "The address to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "validateaddress_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/ValidateAddressResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Util"
+        }
+      ]
+    },
+    {
+      "name": "getblockcount",
+      "summary": "Returns the height of the most recent block in the best valid block chain (equivalently,",
+      "description": "Returns the height of the most recent block in the best valid block chain (equivalently,\nthe number of blocks in this chain excluding the genesis block).\n\nzcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)",
+      "params": [],
+      "result": {
+        "name": "getblockcount_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getblockhash",
+      "summary": "Returns the hash of the block of a given height iff the index argument correspond",
+      "description": "Returns the hash of the block of a given height iff the index argument correspond\nto a block in the best chain.\n\nzcashd reference: [`getblockhash`](https://zcash-rpc.github.io/getblockhash.html)\n\n# Parameters\n\n- `index`: (numeric, required, example=1) The block index.\n\n# Notes\n\n- If `index` is positive then index = block height.\n- If `index` is negative then -1 is the last known valid block.",
+      "params": [
+        {
+          "name": "index",
+          "summary": "The index of the subtree to return.",
+          "description": "The index of the subtree to return.",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      ],
+      "result": {
+        "name": "getblockhash_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockHashResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getblockchaininfo",
+      "summary": "Returns blockchain state information, as a `GetBlockchainInfoResponse` JSON struct.",
+      "description": "Returns blockchain state information, as a `GetBlockchainInfoResponse` JSON struct.\n\nzcashd reference: [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html)\n\n# Notes\n\nSome fields from the zcashd reference are missing from Zebra's `GetBlockchainInfoResponse`. It only contains the fields\n[required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)",
+      "params": [],
+      "result": {
+        "name": "getblockchaininfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockchainInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getnetworkinfo",
+      "summary": "Returns an object containing various state info regarding P2P networking.",
+      "description": "Returns an object containing various state info regarding P2P networking.\n\nzcashd reference: [`getnetworkinfo`](https://zcash.github.io/rpc/getnetworkinfo.html)",
+      "params": [],
+      "result": {
+        "name": "getnetworkinfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetNetworkInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Network"
+        }
+      ]
+    },
+    {
+      "name": "getinfo",
+      "summary": "Returns software information from the RPC server, as a `GetInfo` JSON struct.",
+      "description": "Returns software information from the RPC server, as a `GetInfo` JSON struct.\n\nzcashd reference: [`getinfo`](https://zcash.github.io/rpc/getinfo.html)\n\n# Notes\n\n[The zcashd reference](https://zcash.github.io/rpc/getinfo.html) might not show some fields\nin Zebra's `GetInfo`. Zebra uses the field names and formats from the\n[zcashd code](https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87).\n\nSome fields from the zcashd reference are missing from Zebra's `GetInfo`. It only contains the fields\n[required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)",
+      "params": [],
+      "result": {
+        "name": "getinfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetInfoResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Control"
+        }
+      ]
+    },
+    {
+      "name": "getbestblockheightandhash",
+      "summary": "Returns the height and hash of the current best blockchain tip block, as a `GetBlockHeightAndHashResponse` JSON struct.",
+      "description": "Returns the height and hash of the current best blockchain tip block, as a `GetBlockHeightAndHashResponse` JSON struct.\n\nzcashd reference: none",
+      "params": [],
+      "result": {
+        "name": "getbestblockheightandhash_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockHeightAndHashResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getdifficulty",
+      "summary": "Returns the proof-of-work difficulty as a multiple of the minimum difficulty.",
+      "description": "Returns the proof-of-work difficulty as a multiple of the minimum difficulty.\n\nzcashd reference: [`getdifficulty`](https://zcash.github.io/rpc/getdifficulty.html)",
+      "params": [],
+      "result": {
+        "name": "getdifficulty_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getstandardfee",
+      "summary": "Returns the recommended standard fee per logical action, in zatoshis.",
+      "description": "Returns the recommended standard fee per logical action, in zatoshis.\n\nCurrently returns the ZIP 317 marginal fee for the next block, with `version` 0:\n5000 zatoshis before Mainnet height 3,590,000, and 1000 zatoshis from that height\nand on test networks. This will be replaced by a dynamic estimate without changing\nthe parameters or result shape.",
+      "params": [],
+      "result": {
+        "name": "getstandardfee_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetStandardFeeResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Util"
+        }
+      ]
+    },
+    {
+      "name": "invalidateblock",
+      "summary": "Invalidates a block if it is not yet finalized, removing it from the non-finalized",
+      "description": "Invalidates a block if it is not yet finalized, removing it from the non-finalized\nstate if it is present and rejecting it during contextual validation if it is submitted.\n\n# Parameters\n\n- `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.",
+      "params": [
+        {
+          "name": "block_hash",
+          "summary": "The hash of the block to return.",
+          "description": "The hash of the block to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "invalidateblock_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getblockheader",
+      "summary": "Returns the requested block header by hash or height, as a `GetBlockHeader` JSON string.",
+      "description": "Returns the requested block header by hash or height, as a `GetBlockHeader` JSON string.\nIf the block is not in Zebra's state,\nreturns [error code `-8`.](https://github.com/zcash/zcash/issues/5758)\nif a height was passed or -5 if a hash was passed.\n\nzcashd reference: [`getblockheader`](https://zcash.github.io/rpc/getblockheader.html)\n\n# Parameters\n\n- `hash_or_height`: (string, required, example=\"1\") The hash or height for the block to be returned.\n- `verbose`: (bool, optional, default=false, example=true) false for hex encoded data, true for a json object\n\n# Notes\n\nThe undocumented `chainwork` field is not returned.",
+      "params": [
+        {
+          "name": "hash_or_height",
+          "summary": "The block hash or height to return.",
+          "description": "The block hash or height to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "verbose",
+          "summary": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "description": "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.",
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "getblockheader_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetBlockHeaderResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "generate",
+      "summary": "Mine blocks immediately. Returns the block hashes of the generated blocks.",
+      "description": "Mine blocks immediately. Returns the block hashes of the generated blocks.\n\n# Parameters\n\n- `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.\n\n# Notes\n\nOnly works if the network of the running zebrad process is `Regtest`.\n\nzcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)",
+      "params": [
+        {
+          "name": "num_blocks",
+          "summary": "The number of blocks to return.",
+          "description": "The number of blocks to return.",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        }
+      ],
+      "result": {
+        "name": "generate_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/GetBlockHashResponse"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Generating"
+        }
+      ]
+    },
+    {
+      "name": "gettxout",
+      "summary": "Returns details about an unspent transaction output.",
+      "description": "Returns details about an unspent transaction output.\n\nzcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)\n\n# Parameters\n\n- `txid`: (string, required, example=\"mytxid\") The transaction ID that contains the output.\n- `n`: (number, required) The output index number.\n- `include_mempool` (bool, optional, default=true) Whether to include the mempool in the search.",
+      "params": [
+        {
+          "name": "txid",
+          "summary": "The transaction ID to return.",
+          "description": "The transaction ID to return.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "n",
+          "summary": "The output index in the transaction.",
+          "description": "The output index in the transaction.",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        {
+          "name": "include_mempool",
+          "summary": "Whether to include mempool transactions in the response.",
+          "description": "Whether to include mempool transactions in the response.",
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "gettxout_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "$ref": "#/components/schemas/GetTxOutResponse"
+        }
+      },
+      "tags": [
+        {
+          "name": "Blockchain"
+        }
+      ]
+    },
+    {
+      "name": "getpeerinfo",
+      "summary": "Returns data about each connected network node.",
+      "description": "Returns data about each connected network node.\n\nzcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)",
+      "params": [],
+      "result": {
+        "name": "getpeerinfo_result",
+        "summary": "",
+        "description": "",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/PeerInfo"
+          }
+        }
+      },
+      "tags": [
+        {
+          "name": "Network"
+        }
+      ]
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AddNodeCommand": {
+        "description": "Commands for the `addnode` RPC method.",
+        "oneOf": [
+          {
+            "const": "add",
+            "description": "Add a node to the address book.",
+            "type": "string"
+          }
+        ]
+      },
+      "Amount": {
+        "description": "A runtime validated type for representing amounts of zatoshis",
+        "format": "int64",
+        "type": "integer"
+      },
+      "BlockHeaderObject": {
+        "description": "Verbose response to a `getblockheader` RPC request.\n\nSee the notes for the [`RpcServer::get_block_header`] method.",
+        "properties": {
+          "bits": {
+            "description": "The difficulty threshold of the requested block header displayed in compact form.",
+            "type": "string"
+          },
+          "blockcommitments": {
+            "description": "The blockcommitments field of the requested block. Its interpretation changes\ndepending on the network and height.",
+            "type": "string"
+          },
+          "confirmations": {
+            "description": "The number of confirmations of this block in the best chain,\nor -1 if it is not in the best chain.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "difficulty": {
+            "description": "Floating point number that represents the difficulty limit for this block as a multiple\nof the minimum difficulty for the network.",
+            "format": "double",
+            "type": "number"
+          },
+          "finalsaplingroot": {
+            "description": "The root of the Sapling commitment tree after applying this block.",
+            "type": "string"
+          },
+          "hash": {
+            "description": "The hash of the requested block.",
+            "type": "string"
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The height of the requested block."
+          },
+          "merkleroot": {
+            "description": "The merkle root of the requesteed block.",
+            "type": "string"
+          },
+          "nextblockhash": {
+            "description": "The next block hash after the requested block header.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nonce": {
+            "description": "The nonce of the requested block header.",
+            "type": "string"
+          },
+          "previousblockhash": {
+            "description": "The previous block hash of the requested block header.",
+            "type": "string"
+          },
+          "solution": {
+            "description": "The Equihash solution in the requested block header.",
+            "type": "string"
+          },
+          "time": {
+            "description": "The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "description": "The version field of the requested block.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hash",
+          "confirmations",
+          "height",
+          "version",
+          "merkleroot",
+          "blockcommitments",
+          "finalsaplingroot",
+          "time",
+          "nonce",
+          "solution",
+          "bits",
+          "difficulty",
+          "previousblockhash"
+        ],
+        "type": "object"
+      },
+      "BlockObject": {
+        "description": "A Block object returned by the `getblock` RPC request.",
+        "properties": {
+          "bits": {
+            "description": "The difficulty threshold of the requested block header displayed in compact form.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blockcommitments": {
+            "description": "The blockcommitments field of the requested block. Its interpretation changes\ndepending on the network and height.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chainSupply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GetBlockchainInfoBalance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chain supply balance"
+          },
+          "confirmations": {
+            "description": "The number of confirmations of this block in the best chain,\nor -1 if it is not in the best chain.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "difficulty": {
+            "description": "Floating point number that represents the difficulty limit for this block as a multiple\nof the minimum difficulty for the network.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "finalorchardroot": {
+            "description": "The root of the Orchard commitment tree after applying this block.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finalsaplingroot": {
+            "description": "The root of the Sapling commitment tree after applying this block.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hash": {
+            "description": "The hash of the requested block.",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Height"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The height of the requested block."
+          },
+          "merkleroot": {
+            "description": "The merkle root of the requested block.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nTx": {
+            "description": "The number of transactions in this block.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "nextblockhash": {
+            "description": "The next block hash after the requested block header.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nonce": {
+            "description": "The nonce of the requested block header.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "previousblockhash": {
+            "description": "The previous block hash of the requested block header.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "description": "The block size. TODO: fill it",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "solution": {
+            "description": "The Equihash solution in the requested block header.\nNote: presence of this field in getblock is not documented in zcashd.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "time": {
+            "description": "The height of the requested block.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trees": {
+            "$ref": "#/components/schemas/GetBlockTrees",
+            "description": "Information about the note commitment trees."
+          },
+          "tx": {
+            "description": "List of transactions in block order, hex-encoded if verbosity=1 or\nas objects if verbosity=2.",
+            "items": {
+              "$ref": "#/components/schemas/GetBlockTransaction"
+            },
+            "type": "array"
+          },
+          "valuePools": {
+            "description": "Value pool balances",
+            "items": {
+              "$ref": "#/components/schemas/GetBlockchainInfoBalance"
+            },
+            "maxItems": 6,
+            "minItems": 6,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "version": {
+            "description": "The version field of the requested block.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "hash",
+          "confirmations",
+          "nTx",
+          "tx",
+          "trees"
+        ],
+        "type": "object"
+      },
+      "BlockProposalResponse": {
+        "anyOf": [
+          {
+            "description": "Block proposal was rejected as invalid.\nContains the reason that the proposal was invalid.\n\nTODO: turn this into a typed error enum?",
+            "type": "string"
+          },
+          {
+            "description": "Block proposal was successfully validated, returns null.",
+            "type": "null"
+          }
+        ],
+        "description": "Response to a `getblocktemplate` RPC request in proposal mode.\n\n<https://en.bitcoin.it/wiki/BIP_0022#Appendix:_Example_Rejection_Reasons>\n\nNote:\nThe error response specification at <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>\nseems to have a copy-paste issue, or it is under-specified. We follow the `zcashd`\nimplementation instead, which returns a single raw string."
+      },
+      "BlockTemplateResponse": {
+        "description": "A serialized `getblocktemplate` RPC response in template mode.\n\nThis is the output of the `getblocktemplate` RPC in the default 'template' mode. See\n[`BlockProposalResponse`] for the output in 'proposal' mode.",
+        "properties": {
+          "bits": {
+            "description": "The expected difficulty for the new block displayed in compact form.",
+            "type": "string"
+          },
+          "blockcommitmentshash": {
+            "description": "The block commitment for the new block's header.\n\nSame as [`DefaultRoots::block_commitments_hash`], see that field for details.",
+            "type": "string"
+          },
+          "capabilities": {
+            "description": "The getblocktemplate RPC capabilities supported by Zebra.\n\nAt the moment, Zebra does not support any of the extra capabilities from the specification:\n- `proposal`: <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>\n- `longpoll`: <https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>\n- `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>\n\nBy the above, Zebra will always return an empty vector here.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "coinbasetxn": {
+            "$ref": "#/components/schemas/TransactionTemplate2",
+            "description": "The coinbase transaction generated from `transactions` and `height`."
+          },
+          "curtime": {
+            "$ref": "#/components/schemas/DateTime32",
+            "description": "> the current time as seen by the server (recommended for block time).\n> note this is not necessarily the system clock, and must fall within the mintime/maxtime rules\n\n<https://en.bitcoin.it/wiki/BIP_0022#Block_Template_Request>"
+          },
+          "defaultroots": {
+            "$ref": "#/components/schemas/DefaultRoots",
+            "description": "The block header roots for the transactions in the block template.\n\nIf the transactions in the block template are modified, these roots must be recalculated\n[according to the specification](https://zcash.github.io/rpc/getblocktemplate.html)."
+          },
+          "finalsaplingroothash": {
+            "description": "Legacy backwards-compatibility header root field.\n\nSame as [`DefaultRoots::block_commitments_hash`], see that field for details.",
+            "type": "string"
+          },
+          "height": {
+            "description": "The height of the next block in the best chain.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "lightclientroothash": {
+            "description": "Legacy backwards-compatibility header root field.\n\nSame as [`DefaultRoots::block_commitments_hash`], see that field for details.",
+            "type": "string"
+          },
+          "longpollid": {
+            "$ref": "#/components/schemas/LongPollId",
+            "description": "An ID that represents the chain tip and mempool contents for this template."
+          },
+          "maxtime": {
+            "$ref": "#/components/schemas/DateTime32",
+            "description": "> the maximum time allowed\n\n<https://en.bitcoin.it/wiki/BIP_0023#Mutations>\n\nZebra adjusts the minimum and current times for testnet minimum difficulty blocks,\nso we need to tell miners what the maximum valid time is.\n\nThis field is not in `zcashd` or the Zcash RPC reference yet.\n\nCurrently, some miners just use `min_time` or `cur_time`. Others calculate `max_time` from the\nfixed 90 minute consensus rule, or a smaller fixed interval (like 1000s).\nSome miners don't check the maximum time. This can cause invalid blocks after network downtime,\na significant drop in the hash rate, or after the testnet minimum difficulty interval."
+          },
+          "mintime": {
+            "$ref": "#/components/schemas/DateTime32",
+            "description": "> For each block other than the genesis block, nTime MUST be strictly greater than\n> the median-time-past of that block.\n\n<https://zips.z.cash/protocol/protocol.pdf#blockheader>"
+          },
+          "mutable": {
+            "description": "Hardcoded list of block fields the miner is allowed to change.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "noncerange": {
+            "description": "A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.",
+            "type": "string"
+          },
+          "previousblockhash": {
+            "description": "The hash of the previous block.",
+            "type": "string"
+          },
+          "sigoplimit": {
+            "description": "Max legacy signature operations in the block.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sizelimit": {
+            "description": "Max block size in bytes",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "submitold": {
+            "description": "> only relevant for long poll responses:\n> indicates if work received prior to this response remains potentially valid (default)\n> and should have its shares submitted;\n> if false, the miner may wish to discard its share queue\n\n<https://en.bitcoin.it/wiki/BIP_0022#Optional:_Long_Polling>\n\nThis field is not in `zcashd` or the Zcash RPC reference yet.\n\nIn Zebra, `submit_old` is `false` when the tip block changed or max time is reached,\nand `true` if only the mempool transactions have changed.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "target": {
+            "description": "The expected difficulty for the new block displayed in expanded form.",
+            "type": "string"
+          },
+          "transactions": {
+            "description": "The non-coinbase transactions selected for this block template.",
+            "items": {
+              "$ref": "#/components/schemas/TransactionTemplate"
+            },
+            "type": "array"
+          },
+          "version": {
+            "description": "The version of the block format.\nAlways 4 for new Zcash blocks.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "capabilities",
+          "version",
+          "previousblockhash",
+          "blockcommitmentshash",
+          "lightclientroothash",
+          "finalsaplingroothash",
+          "defaultroots",
+          "transactions",
+          "coinbasetxn",
+          "longpollid",
+          "target",
+          "mintime",
+          "mutable",
+          "noncerange",
+          "sigoplimit",
+          "sizelimit",
+          "curtime",
+          "bits",
+          "height",
+          "maxtime"
+        ],
+        "type": "object"
+      },
+      "Commitments": {
+        "description": "A wrapper that contains either an Orchard or Sapling note commitment tree.\n\n# Data representation\n\nThe fields hold **raw bytes** (`Vec<u8>`). They are hex-encoded only when the\nstruct is serialized to JSON (via `serde_as` / `serde_with::hex`), so callers\nthat read the Rust fields directly — through the generated getters or `new` —\nreceive unencoded bytes, not hex strings.\n\nNote that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also\ncontains the field `finalRoot`. Zebra does *not* use this field.\n\n[1]: https://zcash.github.io/rpc/z_gettreestate.html",
+        "properties": {
+          "finalRoot": {
+            "description": "The raw bytes of the Orchard or Sapling note commitment tree root.\n\nSerialized to JSON as a hex-encoded string in the `finalRoot` field.",
+            "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finalState": {
+            "description": "The raw bytes of the Orchard or Sapling serialized note commitment tree.\n\nSerialized to JSON as a hex-encoded string in the `finalState` field.",
+            "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ConsensusBranchIdHex": {
+        "description": "A hex-encoded [`ConsensusBranchId`] string.",
+        "type": "string"
+      },
+      "DateTime32": {
+        "description": "A date and time, represented by a 32-bit number of seconds since the UNIX epoch.",
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "DefaultRoots": {
+        "description": "The block header roots for the transactions in a block template.\n\nIf the transactions in the block template are modified, these roots must be recalculated\n[according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).",
+        "properties": {
+          "authdataroot": {
+            "description": "The merkle root of the authorizing data hashes of the transactions in the new block.",
+            "type": "string"
+          },
+          "blockcommitmentshash": {
+            "description": "The block commitment for the new block's header.\nThis hash covers `chain_history_root` and `auth_data_root`.\n\n`merkle_root` has its own field in the block header.",
+            "type": "string"
+          },
+          "chainhistoryroot": {
+            "description": "The root of the merkle mountain range of the chain history roots from the last network upgrade to the previous block.\nUnlike the other roots, this not cover any data from this new block, only from previous blocks.",
+            "type": "string"
+          },
+          "merkleroot": {
+            "description": "The merkle root of the transaction IDs in the block.\nUsed in the new block's header.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "merkleroot",
+          "chainhistoryroot",
+          "authdataroot",
+          "blockcommitmentshash"
+        ],
+        "type": "object"
+      },
+      "EndOfService": {
+        "description": "The `end_of_service` object in a [`GetDeprecationInfoResponse`].",
+        "properties": {
+          "block_height": {
+            "description": "The estimated last height this server version supports, matching zcashd's threshold\nsemantics. The node halts when the chain tip goes past this height.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "estimated_time": {
+            "description": "The approximate time of the end of support halt, in seconds since epoch, estimated from\nthe current chain tip height and the target block spacing.\n\nReported 24 hours earlier than the spacing-based estimate, so consumers are warned early\nrather than late when block times vary.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "block_height",
+          "estimated_time"
+        ],
+        "type": "object"
+      },
+      "FundingStream": {
+        "description": "A single funding stream's information in a  `getblocksubsidy` RPC request",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransparentAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The transparent or Sapling address of the funding stream recipient.\n\nThe current Zcash funding streams only use transparent addresses,\nso Zebra doesn't support Sapling addresses in this RPC.\n\nThis is optional so we can support funding streams with no addresses (lockbox streams)."
+          },
+          "recipient": {
+            "description": "A description of the funding stream recipient.",
+            "type": "string"
+          },
+          "specification": {
+            "description": "A URL for the specification of this funding stream.",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The funding stream amount in ZEC."
+          },
+          "valueZat": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "The funding stream amount in zatoshis."
+          }
+        },
+        "required": [
+          "recipient",
+          "specification",
+          "value",
+          "valueZat"
+        ],
+        "type": "object"
+      },
+      "GetAddressBalanceRequest": {
+        "anyOf": [
+          {
+            "description": "A list of address strings.",
+            "properties": {
+              "addresses": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "addresses"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A single address string.",
+            "type": "string"
+          }
+        ],
+        "description": "A request for [`RpcServer::get_address_balance`]."
+      },
+      "GetAddressBalanceResponse": {
+        "description": "The transparent balance of a set of addresses.",
+        "properties": {
+          "balance": {
+            "description": "The total transparent balance.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "received": {
+            "description": "The total received balance, including change.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "balance",
+          "received"
+        ],
+        "type": "object"
+      },
+      "GetAddressTxIdsRequest": {
+        "anyOf": [
+          {
+            "description": "A single address string.",
+            "type": "string"
+          },
+          {
+            "description": "A full request object with address list and optional height range.",
+            "properties": {
+              "addresses": {
+                "description": "A list of addresses to get transactions from.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "end": {
+                "description": "The height to end looking for transactions.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "start": {
+                "description": "The height to start looking for transactions.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "addresses"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "Parameters of [`RpcServer::get_address_tx_ids`] RPC method.\n\nSee [`RpcServer::get_address_tx_ids`] for more details."
+      },
+      "GetAddressUtxosRequest": {
+        "anyOf": [
+          {
+            "description": "A single address string.",
+            "type": "string"
+          },
+          {
+            "description": "A full request object with an address list, a chainInfo flag, and optional limits.",
+            "properties": {
+              "addresses": {
+                "description": "A list of addresses to get unspent outputs from.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "chainInfo": {
+                "default": false,
+                "description": "Whether to return chain info along with the unspent outputs.",
+                "type": "boolean"
+              },
+              "maxEntries": {
+                "default": 0,
+                "description": "The maximum number of unspent outputs to return, or zero for no limit.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "startHeight": {
+                "default": 0,
+                "description": "The height to start looking for unspent outputs, or zero for the whole chain.",
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "addresses"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "Parameters of [`RpcServer::get_address_utxos`] RPC method."
+      },
+      "GetAddressUtxosResponse": {
+        "anyOf": [
+          {
+            "description": "Response when `chainInfo` is false or not provided.",
+            "items": {
+              "$ref": "#/components/schemas/Utxo"
+            },
+            "type": "array"
+          },
+          {
+            "$ref": "#/components/schemas/GetAddressUtxosResponseObject",
+            "description": "Response when `chainInfo` is true."
+          }
+        ],
+        "description": "Response to a `getaddressutxos` RPC request."
+      },
+      "GetAddressUtxosResponseObject": {
+        "description": "Response to a `getaddressutxos` RPC request, when `chainInfo` is true.",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height"
+          },
+          "utxos": {
+            "items": {
+              "$ref": "#/components/schemas/Utxo"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "utxos",
+          "hash",
+          "height"
+        ],
+        "type": "object"
+      },
+      "GetBlockHashResponse": {
+        "description": "Response to a `getbestblockhash` and `getblockhash` RPC request.\n\nContains the hex-encoded hash of the requested block.\n\nAlso see the notes for the [`RpcServer::get_best_block_hash`] and `get_block_hash` methods.",
+        "type": "string"
+      },
+      "GetBlockHeaderResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/HexData",
+            "description": "The request block header, hex-encoded."
+          },
+          {
+            "$ref": "#/components/schemas/BlockHeaderObject",
+            "description": "The block header object."
+          }
+        ],
+        "description": "Response to a `getblockheader` RPC request.\n\nSee the notes for the [`RpcServer::get_block_header`] method."
+      },
+      "GetBlockHeightAndHashResponse": {
+        "description": "Response to a `getbestblockheightandhash` RPC request.",
+        "properties": {
+          "hash": {
+            "$ref": "#/components/schemas/Hash",
+            "description": "The best chain tip block hash"
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The best chain tip block height"
+          }
+        },
+        "required": [
+          "height",
+          "hash"
+        ],
+        "type": "object"
+      },
+      "GetBlockResponse": {
+        "anyOf": [
+          {
+            "description": "The request block, hex-encoded.",
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/BlockObject",
+            "description": "The block object."
+          }
+        ],
+        "description": "Response to a `getblock` RPC request.\n\nSee the notes for the [`RpcServer::get_block`] method."
+      },
+      "GetBlockSubsidyResponse": {
+        "description": "A response to a `getblocksubsidy` RPC request",
+        "properties": {
+          "founders": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The founders' reward amount in ZEC.\n\nZebra returns an error when asked for founders reward heights,\nbecause it checkpoints those blocks instead."
+          },
+          "fundingstreams": {
+            "description": "An array of funding stream descriptions.\nEmpty arrays are omitted on the wire and deserialize as empty.",
+            "items": {
+              "$ref": "#/components/schemas/FundingStream"
+            },
+            "type": "array"
+          },
+          "fundingstreamstotal": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The total funding stream amount in ZEC."
+          },
+          "lockboxstreams": {
+            "description": "An array of lockbox stream descriptions.\nEmpty arrays are omitted on the wire and deserialize as empty.",
+            "items": {
+              "$ref": "#/components/schemas/FundingStream"
+            },
+            "type": "array"
+          },
+          "lockboxtotal": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The total lockbox stream amount in ZEC."
+          },
+          "miner": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The mining reward amount in ZEC.\n\nThis does not include the miner fee."
+          },
+          "totalblocksubsidy": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "The total block subsidy amount in ZEC.\n\nThis does not include the miner fee."
+          }
+        },
+        "required": [
+          "miner",
+          "founders",
+          "fundingstreamstotal",
+          "lockboxtotal",
+          "totalblocksubsidy"
+        ],
+        "type": "object"
+      },
+      "GetBlockTemplateCapability": {
+        "description": "Valid `capabilities` values that indicate client-side support.",
+        "oneOf": [
+          {
+            "const": "longpoll",
+            "description": "Long Polling support.\nCurrently ignored by zebra.",
+            "type": "string"
+          },
+          {
+            "const": "coinbasetxn",
+            "description": "Information for coinbase transaction, default template data with the `coinbasetxn` field.\nCurrently ignored by zebra.",
+            "type": "string"
+          },
+          {
+            "const": "coinbasevalue",
+            "description": "Coinbase value, template response provides a `coinbasevalue` field and omits `coinbasetxn` field.\nCurrently ignored by zebra.",
+            "type": "string"
+          },
+          {
+            "const": "coinbaseaux",
+            "description": "Components of the coinbase transaction.\nCurrently ignored by zebra.",
+            "type": "string"
+          },
+          {
+            "const": "proposal",
+            "description": "Currently ignored by zcashd and zebra.",
+            "type": "string"
+          },
+          {
+            "const": "serverlist",
+            "description": "Currently ignored by zcashd and zebra.",
+            "type": "string"
+          },
+          {
+            "const": "workid",
+            "description": "Currently ignored by zcashd and zebra.",
+            "type": "string"
+          },
+          {
+            "const": "unknowncapability",
+            "description": "Unknown capability to fill in for mutations.",
+            "type": "string"
+          }
+        ]
+      },
+      "GetBlockTemplateParameters": {
+        "description": "Optional parameter `jsonrequestobject` for `getblocktemplate` RPC request.\n\nThe `data` field must be provided in `proposal` mode, and must be omitted in `template` mode.\nAll other fields are optional.",
+        "properties": {
+          "capabilities": {
+            "description": "A list of client-side supported capability features",
+            "items": {
+              "$ref": "#/components/schemas/GetBlockTemplateCapability"
+            },
+            "type": "array"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HexData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Must be omitted when `getblocktemplate` RPC is called in \"template\" mode (or when `mode` is omitted).\nMust be provided when `getblocktemplate` RPC is called in \"proposal\" mode.\n\nHex-encoded block data to be validated and checked against the server's usual acceptance rules\n(excluding the check for a valid proof-of-work)."
+          },
+          "longpollid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LongPollId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An ID that delays the RPC response until the template changes.\n\nIn Zebra, the ID represents the chain tip, max time, and mempool contents."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/GetBlockTemplateRequestMode",
+            "default": "template",
+            "description": "Defines whether the RPC method should generate a block template or attempt to\nvalidate block data, checking against all of the server's usual acceptance rules\n(excluding the check for a valid proof-of-work)."
+          },
+          "workid": {
+            "description": "The workid for the block template.\n\ncurrently unused.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "GetBlockTemplateRequestMode": {
+        "description": "Defines whether the RPC method should generate a block template or attempt to validate a block\nproposal.",
+        "oneOf": [
+          {
+            "const": "template",
+            "description": "Indicates a request for a block template.",
+            "type": "string"
+          },
+          {
+            "const": "proposal",
+            "description": "Indicates a request to validate block data.",
+            "type": "string"
+          }
+        ]
+      },
+      "GetBlockTemplateResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/BlockTemplateResponse",
+            "description": "`getblocktemplate` RPC request in template mode."
+          },
+          {
+            "$ref": "#/components/schemas/BlockProposalResponse",
+            "description": "`getblocktemplate` RPC request in proposal mode."
+          }
+        ],
+        "description": "A `getblocktemplate` RPC response."
+      },
+      "GetBlockTransaction": {
+        "anyOf": [
+          {
+            "description": "The transaction hash, hex-encoded.",
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/TransactionObject",
+            "description": "The block object."
+          }
+        ],
+        "description": "The transaction list in a `getblock` call. Can be a list of transaction\nIDs or the full transaction details depending on verbosity."
+      },
+      "GetBlockTrees": {
+        "description": "Information about the sapling and orchard note commitment trees if any.",
+        "properties": {
+          "ironwood": {
+            "$ref": "#/components/schemas/IronwoodTrees"
+          },
+          "orchard": {
+            "$ref": "#/components/schemas/OrchardTrees"
+          },
+          "sapling": {
+            "$ref": "#/components/schemas/SaplingTrees"
+          }
+        },
+        "type": "object"
+      },
+      "GetBlockchainInfoBalance": {
+        "description": "A value pool's balance in Zec and Zatoshis",
+        "properties": {
+          "chainValue": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "Total amount in the pool, in ZEC"
+          },
+          "chainValueZat": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "Total amount in the pool, in zatoshis"
+          },
+          "id": {
+            "description": "Name of the pool",
+            "type": "string"
+          },
+          "monitored": {
+            "description": "Whether the value pool balance is being monitored.",
+            "type": "boolean"
+          },
+          "valueDelta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Zec2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Change to the amount in the pool produced by this block, in ZEC"
+          },
+          "valueDeltaZat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Amount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Change to the amount in the pool produced by this block, in zatoshis"
+          }
+        },
+        "required": [
+          "chainValue",
+          "chainValueZat",
+          "monitored"
+        ],
+        "type": "object"
+      },
+      "GetBlockchainInfoResponse": {
+        "description": "Response to a `getblockchaininfo` RPC request.\n\nSee the notes for the [`Rpc::get_blockchain_info` method].",
+        "properties": {
+          "bestblockhash": {
+            "description": "The hash of the currently best block, in big-endian order, hex-encoded",
+            "type": "string"
+          },
+          "blocks": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The current number of blocks processed in the server, numeric"
+          },
+          "chain": {
+            "description": "Current network name as defined in BIP70 (main, test, regtest)",
+            "type": "string"
+          },
+          "chainSupply": {
+            "$ref": "#/components/schemas/GetBlockchainInfoBalance",
+            "description": "Chain supply balance"
+          },
+          "chainwork": {
+            "description": "The total amount of work in the best chain, hex-encoded.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "commitments": {
+            "description": "The current number of note commitments in the commitment tree",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "consensus": {
+            "$ref": "#/components/schemas/TipConsensusBranch",
+            "description": "Branch IDs of the current and upcoming consensus rules"
+          },
+          "difficulty": {
+            "description": "The estimated network solution rate in Sol/s.",
+            "format": "double",
+            "type": "number"
+          },
+          "estimatedheight": {
+            "$ref": "#/components/schemas/Height",
+            "description": "If syncing, the estimated height of the chain, else the current best height, numeric.\n\nIn Zebra, this is always the height estimate, so it might be a little inaccurate."
+          },
+          "headers": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The current number of headers we have validated in the best chain, that is,\nthe height of the best chain."
+          },
+          "pruned": {
+            "description": "Whether this node is pruned, currently always false in Zebra.",
+            "type": "boolean"
+          },
+          "size_on_disk": {
+            "description": "The estimated size of the block and undo files on disk",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "upgrades": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NetworkUpgradeInfo"
+            },
+            "description": "Status of network upgrades",
+            "type": "object"
+          },
+          "valuePools": {
+            "description": "Value pool balances",
+            "items": {
+              "$ref": "#/components/schemas/GetBlockchainInfoBalance"
+            },
+            "maxItems": 6,
+            "minItems": 6,
+            "type": "array"
+          },
+          "verificationprogress": {
+            "description": "The verification progress relative to the estimated network chain tip.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "chain",
+          "blocks",
+          "headers",
+          "difficulty",
+          "verificationprogress",
+          "chainwork",
+          "pruned",
+          "size_on_disk",
+          "commitments",
+          "bestblockhash",
+          "estimatedheight",
+          "chainSupply",
+          "valuePools",
+          "upgrades",
+          "consensus"
+        ],
+        "type": "object"
+      },
+      "GetDeprecationInfoResponse": {
+        "description": "Response to a `getdeprecationinfo` RPC request.\n\nSee the notes for the [`Rpc::get_deprecation_info` method].",
+        "properties": {
+          "end_of_service": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndOfService"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of service information for this node release. Only present on Mainnet, where end of\nsupport is enforced."
+          }
+        },
+        "type": "object"
+      },
+      "GetInfoResponse": {
+        "description": "Response to a `getinfo` RPC request.\n\nSee the notes for the [`Rpc::get_info` method].",
+        "properties": {
+          "blocks": {
+            "description": "The current number of blocks processed in the server",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "build": {
+            "description": "The node version build number",
+            "type": "string"
+          },
+          "connections": {
+            "description": "The total (inbound and outbound) number of connections the node has",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "difficulty": {
+            "description": "The current network difficulty",
+            "format": "double",
+            "type": "number"
+          },
+          "errors": {
+            "description": "The last error or warning message, or \"no errors\" if there are no errors",
+            "type": "string"
+          },
+          "errorstimestamp": {
+            "description": "The time of the last error or warning message, or \"no errors timestamp\" if there are no errors",
+            "format": "int64",
+            "type": "integer"
+          },
+          "paytxfee": {
+            "description": "The minimum transaction fee in ZEC/kB",
+            "format": "double",
+            "type": "number"
+          },
+          "protocolversion": {
+            "description": "The protocol version",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proxy": {
+            "description": "The proxy (if any) used by the server. Currently always `None` in Zebra.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relayfee": {
+            "description": "The minimum relay fee for non-free transactions in ZEC/kB",
+            "format": "double",
+            "type": "number"
+          },
+          "subversion": {
+            "description": "The server sub-version identifier, used as the network protocol user-agent",
+            "type": "string"
+          },
+          "testnet": {
+            "description": "True if the server is running in testnet mode, false otherwise",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The node version",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "build",
+          "subversion",
+          "protocolversion",
+          "blocks",
+          "connections",
+          "difficulty",
+          "testnet",
+          "paytxfee",
+          "relayfee",
+          "errors",
+          "errorstimestamp"
+        ],
+        "type": "object"
+      },
+      "GetMempoolInfoResponse": {
+        "description": "Response to a `getmempoolinfo` RPC request.\n\nSee the notes for the [`Rpc::get_mempool_info` method].",
+        "properties": {
+          "bytes": {
+            "description": "Sum of all tx sizes",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fully_notified": {
+            "description": "Whether the node has finished notifying all listeners/tests about every transaction currently in the mempool.\nThis key is returned only when the node is running in regtest.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "size": {
+            "description": "Current tx count",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usage": {
+            "description": "Total memory usage for the mempool",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size",
+          "bytes",
+          "usage"
+        ],
+        "type": "object"
+      },
+      "GetMiningInfoResponse": {
+        "description": "Response to a `getmininginfo` RPC request.",
+        "properties": {
+          "blocks": {
+            "description": "The current tip height.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chain": {
+            "description": "Current network name as defined in BIP70 (main, test, regtest)",
+            "type": "string"
+          },
+          "currentblocksize": {
+            "description": "The size of the last mined block if any.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "currentblocktx": {
+            "description": "The number of transactions in the last mined block if any.",
+            "format": "uint",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "networkhashps": {
+            "description": "The estimated network solution rate in Sol/s.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "networksolps": {
+            "description": "The estimated network solution rate in Sol/s.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "testnet": {
+            "description": "If using testnet or not",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "blocks",
+          "networksolps",
+          "networkhashps",
+          "chain",
+          "testnet"
+        ],
+        "type": "object"
+      },
+      "GetNetworkInfoResponse": {
+        "description": "Response to a `getnetworkinfo` RPC request\n\nSee the notes for [`Rpc::get_network_info` method]",
+        "properties": {
+          "connections": {
+            "description": "The total number of connections",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "localaddresses": {
+            "description": "List of local network addresses",
+            "items": {
+              "$ref": "#/components/schemas/LocalAddress"
+            },
+            "type": "array"
+          },
+          "localservices": {
+            "description": "The services we offer to the network",
+            "type": "string"
+          },
+          "networks": {
+            "description": "Information per network",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInfo"
+            },
+            "type": "array"
+          },
+          "protocolversion": {
+            "description": "The protocol version",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "relayfee": {
+            "description": "Minimum relay fee rate for transactions in ZEC per 1000 bytes",
+            "format": "double",
+            "type": "number"
+          },
+          "subversion": {
+            "description": "The server sub-version string",
+            "type": "string"
+          },
+          "timeoffset": {
+            "description": "The time offset (deprecated; always 0)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "description": "The server version",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "warnings": {
+            "description": "Any network warnings (such as alert messages)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "subversion",
+          "protocolversion",
+          "localservices",
+          "timeoffset",
+          "connections",
+          "networks",
+          "relayfee",
+          "localaddresses",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "GetRawMempoolResponse": {
+        "anyOf": [
+          {
+            "description": "The transaction IDs, as hex strings (verbose=0)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MempoolObject"
+            },
+            "description": "A map of transaction IDs to mempool transaction details objects\n(verbose=1)",
+            "type": "object"
+          }
+        ],
+        "description": "Response to a `getrawmempool` RPC request.\n\nSee the notes for the [`Rpc::get_raw_mempool` method]."
+      },
+      "GetRawTransactionResponse": {
+        "anyOf": [
+          {
+            "description": "The raw transaction, encoded as hex bytes.",
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/TransactionObject",
+            "description": "The transaction object."
+          }
+        ],
+        "description": "Response to a `getrawtransaction` RPC request.\n\nSee the notes for the [`Rpc::get_raw_transaction` method]."
+      },
+      "GetStandardFeeResponse": {
+        "description": "A response to a `getstandardfee` RPC request.",
+        "properties": {
+          "standard_fee": {
+            "description": "Recommended fee per logical action, in zatoshis.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "description": "Estimator version identifier.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "standard_fee",
+          "version"
+        ],
+        "type": "object"
+      },
+      "GetSubtreesByIndexResponse": {
+        "description": "Response to a `z_getsubtreesbyindex` RPC request.\n\nContains the Sapling or Orchard pool label, the index of the first subtree in the list,\nand a list of subtree roots and end heights.",
+        "properties": {
+          "pool": {
+            "description": "The shielded pool to which the subtrees belong.",
+            "type": "string"
+          },
+          "start_index": {
+            "$ref": "#/components/schemas/NoteCommitmentSubtreeIndex",
+            "description": "The index of the first subtree."
+          },
+          "subtrees": {
+            "description": "A sequential list of complete subtrees, in `index` order.\n\nThe generic subtree root type is a hex-encoded Sapling or Orchard subtree root string.",
+            "items": {
+              "$ref": "#/components/schemas/NoteCommitmentSubtreeData"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pool",
+          "start_index",
+          "subtrees"
+        ],
+        "type": "object"
+      },
+      "GetTreestateResponse": {
+        "description": "Response to a `z_gettreestate` RPC request.\n\nContains the Sapling & Orchard note commitment trees and their corresponding\n[`struct@Hash`], [`Height`], and block time. The tree and hash bytes are\nstored raw and hex-encoded only when serialized to JSON.\n\nThe format of the serialized trees represents `CommitmentTree`s from the crate\n`incrementalmerkletree` and not `Frontier`s from the same crate, even though `zebrad`'s\n`NoteCommitmentTree`s are implemented using `Frontier`s. Zebra follows the former format to stay\nconsistent with `zcashd`'s RPCs.\n\nThe formats are semantically equivalent. The difference is that in `Frontier`s, the vector of\nommers is dense (we know where the gaps are from the position of the leaf in the overall tree);\nwhereas in `CommitmentTree`, the vector of ommers is sparse with [`None`] values in the gaps.\n\nThe dense format might be used in future RPCs.",
+        "properties": {
+          "hash": {
+            "description": "The block hash corresponding to the treestate.\n\nStored as a raw [`struct@Hash`]; serialized to JSON as a hex-encoded string.",
+            "type": "string"
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The block height corresponding to the treestate, numeric."
+          },
+          "ironwood": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Treestate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A treestate containing an Ironwood note commitment tree; its bytes are\nserialized to JSON as hex-encoded strings. Only present from NU6.3, so\nthat pre-NU6.3 responses are unchanged."
+          },
+          "orchard": {
+            "$ref": "#/components/schemas/Treestate",
+            "description": "A treestate containing an Orchard note commitment tree; its bytes are\nserialized to JSON as hex-encoded strings."
+          },
+          "sapling": {
+            "$ref": "#/components/schemas/Treestate",
+            "description": "A treestate containing a Sapling note commitment tree; its bytes are\nserialized to JSON as hex-encoded strings."
+          },
+          "sprout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Treestate"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A treestate containing a Sprout note commitment tree; its bytes are\nserialized to JSON as hex-encoded strings. Zebra does not support\nreturning it, but the field is here to enable parsing responses from\nother implementations."
+          },
+          "time": {
+            "description": "Unix time when the block corresponding to the treestate was mined,\nnumeric.\n\nUTC seconds since the Unix 1970-01-01 epoch.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hash",
+          "height",
+          "time",
+          "sapling",
+          "orchard"
+        ],
+        "type": "object"
+      },
+      "GetTxOutResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/OutputObject"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Response to a `gettxout` RPC request.\n\nSee the notes for the [`Rpc::get_tx_out` method]."
+      },
+      "Hash": {
+        "description": "A hash of a block, used to identify blocks and link blocks into a chain. ⛓️\n\nTechnically, this is the (SHA256d) hash of a block *header*, but since the\nblock header includes the Merkle root of the transaction Merkle tree, it\nbinds the entire contents of the block and is used to identify entire blocks.\n\nNote: Zebra displays transaction and block hashes in big-endian byte-order,\nfollowing the u256 convention set by Bitcoin and zcashd.",
+        "items": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxItems": 32,
+        "minItems": 32,
+        "type": "array"
+      },
+      "Height": {
+        "description": "The length of the chain back to the genesis block.\n\nTwo [`Height`]s can't be added, but they can be *subtracted* to get their difference,\nrepresented as an [`HeightDiff`]. This difference can then be added to or subtracted from a\n[`Height`]. Note the similarity with `chrono::DateTime` and `chrono::Duration`.\n\n# Invariants\n\nUsers should not construct block heights greater than `Height::MAX`.\n\n# Consensus\n\nThere are multiple formats for serializing a height, so we don't implement\n`ZcashSerialize` or `ZcashDeserialize` for `Height`.",
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "HexData": {
+        "description": "Deserialize hex-encoded strings to bytes.",
+        "type": "string"
+      },
+      "Input": {
+        "anyOf": [
+          {
+            "description": "A coinbase input.",
+            "properties": {
+              "coinbase": {
+                "description": "The coinbase scriptSig as hex.",
+                "type": "string"
+              },
+              "sequence": {
+                "description": "The script sequence number.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "coinbase",
+              "sequence"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A non-coinbase input.",
+            "properties": {
+              "address": {
+                "description": "The address of the output being spent.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "prevout": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Prevout"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The output being spent, only present at `getblock` verbosity 3.\n\nBoxed to keep the common (verbosity 1/2) input small."
+              },
+              "scriptSig": {
+                "$ref": "#/components/schemas/ScriptSig",
+                "description": "The script."
+              },
+              "sequence": {
+                "description": "The script sequence number.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "txid": {
+                "description": "The transaction id.",
+                "type": "string"
+              },
+              "value": {
+                "description": "The value of the output being spent in ZEC.",
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "valueSat": {
+                "description": "The value of the output being spent, in zats, named to match zcashd.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "vout": {
+                "description": "The vout index.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "txid",
+              "vout",
+              "scriptSig",
+              "sequence"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "The transparent input of a transaction."
+      },
+      "IronwoodTrees": {
+        "description": "Ironwood note commitment tree information. Ironwood reuses the Orchard tree type.",
+        "properties": {
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "type": "object"
+      },
+      "JoinSplit": {
+        "description": "A Sprout JoinSplit of a transaction.",
+        "properties": {
+          "anchor": {
+            "description": "Merkle root of the Sprout note commitment tree.",
+            "type": "string"
+          },
+          "ciphertexts": {
+            "description": "The output notes ciphertexts.",
+            "items": {
+              "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "commitments": {
+            "description": "The commitments of the output notes.",
+            "items": {
+              "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "macs": {
+            "description": "The input notes MACs.",
+            "items": {
+              "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "nullifiers": {
+            "description": "The nullifier of the input notes.",
+            "items": {
+              "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "onetimePubKey": {
+            "description": "The onetime public key used to encrypt the ciphertexts",
+            "type": "string"
+          },
+          "proof": {
+            "description": "A zero-knowledge proof using the Sprout circuit.",
+            "type": "string"
+          },
+          "randomSeed": {
+            "description": "The random seed",
+            "type": "string"
+          },
+          "vpub_new": {
+            "description": "Public input value in ZEC.",
+            "format": "double",
+            "type": "number"
+          },
+          "vpub_newZat": {
+            "description": "Public input value in zatoshis.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "vpub_old": {
+            "description": "Public input value in ZEC.",
+            "format": "double",
+            "type": "number"
+          },
+          "vpub_oldZat": {
+            "description": "Public input value in zatoshis.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "vpub_old",
+          "vpub_oldZat",
+          "vpub_new",
+          "vpub_newZat",
+          "anchor",
+          "nullifiers",
+          "commitments",
+          "onetimePubKey",
+          "randomSeed",
+          "macs",
+          "proof",
+          "ciphertexts"
+        ],
+        "type": "object"
+      },
+      "LocalAddress": {
+        "description": "Local address info.",
+        "properties": {
+          "address": {
+            "description": "Network address",
+            "type": "string"
+          },
+          "port": {
+            "description": "Network port",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "score": {
+            "description": "Relative score",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address",
+          "port",
+          "score"
+        ],
+        "type": "object"
+      },
+      "LongPollId": {
+        "description": "The encoded long poll ID, generated from the [`LongPollInput`].\n\n`zcashd` IDs are currently 69 hex/decimal digits long.\nSince Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.",
+        "type": "string"
+      },
+      "MempoolObject": {
+        "description": "A mempool transaction details object as returned by `getrawmempool` in\nverbose mode.",
+        "properties": {
+          "depends": {
+            "description": "Transaction IDs of unconfirmed transactions used as inputs for this\ntransaction.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "descendantcount": {
+            "description": "Number of in-mempool descendant transactions (including this one).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "descendantfees": {
+            "description": "Modified fees (see \"modifiedfee\" above) of in-mempool descendants\n(including this one).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "descendantsize": {
+            "description": "Size of in-mempool descendants (including this one).",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "Transaction fee in zatoshi."
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "Block height when transaction entered pool."
+          },
+          "modifiedfee": {
+            "$ref": "#/components/schemas/Zec",
+            "description": "Transaction fee with fee deltas used for mining priority."
+          },
+          "size": {
+            "description": "Transaction size in bytes.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "time": {
+            "description": "Local time transaction entered pool in seconds since 1 Jan 1970 GMT",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size",
+          "fee",
+          "modifiedfee",
+          "time",
+          "height",
+          "descendantcount",
+          "descendantsize",
+          "descendantfees",
+          "depends"
+        ],
+        "type": "object"
+      },
+      "NetworkInfo": {
+        "description": "Information about a specific network (ipv4, ipv6, onion).",
+        "properties": {
+          "limited": {
+            "description": "Is the network limited using -onlynet?",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Network (ipv4, ipv6 or onion)",
+            "type": "string"
+          },
+          "proxy": {
+            "description": "The proxy that is used for this network, or empty if none",
+            "type": "string"
+          },
+          "proxy_randomize_credentials": {
+            "description": "Whether to randomize credentials for the proxy (present in zcashd, undocumented)",
+            "type": "boolean"
+          },
+          "reachable": {
+            "description": "Is the network reachable?",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "limited",
+          "reachable",
+          "proxy",
+          "proxy_randomize_credentials"
+        ],
+        "type": "object"
+      },
+      "NetworkUpgrade": {
+        "description": "A Zcash network upgrade.\n\nNetwork upgrades change the Zcash network protocol or consensus rules. Note that they have no\ndesignated codenames from NU5 onwards.\n\nEnum variants must be ordered by activation height.",
+        "oneOf": [
+          {
+            "const": "Genesis",
+            "description": "The Zcash protocol for a Genesis block.\n\nZcash genesis blocks use a different set of consensus rules from\nother BeforeOverwinter blocks, so we treat them like a separate network\nupgrade.",
+            "type": "string"
+          },
+          {
+            "const": "BeforeOverwinter",
+            "description": "The Zcash protocol before the Overwinter upgrade.\n\nWe avoid using `Sprout`, because the specification says that Sprout\nis the name of the pre-Sapling protocol, before and after Overwinter.",
+            "type": "string"
+          },
+          {
+            "const": "Overwinter",
+            "description": "The Zcash protocol after the Overwinter upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "Sapling",
+            "description": "The Zcash protocol after the Sapling upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "Blossom",
+            "description": "The Zcash protocol after the Blossom upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "Heartwood",
+            "description": "The Zcash protocol after the Heartwood upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "Canopy",
+            "description": "The Zcash protocol after the Canopy upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU5",
+            "description": "The Zcash protocol after the NU5 upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU6",
+            "description": "The Zcash protocol after the NU6 upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU6.1",
+            "description": "The Zcash protocol after the NU6.1 upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU6.2",
+            "description": "The Zcash protocol after the NU6.2 upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU6.3",
+            "description": "The Zcash protocol after the NU6.3 (Ironwood) upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "NU7",
+            "description": "The Zcash protocol after the NU7 upgrade.",
+            "type": "string"
+          }
+        ]
+      },
+      "NetworkUpgradeInfo": {
+        "description": "Information about [`NetworkUpgrade`] activation.",
+        "properties": {
+          "activationheight": {
+            "$ref": "#/components/schemas/Height",
+            "description": "Block height of activation, numeric."
+          },
+          "name": {
+            "$ref": "#/components/schemas/NetworkUpgrade",
+            "description": "Name of upgrade, string.\n\nIgnored by lightwalletd, but useful for debugging."
+          },
+          "status": {
+            "$ref": "#/components/schemas/NetworkUpgradeStatus",
+            "description": "Status of upgrade, string."
+          }
+        },
+        "required": [
+          "name",
+          "activationheight",
+          "status"
+        ],
+        "type": "object"
+      },
+      "NetworkUpgradeStatus": {
+        "description": "The activation status of a [`NetworkUpgrade`].",
+        "oneOf": [
+          {
+            "const": "active",
+            "description": "The network upgrade is currently active.\n\nIncludes all network upgrades that have previously activated,\neven if they are not the most recent network upgrade.",
+            "type": "string"
+          },
+          {
+            "const": "disabled",
+            "description": "The network upgrade does not have an activation height.",
+            "type": "string"
+          },
+          {
+            "const": "pending",
+            "description": "The network upgrade has an activation height, but we haven't reached it yet.",
+            "type": "string"
+          }
+        ]
+      },
+      "NoteCommitmentSubtreeData": {
+        "description": "Subtree root of Sapling or Orchard note commitment tree, with block height, but without the subtree index.\nUsed for database key-value serialization, where the subtree index is the key, and this struct is the value.",
+        "properties": {
+          "end_height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "Height of the block containing the note that completed this subtree."
+          },
+          "root": {
+            "description": "Merkle root of the 2^16-leaf subtree.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root",
+          "end_height"
+        ],
+        "type": "object"
+      },
+      "NoteCommitmentSubtreeIndex": {
+        "description": "A note commitment subtree index, used to identify a subtree in a shielded pool.\nAlso used to count subtrees.",
+        "format": "uint16",
+        "maximum": 65535,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "OpenRpcDocument": {
+        "description": "An OpenRPC document, as defined by https://spec.open-rpc.org/.",
+        "type": "object"
+      },
+      "Orchard": {
+        "description": "Object with Orchard-specific information.",
+        "properties": {
+          "actions": {
+            "description": "Array of Orchard actions.",
+            "items": {
+              "$ref": "#/components/schemas/OrchardAction"
+            },
+            "type": "array"
+          },
+          "anchor": {
+            "description": "A root of the Orchard note commitment tree at some block height in the past",
+            "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bindingSig": {
+            "description": "An Orchard binding signature on the SIGHASH transaction hash",
+            "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flags": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrchardFlags"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The flags."
+          },
+          "proof": {
+            "description": "Encoding of aggregated zk-SNARK proofs for Orchard Actions",
+            "pattern": "^(?:[0-9A-Fa-f]{2})*$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "valueBalance": {
+            "description": "The net value of Orchard Actions in ZEC.",
+            "format": "double",
+            "type": "number"
+          },
+          "valueBalanceZat": {
+            "description": "The net value of Orchard Actions in zatoshis.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "actions",
+          "valueBalance",
+          "valueBalanceZat"
+        ],
+        "type": "object"
+      },
+      "OrchardAction": {
+        "description": "The Orchard action of a transaction.",
+        "properties": {
+          "cmx": {
+            "description": "The x-coordinate of the note commitment for the output note.",
+            "type": "string"
+          },
+          "cv": {
+            "description": "A value commitment to the net value of the input note minus the output note.",
+            "type": "string"
+          },
+          "encCiphertext": {
+            "description": "The output note encrypted to the recipient.",
+            "type": "string"
+          },
+          "ephemeralKey": {
+            "description": "An encoding of an ephemeral Pallas public key.",
+            "type": "string"
+          },
+          "nullifier": {
+            "description": "The nullifier of the input note.",
+            "type": "string"
+          },
+          "outCiphertext": {
+            "description": "A signature authorizing the spend in this Action.",
+            "type": "string"
+          },
+          "rk": {
+            "description": "The randomized validating key for spendAuthSig.",
+            "type": "string"
+          },
+          "spendAuthSig": {
+            "description": "A ciphertext enabling the sender to recover the output note.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cv",
+          "nullifier",
+          "rk",
+          "cmx",
+          "ephemeralKey",
+          "encCiphertext",
+          "spendAuthSig",
+          "outCiphertext"
+        ],
+        "type": "object"
+      },
+      "OrchardFlags": {
+        "description": "Object with Orchard-specific information.",
+        "properties": {
+          "enableOutputs": {
+            "description": "Whether Orchard outputs are enabled.",
+            "type": "boolean"
+          },
+          "enableSpends": {
+            "description": "Whether Orchard spends are enabled.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enableOutputs",
+          "enableSpends"
+        ],
+        "type": "object"
+      },
+      "OrchardTrees": {
+        "description": "Orchard note commitment tree information.",
+        "properties": {
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "type": "object"
+      },
+      "Output": {
+        "description": "The transparent output of a transaction.",
+        "properties": {
+          "n": {
+            "description": "index.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scriptPubKey": {
+            "$ref": "#/components/schemas/ScriptPubKey",
+            "description": "The scriptPubKey."
+          },
+          "value": {
+            "description": "The value in ZEC.",
+            "format": "double",
+            "type": "number"
+          },
+          "valueZat": {
+            "description": "The value in zats.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "value",
+          "valueZat",
+          "n",
+          "scriptPubKey"
+        ],
+        "type": "object"
+      },
+      "OutputIndex": {
+        "description": "A transparent output's index in its transaction.",
+        "format": "uint32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "OutputObject": {
+        "description": "The output object returned by `gettxout` RPC requests.",
+        "properties": {
+          "bestblock": {
+            "type": "string"
+          },
+          "coinbase": {
+            "type": "boolean"
+          },
+          "confirmations": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scriptPubKey": {
+            "$ref": "#/components/schemas/ScriptPubKey"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          },
+          "version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bestblock",
+          "confirmations",
+          "value",
+          "scriptPubKey",
+          "version",
+          "coinbase"
+        ],
+        "type": "object"
+      },
+      "PeerInfo": {
+        "description": "Item of the `getpeerinfo` response",
+        "properties": {
+          "addr": {
+            "$ref": "#/components/schemas/PeerSocketAddr",
+            "description": "The IP address and port of the peer"
+          },
+          "banscore": {
+            "description": "The ban score for misbehavior",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "connection_state": {
+            "description": "The connection state (e.g. \"connected\", \"never_connected\", \"failed\", \"connecting\")",
+            "type": "string"
+          },
+          "inbound": {
+            "description": "Inbound (true) or Outbound (false)",
+            "type": "boolean"
+          },
+          "lastrecv": {
+            "description": "The time in seconds since epoch of the last message received from this peer",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pingtime": {
+            "description": "The round-trip ping time in seconds.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pingwait": {
+            "description": "The wait time on a ping response in seconds.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "services": {
+            "description": "The services offered, as a zero-padded 16-character hex string",
+            "type": "string"
+          },
+          "subver": {
+            "description": "The peer's user agent string (e.g. \"/Zebra:2.1.0/\" or \"/MagicBean:5.8.0/\")",
+            "type": "string"
+          },
+          "version": {
+            "description": "The negotiated protocol version",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "addr",
+          "services",
+          "lastrecv",
+          "inbound",
+          "banscore",
+          "subver",
+          "version",
+          "connection_state"
+        ],
+        "type": "object"
+      },
+      "PeerSocketAddr": {
+        "description": "A thin wrapper for [`SocketAddr`] which hides peer IP addresses in logs and metrics.",
+        "type": "string"
+      },
+      "Prevout": {
+        "description": "The previous output spent by a transparent input.\n\nOnly present at `getblock` verbosity 3. The fields match Bitcoin Core's `getblock`\nverbosity 3 `prevout` object.",
+        "properties": {
+          "generated": {
+            "description": "Whether the output being spent was created by a coinbase transaction.",
+            "type": "boolean"
+          },
+          "height": {
+            "description": "The height of the block that created the output being spent.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scriptPubKey": {
+            "$ref": "#/components/schemas/ScriptPubKey",
+            "description": "The scriptPubKey of the output being spent."
+          },
+          "value": {
+            "description": "The value of the output being spent in ZEC.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "generated",
+          "height",
+          "value",
+          "scriptPubKey"
+        ],
+        "type": "object"
+      },
+      "SaplingTrees": {
+        "description": "Sapling note commitment tree information.",
+        "properties": {
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size"
+        ],
+        "type": "object"
+      },
+      "Script": {
+        "description": "An encoding of a Bitcoin script.",
+        "title": "Correctness",
+        "type": "string"
+      },
+      "ScriptPubKey": {
+        "description": "The scriptPubKey of a transaction output.",
+        "properties": {
+          "addresses": {
+            "description": "The addresses.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "asm": {
+            "description": "the asm.",
+            "type": "string"
+          },
+          "hex": {
+            "description": "the hex.",
+            "type": "string"
+          },
+          "reqSigs": {
+            "description": "The required sigs.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": {
+            "description": "The type, eg 'pubkeyhash'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asm",
+          "hex",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ScriptSig": {
+        "description": "The scriptSig of a transaction input.",
+        "properties": {
+          "asm": {
+            "description": "The asm.",
+            "type": "string"
+          },
+          "hex": {
+            "$ref": "#/components/schemas/Script",
+            "description": "The hex."
+          }
+        },
+        "required": [
+          "asm",
+          "hex"
+        ],
+        "type": "object"
+      },
+      "SendRawTransactionResponse": {
+        "description": "Response to a `sendrawtransaction` RPC request.\n\nContains the hex-encoded hash of the sent transaction.\n\nSee the notes for the [`Rpc::send_raw_transaction` method].",
+        "type": "string"
+      },
+      "ShieldedOutput": {
+        "description": "A Sapling output of a transaction.",
+        "properties": {
+          "cmu": {
+            "description": "The u-coordinate of the note commitment for the output note.",
+            "type": "string"
+          },
+          "cv": {
+            "description": "Value commitment to the input note.",
+            "type": "string"
+          },
+          "encCiphertext": {
+            "description": "The output note encrypted to the recipient.",
+            "type": "string"
+          },
+          "ephemeralKey": {
+            "description": "A Jubjub public key.",
+            "type": "string"
+          },
+          "outCiphertext": {
+            "description": "A ciphertext enabling the sender to recover the output note.",
+            "type": "string"
+          },
+          "proof": {
+            "description": "A zero-knowledge proof using the Sapling Output circuit.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cv",
+          "cmu",
+          "ephemeralKey",
+          "encCiphertext",
+          "outCiphertext",
+          "proof"
+        ],
+        "type": "object"
+      },
+      "ShieldedSpend": {
+        "description": "A Sapling spend of a transaction.",
+        "properties": {
+          "anchor": {
+            "description": "Merkle root of the Sapling note commitment tree.",
+            "type": "string"
+          },
+          "cv": {
+            "description": "Value commitment to the input note.",
+            "type": "string"
+          },
+          "nullifier": {
+            "description": "The nullifier of the input note.",
+            "type": "string"
+          },
+          "proof": {
+            "description": "A zero-knowledge proof using the Sapling Spend circuit.",
+            "type": "string"
+          },
+          "rk": {
+            "description": "The randomized public key for spendAuthSig.",
+            "type": "string"
+          },
+          "spendAuthSig": {
+            "description": "A signature authorizing this Spend.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cv",
+          "anchor",
+          "nullifier",
+          "rk",
+          "proof",
+          "spendAuthSig"
+        ],
+        "type": "object"
+      },
+      "SubmitBlockErrorResponse": {
+        "description": "Response to a `submitblock` RPC request.\n\nZebra never returns \"duplicate-invalid\", because it does not store invalid blocks.",
+        "oneOf": [
+          {
+            "const": "duplicate",
+            "description": "Block was already committed to the non-finalized or finalized state",
+            "type": "string"
+          },
+          {
+            "const": "duplicate-inconclusive",
+            "description": "Block was already added to the state queue or channel, but not yet committed to the non-finalized state",
+            "type": "string"
+          },
+          {
+            "const": "inconclusive",
+            "description": "Block was already committed to the non-finalized state, but not on the best chain",
+            "type": "string"
+          },
+          {
+            "const": "rejected",
+            "description": "Block rejected as invalid",
+            "type": "string"
+          }
+        ]
+      },
+      "SubmitBlockParameters": {
+        "description": "Optional argument `jsonparametersobject` for `submitblock` RPC request\n\nSee the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.",
+        "properties": {
+          "workid": {
+            "description": "The workid for the block template. Currently unused.\n\n> If the server provided a workid, it MUST be included with submissions,\n\nRationale:\n\n> If servers allow all mutations, it may be hard to identify which job it is based on.\n> While it may be possible to verify the submission by its content, it is much easier\n> to compare it to the job issued. It is very easy for the miner to keep track of this.\n> Therefore, using a \"workid\" is a very cheap solution to enable more mutations.\n\n<https://en.bitcoin.it/wiki/BIP_0022#Rationale>",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SubmitBlockResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/SubmitBlockErrorResponse",
+            "description": "Block was not successfully submitted, return error"
+          },
+          {
+            "description": "Block successfully submitted, returns null",
+            "type": "null"
+          }
+        ],
+        "description": "Response to a `submitblock` RPC request.\n\nZebra never returns \"duplicate-invalid\", because it does not store invalid blocks."
+      },
+      "TipConsensusBranch": {
+        "description": "The [`ConsensusBranchId`]s for the tip and the next block.\n\nThese branch IDs are different when the next block is a network upgrade activation block.",
+        "properties": {
+          "chaintip": {
+            "$ref": "#/components/schemas/ConsensusBranchIdHex",
+            "description": "Branch ID used to validate the current chain tip, big-endian, hex-encoded."
+          },
+          "nextblock": {
+            "$ref": "#/components/schemas/ConsensusBranchIdHex",
+            "description": "Branch ID used to validate the next block, big-endian, hex-encoded."
+          }
+        },
+        "required": [
+          "chaintip",
+          "nextblock"
+        ],
+        "type": "object"
+      },
+      "TransactionObject": {
+        "description": "A Transaction object as returned by `getrawtransaction` and `getblock` RPC\nrequests.",
+        "properties": {
+          "authdigest": {
+            "description": "The transaction's auth digest. For pre-v5 transactions this will be\nffff..ffff",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bindingSig": {
+            "description": "Sapling binding signature of the transaction.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blockhash": {
+            "description": "The block hash",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "blocktime": {
+            "description": "The block height after which the transaction expires",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "confirmations": {
+            "description": "The height diff between the block containing the tx and the best chain\ntip + 1, 0 if it's in a side chain, or `None` if the tx is in the\nmempool.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expiryheight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Height"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The block height after which the transaction expires.\nIncluded for Overwinter+ transactions (matching zcashd), omitted for V1/V2.\nSee: <https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L224-L226>"
+          },
+          "fee": {
+            "description": "The transaction fee in ZEC, only present at `getblock` verbosity 3.\n\nOmitted for the coinbase transaction and when a spent output cannot be found.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "height": {
+            "description": "The height of the block in the best chain that contains the tx, -1 if\nit's in a side chain block, or `None` if the tx is in the mempool.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "hex": {
+            "description": "The raw transaction, encoded as hex bytes.",
+            "type": "string"
+          },
+          "in_active_chain": {
+            "description": "Whether specified block is in the active chain or not (only present with\nexplicit \"blockhash\" argument)",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "ironwood": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Orchard"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ironwood actions of the transaction (v6 transactions from NU6.3 onward).\n\nThe Ironwood pool reuses the Orchard-shaped bundle, so this uses the same [`Orchard`] object."
+          },
+          "joinSplitPubKey": {
+            "description": "JoinSplit public key of the transaction.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "joinSplitSig": {
+            "description": "JoinSplit signature of the transaction.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "locktime": {
+            "description": "The lock time",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "orchard": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Orchard"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Orchard actions of the transaction."
+          },
+          "overwintered": {
+            "description": "Whether the overwintered flag is set",
+            "type": "boolean"
+          },
+          "size": {
+            "description": "The size of the transaction in bytes.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "time": {
+            "description": "The time the transaction was included in a block.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "txid": {
+            "description": "The transaction identifier, encoded as hex bytes.",
+            "type": "string"
+          },
+          "vShieldedOutput": {
+            "description": "Sapling outputs of the transaction.",
+            "items": {
+              "$ref": "#/components/schemas/ShieldedOutput"
+            },
+            "type": "array"
+          },
+          "vShieldedSpend": {
+            "description": "Sapling spends of the transaction.",
+            "items": {
+              "$ref": "#/components/schemas/ShieldedSpend"
+            },
+            "type": "array"
+          },
+          "valueBalance": {
+            "description": "The net value of Sapling Spends minus Outputs in ZEC",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "valueBalanceZat": {
+            "description": "The net value of Sapling Spends minus Outputs in zatoshis",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "version": {
+            "description": "The version of the transaction.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "versiongroupid": {
+            "description": "The version group ID.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vin": {
+            "description": "Transparent inputs of the transaction.",
+            "items": {
+              "$ref": "#/components/schemas/Input"
+            },
+            "type": "array"
+          },
+          "vjoinsplit": {
+            "description": "Transparent outputs of the transaction.",
+            "items": {
+              "$ref": "#/components/schemas/JoinSplit"
+            },
+            "type": "array"
+          },
+          "vout": {
+            "description": "Transparent outputs of the transaction.",
+            "items": {
+              "$ref": "#/components/schemas/Output"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "hex",
+          "vin",
+          "vout",
+          "vShieldedSpend",
+          "vShieldedOutput",
+          "vjoinsplit",
+          "txid",
+          "overwintered",
+          "version",
+          "locktime"
+        ],
+        "type": "object"
+      },
+      "TransactionTemplate": {
+        "description": "Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.",
+        "properties": {
+          "authdigest": {
+            "description": "The authorizing data digest of a v5 transaction, or a placeholder for older versions.",
+            "type": "string"
+          },
+          "data": {
+            "description": "The hex-encoded serialized data for this transaction.",
+            "type": "string"
+          },
+          "depends": {
+            "description": "The transactions in this block template that this transaction depends upon.\nThese are 1-based indexes in the `transactions` list.\n\nPopulated when the selected transactions are assembled into a block template.\n\nWe use `u16` because 2 MB blocks are limited to around 39,000 transactions.",
+            "items": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "The fee for this transaction.\n\nNon-coinbase transactions must be `NonNegative`.\nThe coinbase transaction `fee` is the negative total collected miner fees, excluding\nthe NSM contribution, so its fee must be `NegativeOrZero`."
+          },
+          "hash": {
+            "description": "The transaction ID of this transaction.",
+            "type": "string"
+          },
+          "required": {
+            "description": "Is this transaction required in the block?\n\nCoinbase transactions are required, all other transactions are not.",
+            "type": "boolean"
+          },
+          "sigops": {
+            "description": "The number of transparent signature operations in this transaction.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "hash",
+          "authdigest",
+          "depends",
+          "fee",
+          "sigops",
+          "required"
+        ],
+        "type": "object"
+      },
+      "TransactionTemplate2": {
+        "description": "Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.",
+        "properties": {
+          "authdigest": {
+            "description": "The authorizing data digest of a v5 transaction, or a placeholder for older versions.",
+            "type": "string"
+          },
+          "data": {
+            "description": "The hex-encoded serialized data for this transaction.",
+            "type": "string"
+          },
+          "depends": {
+            "description": "The transactions in this block template that this transaction depends upon.\nThese are 1-based indexes in the `transactions` list.\n\nPopulated when the selected transactions are assembled into a block template.\n\nWe use `u16` because 2 MB blocks are limited to around 39,000 transactions.",
+            "items": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "fee": {
+            "$ref": "#/components/schemas/Amount",
+            "description": "The fee for this transaction.\n\nNon-coinbase transactions must be `NonNegative`.\nThe coinbase transaction `fee` is the negative total collected miner fees, excluding\nthe NSM contribution, so its fee must be `NegativeOrZero`."
+          },
+          "hash": {
+            "description": "The transaction ID of this transaction.",
+            "type": "string"
+          },
+          "required": {
+            "description": "Is this transaction required in the block?\n\nCoinbase transactions are required, all other transactions are not.",
+            "type": "boolean"
+          },
+          "sigops": {
+            "description": "The number of transparent signature operations in this transaction.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "hash",
+          "authdigest",
+          "depends",
+          "fee",
+          "sigops",
+          "required"
+        ],
+        "type": "object"
+      },
+      "TransparentAddress": {
+        "type": "string"
+      },
+      "Treestate": {
+        "description": "A treestate that is included in the [`z_gettreestate`][1] RPC response.\n\n[1]: https://zcash.github.io/rpc/z_gettreestate.html",
+        "properties": {
+          "commitments": {
+            "$ref": "#/components/schemas/Commitments",
+            "description": "The Orchard or Sapling note commitment tree, stored as raw bytes and\nserialized to JSON as hex-encoded strings (see [`Commitments`])."
+          }
+        },
+        "required": [
+          "commitments"
+        ],
+        "type": "object"
+      },
+      "Utxo": {
+        "description": "A UTXO returned by the `getaddressutxos` RPC request.\n\nSee the notes for the [`Rpc::get_address_utxos` method].",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/TransparentAddress",
+            "description": "The transparent address, base58check encoded"
+          },
+          "height": {
+            "$ref": "#/components/schemas/Height",
+            "description": "The block height, numeric.\n\nWe put this field last, to match the zcashd order."
+          },
+          "outputIndex": {
+            "$ref": "#/components/schemas/OutputIndex",
+            "description": "The transparent output index, numeric"
+          },
+          "satoshis": {
+            "description": "The amount of zatoshis in the transparent output",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "script": {
+            "description": "The transparent output script, hex encoded",
+            "type": "string"
+          },
+          "txid": {
+            "description": "The output txid, in big-endian order, hex-encoded",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "txid",
+          "outputIndex",
+          "script",
+          "satoshis",
+          "height"
+        ],
+        "type": "object"
+      },
+      "ValidateAddressResponse": {
+        "description": "`validateaddress` response",
+        "properties": {
+          "address": {
+            "description": "The zcash address that has been validated.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isscript": {
+            "description": "If the key is a script.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "isvalid": {
+            "description": "Whether the address is valid.\n\nIf not, this is the only property returned.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isvalid"
+        ],
+        "type": "object"
+      },
+      "ZListUnifiedReceiversResponse": {
+        "description": "`z_listunifiedreceivers` response",
+        "properties": {
+          "orchard": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "p2pkh": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "p2sh": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sapling": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ZValidateAddressResponse": {
+        "description": "`z_validateaddress` response",
+        "properties": {
+          "address": {
+            "description": "The zcash address that has been validated.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ZValidateAddressType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The type of the address."
+          },
+          "ismine": {
+            "description": "Whether the address is yours or not.\n\nAlways false for now since Zebra doesn't have a wallet yet.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "isvalid": {
+            "description": "Whether the address is valid.\n\nIf not, this is the only property returned.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "isvalid"
+        ],
+        "type": "object"
+      },
+      "ZValidateAddressType": {
+        "description": "Address types supported by the `z_validateaddress` RPC according to\n<https://zcash.github.io/rpc/z_validateaddress.html>.",
+        "oneOf": [
+          {
+            "const": "p2pkh",
+            "description": "The `p2pkh` address type.",
+            "type": "string"
+          },
+          {
+            "const": "p2sh",
+            "description": "The `p2sh` address type.",
+            "type": "string"
+          },
+          {
+            "const": "sapling",
+            "description": "The `sapling` address type.",
+            "type": "string"
+          },
+          {
+            "const": "unified",
+            "description": "The `unified` address type.",
+            "type": "string"
+          }
+        ]
+      },
+      "Zec": {
+        "description": "A wrapper type that formats [`Amount`]s as ZEC, using double-precision floating point.\n\nThis formatting is accurate to the nearest zatoshi, as long as the number of floating-point\ncalculations is very small. This is because [`MAX_MONEY`] uses 51 bits, but [`f64`] has\n[53 bits of precision](f64::MANTISSA_DIGITS).\n\nRust uses [`roundTiesToEven`](f32), which can lose one bit of precision per calculation\nin the worst case. (Assuming the platform implements it correctly.)\n\nUnlike `zcashd`, Zebra doesn't have control over its JSON number precision,\nbecause it uses `serde_json`'s formatter. But `zcashd` uses a fixed-point calculation:\n<https://github.com/zcash/zcash/blob/f6a4f68115ea4c58d55c8538579d0877ba9c8f79/src/rpc/server.cpp#L134>",
+        "format": "double",
+        "type": "number"
+      },
+      "Zec2": {
+        "description": "A wrapper type that formats [`Amount`]s as ZEC, using double-precision floating point.\n\nThis formatting is accurate to the nearest zatoshi, as long as the number of floating-point\ncalculations is very small. This is because [`MAX_MONEY`] uses 51 bits, but [`f64`] has\n[53 bits of precision](f64::MANTISSA_DIGITS).\n\nRust uses [`roundTiesToEven`](f32), which can lose one bit of precision per calculation\nin the worst case. (Assuming the platform implements it correctly.)\n\nUnlike `zcashd`, Zebra doesn't have control over its JSON number precision,\nbecause it uses `serde_json`'s formatter. But `zcashd` uses a fixed-point calculation:\n<https://github.com/zcash/zcash/blob/f6a4f68115ea4c58d55c8538579d0877ba9c8f79/src/rpc/server.cpp#L134>",
+        "format": "double",
+        "type": "number"
+      }
+    }
+  }
+}

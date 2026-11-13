@@ -34,7 +34,17 @@ pub(crate) fn standard_fee(network: &Network, height: Height) -> u64 {
 }
 
 /// A response to a `getstandardfee` RPC request.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
+    schemars::JsonSchema,
+)]
 pub struct GetStandardFeeResponse {
     /// Recommended fee per logical action, in zatoshis.
     #[getter(copy)]
