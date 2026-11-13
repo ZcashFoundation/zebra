@@ -372,6 +372,51 @@ async fn mempool_stream_re_reads_the_mempool_after_lagging() -> Result<()> {
     Ok(())
 }
 
+/// A mid-stream mempool query failure must surface to the client, not close
+/// the stream as if the mempool had no new transactions.
+#[tokio::test]
+async fn mempool_stream_returns_an_error_when_a_query_fails() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (_server_task, mut client, _read_state, mut mempool, _chain_tip_sender, mempool_change) =
+        start_server_and_get_client().await?;
+
+    let response = client
+        .get_mempool_stream(tonic::Request::new(Empty {}))
+        .await
+        .expect("the mempool stream should open");
+    let mut stream = response.into_inner();
+
+    // Let the initial snapshot complete, so the task is in the change loop.
+    mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
+        .await
+        .respond(empty_mempool_response());
+
+    mempool_change
+        .send(MempoolChange::added(HashSet::from([
+            zebra_chain::transaction::UnminedTxId::Legacy(zebra_chain::transaction::Hash([1; 32])),
+        ])))
+        .expect("server should be subscribed to mempool changes");
+
+    mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::TransactionsById(_)))
+        .await
+        .respond(Err(BoxError::from("mempool query failed")));
+
+    let item = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("timed out waiting for the stream error")
+        .expect("the stream must yield an error status, not close silently");
+
+    assert!(
+        item.is_err(),
+        "the failed query must surface as an error, not a transaction"
+    );
+
+    Ok(())
+}
+
 /// Returns a mempool response with no transactions in it.
 fn empty_mempool_response() -> mempool::Response {
     mempool::Response::FullTransactions {
