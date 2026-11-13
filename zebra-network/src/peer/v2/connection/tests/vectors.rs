@@ -3525,9 +3525,10 @@ fn overloads_of_one_burst_roll_once() {
     );
     assert_eq!(overloads.drop_probability(next), None);
 
-    // A burst a full interval after the last overload is as unlikely to drop the connection
-    // as the first one.
-    let quiet = next + OVERLOAD_PROTECTION_INTERVAL;
+    // A burst more than a full interval after the last overload is as unlikely to drop the
+    // connection as the first one. Exactly one interval is the boundary of the probability
+    // curve, where the result depends on how the elapsed time rounds.
+    let quiet = next + OVERLOAD_PROTECTION_INTERVAL + Duration::from_millis(10);
     assert_eq!(
         overloads.drop_probability(quiet),
         Some(MIN_OVERLOAD_DROP_PROBABILITY)
