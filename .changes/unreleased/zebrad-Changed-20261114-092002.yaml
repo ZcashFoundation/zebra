@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Reduce transaction decoding CPU overhead with bulk byte-vector codecs and table-based scalar square roots.
+time: 2026-11-14T09:20:02.792267607+01:00
