@@ -25,6 +25,11 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 ///   `< 0.8`, or `< 1`.
 /// - `zcash.mempool.size.weighted`: `bk`, a fee weight ratio bucket: `< 1`, `1`, `> 1`, `> 2`, or
 ///   `> 3`.
+/// - `zcash.chain.tip.block_delay_seconds`:
+///   - `event.chain.height`: the block's height, an event attribute.
+///   - `chain.network_upgrade`: the network upgrade at the block's height, such as `Nu6`.
+/// - `zebrad.sentry.metrics.dropped.total`: `reason`, `flush_budget`, `transport_backlog`, or
+///   `label_set_cap`.
 pub const LABELS: &[(&str, &[&str])] = &[
     ("zebrad.build.info", &["version"]),
     ("sync.restart.count", &["reason", "made_progress"]),
@@ -38,6 +43,11 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("mempool.verified.transactions.total", &["version"]),
     ("zcash.mempool.actions.unpaid", &["bk"]),
     ("zcash.mempool.size.weighted", &["bk"]),
+    (
+        "zcash.chain.tip.block_delay_seconds",
+        &["event.chain.height", "chain.network_upgrade"],
+    ),
+    ("zebrad.sentry.metrics.dropped.total", &["reason"]),
 ];
 
 /// Describes every metric `zebrad` itself records to the installed [`metrics`] recorder.
@@ -46,6 +56,12 @@ pub fn describe() {
         concat!(env!("CARGO_PKG_NAME"), ".build.info"),
         Unit::Count,
         "Always 1, with the running zebrad version as a label."
+    );
+    describe_counter!(
+        "zebrad.sentry.metrics.dropped.total",
+        Unit::Count,
+        "Metric values that weren't sent to Sentry when due, because a flush was full, the Sentry \
+         transport was still sending earlier data, or the metric had too many label sets."
     );
 
     describe_sync();

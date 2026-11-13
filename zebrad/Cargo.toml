@@ -87,7 +87,7 @@ internal-miner = [
 ]
 
 # Tracing and monitoring
-sentry = ["dep:sentry"]
+sentry = ["dep:sentry", "metrics-util"]
 journald = ["tracing-journald"]
 filter-reload = []
 opentelemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
@@ -246,7 +246,9 @@ bytes = { workspace = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
-metrics-util = { workspace = true, optional = true }
+
+# prod features prometheus and sentry
+metrics-util = { workspace = true, features = ["registry"], optional = true }
 
 # prod feature release_max_level_info
 #

@@ -9,6 +9,11 @@ use metrics::Recorder;
 use serde::{Deserialize, Serialize};
 
 pub mod catalog;
+#[cfg(any(feature = "prometheus", feature = "sentry"))]
+pub(crate) mod event_labels;
+pub(crate) mod node_context;
+#[cfg(feature = "sentry")]
+pub(crate) mod sentry_policy;
 
 // `metrics-process` describes fewer metrics on Windows, so the catalog only matches elsewhere.
 #[cfg(all(test, not(target_os = "windows")))]
@@ -58,8 +63,6 @@ impl MetricsEndpoint {
         };
 
         if recorder_installed {
-            describe_all();
-            zebra_consensus::metrics::register_failure_counters();
             spawn_process_metrics()?;
         }
 
@@ -80,24 +83,8 @@ impl MetricsEndpoint {
             .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
             .with_http_listener(addr);
 
-        let endpoint_result = match other {
-            Some(other) => install_alongside(builder, other),
-            None => builder.install().map_err(Into::into),
-        };
-
-        match endpoint_result {
-            Ok(()) => {
-                // Expose binary metadata to metrics, using a single time series with
-                // value 1:
-                //     https://www.robustperception.io/exposing-the-software-version-to-prometheus
-                metrics::counter!(
-                    format!("{}.build.info", env!("CARGO_PKG_NAME")),
-                    "version" => env!("CARGO_PKG_VERSION")
-                )
-                .increment(1);
-
-                info!("Opened metrics endpoint at {}", addr);
-            }
+        match install_with_prometheus(builder, other) {
+            Ok(()) => info!("Opened metrics endpoint at {}", addr),
             Err(e) => panic!(
                 "Opening metrics endpoint listener {addr:?} failed: {e:?}. \
                  Hint: Check if another zebrad or zcashd process is running. \
@@ -140,6 +127,21 @@ pub fn describe_all() {
     metrics_process::Collector::default().describe();
 }
 
+/// Describes every metric, registers the failure counters at zero, and records the build info
+/// once, through the recorder that was just installed, whichever backends it sends to.
+fn describe_and_record_build_info() {
+    describe_all();
+    zebra_consensus::metrics::register_failure_counters();
+
+    // A single series with value 1 exposes the version:
+    // https://www.robustperception.io/exposing-the-software-version-to-prometheus
+    metrics::counter!(
+        concat!(env!("CARGO_PKG_NAME"), ".build.info"),
+        "version" => env!("CARGO_PKG_VERSION"),
+    )
+    .increment(1);
+}
+
 /// Records the process metrics through the global recorder, which must already be installed.
 ///
 /// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
@@ -158,13 +160,17 @@ fn spawn_process_metrics() -> Result<(), FrameworkError> {
         .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
 }
 
-/// Installs `recorder` as the global metrics recorder.
+/// Installs `recorder` as the global metrics recorder, then describes every metric and records
+/// the build info through it.
 fn install<R>(recorder: R) -> Result<(), FrameworkError>
 where
     R: Recorder + Send + Sync + 'static,
 {
     metrics::set_global_recorder(recorder)
-        .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
+        .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
+    describe_and_record_build_info();
+
+    Ok(())
 }
 
 /// Returns the Prometheus exporter's configuration, before its endpoint is added.
@@ -183,16 +189,45 @@ fn prometheus_builder(
     )
 }
 
-/// Installs the Prometheus recorder from `builder` and `other` as one recorder.
+/// Returns the recorder that receives every metric: `prometheus` without event attributes, and
+/// `other` beside it if it is provided.
+#[cfg(feature = "prometheus")]
+fn with_prometheus<R>(
+    prometheus: metrics_exporter_prometheus::PrometheusRecorder,
+    other: Option<R>,
+) -> Box<dyn Recorder + Sync>
+where
+    R: Recorder + Send + Sync + 'static,
+{
+    use metrics_util::layers::{FanoutBuilder, Layer};
+
+    let prometheus = event_labels::StripEventLabelsLayer.layer(prometheus);
+
+    match other {
+        Some(other) => Box::new(
+            FanoutBuilder::default()
+                .add_recorder(prometheus)
+                .add_recorder(other)
+                .build(),
+        ),
+        None => Box::new(prometheus),
+    }
+}
+
+/// Installs the Prometheus recorder from `builder`, with `other` beside it if it is provided, as
+/// the global recorder, then describes every metric and records the build info through it.
+///
+/// The build info is recorded before this returns, so it is already exported when the caller
+/// logs that the endpoint is open.
 ///
 /// Like [`PrometheusBuilder::install`] outside a Tokio runtime, which is how Zebra calls it, this
 /// serves the endpoint from its own thread.
 ///
 /// [`PrometheusBuilder::install`]: metrics_exporter_prometheus::PrometheusBuilder::install
 #[cfg(feature = "prometheus")]
-fn install_alongside<R>(
+fn install_with_prometheus<R>(
     builder: metrics_exporter_prometheus::PrometheusBuilder,
-    other: R,
+    other: Option<R>,
 ) -> Result<(), crate::BoxError>
 where
     R: Recorder + Send + Sync + 'static,
@@ -214,13 +249,8 @@ where
         .spawn(move || runtime.block_on(exporter))
         .map_err(|e| BuildError::FailedToCreateRuntime(e.to_string()))?;
 
-    metrics::set_global_recorder(
-        metrics_util::layers::FanoutBuilder::default()
-            .add_recorder(prometheus)
-            .add_recorder(other)
-            .build(),
-    )
-    .map_err(|e| e.to_string())?;
+    metrics::set_global_recorder(with_prometheus(prometheus, other)).map_err(|e| e.to_string())?;
+    describe_and_record_build_info();
 
     Ok(())
 }

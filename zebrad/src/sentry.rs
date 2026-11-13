@@ -6,8 +6,8 @@ use std::{
     env,
     panic::PanicHookInfo,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-        Mutex, MutexGuard, OnceLock, PoisonError,
+        atomic::{AtomicU64, Ordering},
+        Mutex, MutexGuard, PoisonError,
     },
     thread,
     time::{Duration, Instant, SystemTime},
@@ -23,42 +23,26 @@ use sentry::{
     ClientInitGuard, ClientOptions, Hub, Scope,
 };
 use tracing::Level;
-use zebra_chain::{
-    block::Height,
-    parameters::{Network, NetworkUpgrade},
-};
+use zebra_chain::parameters::Network;
 
 use crate::{
     application::{build_version, ZebradApp},
-    components::sync::progress,
+    components::{
+        metrics::{
+            node_context::{self, ChainPosition},
+            sentry_policy::{SentryPolicy, TRANSPORT_QUEUE_ENVELOPES},
+        },
+        sync::progress,
+    },
 };
 
-mod distributions;
-mod periodic;
-
-pub(crate) use distributions::{send_tip_block_delay, SentryRecorder};
+mod metrics_adapter;
 
 /// Keeps the Sentry client open until [`end`] drops it.
 ///
 /// `zebrad` exits with `process::exit`, which skips destructors, so the guard must be dropped
 /// explicitly to end the release health session and flush queued events and logs.
 static CLIENT_GUARD: Mutex<Option<ClientInitGuard>> = Mutex::new(None);
-
-/// The network this node runs on, used to find the network upgrade at the tip.
-static NETWORK: OnceLock<Network> = OnceLock::new();
-
-/// Whether the syncer was close to the chain tip when the progress task last checked.
-static CLOSE_TO_TIP: AtomicBool = AtomicBool::new(false);
-
-/// The best chain tip height, or [`UNKNOWN_TIP_HEIGHT`] until the progress task records one.
-///
-/// Events, logs, and metrics read this instead of the chain tip watch channel, because Sentry calls
-/// `before_send` and `before_send_log` from inside tracing, where instrumented chain tip reads
-/// would re-enter the tracing layers.
-static TIP_HEIGHT: AtomicU32 = AtomicU32::new(UNKNOWN_TIP_HEIGHT);
-
-/// Above `Height::MAX`, so it is never a real height.
-const UNKNOWN_TIP_HEIGHT: u32 = u32::MAX;
 
 /// The release health session in progress.
 ///
@@ -148,6 +132,9 @@ impl Metadata {
         let started_at = Instant::now();
         let options = ClientOptions::new()
             .release(release)
+            // The Sentry metrics flush budget is a share of this queue.
+            .transport_channel_capacity(TRANSPORT_QUEUE_ENVELOPES)
+            .transport(metrics_adapter::transport_factory())
             // Suspect commits need in-app stack frames. Only ERROR events and panics are sent as
             // events, so capturing the stack stays off the common paths.
             .attach_stacktrace(true)
@@ -156,19 +143,22 @@ impl Metadata {
                     SESSION_ERRORS.fetch_add(1, Ordering::Relaxed);
                 }
                 mark_zebra_frames_in_app(&mut event);
-                add_chain_tags(&mut event, chain_position());
+                add_chain_tags(&mut event, node_context::chain_position());
                 Some(event)
             })
             .before_send_log(move |mut log| {
                 merge_log_attributes(&mut log, &log_attributes);
-                merge_log_attributes(&mut log, &chain_log_attributes(chain_position()));
+                merge_log_attributes(
+                    &mut log,
+                    &chain_log_attributes(node_context::chain_position()),
+                );
                 Some(log)
             })
             .before_send_metric(move |mut metric| {
                 add_metric_attributes(
                     &mut metric.attributes,
                     network.as_deref(),
-                    chain_position().map(|(_, network_upgrade)| network_upgrade),
+                    node_context::chain_position(),
                     started_at.elapsed(),
                 );
                 Some(metric)
@@ -214,8 +204,6 @@ impl Metadata {
 
 /// Starts the Sentry client and its release health sessions, which are replaced daily.
 pub(crate) fn init(network: &Network) {
-    let _ = NETWORK.set(network.clone());
-
     let mut metadata = Metadata::from_env();
     metadata.tags.insert("chain.network", network.to_string());
 
@@ -225,7 +213,7 @@ pub(crate) fn init(network: &Network) {
     let enabled = guard.is_enabled();
     *CLIENT_GUARD.lock().unwrap_or_else(PoisonError::into_inner) = Some(guard);
 
-    // A disabled client has no sessions to rotate and no metrics to flush.
+    // A disabled client has no sessions to rotate.
     if !enabled {
         return;
     }
@@ -240,16 +228,6 @@ pub(crate) fn init(network: &Network) {
         });
     if let Err(error) = rotation {
         warn!(?error, "unable to start Sentry session rotation");
-    }
-
-    let metrics_flush = thread::Builder::new()
-        .name("sentry metrics flush".to_owned())
-        .spawn(|| loop {
-            thread::sleep(periodic::FLUSH_INTERVAL);
-            periodic::flush();
-        });
-    if let Err(error) = metrics_flush {
-        warn!(?error, "unable to start Sentry metrics flush");
     }
 }
 
@@ -335,14 +313,17 @@ fn lock_session() -> MutexGuard<'static, Option<SessionUpdate<'static>>> {
     SESSION.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Sends the counter totals and gauge values recorded since the last flush, ends the release
-/// health session with `status`, then closes the client.
+/// Ends the release health session with `status`, sends the metrics that are due without waiting
+/// between envelopes, then closes the client.
+///
+/// The session update is queued before the metrics, so metrics can't take its place in the
+/// transport queue.
 ///
 /// Returns `false` if queued events, logs, and metrics could not be sent before the shutdown
 /// timeout.
 pub(crate) fn end(status: SessionStatus) -> bool {
-    periodic::flush();
     end_session(status);
+    metrics_adapter::flush_at_exit();
 
     let guard = CLIENT_GUARD
         .lock()
@@ -352,72 +333,50 @@ pub(crate) fn end(status: SessionStatus) -> bool {
     guard.is_none_or(|guard| guard.close(None))
 }
 
-/// Records the best chain tip height for the events, logs, and metrics sent after this call.
-pub(crate) fn record_tip_height(height: Height) {
-    TIP_HEIGHT.store(height.0, Ordering::Relaxed);
-}
-
-/// Records whether the syncer is close to the chain tip, which per-block metrics wait for.
-pub(crate) fn record_close_to_tip(close_to_tip: bool) {
-    CLOSE_TO_TIP.store(close_to_tip, Ordering::Relaxed);
-}
-
-fn is_close_to_tip() -> bool {
-    CLOSE_TO_TIP.load(Ordering::Relaxed)
-}
-
-/// Returns the best chain tip height and its network upgrade, once both are known.
-fn chain_position() -> Option<(Height, NetworkUpgrade)> {
-    let network = NETWORK.get()?;
-    let height = TIP_HEIGHT.load(Ordering::Relaxed);
-    let height = (height != UNKNOWN_TIP_HEIGHT).then_some(Height(height))?;
-
-    Some((height, NetworkUpgrade::current(network, height)))
-}
-
 /// Adds the chain position to `event`, keeping any tags the event already has.
-fn add_chain_tags(event: &mut Event<'static>, chain_position: Option<(Height, NetworkUpgrade)>) {
-    let Some((height, network_upgrade)) = chain_position else {
+fn add_chain_tags(event: &mut Event<'static>, chain_position: Option<ChainPosition>) {
+    let Some(chain_position) = chain_position else {
         return;
     };
 
     event
         .tags
         .entry("chain.height".to_owned())
-        .or_insert_with(|| height.0.to_string());
+        .or_insert_with(|| chain_position.tip_height.0.to_string());
     event
         .tags
         .entry("chain.network_upgrade".to_owned())
-        .or_insert_with(|| network_upgrade.to_string());
+        .or_insert_with(|| chain_position.network_upgrade.to_string());
 }
 
 /// Returns the chain position as log attributes, with the height as a number so that log
 /// queries can aggregate it.
-fn chain_log_attributes(
-    chain_position: Option<(Height, NetworkUpgrade)>,
-) -> Vec<(String, LogAttribute)> {
-    let Some((height, network_upgrade)) = chain_position else {
+fn chain_log_attributes(chain_position: Option<ChainPosition>) -> Vec<(String, LogAttribute)> {
+    let Some(chain_position) = chain_position else {
         return Vec::new();
     };
 
     vec![
-        ("chain.height".to_owned(), LogAttribute::from(height.0)),
+        (
+            "chain.height".to_owned(),
+            LogAttribute::from(chain_position.tip_height.0),
+        ),
         (
             "chain.network_upgrade".to_owned(),
-            LogAttribute::from(network_upgrade.to_string()),
+            LogAttribute::from(chain_position.network_upgrade.to_string()),
         ),
     ]
 }
 
-/// Adds the network, the network upgrade at the tip, and the process uptime to a metric's
-/// attributes, keeping any the metric already has.
+/// Adds the network, the network upgrade at the tip, whether the node is near the tip, and the
+/// process uptime to a metric's attributes, keeping any the metric already has.
 ///
 /// Unlike events and logs, metrics don't get the tip height, because a block timing value is often
 /// for a block above the tip.
 fn add_metric_attributes(
     attributes: &mut Map<Cow<'static, str>, LogAttribute>,
     network: Option<&str>,
-    network_upgrade: Option<NetworkUpgrade>,
+    chain_position: Option<ChainPosition>,
     uptime: Duration,
 ) {
     if let Some(network) = network {
@@ -425,10 +384,13 @@ fn add_metric_attributes(
             .entry("chain.network".into())
             .or_insert_with(|| network.to_owned().into());
     }
-    if let Some(network_upgrade) = network_upgrade {
+    if let Some(chain_position) = chain_position {
         attributes
             .entry("chain.network_upgrade".into())
-            .or_insert_with(|| network_upgrade.to_string().into());
+            .or_insert_with(|| chain_position.network_upgrade.to_string().into());
+        attributes
+            .entry("chain.near_tip".into())
+            .or_insert_with(|| chain_position.near_tip.into());
     }
     attributes
         .entry("process.uptime_seconds".into())
@@ -461,10 +423,18 @@ where
     })
 }
 
-/// Returns the recorder that sends selected histograms to Sentry, or `None` if [`init`] has not
-/// bound an enabled client.
-pub(crate) fn metrics_recorder() -> Option<SentryRecorder> {
-    is_client_enabled().then_some(SentryRecorder)
+/// Returns the recorder that sends every metric to Sentry, starting the thread that flushes it on
+/// the first call. Returns `None` if [`init`] has not bound an enabled client, or if that thread
+/// can't start.
+///
+/// Must be called after the tracing subscriber is installed, so a failure to start the thread is
+/// logged.
+pub(crate) fn metrics_recorder() -> Option<&'static SentryPolicy> {
+    if !is_client_enabled() {
+        return None;
+    }
+
+    metrics_adapter::start()
 }
 
 fn is_client_enabled() -> bool {
@@ -691,20 +661,22 @@ mod tests {
         parameters::{Network, NetworkUpgrade},
     };
 
-    use crate::application::build_version;
-
-    use super::distributions::tip_block_delay;
-    use super::{
-        add_chain_tags, add_metric_attributes, chain_log_attributes, end_session, is_zebra_source,
-        merge_log_attributes, panic_event_from, release_name_from, rotate_session,
-        start_run_sessions, tracing_layer, without_panic_handling_frames, Metadata, SentryRecorder,
+    use crate::{
+        application::build_version,
+        components::metrics::sentry_policy::{SentryPolicy, TRANSPORT_QUEUE_ENVELOPES},
     };
 
-    /// Returns the metrics sent while `record` runs with [`SentryRecorder`] and a client built from
+    use super::{
+        add_chain_tags, add_metric_attributes, chain_log_attributes, end_session, is_zebra_source,
+        merge_log_attributes, metrics_adapter, panic_event_from, release_name_from, rotate_session,
+        start_run_sessions, tracing_layer, without_panic_handling_frames, ChainPosition, Metadata,
+    };
+
+    /// Returns the metrics that Sentry receives while `send` runs with a client built from
     /// `metadata`.
-    fn sent_metrics(metadata: &Metadata, record: impl FnOnce()) -> Vec<Metric> {
+    fn sent_metrics(metadata: &Metadata, send: impl FnOnce()) -> Vec<Metric> {
         with_captured_envelopes_options(
-            || metrics::with_local_recorder(&SentryRecorder, record),
+            send,
             metadata.client_options_with_release("zebrad@test".to_string()),
         )
         .iter()
@@ -916,6 +888,15 @@ mod tests {
         assert!(!options.auto_session_tracking);
         assert_eq!(options.environment.as_deref(), Some("stage"));
         assert_eq!(options.release.as_deref(), Some("zebrad@test"));
+        assert_eq!(
+            options.transport_channel_capacity.map(usize::from),
+            Some(TRANSPORT_QUEUE_ENVELOPES),
+            "the metrics flush budget leaves room in this queue",
+        );
+        assert!(
+            options.transport.is_some(),
+            "metrics flushes check the transport the client sends through",
+        );
     }
 
     #[test]
@@ -1010,6 +991,16 @@ mod tests {
         );
     }
 
+    /// Returns the chain position at `tip_height` on Mainnet.
+    fn chain_position(tip_height: u32, near_tip: bool) -> ChainPosition {
+        let tip_height = Height(tip_height);
+        ChainPosition {
+            tip_height,
+            network_upgrade: NetworkUpgrade::current(&Network::Mainnet, tip_height),
+            near_tip,
+        }
+    }
+
     #[test]
     fn chain_tags_keep_existing_event_tags() {
         let mut event = Event::default();
@@ -1017,7 +1008,7 @@ mod tests {
             .tags
             .insert("chain.height".to_owned(), "event-height".to_owned());
 
-        add_chain_tags(&mut event, Some((Height(3_146_400), NetworkUpgrade::Nu7)));
+        add_chain_tags(&mut event, Some(chain_position(3_543_405, true)));
 
         assert_eq!(
             event.tags.get("chain.height").map(String::as_str),
@@ -1042,13 +1033,13 @@ mod tests {
     #[test]
     fn chain_log_attributes_report_height_as_a_number() {
         let attrs: BTreeMap<String, LogAttribute> =
-            chain_log_attributes(Some((Height(3_146_400), NetworkUpgrade::Nu7)))
+            chain_log_attributes(Some(chain_position(3_543_405, true)))
                 .into_iter()
                 .collect();
 
         assert_eq!(
             attrs.get("chain.height").and_then(|attr| attr.0.as_u64()),
-            Some(3_146_400),
+            Some(3_543_405),
         );
         assert_eq!(
             attrs
@@ -1059,70 +1050,62 @@ mod tests {
     }
 
     #[test]
-    fn listed_histograms_become_distributions_with_labels_and_network() {
+    fn metrics_are_sent_with_their_unit_labels_and_event_attributes() {
         let mut metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
         metadata.tags.insert("chain.network", "Mainnet".to_owned());
+        let policy = SentryPolicy::default();
 
-        let metrics = sent_metrics(&metadata, || {
-            let queue = metrics::histogram!("state.block_writer.phase.duration_seconds", "phase" => "queue");
+        metrics::with_local_recorder(&policy, || {
+            crate::components::metrics::describe_all();
 
-            // Far from the tip, an initial sync would send a value for every block.
-            queue.record(9.0);
-            super::record_close_to_tip(true);
-            queue.record(0.25);
-            super::record_close_to_tip(false);
-            queue.record(8.0);
-
-            super::record_close_to_tip(true);
-            metrics::histogram!("sync.block.download.duration_seconds").record(1.0);
-            metrics::gauge!("zcash.chain.verified.block.height").set(1.0);
+            metrics::histogram!(
+                "zcash.chain.tip.block_delay_seconds",
+                "event.chain.height" => "3543405",
+                "chain.network_upgrade" => "Nu7",
+            )
+            .record(2.0);
+            metrics::counter!("sync.block.error.count", "kind" => "not_found").increment(3);
+            metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(1024.0);
         });
+        let metrics = sent_metrics(&metadata, || policy.flush(metrics_adapter::send));
 
-        let [metric] = metrics.as_slice() else {
-            panic!("expected only the listed histogram near the tip, got {metrics:?}");
-        };
-        let attribute = |key: &str| metric_attribute(metric, key).and_then(Value::as_str);
-
-        assert_eq!(metric.name, "state.block_writer.phase.duration_seconds");
-        assert_eq!(metric.r#type, MetricType::Distribution);
-        assert_eq!(metric.value, 0.25);
-        assert_eq!(metric.unit, Some(Unit::Second));
-        assert_eq!(attribute("phase"), Some("queue"));
-        assert_eq!(attribute("chain.network"), Some("Mainnet"));
-    }
-
-    #[test]
-    fn tip_block_delays_are_sent_once_with_their_block_height() {
-        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
-
-        // The Mainnet NU7 activation block, which the tip height read by other metrics often
-        // hasn't reached yet.
-        let height = Height(3_543_405);
-
-        let metrics = sent_metrics(&metadata, || {
-            // The progress task records the histogram for Prometheus and sends the value to
-            // Sentry, so the recorder must not send it again.
-            super::record_close_to_tip(true);
-            metrics::histogram!("zcash.chain.tip.block_delay_seconds").record(2.0);
-            tip_block_delay(Some(&Network::Mainnet), height, 2.0).capture();
-        });
-
-        let [metric] = metrics.as_slice() else {
-            panic!("expected one tip block delay, got {metrics:?}");
+        let sent = |name: &str| {
+            metrics
+                .iter()
+                .find(|metric| metric.name == name)
+                .unwrap_or_else(|| panic!("{name} is sent: {metrics:?}"))
         };
 
-        assert_eq!(metric.name, "zcash.chain.tip.block_delay_seconds");
-        assert_eq!(metric.r#type, MetricType::Distribution);
-        assert_eq!(metric.value, 2.0);
-        assert_eq!(metric.unit, Some(Unit::Second));
+        let delay = sent("zcash.chain.tip.block_delay_seconds");
+        assert_eq!(delay.r#type, MetricType::Distribution);
+        assert_eq!(delay.value, 2.0);
+        assert_eq!(delay.unit, Some(Unit::Second));
         assert_eq!(
-            metric_attribute(metric, "chain.height").and_then(Value::as_u64),
+            metric_attribute(delay, "chain.height").and_then(Value::as_u64),
             Some(3_543_405),
         );
         assert_eq!(
-            metric_attribute(metric, "chain.network_upgrade").and_then(Value::as_str),
+            metric_attribute(delay, "chain.network_upgrade").and_then(Value::as_str),
             Some("Nu7"),
         );
+        assert_eq!(
+            metric_attribute(delay, "chain.network").and_then(Value::as_str),
+            Some("Mainnet"),
+        );
+        assert_eq!(metric_attribute(delay, "event.chain.height"), None);
+
+        let errors = sent("sync.block.error.count");
+        assert_eq!(errors.r#type, MetricType::Counter);
+        assert_eq!(errors.value, 3.0);
+        assert_eq!(
+            metric_attribute(errors, "kind").and_then(Value::as_str),
+            Some("not_found"),
+        );
+
+        let disk_size = sent("zebra.state.rocksdb.total_disk_size_bytes");
+        assert_eq!(disk_size.r#type, MetricType::Gauge);
+        assert_eq!(disk_size.value, 1024.0);
+        assert_eq!(disk_size.unit, Some(Unit::Byte));
     }
 
     #[test]
@@ -1139,7 +1122,7 @@ mod tests {
         add_metric_attributes(
             &mut attributes,
             Some("Mainnet"),
-            Some(NetworkUpgrade::Nu7),
+            Some(chain_position(3_543_405, true)),
             Duration::from_millis(90_500),
         );
         let attribute = |key: &str| attributes.get(key).map(|attr| &attr.0);
@@ -1159,60 +1142,36 @@ mod tests {
     }
 
     #[test]
-    fn listed_counters_and_gauges_are_sent_once_per_flush() {
-        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+    fn metrics_say_whether_the_node_was_near_the_tip() {
+        for near_tip in [false, true] {
+            let mut attributes = Map::new();
+            add_metric_attributes(
+                &mut attributes,
+                None,
+                Some(chain_position(3_000_000, near_tip)),
+                Duration::ZERO,
+            );
 
-        let metrics = sent_metrics(&metadata, || {
-            for _ in 0..3 {
-                metrics::counter!("sync.block.error.count", "kind" => "not_found").increment(1);
-            }
-            metrics::counter!("sync.downloaded.block.count").increment(1);
-            metrics::gauge!("sync.downloads.oldest_age_seconds").set(30.0);
-            metrics::gauge!("sync.downloads.oldest_age_seconds").set(90.0);
-
-            super::periodic::flush();
-            // No new errors, so only the gauge's latest value is sent again.
-            super::periodic::flush();
-        });
-
-        let mut metrics: Vec<_> = metrics
-            .iter()
-            .map(|metric| {
-                let kind = metric_attribute(metric, "kind")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                (metric.name.to_string(), metric.r#type, metric.value, kind)
-            })
-            .collect();
-        metrics.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let oldest_age = (
-            "sync.downloads.oldest_age_seconds".to_string(),
-            MetricType::Gauge,
-            90.0,
-            None,
-        );
-        assert_eq!(
-            metrics,
-            [
-                (
-                    "sync.block.error.count".to_string(),
-                    MetricType::Counter,
-                    3.0,
-                    Some("not_found".to_string()),
-                ),
-                oldest_age.clone(),
-                oldest_age,
-            ],
-        );
+            assert_eq!(
+                attributes
+                    .get("chain.near_tip")
+                    .and_then(|attr| attr.0.as_bool()),
+                Some(near_tip),
+            );
+        }
     }
 
     #[test]
     fn counts_since_the_last_flush_are_sent_at_shutdown() {
         let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
 
+        let policy = metrics_adapter::start().expect("the test can start the flush thread");
+
         let metrics = sent_metrics(&metadata, || {
-            metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout").increment(1);
+            metrics::with_local_recorder(policy, || {
+                metrics::counter!("sync.restart.count", "reason" => "sync_step_timeout")
+                    .increment(1);
+            });
 
             super::end(SessionStatus::Crashed);
         });

@@ -1783,7 +1783,10 @@
       "kind": "histogram",
       "unit": "seconds",
       "description": "Time from a block's header time until it became this node's best chain tip.",
-      "labels": [],
+      "labels": [
+        "event.chain.height",
+        "chain.network_upgrade"
+      ],
       "prometheus": {
         "type": "summary",
         "series": [
@@ -2158,9 +2161,7 @@
       "kind": "counter",
       "unit": "count",
       "description": "Peer addresses written to the peer cache file.",
-      "labels": [
-        "cache"
-      ],
+      "labels": [],
       "prometheus": {
         "type": "counter",
         "series": [
@@ -2191,8 +2192,7 @@
       "unit": "count",
       "description": "Initial peer addresses from each DNS seeder and the peer cache.",
       "labels": [
-        "seed",
-        "cache"
+        "seed"
       ],
       "prometheus": {
         "type": "counter",
@@ -2207,7 +2207,7 @@
       "unit": "count",
       "description": "Handshakes rejected because the peer doesn't advertise the required services.",
       "labels": [
-        "remote_services"
+        "missing_service"
       ],
       "prometheus": {
         "type": "counter",
@@ -2675,6 +2675,21 @@
         "type": "counter",
         "series": [
           "zebrad_build_info"
+        ]
+      }
+    },
+    {
+      "name": "zebrad.sentry.metrics.dropped.total",
+      "kind": "counter",
+      "unit": "count",
+      "description": "Metric values that weren't sent to Sentry when due, because a flush was full, the Sentry transport was still sending earlier data, or the metric had too many label sets.",
+      "labels": [
+        "reason"
+      ],
+      "prometheus": {
+        "type": "counter",
+        "series": [
+          "zebrad_sentry_metrics_dropped_total"
         ]
       }
     }
