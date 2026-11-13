@@ -232,7 +232,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
   The library MSRV matrix excludes `zebrad`; the lint workflow checks the binary's own MSRV.
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc and publishes to Pages: the latest release's book at the root, `main`'s under `/main/`, and the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book under `/next/`
 - **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Docs Check** (`docs-check.yml`): Spell check, markdownlint, and a book build with an offline link and anchor check
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
