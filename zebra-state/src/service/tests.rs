@@ -1068,3 +1068,44 @@ fn queued_replacement_commits_its_own_body() -> Result<()> {
 
     Ok(())
 }
+
+/// A request for a hash already sent to the write task gets its own duplicate error and does not
+/// take over another request's response channel.
+#[tokio::test]
+async fn write_channel_duplicate_keeps_its_own_channel() {
+    let _init_guard = zebra_test::init();
+    let (mut state, _, _, _) =
+        StateService::new(Config::ephemeral(), &Network::Mainnet, Height::MAX, 0).await;
+
+    let blocks: Vec<SemanticallyVerifiedBlock> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(2..=3)
+        .map(|(_, bytes)| {
+            let block: Arc<Block> = bytes.zcash_deserialize_into().unwrap();
+            block.prepare()
+        })
+        .collect();
+
+    // Block 3 is queued behind block 2, which has been sent to the write task.
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(blocks[1].clone());
+    state.non_finalized_block_write_sent_hashes.add(&blocks[0]);
+
+    let duplicate = state
+        .queue_and_commit_to_non_finalized_state(blocks[0].clone())
+        .await
+        .expect("state responds")
+        .expect_err("the hash was already sent to the write task");
+    assert_eq!(
+        duplicate.inner(),
+        &CommitBlockError::new_duplicate(
+            Some(blocks[0].hash.into()),
+            crate::KnownBlock::WriteChannel,
+        ),
+    );
+
+    assert!(
+        queued_rx.try_recv().is_err(),
+        "the queued request keeps waiting on its own channel"
+    );
+    assert!(state.non_finalized_state_queued_blocks.has(blocks[1].hash));
+    assert!(!state.non_finalized_state_queued_blocks.has(blocks[0].hash));
+}
