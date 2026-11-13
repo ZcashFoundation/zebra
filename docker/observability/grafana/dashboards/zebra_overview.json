@@ -714,7 +714,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-      "description": "RPC endpoint p99 latency (5m window)",
+      "description": "RPC endpoint p99 latency (5m window), excluding getblocktemplate long polls",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -745,7 +745,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "zebra-prometheus" },
-          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!=\"getblocktemplate\"}[5m])) by (le))",
           "legendFormat": "p99",
           "refId": "A"
         }

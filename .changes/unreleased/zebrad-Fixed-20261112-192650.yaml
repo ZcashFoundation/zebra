@@ -1,4 +1,4 @@
 project: zebrad
 kind: Fixed
-body: Fixed supplied Grafana panels, alert rules, and example queries that queried series Zebra doesn't export. The `ZebraHighErrorRate` alert now fires on block verification errors from `sync.block.error.count`, the errors dashboard shows signature and proof verification failures, and the observability README checks `zcash_chain_verified_block_height`.
+body: Fixed supplied Grafana panels, alert rules, and example queries that queried series Zebra doesn't export. The `ZebraHighErrorRate` alert now fires on block verification errors from `sync.block.error.count`, the errors dashboard shows signature and proof verification failures, the observability README checks `zcash_chain_verified_block_height`, the `RPCHighLatency` alert ignores `getblocktemplate` long polls, and the `SlowHandshakes` alert fires when the p95 successful handshake takes over 2 seconds, below the 3 second handshake timeout.
 time: 2026-11-12T19:26:50.943598411Z

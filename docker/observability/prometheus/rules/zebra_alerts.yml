@@ -86,15 +86,16 @@ groups:
   # RPC Alerts
   - name: zebra-rpc
     rules:
-      # High RPC latency
+      # High RPC latency. getblocktemplate long polls wait for a new template on purpose, so
+      # they're left out.
       - alert: RPCHighLatency
-        expr: histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method)) > 2
+        expr: histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!="getblocktemplate"}[5m])) by (le, method)) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "High RPC latency detected"
-          description: "RPC method {{ $labels.method }} has p99 latency > 2 seconds for 5 minutes."
+          description: "RPC method {{ $labels.method }} has p99 latency > 2 seconds for 5 minutes. getblocktemplate isn't checked, because its long polls wait for a new template."
 
       # High RPC error rate
       - alert: RPCHighErrorRate
@@ -139,12 +140,13 @@ groups:
           summary: "Many obsolete version handshakes"
           description: "Elevated rate of peer handshake failures due to obsolete protocol versions. May indicate network upgrade in progress."
 
-      # Slow handshakes
+      # Slow handshakes. Zebra abandons handshakes after 3 seconds (HANDSHAKE_TIMEOUT), so the
+      # threshold must be lower than that.
       - alert: SlowHandshakes
-        expr: histogram_quantile(0.95, sum(rate(zcash_net_peer_handshake_duration_seconds_bucket{result="success"}[5m])) by (le)) > 10
+        expr: histogram_quantile(0.95, sum without (result) (rate(zcash_net_peer_handshake_duration_seconds_bucket{result="success"}[5m]))) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: "Slow peer handshakes"
-          description: "p95 handshake duration exceeds 10 seconds. Network latency may be high."
+          description: "p95 successful handshake duration exceeds 2 seconds for 5 minutes, close to the 3 second handshake timeout. Network latency may be high."
