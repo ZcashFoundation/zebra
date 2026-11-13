@@ -1285,16 +1285,16 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
             .await
             .respond(zs::Response::KnownBlock(None));
         state
+            .expect_request(zs::Request::MiningCandidate(block.clone()))
+            .await
+            .respond_error("early mining is disabled in this fixture".into());
+        state
             .expect_request(zs::Request::EarlyRelay {
                 block: block.clone(),
                 require_authentication: false,
             })
             .await
             .respond(zs::Response::EarlyRelay(None));
-        state
-            .expect_request(zs::Request::MiningCandidate(block.clone()))
-            .await
-            .respond_error("early mining is disabled in this fixture".into());
 
         transaction_verifier
             .expect_request_that(|_| true)
@@ -1345,9 +1345,9 @@ async fn nsm_block_verifier_leaves_subsidy_checks_to_the_state() -> Result<(), R
     Ok(())
 }
 
-/// Blocks beyond the future-time limit must not become early mining work.
+/// Blocks beyond the future-time limit are rejected before their early mining work is published.
 #[tokio::test]
-async fn future_time_is_rejected_before_mining_candidate() {
+async fn future_time_is_rejected_before_mining_candidate_publication() {
     use zebra_chain::parameters::testnet::Parameters;
     use zebra_test::mock_service::MockService;
 
@@ -1366,12 +1366,17 @@ async fn future_time_is_rejected_before_mining_candidate() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let transactions: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let verifier = SemanticBlockVerifier::new(&network, state.clone(), transactions);
-    let verify = tokio::spawn(verifier.oneshot(Request::Commit(block)));
+    let verify = tokio::spawn(verifier.oneshot(Request::Commit(block.clone())));
 
     state
         .expect_request(zs::Request::KnownBlock(hash))
         .await
         .respond(zs::Response::KnownBlock(None));
+    // Early work starts after proof of work, and the time check withdraws it before publication.
+    state
+        .expect_request(zs::Request::MiningCandidate(block.clone()))
+        .await
+        .respond(zs::Response::MiningCandidate(None));
     state.expect_no_requests().await;
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), verify)
         .await

@@ -1117,11 +1117,13 @@ pub enum Request {
     /// failures are not deterministic rejections. Returns [`Response::Rejected`].
     RejectBlock(Arc<Block>),
 
-    /// Announces a block after proof-of-work and transaction Merkle-root checks.
+    /// Announces a block after its proof-of-work checks.
     ///
-    /// Returns [`Response::MiningCandidate`] immediately. Child context is computed concurrently,
-    /// without full transaction and contextual validation, and withdrawn on guard drop or after
-    /// 30 seconds.
+    /// Returns [`Response::MiningCandidate`] immediately. Child context, including the note
+    /// commitment tree roots, is computed concurrently, without full transaction and contextual
+    /// validation. It is only published after the caller checks the transaction Merkle root and
+    /// its other cheap block checks, then calls [`crate::MiningCandidateGuard::body_bound`]. It is
+    /// withdrawn on guard drop or after 30 seconds.
     MiningCandidate(Arc<Block>),
 
     /// Performs contextual validation of the given semantically verified block,

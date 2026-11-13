@@ -819,6 +819,46 @@ where
                 .await?;
             }
 
+            // Bound shielded work before output recovery, proof verification, or computing the
+            // early work's note commitment tree roots.
+            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+
+            // Start computing early work on this block, including its note commitment tree
+            // roots, as soon as its proof of work is valid. The state publishes the work once
+            // `bind_mining_candidate` reports that the Merkle root and the cheap checks below
+            // have passed, so a forged body under a valid header never reaches miners. Dropping
+            // the sender on an early return withdraws the work.
+            let (bind_mining_candidate, mining_candidate_bound) = tokio::sync::oneshot::channel();
+            let mining_candidate = if request.is_proposal() {
+                None
+            } else {
+                let mut state_service = state_service.clone();
+                match state_service.ready().await {
+                    Ok(state_service) => {
+                        let announcement =
+                            state_service.call(zs::Request::MiningCandidate(block.clone()));
+                        Some(tokio::spawn(async move {
+                            let response = announcement.await;
+                            if let Ok(zs::Response::MiningCandidate(Some(guard))) = &response {
+                                if mining_candidate_bound.await.is_ok() {
+                                    guard.body_bound();
+                                }
+                            }
+                            response
+                        }))
+                    }
+                    Err(_) => None,
+                }
+            };
+            // Dropping the guard withdraws the work, so it is held until the commit finishes. An
+            // early return drops the task's handle, and the guard with the task's output.
+            let hold_mining_candidate = async {
+                match mining_candidate {
+                    Some(announcement) => announcement.await.ok().and_then(Result::ok),
+                    None => None,
+                }
+            };
+
             // Hash only when populating the cache or when an unmatched block could reuse it.
             let proposal_key = if decoded_match.is_none()
                 && (request.is_proposal() || {
@@ -883,8 +923,9 @@ where
                     .map(|(_, hashes)| hashes.clone()),
                 _ => None,
             };
-            // Proposal and reconstruction evidence bind the exact body to the header's Merkle root.
-            // Other requests must compute and check it before announcing early work.
+            // Cache hits and reconstruction evidence bind the exact body to the header's Merkle
+            // root. On misses, bind the body before publishing early work and reuse these hashes
+            // below.
             let transaction_hashes = if cached.is_none() {
                 let block = block.clone();
                 let network = network.clone();
@@ -965,8 +1006,10 @@ where
                 Some((expected_block_subsidy, deferred_pool_balance_change))
             };
 
-            // Bound shielded work before output recovery or proof verification.
-            check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
+            // The body is bound to the header and its cheap checks passed, so the early work can
+            // be published while the remaining checks run.
+            let _ = bind_mining_candidate.send(());
+
             let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
                 && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
             // A solved proposal is advertised through its validated-commit notification and
@@ -1004,28 +1047,6 @@ where
             if early_relay.as_ref().is_some_and(zs::EarlyRelayGuard::is_rejected) {
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
-
-            // Announce early work on this block. The announcement runs as its own task, so the
-            // work is admitted while the remaining checks run and doesn't delay the commit.
-            let mining_candidate = if request.is_proposal() {
-                None
-            } else {
-                let mut state_service = state_service.clone();
-                match state_service.ready().await {
-                    Ok(state_service) => Some(tokio::spawn(
-                        state_service.call(zs::Request::MiningCandidate(block.clone())),
-                    )),
-                    Err(_) => None,
-                }
-            };
-            // Dropping the guard withdraws the work, so it is held until the commit finishes. An
-            // early return drops the task's handle, and the guard with the task's output.
-            let hold_mining_candidate = async {
-                match mining_candidate {
-                    Some(announcement) => announcement.await.ok().and_then(Result::ok),
-                    None => None,
-                }
-            };
 
             if let Some(cached) = cached {
                 // Cache hits skip transaction verification, so record their checks and commit
