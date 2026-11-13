@@ -101,6 +101,33 @@ const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
 // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
 const SEND_WINDOW: u64 = 3 * MAX_RECORD_PAYLOAD_LEN as u64;
 
+/// The most inbound connection attempts that wait for the listener to answer
+/// them at once: about four times the default inbound version 2 connection
+/// limit, far below quinn's default of 65,536.
+///
+/// # Security
+///
+/// The listener answers every attempt as soon as it reads it, with a Retry,
+/// a refusal, or by accepting it, and never waits between attempts, so this
+/// many only build up when attempts arrive faster than it runs. Each one
+/// holds its first packet, and anyone can send those from spoofed addresses.
+/// Attempts beyond the limit are dropped unanswered, which costs this node
+/// nothing, and a peer that sent one retransmits it.
+const MAX_WAITING_INCOMING: usize = 256;
+
+/// The most bytes buffered for one waiting connection attempt, after its
+/// first packet: a few full-size packets, enough for a TLS ClientHello that
+/// spans more than one, instead of quinn's default of 10 MiB, which is sized
+/// for 0-RTT data that this node never accepts. Packets beyond it are
+/// dropped, and the peer retransmits them.
+const INCOMING_BUFFER_SIZE: u64 = 8 * 1024;
+
+/// The most bytes buffered for all waiting connection attempts together,
+/// after their first packets: [`INCOMING_BUFFER_SIZE`] for each of
+/// [`MAX_WAITING_INCOMING`], 2 MiB, instead of quinn's default of 100 MiB.
+// `MAX_WAITING_INCOMING` is 256, which fits in a `u64`.
+const INCOMING_BUFFER_SIZE_TOTAL: u64 = MAX_WAITING_INCOMING as u64 * INCOMING_BUFFER_SIZE;
+
 // The parameters above meet the draft's minimums; checked at compile time.
 const _: () = {
     assert!(KEEP_ALIVE_INTERVAL.as_millis() * 2 <= MIN_IDLE_TIMEOUT.as_millis());
@@ -189,7 +216,10 @@ fn server_config(
         .transport_config(Arc::new(transport_config()))
         // Every address-keyed limit uses the address validated at establishment: see the module
         // docs.
-        .migration(false);
+        .migration(false)
+        .max_incoming(MAX_WAITING_INCOMING)
+        .incoming_buffer_size(INCOMING_BUFFER_SIZE)
+        .incoming_buffer_size_total(INCOMING_BUFFER_SIZE_TOTAL);
     Ok(config)
 }
 

@@ -36,6 +36,7 @@ use crate::{
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
+            rate::TokenBucket,
         },
         ConnectedAddr, MinimumPeerVersion,
     },
@@ -55,6 +56,14 @@ use crate::{
 /// open connections.
 type OpenInbound = HashMap<PeerSocketAddr, usize>;
 
+/// How many inbound connections the listener accepts in a row before it accepts one per
+/// inbound connection interval.
+///
+/// The legacy listener accepts one connection per interval by sleeping after each. A few nodes
+/// that dial at the same moment, such as this node's configured peers after it restarts, are
+/// all answered within their connect timeouts instead of one per interval.
+pub(super) const INBOUND_ACCEPT_BURST: u32 = 4;
+
 /// What every version 2 connection attempt shares.
 #[derive(Clone)]
 pub(super) struct Shared<S, C> {
@@ -63,7 +72,7 @@ pub(super) struct Shared<S, C> {
     max_connections_per_ip: usize,
     /// The base delay before redialling a configured peer, before jitter.
     reconnection_delay: Duration,
-    /// The delay between accepted inbound connections.
+    /// The time one inbound connection's worth of the listener's accept rate takes to refill.
     inbound_interval: Duration,
     /// The open inbound connections, which the listener maintains, so the dialer does not dial
     /// a configured peer that is already connected to this node.
@@ -193,8 +202,9 @@ where
     )
 }
 
-/// [`start`], redialling configured peers after `reconnection_delay` plus jitter, and waiting
-/// `inbound_interval` between accepted inbound connections: tests use short intervals.
+/// [`start`], redialling configured peers after `reconnection_delay` plus jitter, and accepting
+/// one inbound connection per `inbound_interval` after a burst of [`INBOUND_ACCEPT_BURST`]:
+/// tests use short intervals.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start_with_intervals<S, C>(
     config: Config,
@@ -296,6 +306,16 @@ where
 /// Applies the same ban list and per-IP rate limit as the legacy listener,
 /// and this transport's share of the inbound connection limit.
 ///
+/// # Security
+///
+/// The loop never waits between connection attempts: an attempt whose
+/// address is not validated yet is sent a Retry at once, and one that is
+/// refused is refused at once. The legacy listener's accept rate, one
+/// connection per `inbound_interval`, is kept by a token bucket instead of a
+/// sleep, and an attempt beyond it is refused. A sleep here would also delay
+/// every Retry, so a trickle of validated attempts could keep honest dialers
+/// from ever having their addresses validated before their connect timeout.
+///
 /// Keeps `open_inbound` up to date with the open inbound connections, so the
 /// dialer can skip configured peers that are already connected to this node.
 #[instrument(skip_all, fields(listener_addr = ?shared.endpoint.local_addr().ok()))]
@@ -315,6 +335,11 @@ where
     let mut active_inbound_connections =
         ActiveConnectionCounter::new_counter_with(shared.inbound_limit, "Inbound v2 Connections");
     let mut handshakes: JoinSet<()> = JoinSet::new();
+    let mut accept_rate = TokenBucket::new(
+        shared.inbound_interval,
+        INBOUND_ACCEPT_BURST,
+        Instant::now(),
+    );
 
     loop {
         let incoming = tokio::select! {
@@ -358,20 +383,27 @@ where
             continue;
         }
 
+        // The accept rate is checked before the per-IP rate limit, which records the attempt,
+        // and only spent on an attempt that passes it: an attempt refused for the accept rate
+        // must not count against its address, and one refused for its address must not use up
+        // the rate for everyone else.
+        let now = Instant::now();
         if active_inbound_connections.update_count() >= shared.inbound_limit
+            || !accept_rate.is_available(now)
             || recent_inbound_connections.is_past_limit_or_add(addr.ip())
         {
             record_inbound_connection_rejected(&shared.network, addr, "capacity_or_rate_limited");
             incoming.refuse();
-            tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
+            tokio::task::yield_now().await;
             continue;
         }
+        let took_token = accept_rate.try_take(now);
+        debug_assert!(took_token, "a token was available at the same instant");
 
         let connection_tracker = active_inbound_connections.track_connection();
         // The transport handshake has already started; the application deadline runs from here,
         // which is as close to the connection's establishment as this loop can get.
-        let deadline = Instant::now() + constants::HANDSHAKE_TIMEOUT;
-        let inbound_interval = shared.inbound_interval;
+        let deadline = now + constants::HANDSHAKE_TIMEOUT;
         let shared = shared.clone();
         let peerset_tx = peerset_tx.clone();
         let open_inbound = open_inbound.clone();
@@ -430,8 +462,7 @@ where
             .in_current_span(),
         );
 
-        // Rate-limit inbound connections, like the legacy listener.
-        tokio::time::sleep(inbound_interval).await;
+        tokio::task::yield_now().await;
     }
 }
 

@@ -10,6 +10,7 @@ pub mod connection;
 pub mod handshake;
 pub mod misbehavior;
 pub mod nonces;
+pub mod rate;
 
 #[cfg(test)]
 mod tests;
