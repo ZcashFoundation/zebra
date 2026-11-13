@@ -298,6 +298,30 @@ pub enum ReconsiderError {
     ReplayFailed(#[source] ValidateContextError),
 }
 
+// Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+// Apache License, Version 2.0, at your option.
+// Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+/// An error describing why a `PreciousBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PreciousError {
+    /// The block hash was not found in the finalized or non-finalized state.
+    #[error("Block not found")]
+    MissingBlock(block::Hash),
+
+    /// The state is checkpointing blocks and cannot change non-finalized chain preferences.
+    #[error("cannot prefer blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the precious block request to the block write task failed.
+    #[error("failed to send precious block request to block write task")]
+    SendPreciousRequestFailed,
+
+    /// The precious block request was dropped before processing.
+    #[error("precious block request was unexpectedly dropped")]
+    PreciousRequestDropped,
+}
+
 /// An error describing why an `AwaitUtxo` request failed.
 #[derive(Debug, Error)]
 #[non_exhaustive]

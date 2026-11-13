@@ -21,7 +21,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
+        ChainTipBlock, ChainTipSender, InvalidateError, PreciousError, ReconsiderError,
     },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -164,6 +164,14 @@ pub enum NonFinalizedWriteMessage {
     Reconsider {
         hash: block::Hash,
         rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
+    },
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+    /// The hash of a block to prefer over equal-work chain tips.
+    Precious {
+        hash: block::Hash,
+        rsp_tx: oneshot::Sender<Result<block::Hash, PreciousError>>,
     },
 }
 
@@ -375,6 +383,21 @@ impl WriteBlockWorkerTask {
                     let _ = rsp_tx
                         .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
+                }
+                // Adapted from zakura-core/zakura#1117
+                // (https://github.com/zakura-core/zakura/pull/1117).
+                NonFinalizedWriteMessage::Precious { hash, rsp_tx } => {
+                    tracing::info!(?hash, "preferring a block in the non-finalized state");
+                    let result = non_finalized_state.precious_block(hash, &finalized_state.db);
+                    update_latest_chain_channels(
+                        non_finalized_state,
+                        &finalized_state.db,
+                        chain_tip_sender,
+                        non_finalized_state_sender,
+                        backup_dir_path.as_deref(),
+                    );
+                    let _ = rsp_tx.send(result);
+                    continue;
                 }
             };
 

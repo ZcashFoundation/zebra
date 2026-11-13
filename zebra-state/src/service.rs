@@ -43,7 +43,10 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError},
+    error::{
+        CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, PreciousError,
+        ReconsiderError,
+    },
     request::TimedSpan,
     response::NonFinalizedBlocksListener,
     service::{
@@ -1020,6 +1023,53 @@ impl StateService {
         rsp_rx
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+    fn send_precious_block(
+        &self,
+        hash: block::Hash,
+    ) -> oneshot::Receiver<Result<block::Hash, PreciousError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        // The writer drains finalized blocks before receiving non-finalized requests.
+        let sender = self
+            .block_write_sender
+            .non_finalized
+            .as_ref()
+            .filter(|_| self.block_write_sender.finalized.is_none());
+        let Some(sender) = sender else {
+            let result = if self.read_service.db.contains_hash(hash) {
+                Ok(hash)
+            } else if self.known_sent_hash(&hash).is_some()
+                || self.non_finalized_state_queued_blocks.has(hash)
+                || read::non_finalized_state_contains_block_hash(
+                    &self.read_service.latest_non_finalized_state(),
+                    hash,
+                )
+                .is_some()
+            {
+                Err(PreciousError::ProcessingCheckpointedBlocks)
+            } else {
+                Err(PreciousError::MissingBlock(hash))
+            };
+            let _ = rsp_tx.send(result);
+            return rsp_rx;
+        };
+
+        if let Err(tokio::sync::mpsc::error::SendError(error)) =
+            sender.send(NonFinalizedWriteMessage::Precious { hash, rsp_tx })
+        {
+            let NonFinalizedWriteMessage::Precious { rsp_tx, .. } = error else {
+                unreachable!("should return the same Precious message that could not be sent");
+            };
+
+            let _ = rsp_tx.send(Err(PreciousError::SendPreciousRequestFailed));
+        }
+
+        rsp_rx
+    }
+
     /// Assert some assumptions about the semantically verified `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
@@ -1397,6 +1447,26 @@ impl Service<Request> for StateService {
                         .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Reconsidered)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
+            // Adapted from zakura-core/zakura#1117 (https://github.com/zakura-core/zakura/pull/1117).
+            // The expected error type for this request is `PreciousError`.
+            Request::PreciousBlock(block_hash) => {
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.send_precious_block(block_hash))
+                });
+
+                let span = Span::current();
+                async move {
+                    rsp_rx
+                        .await
+                        .map_err(|_recv_error| PreciousError::PreciousRequestDropped)
+                        .and_then(|result| result)
+                        .map_err(BoxError::from)
+                        .map(Response::Precious)
                 }
                 .instrument(span)
                 .boxed()
