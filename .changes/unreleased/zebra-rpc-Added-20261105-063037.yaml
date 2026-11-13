@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Added
+body: Select an equal-work tip through the `RpcServer::precious_block` RPC method.
+time: 2026-11-05T06:30:37.224904876+01:00
