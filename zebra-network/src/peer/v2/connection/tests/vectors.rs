@@ -614,7 +614,7 @@ async fn dropping_a_client_closes_the_connection() {
 /// and the client reports the matching error.
 ///
 /// Not covered here: a request stream that waits for a permit past
-/// `REQUEST_TIMEOUT` (refused with `REFUSED`), which
+/// `REQUEST_TIMEOUT` (reset with `BUSY`), which
 /// `stalled_requests_end_at_the_request_timeout` covers; and a request that
 /// decodes to misbehavior rather than a violation, which no request format
 /// can produce (misbehavior is a response-side rule).
@@ -1531,7 +1531,9 @@ enum Reply {
 /// header chain is misbehavior; an explicit all-not-found response is the
 /// legacy `NotFoundResponse` and registers the objects as missing; and a
 /// response finished before its first entry, or refused, fails without
-/// claiming anything is missing.
+/// claiming anything is missing. A stream reset with `BUSY` or
+/// `INTERNAL_ERROR` fails with its own error, which tells the caller that the
+/// request can be retried.
 #[tokio::test]
 async fn outbound_responses_are_verified() {
     let _init_guard = zebra_test::init();
@@ -1553,6 +1555,8 @@ async fn outbound_responses_are_verified() {
             "finished before the first transaction",
             "non-contiguous headers",
             "refused",
+            "busy",
+            "internal error",
         ] {
             let mut raw = raw_peer_node(&network).await;
 
@@ -1622,6 +1626,24 @@ async fn outbound_responses_are_verified() {
                     "RequestStreamFailed",
                     None,
                 ),
+                // A peer at a limit, or one that failed internally, can be asked again: the
+                // error tells the caller so, unlike a refusal.
+                "busy" => (
+                    Request::BlockDownload {
+                        hash: block_1.hash(),
+                        advertiser: None,
+                    },
+                    Reply::Reset(ErrorCode::Busy),
+                    "RequestStreamBusy",
+                    None,
+                ),
+                "internal error" => (
+                    Request::TransactionsById([coinbase_1].into_iter().collect()),
+                    Reply::Reset(ErrorCode::InternalError),
+                    "RequestStreamBusy",
+                    None,
+                ),
+
                 _ => unreachable!(),
             };
 
@@ -2282,7 +2304,7 @@ async fn cancelled_request_stops_its_stream() {
 /// `ConnectionReceiveTimeout` and cancels its stream with `CANCELLED`;
 /// requests from the peer that hold the node's request permits while the
 /// inbound service never answers, and one that waits for a busy permit, are
-/// all refused with `REFUSED` at their deadlines.
+/// all reset with `BUSY` at their deadlines.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time: pausing tokio's clock is
 /// unsafe with real sockets.
@@ -2337,7 +2359,7 @@ async fn stalled_requests_end_at_the_request_timeout() {
                 .collect::<Vec<_>>();
             // The requests holding the permits wait on the inbound service until their deadline,
             // and the extra one waits for a permit until its own, or until the others free their
-            // permits a moment before it: every one is refused at its deadline.
+            // permits a moment before it: every one is abandoned at its deadline.
             let mut codes = Vec::new();
             for read in futures::future::join_all(reads).await {
                 let error = read.expect_err("the stream is reset");
@@ -2348,8 +2370,8 @@ async fn stalled_requests_end_at_the_request_timeout() {
             }
             assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
             assert!(
-                codes.iter().all(|code| *code == ErrorCode::Refused.code()),
-                "every request is refused at its deadline: {codes:?}"
+                codes.iter().all(|code| *code == ErrorCode::Busy.code()),
+                "every request is abandoned as busy at its deadline: {codes:?}"
             );
         };
 
@@ -2711,7 +2733,7 @@ async fn slowly_read_responses_end_at_the_request_deadline() {
 
 /// An inbound service call is bounded by the request deadline too: a
 /// request the inbound service never answers has its stream reset with
-/// `REFUSED` at `REQUEST_TIMEOUT`, since none of the response was written,
+/// `BUSY` at `REQUEST_TIMEOUT`, since none of the response was written,
 /// and the connection stays open.
 ///
 /// This takes `REQUEST_TIMEOUT` of real time.
@@ -2729,7 +2751,7 @@ async fn unanswered_lookups_end_at_the_request_deadline() {
             txrefs: vec![TxRef::Txid(transaction::Hash([0xCD; 32]))],
         });
         let mut recv = raw_request(&raw.connection, &request).await;
-        assert_reset(recv.read_to_end(1024).await, ErrorCode::Refused);
+        assert_reset(recv.read_to_end(1024).await, ErrorCode::Busy);
         assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1));
         assert!(
             raw.connection.close_reason().is_none(),
@@ -3139,8 +3161,8 @@ async fn assert_overload_close(raw: &mut RawPeer, expected_error: &str) {
 }
 
 /// A peer whose requests keep overloading the inbound service is
-/// disconnected, as on the legacy connection: each overload refuses its
-/// stream and may close the connection, more likely the more recent the
+/// disconnected, as on the legacy connection: each overload resets its
+/// stream with `BUSY` and may close the connection, more likely the more recent the
 /// last overload, so a peer that retries at once is soon closed with
 /// `NO_ERROR`, and the client's error is `Overloaded`.
 #[tokio::test]
@@ -3178,14 +3200,14 @@ async fn overloaded_requests_close_the_connection() {
             }
             match recv.read_to_end(1024).await {
                 Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code)))
-                    if code == app_error_code(ErrorCode::Refused) =>
+                    if code == app_error_code(ErrorCode::Busy) =>
                 {
                     refused += 1
                 }
                 _ => break,
             }
         }
-        assert!(refused > 0, "overloaded requests are refused");
+        assert!(refused > 0, "overloaded requests are reset with BUSY");
         assert_overload_close(&mut raw, "Overloaded").await;
     })
     .await

@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use quinn::{Connection, RecvStream, SendStream};
+use quinn::{Connection, RecvStream, SendStream, VarInt};
 use tokio::{io::BufReader, sync::OwnedSemaphorePermit};
 
 use zebra_chain::{
@@ -264,6 +264,12 @@ enum Failure {
     #[error("transport error: {0}")]
     Transport(String),
 
+    /// The peer reset the request stream with `BUSY` or `INTERNAL_ERROR`: it
+    /// serves this kind of request but could not just now, and the caller
+    /// may retry after a short delay (draft, "Request Streams").
+    #[error("the peer is busy: {0}")]
+    Busy(String),
+
     /// This node refuses the request without sending it. The connection task refuses these
     /// requests itself, before a stream is opened, so this is only a fallback.
     #[error("refused without sending: {0}")]
@@ -278,7 +284,10 @@ impl From<WireError> for Failure {
                 code,
             },
             Some(Violation::Misbehavior) => Failure::Misbehavior(error.to_string()),
-            None => Failure::Transport(error.to_string()),
+            None => match error {
+                WireError::Io(error) => io_failure(error),
+                error => Failure::Transport(error.to_string()),
+            },
         }
     }
 }
@@ -294,6 +303,7 @@ impl From<Failure> for SharedPeerError {
                 PeerError::RequestStreamFailed(failure.to_string()).into()
             }
             Failure::Transport(reason) => PeerError::RequestStreamFailed(reason).into(),
+            Failure::Busy(reason) => PeerError::RequestStreamBusy(reason).into(),
             Failure::Refused(error) => error.into(),
         }
     }
@@ -302,6 +312,49 @@ impl From<Failure> for SharedPeerError {
 /// Maps a stream error from quinn.
 fn transport(error: impl std::fmt::Display) -> Failure {
     Failure::Transport(error.to_string())
+}
+
+/// The failure of a request whose stream the peer reset or stopped with
+/// `code`, which `error` reports: `BUSY` says the peer could not serve the
+/// request just now, and a requester treats `INTERNAL_ERROR` on a request
+/// stream the same way (draft, "Request Streams"). Any other code, `REFUSED`
+/// included, is a failed stream.
+fn reset_failure(code: VarInt, error: impl std::fmt::Display) -> Failure {
+    if code == app_error_code(ErrorCode::Busy) || code == app_error_code(ErrorCode::InternalError) {
+        Failure::Busy(error.to_string())
+    } else {
+        transport(error)
+    }
+}
+
+/// Maps an error reading a response stream.
+fn read_failure(error: &quinn::ReadError) -> Failure {
+    match error {
+        quinn::ReadError::Reset(code) => reset_failure(*code, error),
+        error => transport(error),
+    }
+}
+
+/// Maps an error writing a request: a peer that refuses a request before it
+/// has read all of it stops the stream with the code it resets its own
+/// direction with.
+fn write_failure(error: quinn::WriteError) -> Failure {
+    match &error {
+        quinn::WriteError::Stopped(code) => reset_failure(*code, &error),
+        error => transport(error),
+    }
+}
+
+/// Maps an I/O error from a response reader, which wraps the stream's own
+/// error if the stream failed.
+fn io_failure(error: std::io::Error) -> Failure {
+    match error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<quinn::ReadError>())
+    {
+        Some(read_error) => read_failure(read_error),
+        None => transport(error),
+    }
 }
 
 /// A response stream that tells the peer to stop sending when it is dropped
@@ -362,8 +415,8 @@ async fn open_request(
         .expect("the guard holds the stream until it is finished");
     send.write_all(&[request.stream_type().code()])
         .await
-        .map_err(transport)?;
-    send.write_all(&body).await.map_err(transport)?;
+        .map_err(write_failure)?;
+    send.write_all(&body).await.map_err(write_failure)?;
     send.finish().map_err(transport)?;
     // Finished: nothing is left for the guard to cancel.
     guard.0 = None;
@@ -390,7 +443,7 @@ async fn drive_inner(
                                 .to_string(),
                             code: ErrorCode::ProtocolError,
                         },
-                        quinn::ReadToEndError::Read(error) => transport(error),
+                        quinn::ReadToEndError::Read(error) => read_failure(&error),
                     })?;
             Response::Peers(decode_addr_response(&body)?)
         }
