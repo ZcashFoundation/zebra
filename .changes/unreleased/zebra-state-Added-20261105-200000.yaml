@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `NonFinalizedState::root_parent_hash` and `Chain::non_finalized_root_parent_hash`, which return the hash of the finalized tip that the non-finalized state is built on without reading the database.
+time: 2026-11-05T20:00:00.000000000+00:00
