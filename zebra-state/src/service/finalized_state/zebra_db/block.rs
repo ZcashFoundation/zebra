@@ -21,7 +21,7 @@ use rayon::prelude::*;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height, SerializedBlock},
+    block::{self, Block, Height, SerializedBlock, MAX_BLOCK_BYTES},
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
@@ -145,9 +145,14 @@ impl ZebraDb {
         hash_or_height: HashOrHeight,
     ) -> Result<Option<Arc<Block>>, BlockReadError> {
         Ok(self
-            .complete_block(hash_or_height, |header: &Arc<block::Header>| {
-                header.merkle_root
-            })?
+            .complete_block(
+                hash_or_height,
+                |header: &Arc<block::Header>| header.merkle_root,
+                |_, _, tx_count| Vec::with_capacity(tx_count),
+                |transactions, transaction| {
+                    transactions.push(Arc::<Transaction>::from_bytes(transaction))
+                },
+            )?
             .map(|(header, transactions)| {
                 Arc::new(Block {
                     header,
@@ -174,7 +179,7 @@ impl ZebraDb {
             .map(|raw_tx| Arc::<Transaction>::from_bytes(raw_tx.raw_bytes()))
             .collect();
 
-        let (_, size) = serialized_tx_count_and_block_size(&raw_header, &raw_txs);
+        let size = serialized_block_size(&raw_header, &raw_txs);
 
         let block = Block {
             header,
@@ -189,24 +194,33 @@ impl ZebraDb {
     /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
     /// The stored bytes are not parsed, so a change to how blocks serialize needs a database
     /// upgrade to keep them equal to the serialization.
+    #[allow(clippy::unwrap_in_result)]
     pub fn serialized_block(
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<SerializedBlock>, BlockReadError> {
-        let Some((raw_header, raw_txs)) = self.raw_block(hash_or_height)? else {
-            return Ok(None);
-        };
-
-        let (tx_count, size) = serialized_tx_count_and_block_size(&raw_header, &raw_txs);
-
-        let mut bytes = Vec::with_capacity(size);
-        bytes.extend_from_slice(raw_header.raw_bytes());
-        bytes.extend_from_slice(&tx_count);
-        for raw_tx in &raw_txs {
-            bytes.extend_from_slice(raw_tx.raw_bytes());
-        }
-
-        Ok(Some(bytes.into()))
+        Ok(self
+            .complete_block(
+                hash_or_height,
+                raw_header_merkle_root,
+                |header: &RawBytes, height, tx_count| {
+                    // The stored size is only a capacity hint: it can be missing before upgrades
+                    // finish, and a corrupt value must not cause an oversized allocation.
+                    let capacity = self
+                        .block_info(height.into())
+                        .map_or(0, |info| u64::from(info.size()).min(MAX_BLOCK_BYTES));
+                    // `as` is lossless: the capacity is at most `MAX_BLOCK_BYTES`.
+                    let mut bytes = Vec::<u8>::with_capacity(capacity as usize);
+                    bytes.extend_from_slice(header.raw_bytes());
+                    CompactSizeMessage::try_from(tx_count)
+                        .expect("u16 transaction indexes keep counts within CompactSize limits")
+                        .zcash_serialize(&mut bytes)
+                        .expect("writing to a Vec never fails");
+                    bytes
+                },
+                |bytes, transaction| bytes.extend_from_slice(transaction),
+            )?
+            .map(|(_, bytes)| bytes.into()))
     }
 
     /// Returns the complete serialized header and transactions, or `None` for an unknown block.
@@ -214,23 +228,31 @@ impl ZebraDb {
         &self,
         hash_or_height: HashOrHeight,
     ) -> Result<Option<(RawBytes, Vec<RawBytes>)>, BlockReadError> {
-        self.complete_block(hash_or_height, |header: &RawBytes| {
-            block::Header::from_bytes(header.raw_bytes()).merkle_root
-        })
+        self.complete_block(
+            hash_or_height,
+            raw_header_merkle_root,
+            |_, _, tx_count| Vec::with_capacity(tx_count),
+            |transactions, transaction| transactions.push(RawBytes::from_bytes(transaction)),
+        )
     }
 
     /// Reads one complete body without intermediate serialized copies.
+    ///
+    /// `new_body` gets the header, height and transaction count, then `push_transaction` gets each
+    /// stored transaction in block order. The body is only returned if it is complete.
     ///
     /// Headers and transaction indexes are retained permanently. Check the body's contiguous
     /// locations against the final indexed location, so deletion cannot produce a partial block.
     /// This also works on secondary databases, which do not support RocksDB snapshots.
     /// Secondary reads also check the Merkle root because catch-up can expose partial indexes.
     #[allow(clippy::unwrap_in_result)]
-    fn complete_block<H: FromDisk, T: FromDisk>(
+    fn complete_block<H: FromDisk, B>(
         &self,
         hash_or_height: HashOrHeight,
         header_merkle_root: impl FnOnce(&H) -> block::merkle::Root,
-    ) -> Result<Option<(H, Vec<T>)>, BlockReadError> {
+        new_body: impl FnOnce(&H, Height, usize) -> B,
+        mut push_transaction: impl FnMut(&mut B, &[u8]),
+    ) -> Result<Option<(H, B)>, BlockReadError> {
         let Some(height) = hash_or_height.height_or_else(|hash| self.height(hash)) else {
             return Ok(None);
         };
@@ -292,25 +314,28 @@ impl ZebraDb {
         options.set_iterate_upper_bound(upper_bound);
         let mut bodies = self.db.raw_iterator_cf_opt(&tx_by_loc, options);
         bodies.seek(first);
-        let mut transactions = Vec::with_capacity(expected_count);
+        let mut body = new_body(&header, height, expected_count);
+        let mut count = 0;
         // TODO: consider separating transaction reads from deserialization so decoding can run
         // in parallel. Benchmark blocks with multiple large shielded transactions to check
         // whether the speedup justifies buffering the serialized transactions.
         while let Some(key) = bodies.key().filter(|key| *key <= last.as_ref()) {
             let location = TransactionLocation::from_bytes(key);
-            if location.index.as_usize() != transactions.len() {
+            if location.index.as_usize() != count {
                 return incomplete(BlockReadError::BlockBodyUnavailable { height });
             }
-            if transactions.len() >= expected_count {
+            if count >= expected_count {
                 return incomplete(BlockReadError::CorruptBlock { height });
             }
-            transactions.push(T::from_bytes(
+            push_transaction(
+                &mut body,
                 bodies.value().expect("a valid iterator has a value"),
-            ));
+            );
+            count += 1;
             bodies.next();
         }
         bodies.status().expect("unexpected database failure");
-        if transactions.len() != expected_count {
+        if count != expected_count {
             return incomplete(BlockReadError::BlockBodyUnavailable { height });
         }
 
@@ -345,7 +370,7 @@ impl ZebraDb {
             }
         }
 
-        Ok(Some((header, transactions)))
+        Ok(Some((header, body)))
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
@@ -922,23 +947,21 @@ impl DiskWriteBatch {
     }
 }
 
-/// Returns the CompactSize-encoded transaction count and the serialized size of a block made of
-/// `raw_header` and `raw_txs`.
+/// Returns the serialized size of a block made of `raw_header` and `raw_txs`.
 ///
 /// See <https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks>
-fn serialized_tx_count_and_block_size(
-    raw_header: &RawBytes,
-    raw_txs: &[RawBytes],
-) -> (Vec<u8>, usize) {
+fn serialized_block_size(raw_header: &RawBytes, raw_txs: &[RawBytes]) -> usize {
     let tx_count = CompactSizeMessage::try_from(raw_txs.len())
-        .expect("must work for a previously serialized block")
-        .zcash_serialize_to_vec()
         .expect("must work for a previously serialized block");
-    let size = raw_header.raw_bytes().len()
-        + tx_count.len()
+    raw_header.raw_bytes().len()
+        + tx_count.zcash_serialized_size()
         + raw_txs
             .iter()
             .map(|raw_tx| raw_tx.raw_bytes().len())
-            .sum::<usize>();
-    (tx_count, size)
+            .sum::<usize>()
+}
+
+/// Returns the Merkle root committed to by a serialized header.
+fn raw_header_merkle_root(header: &RawBytes) -> block::merkle::Root {
+    block::Header::from_bytes(header.raw_bytes()).merkle_root
 }
