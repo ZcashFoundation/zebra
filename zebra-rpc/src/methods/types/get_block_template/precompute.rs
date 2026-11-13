@@ -125,6 +125,9 @@ pub(crate) struct TemplateCache {
     /// Wakes [`validate_templates()`] when work is queued for validation, without waking long
     /// polls, which only wait for served work.
     queued: Arc<Notify>,
+    /// Wakes [`run()`] when failed work is withdrawn without valid work to serve instead, so it
+    /// builds coinbase-only work for the tip again.
+    rebuild: Arc<Notify>,
     /// Whether [`run()`] owns template construction.
     updater: Arc<AtomicBool>,
 }
@@ -166,6 +169,7 @@ impl Default for TemplateCache {
         Self {
             served: Arc::new(watch::Sender::new(None)),
             queued: Arc::default(),
+            rebuild: Arc::default(),
             updater: Arc::default(),
         }
     }
@@ -381,15 +385,18 @@ impl TemplateCache {
     }
 
     /// Serves the last valid work again if `failed`, which failed its check, is served, or is
-    /// the served work with its time range narrowed by [`Self::template_for_tip()`], unless the
-    /// served work passed its own check. Without valid work for its parent, withdraws the served
-    /// work instead.
+    /// the served work with its time range narrowed by [`Self::template_for_tip()`]. Without
+    /// valid work for its parent, withdraws the served work instead, and wakes [`run()`] to build
+    /// coinbase-only work again.
     ///
     /// Only the first transaction-bearing build for a parent is served ahead of its check, so the
-    /// last valid work is usually that parent's coinbase-only work. A newer build waiting for its
-    /// check stays queued. Returns whether the served work changed.
+    /// last valid work is usually that parent's coinbase-only work. Work with the failed body is
+    /// neither a fallback nor kept queued, even if it passed its own check: miners would get its
+    /// narrowed copies. A newer build with another body stays queued. Returns whether the served
+    /// work changed.
     fn reject(&self, failed: &Arc<BlockTemplateResponse>) -> bool {
-        self.served.send_if_modified(|state| {
+        let mut withdrawn = false;
+        let changed = self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
                 return false;
             };
@@ -398,26 +405,33 @@ impl TemplateCache {
             }) {
                 return false;
             }
-            let failed_work = |work: &Arc<BlockTemplateResponse>| {
-                Arc::ptr_eq(work, failed) || is_narrowed_copy(work, failed)
-            };
-            let valid = state.last_valid.clone();
-            if valid
-                .as_ref()
-                .zip(state.template.as_ref())
-                .is_some_and(|(valid, served)| Arc::ptr_eq(valid, served))
-            {
-                // The served work passed its own check, so only its narrowed copy failed.
-                return false;
-            }
+            let valid = state
+                .last_valid
+                .clone()
+                .filter(|valid| !same_body(valid, failed));
+            withdrawn = valid.is_none();
             *state = TemplateState {
-                next: state.next.take().filter(|next| !failed_work(next)),
+                next: state.next.take().filter(|next| !same_body(next, failed)),
                 last_valid: valid.clone(),
                 error: state.error.take(),
                 ..TemplateState::new(valid)
             };
             true
-        })
+        });
+        if withdrawn {
+            self.rebuild.notify_one();
+        }
+        changed
+    }
+
+    /// Waits until failed work for `tip` is withdrawn without valid work to serve instead.
+    async fn rebuild_needed(&self, tip: Option<block::Hash>) {
+        loop {
+            self.rebuild.notified().await;
+            if tip.is_none_or(|tip| !self.holds_tip(tip)) {
+                return;
+            }
+        }
     }
 
     /// Preserves the time component of work identity when only its usable upper bound grows.
@@ -511,10 +525,10 @@ impl TemplateCache {
                     .template
                     .as_ref()
                     .is_some_and(|served| Arc::ptr_eq(served, &source))
-                    && state.next.as_ref().is_none_or(|next| {
-                        next.cur_time != cur_time
-                            && (Arc::ptr_eq(next, &source) || is_narrowed_copy(next, &source))
-                    });
+                    && state
+                        .next
+                        .as_ref()
+                        .is_none_or(|next| next.cur_time != cur_time && same_body(next, &source));
                 if restage {
                     state.next = Some(Arc::clone(&template));
                 }
@@ -528,14 +542,21 @@ impl TemplateCache {
     }
 }
 
-/// Returns `true` if `narrowed` is `work` with its time range narrowed after a clock rollback.
+/// Returns `true` if `a` and `b` have the same parent and transactions, including the coinbase.
 ///
 /// Builds from the same mempool snapshot share a long poll ID, but ZIP-317 selection is
-/// randomized, so the Merkle root tells their bodies apart.
+/// randomized, so the Merkle root tells their bodies apart. A served template copied to keep its
+/// long poll ID, or narrowed after a clock rollback, has the same body.
+fn same_body(a: &BlockTemplateResponse, b: &BlockTemplateResponse) -> bool {
+    a.previous_block_hash == b.previous_block_hash
+        && a.transactions.len() == b.transactions.len()
+        && a.default_roots.merkle_root == b.default_roots.merkle_root
+}
+
+/// Returns `true` if `narrowed` is `work` with its time range narrowed after a clock rollback.
 fn is_narrowed_copy(narrowed: &BlockTemplateResponse, work: &BlockTemplateResponse) -> bool {
-    narrowed.previous_block_hash == work.previous_block_hash
+    same_body(narrowed, work)
         && narrowed.long_poll_id == work.long_poll_id
-        && narrowed.default_roots.merkle_root == work.default_roots.merkle_root
         && narrowed.max_time < work.max_time
 }
 
@@ -875,6 +896,7 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
             tokio::select! {
                 _ = sleep(RETRY_DELAY) => {}
                 _ = candidate_changes.changed() => {}
+                _ = cache.rebuild_needed(latest_chain_tip.best_tip_hash()) => {}
                 result = latest_chain_tip.best_tip_changed() => {
                     if result.is_err() {
                         return;
@@ -915,6 +937,8 @@ pub(crate) async fn run<Mempool, ReadStateService, Tip, SyncStatus, Verifier>(
                     return;
                 }
             }
+            // Failed work was withdrawn, so build coinbase-only work for the tip again.
+            _ = cache.rebuild_needed(latest_chain_tip.best_tip_hash()) => {}
             _ = sleep_until(
                 next_mempool_build.max(
                     build_finished + Duration::from_secs(MEMPOOL_LONG_POLL_INTERVAL),

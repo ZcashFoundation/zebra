@@ -1192,7 +1192,10 @@ fn failed_served_work_falls_back_to_the_last_valid_work() {
     cache.update(full_template(1));
     let checked = served_work(&cache).expect("the first build for a parent is served at once");
     assert!(cache.promote(&checked, Some(&checked)));
-    cache.update(full_template(2));
+    // Another body, so it is still a fallback when the newer work fails.
+    let mut other_body = full_template(2);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x33; 32]);
+    cache.update(other_body);
     let later = next_work(&cache).expect("a later build waits for validation");
     cache.clear();
     cache.update(template());
@@ -1212,6 +1215,8 @@ fn failed_served_work_falls_back_to_the_last_valid_work() {
 /// fails.
 #[test]
 fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
+    use futures::FutureExt;
+
     let network = Network::Mainnet;
 
     // A newer build queued while the served work was checked is still checked afterwards.
@@ -1220,7 +1225,9 @@ fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
     let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
     cache.update(full_template(0));
     let first = served_work(&cache).expect("the first build for a parent is served at once");
-    cache.update(full_template(1));
+    let mut other_body = full_template(1);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x44; 32]);
+    cache.update(other_body);
     let newer = next_work(&cache).expect("a later build waits for validation");
     assert!(cache.reject(&first));
     assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
@@ -1264,7 +1271,9 @@ fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
     assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
     assert!(next_work(&cache).is_none());
 
-    // Served work that passed its own check stays served when only its narrowed copy fails.
+    // Served work that passed its own check isn't a fallback when its narrowed copy fails,
+    // since miners would only get narrowed copies of it. Without other valid work, it is
+    // withdrawn, and the updater is woken to build coinbase-only work.
     let cache = TemplateCache::default();
     cache.update(template());
     cache.update(full.clone());
@@ -1273,13 +1282,34 @@ fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
     let narrowed = cache
         .template_for_tip(tip, &network, now)
         .expect("a usable range survives clock rollback");
-    let mut changes = cache.subscribe();
-    assert!(!cache.reject(&narrowed));
+    assert!(cache.rebuild.notified().now_or_never().is_none());
+    assert!(cache.reject(&narrowed));
+    assert!(served_work(&cache).is_none());
+    assert!(next_work(&cache).is_none());
     assert!(
-        !changes.take_changed(),
-        "nothing changed, so long polls stay asleep"
+        cache.rebuild.notified().now_or_never().is_some(),
+        "withdrawing work without a fallback wakes the updater"
     );
-    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &validated)));
+
+    // A narrowed copy of promoted work, which keeps the served long poll ID in a copy, is still
+    // queued for validation.
+    let cache = TemplateCache::default();
+    cache.update(full.clone());
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut wider = full.clone();
+    wider.max_time = wider.max_time.saturating_add(Duration32::from_seconds(60));
+    wider.long_poll_id.max_timestamp = wider.long_poll_id.max_timestamp.saturating_add(60);
+    cache.update(wider);
+    let staged = next_work(&cache).expect("a later build waits for validation");
+    assert!(cache.promote(&staged, Some(&first)));
+    let promoted = served_work(&cache).expect("validated work is served");
+    assert!(
+        !Arc::ptr_eq(&promoted, &staged),
+        "promotion keeps the served long poll ID"
+    );
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
     assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &narrowed)));
 
     // A newer build from the same mempool snapshot has the same long poll ID but another body,
@@ -1375,6 +1405,7 @@ fn narrowed_work_is_queued_once_unless_newer_work_waits() {
     // A newer build waiting to replace the served work is not displaced by narrowed older work.
     let mut newer = full_template(1);
     newer.long_poll_id.mempool_transaction_count += 1;
+    newer.default_roots.merkle_root = block::merkle::Root([0x22; 32]);
     cache.update(newer);
     let waiting = next_work(&cache).expect("a later build waits for validation");
     let earlier = now.saturating_sub(Duration32::from_seconds(1));
