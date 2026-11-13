@@ -250,15 +250,22 @@ enum InvOutcome {
     /// The peer failed to return the block.
     Failed,
 
-    /// The peer returned a block, after it was chosen because the block was advertised.
-    ServedAdvertised,
+    /// The peer answered a repeat request for the block with `notfound`.
+    NotFound,
+
+    /// The peer returned a block, after it was chosen because the block was advertised, or in a
+    /// repeat request for the block.
+    Served,
 }
 
+/// The peer and connection that got a block request, the block, how the request ended, and
+/// whether it was a repeat request.
 type InvOutcomeEvent = (
     PeerSocketAddr,
     Arc<ConnectionInfo>,
     InventoryHash,
     InvOutcome,
+    bool,
 );
 
 /// Empty replies are valid when the locator reaches the remote tip. Neither a local wall-clock
@@ -313,9 +320,9 @@ where
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
-    /// Receives completed block request errors, and advertised blocks that peers returned, from
-    /// response futures and records them in the [`InventoryRegistry`]. Caller cancellation is not
-    /// evidence of a peer failure.
+    /// Receives completed block request errors, advertised blocks that peers returned, and the
+    /// answers to repeat block requests, from response futures and records them in the
+    /// [`InventoryRegistry`]. Caller cancellation is not evidence of a peer failure.
     ///
     /// Each routed block request sends at most one outcome, so the channel is limited by the
     /// number of block requests in flight.
@@ -1120,8 +1127,8 @@ where
         }
     }
 
-    /// Records block requests that peers failed to answer, and advertised blocks that peers
-    /// returned, in the inventory registry.
+    /// Records block requests that peers failed to answer, advertised blocks that peers returned,
+    /// and the answers to repeat block requests, in the inventory registry.
     ///
     /// Peers declare their own services, and request timeouts don't mark inventory as missing. So
     /// otherwise a peer that falsely claims to serve blocks, and withholds them, could get every
@@ -1133,7 +1140,7 @@ where
     /// `poll_ready()` calls this before a request is routed. So if a caller rejects a block and
     /// asks for it again, that request is always routed after the block is recorded as served.
     fn drain_inv_failures(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((peer, connection_info, hash, outcome))) =
+        while let Poll::Ready(Some((peer, connection_info, hash, outcome, is_repeat))) =
             self.inv_failure_rx.poll_recv(cx)
         {
             match outcome {
@@ -1142,11 +1149,18 @@ where
                         self.inventory_registry.register_failed(hash, peer);
                     }
                 }
+                // The connection handler already marked the block as missing from this peer.
+                InvOutcome::NotFound => {}
                 // The record is about the block, so keep it even if the peer was disconnected,
                 // for example because the caller rejected the block and got the peer banned.
-                InvOutcome::ServedAdvertised => {
+                InvOutcome::Served => {
                     self.inventory_registry.register_served(hash, peer);
                 }
+            }
+
+            // This record is about the block too.
+            if is_repeat {
+                self.inventory_registry.register_repeat_answer(hash, peer);
             }
         }
     }
@@ -1500,7 +1514,8 @@ where
     /// peer might have it.
     ///
     /// A block that a peer already returned because it was advertised is being asked for again,
-    /// so the peers that advertised it or returned it are skipped like failed peers.
+    /// so the peers that returned it are skipped like failed peers. The other peers that
+    /// advertised it take turns with the peers that didn't, starting with the peers that didn't.
     ///
     /// Uses P2C to choose the least loaded peer in each list.
     fn select_inv_route(&self, request: &Request, hash: InventoryHash) -> InvRoute<D::Key> {
@@ -1519,23 +1534,33 @@ where
         //
         // A block hash only commits to the header, so a peer can advertise a block, and then
         // serve its header with other transactions. The caller rejects that block and asks for
-        // it again. If advertisers kept their preference, a few peers that advertise the same
-        // block could take every retry in turn, and stall the caller, even though each of them
-        // is banned for it (GHSA-g9rc-89v4-hhvf). So once an advertised block was returned, the
-        // next request for it only asks the peers that returned it, and the peers that advertised
-        // it, as a last resort, like peers that failed to return it.
-        let is_repeat = self.inventory_registry.served_peers(hash).next().is_some();
-        let mut distrusted_peer_list: HashSet<PeerSocketAddr> = HashSet::new();
-        if is_repeat {
-            distrusted_peer_list.extend(self.inventory_registry.served_peers(hash));
-            distrusted_peer_list.extend(self.inventory_registry.advertising_peers(hash));
-            if let Request::BlockDownload { advertiser, .. } = request {
-                distrusted_peer_list.extend(advertiser);
-            }
-        }
+        // it again (GHSA-g9rc-89v4-hhvf). So once an advertised block was returned, the peers
+        // that returned it are only asked for it as a last resort, like peers that failed to
+        // return it.
+        let served_peer_list: HashSet<PeerSocketAddr> = self
+            .inventory_registry
+            .served_peers(hash)
+            .copied()
+            .collect();
+        let is_repeat = !served_peer_list.is_empty();
+
+        // # Security
+        //
+        // The other advertisers can't be told apart: a few addresses of the same peer could
+        // advertise the block to take every retry in turn, but near the tip most advertisers are
+        // honest, and the peers that didn't advertise the block might not have it, or might not
+        // answer. So in repeat requests, the peers that didn't advertise the block and the other
+        // advertisers take turns to be asked first. The caller only retries a few times, so the
+        // first turn goes to the peers that didn't advertise the block: the first request went
+        // to an advertiser.
+        let ask_other_peers_first = is_repeat
+            && self
+                .inventory_registry
+                .repeat_answer_count(hash)
+                .is_multiple_of(2);
 
         let has_failed = |addr: &PeerSocketAddr| {
-            failed_peer_list.contains(addr) || distrusted_peer_list.contains(addr)
+            failed_peer_list.contains(addr) || served_peer_list.contains(addr)
         };
         let advertiser = match request {
             Request::BlockDownload { advertiser, .. } => advertiser.filter(|addr| {
@@ -1561,22 +1586,6 @@ where
             .copied()
             .collect();
 
-        // # Security
-        //
-        // Choose a random, less-loaded peer with the inventory.
-        //
-        // If we chose the first peer in HashMap order,
-        // peers would be able to influence our choice by switching addresses.
-        // But we need the choice to be random,
-        // so that a peer can't provide all our inventory responses.
-        if let Some(peer) = self.select_p2c_peer_from_list(&advertising_peer_list) {
-            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            return InvRoute::Peer {
-                peer,
-                advertised: true,
-            };
-        }
-
         let missing_peer_list: HashSet<PeerSocketAddr> = self
             .inventory_registry
             .missing_peers(hash)
@@ -1597,6 +1606,43 @@ where
                 .copied()
                 .collect()
         };
+
+        if ask_other_peers_first {
+            let other_peer_list = ready_peers_with_services(true)
+                .into_iter()
+                .filter(|addr| !advertising_peers.contains(addr))
+                .collect();
+
+            // Security: choose a random, less-loaded peer, like the other lists.
+            if let Some(peer) = self.select_p2c_peer_from_list(&other_peer_list) {
+                tracing::trace!(
+                    ?hash,
+                    ?peer,
+                    "routing a repeat request to a peer that didn't advertise inventory"
+                );
+                return InvRoute::Peer {
+                    peer,
+                    advertised: false,
+                };
+            }
+        }
+
+        // # Security
+        //
+        // Choose a random, less-loaded peer with the inventory.
+        //
+        // If we chose the first peer in HashMap order,
+        // peers would be able to influence our choice by switching addresses.
+        // But we need the choice to be random,
+        // so that a peer can't provide all our inventory responses.
+        if let Some(peer) = self.select_p2c_peer_from_list(&advertising_peer_list) {
+            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
+            return InvRoute::Peer {
+                peer,
+                advertised: true,
+            };
+        }
+
         let preferred_peer_list = ready_peers_with_services(true);
 
         // Security: choose a random, less-loaded peer that might have the inventory.
@@ -1678,6 +1724,7 @@ where
     ///
     /// If a block request fails, reports the failure to the peer set. If `advertised` is true,
     /// the peer was chosen because it advertised the block, so a returned block is reported too.
+    /// Every answer to a repeat request is reported, see [`Self::select_inv_route()`].
     fn call_inv_peer(
         &mut self,
         key: D::Key,
@@ -1696,12 +1743,13 @@ where
             .expect("inventory routing selected a ready connection")
             .connection_info()
             .clone();
+        let is_repeat = self.inventory_registry.served_peers(hash).next().is_some();
         let fut = self.call_ready_peer(key, req);
 
         let failure_tx = self.inv_failure_tx.clone();
         async move {
             let result = fut.await;
-            match &result {
+            let outcome = match &result {
                 Err(error) => {
                     let missing = error
                         .downcast_ref::<SharedPeerError>()
@@ -1709,18 +1757,22 @@ where
                     if !missing {
                         // Only a completed peer error, including its response timeout, is failure
                         // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
-                        let _ = failure_tx.send((key, connection_info, hash, InvOutcome::Failed));
+                        Some(InvOutcome::Failed)
+                    } else {
+                        is_repeat.then_some(InvOutcome::NotFound)
                     }
                 }
-                // Security: send this before the caller gets the block, see
-                // `drain_inv_failures()`.
                 Ok(Response::Blocks(blocks))
-                    if advertised && blocks.iter().any(|block| block.available().is_some()) =>
+                    if (advertised || is_repeat)
+                        && blocks.iter().any(|block| block.available().is_some()) =>
                 {
-                    let _ =
-                        failure_tx.send((key, connection_info, hash, InvOutcome::ServedAdvertised));
+                    Some(InvOutcome::Served)
                 }
-                Ok(_) => {}
+                Ok(_) => None,
+            };
+            // Security: send this before the caller gets the block, see `drain_inv_failures()`.
+            if let Some(outcome) = outcome {
+                let _ = failure_tx.send((key, connection_info, hash, outcome, is_repeat));
             }
             result
         }
