@@ -130,7 +130,8 @@ fn bench_response_round_trip(c: &mut Criterion) {
             let label = format!("{shape} {} MB", body.len() / MB);
             group.throughput(Throughput::Bytes(body.len() as u64));
 
-            let mut middleware = HttpRequestMiddleware::new(inner_service(body.clone()), None, MB);
+            let mut middleware =
+                HttpRequestMiddleware::new(inner_service(body.clone()), None, MB, body.len());
             group.bench_function(BenchmarkId::new("middleware", &label), |b| {
                 b.iter(|| runtime.block_on(round_trip(&mut middleware)))
             });
