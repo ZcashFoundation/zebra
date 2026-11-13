@@ -108,7 +108,7 @@ Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `
 - Breaking migration from regional to zonal: snapshot-based one-shot procedure in the runbook.
 - More MIGs per environment (6 vs 2), each simpler.
 - Backwards-incompatible RocksDB format changes still need a snapshot-based handoff at release time; runbook covers it.
-- The `cos-stable` + `gce-container-declaration` deploy pattern is deprecated by Google; a future ADR will address it.
+- The `cos-stable` + `gce-container-declaration` deploy pattern is deprecated by Google; [ADR 0009](0009-gcp-container-launcher.md) replaces it with cloud-init systemd units.
 
 ## More Information
 
