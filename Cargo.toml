@@ -116,6 +116,9 @@ jubjub = "0.11"
 lazy_static = "1.4"
 libzcash_script = "0.2"
 log = "0.4.27"
+# Permutation testing of std synchronization protocols; only built with
+# RUSTFLAGS="--cfg zebra_loom -C debug-assertions", see book/src/dev/loom-testing.md.
+loom = { version = "0.7.2", features = ["checkpoint", "futures"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 metrics-util = { version = "0.19", default-features = false }
@@ -347,7 +350,8 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1"))', # Used in Zebra and librustzcash
+    'cfg(zebra_loom)', # Loom concurrency models, see book/src/dev/loom-testing.md
 ] }
 
 # High-risk code

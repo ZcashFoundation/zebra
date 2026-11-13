@@ -7,7 +7,8 @@ on:
     # that a skipped run reported against `main`.
     types: [opened, synchronize, reopened, labeled, edited]
   push:
-    branches: [main]
+    # A push to `next` runs only `run-loom-tests`, to seed its cache for pull requests to `next`.
+    branches: [main, next]
   merge_group:
     types: [checks_requested]
 
@@ -16,6 +17,7 @@ on:
 # cancel neither the required unit test run nor each other, and cancelling one would
 # report the required check as failed, because `alls-green` reads a cancelled need as
 # a failure. For `next`, those events run the tests, so they share the normal group.
+# Pushes to `main` and `next` are keyed by run id, so a push never cancels another run.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}-${{
@@ -64,8 +66,9 @@ jobs:
     # job in CI, so it must not re-run for one. `allowed-skips` tolerates the skip; the
     # tests still have to pass on the merge group before anything reaches main. `next`
     # has no merge queue, so its pull requests always run the tests: a skip would
-    # replace a failed run's result.
+    # replace a failed run's result. A push to `next` only seeds the loom cache.
     if: >-
+      (github.event_name != 'push' || github.ref == 'refs/heads/main') &&
       needs.changes.outputs.unit_tests == 'true' &&
       (github.base_ref == 'next' ||
       (github.event.action != 'labeled' && github.event.action != 'edited') ||
@@ -153,6 +156,56 @@ jobs:
               print("No flaky or failed tests.")
           PY
 
+  # Loom concurrency models, see book/src/dev/loom-testing.md. Only the crates with a
+  # `src/loom.rs` shim are built: every other crate compiles to the same code with and
+  # without the cfg.
+  run-loom-tests:
+    name: loom stable 1.97.0
+    needs: changes
+    # The condition of run-unit-tests without its push guard: on a push to `next`, this is
+    # the only unit-test job that runs, so that it writes the cache below.
+    if: >-
+      needs.changes.outputs.unit_tests == 'true' &&
+      (github.base_ref == 'next' ||
+      (github.event.action != 'labeled' && github.event.action != 'edited') ||
+      github.event.label.name == 'release')
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    env:
+      # As for the unit tests: LTO only slows the link and changes nothing the models check.
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      # Only loom's per-model summary lines. A bare `LOOM_LOG=info` also logs every thread
+      # switch (`loom::rt::execution`), which wrote 15 GB for one 6 M-iteration model.
+      LOOM_LOG: loom::model=info
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          components: clippy
+          toolchain: 1.97.0
+          # The cfg selects the loom shims; debug assertions (and the overflow checks they
+          # imply) are what the shims' compile_error! guard and the book page require.
+          rustflags: --cfg zebra_loom -C debug-assertions -D warnings
+          cache-key: unit-tests-1.97.0-loom
+          cache-on-failure: true
+          # Written from main and from next. A PR restores caches from main and from its
+          # base branch, and nothing else writes this key: without the next seed, every
+          # PR to next builds the loom artifacts from zero. See README.md, rule 1.
+          cache-save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' }}
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+        with:
+          tool: cargo-nextest
+      - uses: ./.github/actions/setup-zebra-build
+      - name: Lint the loom shims and models
+        run: cargo clippy --release --tests --locked -p zebra-consensus -p zebra-state -p zebra-network
+      - name: Run loom models
+        run: cargo nextest run --profile loom --locked --release --lib -p zebra-consensus -p zebra-state -p zebra-network
+
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
@@ -183,6 +236,7 @@ jobs:
     needs:
       - changes
       - run-unit-tests
+      - run-loom-tests
       - check-no-git-dependencies
     timeout-minutes: 30
     steps:
@@ -190,4 +244,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: run-unit-tests, check-no-git-dependencies
+          allowed-skips: run-unit-tests, run-loom-tests, check-no-git-dependencies

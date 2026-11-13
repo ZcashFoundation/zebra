@@ -6,6 +6,7 @@
 #   ci-stateful   GCP: runs stateful tests selected by --filter-expr
 #   ci-e2e        GCP: runs E2E tests selected by --filter-expr
 #   check-no-git-dependencies  Special CI release check
+#   loom          Loom concurrency models; needs RUSTFLAGS="--cfg zebra_loom -C debug-assertions"
 
 [profile.default]
 fail-fast = true
@@ -196,6 +197,17 @@ slow-timeout = { period = "90m", terminate-after = 1 }
 
 [profile.check-no-git-dependencies]
 default-filter = 'test(=unit::end_of_support::check_no_git_dependencies)'
+
+# --- Loom profile ---
+# Loom models only. Build with RUSTFLAGS="--cfg zebra_loom -C debug-assertions": without
+# the cfg the `loom_tests` modules do not exist and nextest reports that no tests matched.
+[profile.loom]
+fail-fast = false
+failure-output = "immediate"
+# A model that needs more than two minutes has outgrown its budget: bound it in code.
+slow-timeout = { period = "60s", terminate-after = 2 }
+# `(^|::)` also matches a `loom_tests` module declared at a crate root.
+default-filter = 'test(/(^|::)loom_tests::/)'
 
 # --- zcashd-compat Profiles ---
 

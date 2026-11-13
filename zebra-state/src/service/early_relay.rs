@@ -1,10 +1,7 @@
 //! Authenticated, next-tip-only early block retention, independent of mining subscriptions.
 
 use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -16,10 +13,16 @@ use zebra_chain::{
 };
 
 use super::{read, LatestChainTip, ReadStateService};
-use crate::BoxError;
+use crate::{
+    loom::sync::atomic::{AtomicU64, Ordering},
+    BoxError,
+};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
 
 const LIFETIME: Duration = Duration::from_secs(15);
 const REJECTION_LIFETIME: Duration = Duration::from_secs(60);
@@ -89,6 +92,20 @@ impl EarlyRelayState {
     pub(super) fn updating_context(&self) -> ContextUpdate<'_> {
         self.context_version.fetch_add(1, Ordering::SeqCst);
         ContextUpdate(&self.context_version)
+    }
+
+    /// `SeqCst` load; `None` when a context update is in progress (odd version).
+    fn context_snapshot(&self) -> Option<u64> {
+        let version = self.context_version.load(Ordering::SeqCst);
+        if version % 2 != 0 {
+            return None;
+        }
+        Some(version)
+    }
+
+    /// `SeqCst` load; `true` when the version still equals `version`.
+    fn context_unchanged(&self, version: u64) -> bool {
+        self.context_version.load(Ordering::SeqCst) == version
     }
 
     pub(super) fn is_rejected(&self, hash: block::Hash) -> bool {
@@ -331,10 +348,22 @@ impl ReadStateService {
         let admitted = tokio::task::spawn_blocking(move || {
             // A cancelled request retains computation admission until this closure finishes.
             let _permit = permit;
-            let version = state.early_relay.context_version.load(Ordering::SeqCst);
-            if version % 2 != 0 {
+            // # Correctness
+            //
+            // The version loads bracket the reads, but they alone do not make the re-check
+            // sound: nothing orders the reads before the re-check, so a read can observe part
+            // of a writer's mutation while the re-check still loads the old even version. The
+            // re-check rejects every overlapping snapshot only if each such read synchronizes
+            // with the writer. The non-finalized state comes through a `watch` channel, whose
+            // lock does. The RocksDB reads rely on RocksDB performing release/acquire
+            // operations internally that pair across the writer and reader threads: this is
+            // assumed, not verified. Under that assumption the early-relay loom models find no
+            // violation, exhaustively for one reader and at preemption bound 3 for two; without
+            // it they find a torn snapshot. Explicit fences after the writer's first increment
+            // and before the re-check would remove the reliance.
+            let Some(version) = state.early_relay.context_snapshot() else {
                 return Ok(None);
-            }
+            };
             let result = read::difficulty::authenticated_candidate_header(
                 &state.latest_non_finalized_state(),
                 &state.db,
@@ -342,7 +371,7 @@ impl ReadStateService {
                 candidate.clone(),
                 !required,
             );
-            if state.early_relay.context_version.load(Ordering::SeqCst) != version {
+            if !state.early_relay.context_unchanged(version) {
                 return Ok(None);
             }
             result.map(|history| {

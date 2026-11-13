@@ -88,6 +88,7 @@ When the PR adds abstraction, flags, generics, or refactors:
 - New behavior needs tests
 - Async tests: `#[tokio::test]` with timeouts for long-running tests
 - Test configs must use realistic network parameters
+- A PR touching `std` atomics, mutexes or thread hand-offs adds or updates a loom model, or says why none applies
 
 ### Observability
 

@@ -24,10 +24,7 @@ use std::{
     collections::BTreeMap,
     ops::{Bound, Bound::*},
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        mpsc, Arc,
-    },
+    sync::{mpsc, Arc},
     task::{Context, Poll},
 };
 
@@ -58,6 +55,7 @@ use crate::{
         TargetHeight::{self, *},
     },
     error::BlockError,
+    loom::sync::atomic::{AtomicUsize, Ordering},
     BoxError,
 };
 
@@ -65,6 +63,9 @@ mod types;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
 
 pub use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 
@@ -91,6 +92,22 @@ struct RequestBlock {
 /// A lifetime reservation shared by queued blocks and accepted commit tasks.
 #[derive(Debug)]
 struct RetainedBlockPermit(Arc<AtomicUsize>);
+
+impl RetainedBlockPermit {
+    /// Admission is serialized through the caller's `&mut self`; permit owners can only
+    /// decrease the count, so a concurrent drop only makes the check conservative.
+    fn try_admit(
+        count: Arc<AtomicUsize>,
+        limit: usize,
+        evict: impl FnOnce() -> bool,
+    ) -> Option<Self> {
+        if count.load(Ordering::Relaxed) >= limit && !evict() {
+            return None;
+        }
+        count.fetch_add(1, Ordering::Relaxed);
+        Some(Self(count))
+    }
+}
 
 impl Drop for RetainedBlockPermit {
     fn drop(&mut self) {
@@ -856,19 +873,19 @@ where
             }
             self.reject_queued(height, MAX_QUEUED_BLOCKS_PER_HEIGHT - 1);
         }
-        if self.retained_blocks.load(Ordering::Relaxed) >= self.retained_block_limit
-            && !self.evict_for(height, hash)
-        {
+        let Some(retained) = RetainedBlockPermit::try_admit(
+            self.retained_blocks.clone(),
+            self.retained_block_limit,
+            || self.evict_for(height, hash),
+        ) else {
             return Err(VerifyCheckpointError::QueuedLimit);
-        }
+        };
 
-        // Admission is serialized through &mut self; commit owners can only decrease the count.
-        self.retained_blocks.fetch_add(1, Ordering::Relaxed);
         let queued = QueuedBlock {
             block,
             tx,
             notifications,
-            retained: RetainedBlockPermit(self.retained_blocks.clone()),
+            retained,
         };
         let blocks = self
             .queued

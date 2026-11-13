@@ -84,6 +84,18 @@ Pull requests run them on `ubuntu-26.04`, while the merge queue and pushes to
 build the workspace crates at `opt-level=0`; dependency profiles are
 unchanged.
 
+The `run-loom-tests` job in the same workflow runs the
+[loom models](loom-testing.md) of the crates with a `src/loom.rs` shim:
+`cargo clippy --release --tests` over those crates, then
+`cargo nextest run --profile loom --release --lib`. Both steps build with
+`RUSTFLAGS="--cfg zebra_loom -C debug-assertions -D warnings"`, set through
+the toolchain action's `rustflags` input, so the job has its own cache key,
+`unit-tests-1.97.0-loom`. A pull request restores caches from its base branch
+as well as from `main`, so this job also writes its cache from `next`: the
+workflow runs on pushes to `next`, where every other worker skips, the path
+filter is bypassed as on `main`, and the job is reported through the
+`unit-tests` aggregator.
+
 Reuse the [build setup action](https://github.com/ZcashFoundation/zebra/blob/main/.github/actions/setup-zebra-build/action.yml)
 for Linux Rust jobs needing Clang, Protocol Buffers, or system RocksDB;
 it installs them and sets `ROCKSDB_LIB_DIR=/usr/lib/`.

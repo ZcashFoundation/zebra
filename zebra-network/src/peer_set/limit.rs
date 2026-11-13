@@ -5,7 +5,10 @@
 
 use std::{fmt, sync::Arc};
 
-use tokio::sync::mpsc;
+use crate::loom::sync::mpsc;
+
+#[cfg(all(test, zebra_loom))]
+mod loom_tests;
 
 /// A signal sent by a [`Connection`][1] when it opens or closes.
 ///
