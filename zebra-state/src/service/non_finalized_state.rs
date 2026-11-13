@@ -451,21 +451,17 @@ impl NonFinalizedState {
             let mut_side_chain = Arc::make_mut(&mut side_chain);
 
             // remove the first block from `chain`
-            let root_entries = mut_side_chain
-                .index_entries_by_height
-                .get(&best_chain_root.height)
-                .copied()
-                .unwrap_or_default();
+            //
+            // Popping the root separately from the best chain stops sharing its map paths.
+            mut_side_chain.detach_index_entries_at(best_chain_root.height);
             let (side_chain_root, _treestate) = mut_side_chain.pop_root();
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
 
-            // Popping the root separately from the best chain stopped sharing its map paths.
             // Rebuilding costs about the entries the chains don't share, so wait until the chain
-            // has detached that many.
-            mut_side_chain.detached_index_entries += root_entries;
+            // has removed that many separately since its last rebuild.
             if mut_side_chain
                 .divergent_index_entries(&shared_best_chain)
-                .is_some_and(|divergent| mut_side_chain.detached_index_entries >= divergent)
+                .is_some_and(|divergent| mut_side_chain.index_removals_since_rebuild >= divergent)
             {
                 mut_side_chain.share_indexes_with(&shared_best_chain);
             }
@@ -875,7 +871,7 @@ impl NonFinalizedState {
         let mut seen_blocks = HashSet::new();
         let mut entries = 0;
         for chain in &self.chain_set {
-            entries += chain.detached_index_entries;
+            entries += chain.detached_index_entry_count();
             for block in chain.blocks.values() {
                 if seen_blocks.insert(Arc::as_ptr(block)) {
                     entries += chain.block_index_entry_count(block);

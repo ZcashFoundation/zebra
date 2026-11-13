@@ -72,11 +72,21 @@ pub struct Chain {
     /// difficult with `Arc<Chain>`s.
     pub(super) last_fork_height: Option<Height>,
 
-    /// An estimate of the transaction, spend, and nullifier entries this chain no longer shares
-    /// with other chains, because it removed blocks from its maps separately from them.
+    /// Estimates of the transaction, spend, and nullifier entries this chain no longer shares
+    /// with other chains, because it removed blocks from its maps separately from them, or
+    /// rebuilt them. Keyed by the chain's tip height when the entries were detached.
+    ///
+    /// Once the chain finalizes past that height, it has removed every entry it held at the time,
+    /// rewriting the map paths it detached, so the estimate is retired.
     ///
     /// It is not checked for equality.
-    pub(crate) detached_index_entries: usize,
+    detached_index_entries: BTreeMap<block::Height, usize>,
+
+    /// The transaction, spend, and nullifier entries this chain removed separately from the best
+    /// chain since it last rebuilt its maps from it.
+    ///
+    /// It is not checked for equality.
+    pub(crate) index_removals_since_rebuild: usize,
 }
 
 /// Spending transaction id type when the `indexer` feature is selected.
@@ -320,7 +330,8 @@ impl Chain {
             network: network.clone(),
             inner,
             last_fork_height: None,
-            detached_index_entries: 0,
+            detached_index_entries: Default::default(),
+            index_removals_since_rebuild: 0,
         };
 
         chain.add_sprout_tree_and_anchor(finalized_tip_height, sprout_note_commitment_tree);
@@ -422,6 +433,12 @@ impl Chain {
         // Update cumulative data members.
         self.revert_chain_with(block.as_ref(), RevertPosition::Root);
 
+        if let Some(root_height) = self.blocks.keys().next().copied() {
+            self.detached_index_entries = self.detached_index_entries.split_off(&root_height);
+        } else {
+            self.detached_index_entries.clear();
+        }
+
         (block, treestate)
     }
 
@@ -465,11 +482,7 @@ impl Chain {
 
         // Revert blocks above the fork
         while forked.non_finalized_tip_hash() != fork_tip {
-            forked.detached_index_entries += forked
-                .index_entries_by_height
-                .get(&forked.non_finalized_tip_height())
-                .copied()
-                .unwrap_or_default();
+            forked.detach_index_entries_at(forked.non_finalized_tip_height());
             forked.pop_tip();
 
             forked.last_fork_height = Some(forked.non_finalized_tip_height());
@@ -1569,6 +1582,32 @@ impl Chain {
                 .unwrap_or_default()
     }
 
+    /// Records that this chain is about to remove the transaction, spend, and nullifier entries
+    /// of the block at `height` separately from other chains.
+    pub(crate) fn detach_index_entries_at(&mut self, height: Height) {
+        let entries = self
+            .index_entries_by_height
+            .get(&height)
+            .copied()
+            .unwrap_or_default();
+        *self
+            .detached_index_entries
+            .entry(self.non_finalized_tip_height())
+            .or_default() += entries;
+        self.index_removals_since_rebuild += entries;
+    }
+
+    /// Returns an estimate of the transaction, spend, and nullifier entries this chain doesn't
+    /// share with other chains.
+    ///
+    /// A chain can't hold more unshared entries than it has.
+    pub(crate) fn detached_index_entry_count(&self) -> usize {
+        self.detached_index_entries
+            .values()
+            .sum::<usize>()
+            .min(self.shared_map_entry_count())
+    }
+
     /// Returns the height of the highest block that this chain and `other` share, if they share
     /// their root block.
     fn common_tip_height(&self, other: &Chain) -> Option<Height> {
@@ -1683,8 +1722,17 @@ impl Chain {
         self.orchard_nullifiers = orchard_nullifiers;
         self.ironwood_nullifiers = ironwood_nullifiers;
 
-        // Removing `other`'s blocks copied the paths to their entries.
-        self.detached_index_entries = other.index_entries_above(common_tip);
+        // Removing `other`'s blocks copied the paths to their entries, and this chain's own
+        // entries above the common tip are now only in its maps. Other chains that contain those
+        // blocks may hold their own copies, so they are counted for each chain.
+        let tip_height = self
+            .non_finalized_tip_height()
+            .max(other.non_finalized_tip_height());
+        self.detached_index_entries = BTreeMap::from([(
+            tip_height,
+            other.index_entries_above(common_tip) + self.index_entries_above(common_tip),
+        )]);
+        self.index_removals_since_rebuild = 0;
     }
 
     /// Returns the number of entries in the transaction, spend, and nullifier indexes.

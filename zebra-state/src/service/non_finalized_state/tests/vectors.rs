@@ -1993,13 +1993,16 @@ fn finalizing_keeps_block_records_shared_between_chains() -> Result<()> {
 }
 
 /// Adds `count` transactions to `block`, each with one output that has no value.
-fn with_transactions(block: &Block, network: &Network, count: u32) -> Arc<Block> {
+///
+/// Blocks in the same chain need different `seed`s, so their transactions have different hashes.
+fn with_transactions(block: &Block, network: &Network, count: u32, seed: u8) -> Arc<Block> {
     let mut block = block.clone();
     let template = zebra_chain::transaction::Transaction::clone(&block.transactions[0])
         .with_transparent_inputs(Vec::new());
     for i in 0..count {
         let mut pub_key_hash = [0xaa; 20];
         pub_key_hash[..4].copy_from_slice(&i.to_le_bytes());
+        pub_key_hash[4] = seed;
         let output = transparent::Output {
             value: Amount::zero(),
             lock_script: transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash)
@@ -2039,7 +2042,7 @@ fn finalizing_keeps_side_chain_indexes_shared() -> Result<()> {
 
     let network = Network::new_default_testnet();
     let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
-    let funding = with_transactions(&block1.make_fake_child(), &network, 50);
+    let funding = with_transactions(&block1.make_fake_child(), &network, 50, 0);
     let outpoints: Vec<_> = funding.transactions[1..]
         .iter()
         .map(|transaction| transparent::OutPoint {
@@ -2078,6 +2081,131 @@ fn finalizing_keeps_side_chain_indexes_shared() -> Result<()> {
     Ok(())
 }
 
+/// Forks above a transaction-dense side-branch block each keep their own copy of its entries
+/// after rebuilding their maps from the best chain, so the state counts every copy.
+#[test]
+fn rebuilt_forks_count_their_side_branch_entries() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy_root = with_transactions(&block1.make_fake_child(), &network, 2_000, 0);
+    let common = busy_root.make_fake_child();
+    let best = common.make_fake_child();
+    let dense_side = with_transactions(&common.make_fake_child(), &network, 500, 1).set_work(10);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in [&busy_root, &common, &best, &dense_side] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+    }
+    for i in 0..3u8 {
+        let tip = dense_side
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(tip.prepare(), &finalized_state)?;
+    }
+    assert_eq!(4, state.chain_count());
+
+    // Popping the busy root separately is enough to rebuild every side chain.
+    state.finalize();
+    state.finalize();
+    assert_eq!(4, state.chain_count());
+
+    let best_tip = state.best_tip().unwrap().1;
+    let mut side_entries = 0;
+    for chain in state.chain_iter() {
+        if chain.non_finalized_tip_hash() == best_tip {
+            continue;
+        }
+        assert_eq!(chain.index_removals_since_rebuild, 0);
+        assert!(chain.detached_index_entry_count() > 500);
+        side_entries += chain.detached_index_entry_count();
+    }
+    assert!(state.index_entry_count() > side_entries + 500);
+
+    Ok(())
+}
+
+/// A side chain that rebuilt its maps from a transaction-dense best chain waits for as many new
+/// removals as the chains' divergent entries before rebuilding again.
+#[test]
+fn small_side_chain_rebuilds_after_enough_removals() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy_root = with_transactions(&block1.make_fake_child(), &network, 2_000, 0);
+    let common = busy_root.make_fake_child();
+    let dense_best = with_transactions(&common.make_fake_child(), &network, 500, 1);
+    let small_side = common.make_fake_child().set_work(10);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in [&busy_root, &common, &dense_best, &small_side] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+    }
+    assert_eq!(2, state.chain_count());
+
+    let side_chain = |state: &NonFinalizedState| {
+        state
+            .chain_iter()
+            .find(|chain| chain.non_finalized_tip_hash() == small_side.hash())
+            .unwrap()
+            .clone()
+    };
+
+    state.finalize();
+    state.finalize();
+    assert_eq!(side_chain(&state).index_removals_since_rebuild, 0);
+
+    // Removing the small common block doesn't pay for another rebuild.
+    assert_eq!(state.finalize().inner_block().hash(), common.hash());
+    let side = side_chain(&state);
+    assert!(side.index_removals_since_rebuild > 0);
+    // Removing the best chain's dense block didn't leave the small chain holding its entries.
+    assert!(side.detached_index_entry_count() < 10);
+
+    Ok(())
+}
+
+/// A fork that becomes the best chain stops counting the entries it detached when it forked, once
+/// it finalizes every block it held then.
+#[test]
+fn detached_index_entries_retire_after_finalization() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child();
+    let old3 = block2.make_fake_child();
+    let old4 = old3.make_fake_child();
+    let new3 = block2.make_fake_child().set_block_commitment([1; 32]);
+    let new4 = new3.make_fake_child();
+    let new5 = new4.make_fake_child();
+    let new6 = new5.make_fake_child();
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in [&block2, &old3, &old4, &new3, &new4, &new5, &new6] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+    }
+    assert_eq!(state.best_tip().unwrap().1, new6.hash());
+    assert!(state.best_chain().unwrap().detached_index_entry_count() > 0);
+
+    for finalized in [&block1, &block2, &new3] {
+        assert_eq!(state.finalize().inner_block().hash(), finalized.hash());
+    }
+    // The fork detached entries while it held `old4`'s height.
+    assert!(state.best_chain().unwrap().detached_index_entry_count() > 0);
+
+    assert_eq!(state.finalize().inner_block().hash(), new4.hash());
+    assert_eq!(state.best_chain().unwrap().detached_index_entry_count(), 0);
+
+    Ok(())
+}
+
 /// Forks over a busy block share its transactions and created outputs, so the state counts them
 /// once.
 #[test]
@@ -2090,6 +2218,7 @@ fn index_entries_count_shared_blocks_once() -> Result<()> {
         &busy_child(&block1, &block1, &network, 5_000, 50),
         &network,
         1_000,
+        0,
     );
     let (mut state, finalized_state) = new_invalidate_test_state(&network);
     state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
@@ -2135,7 +2264,7 @@ fn index_entries_count_shared_blocks_once() -> Result<()> {
         .sum();
     let detached: usize = state
         .chain_iter()
-        .map(|chain| chain.detached_index_entries)
+        .map(|chain| chain.detached_index_entry_count())
         .sum();
     assert!(block_entries > 6_000);
     assert_eq!(state.index_entry_count(), block_entries + detached);
