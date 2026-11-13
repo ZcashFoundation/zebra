@@ -67,9 +67,10 @@ panics. Each time, it sends:
   steady value;
 - for each histogram, at most 20 of the values recorded since the previous
   minute for each set of labels, as distributions. When more values were
-  recorded, Zebra picks 20 spread across the minute. Histograms recorded about
-  once per block near the chain tip, such as
-  `zcash.chain.tip.block_delay_seconds`, send every value.
+  recorded, Zebra picks 20 of them at random, each value as likely as any
+  other, and keeps only those while it records. Histograms recorded about once
+  per block near the chain tip, such as `zcash.chain.tip.block_delay_seconds`,
+  send every value.
 
 Each minute sends at most 1,500 metrics. The Sentry SDK sends metrics in
 envelopes of 100, and queues at most 30 envelopes for events, logs, release
