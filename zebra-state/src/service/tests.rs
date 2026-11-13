@@ -353,7 +353,11 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
 
     runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(10), async {
-            let (state, read_state, _, _) = crate::init_test_services(&Network::Mainnet).await;
+            // Only a child of the committed tip reserves the slot.
+            let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+                .zcash_deserialize_into::<Arc<Block>>()
+                .expect("the test vector is a valid block");
+            let (state, read_state, _, _) = populated_state([genesis], &Network::Mainnet).await;
             let ReadResponse::MiningCandidateChanges(subscription) = read_state
                 .clone()
                 .oneshot(ReadRequest::MiningCandidateChanges)
@@ -362,7 +366,7 @@ fn cancelled_mining_candidate_keeps_queued_computation_bounded() {
             else {
                 panic!("expected a persistent mining subscription");
             };
-            let block = zebra_test::vectors::BLOCK_MAINNET_419200_BYTES
+            let block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
                 .zcash_deserialize_into::<Arc<Block>>()
                 .expect("the test vector is a valid block");
 
@@ -532,6 +536,67 @@ async fn mining_candidate_slot_is_held_until_verification_finishes() {
     })
     .await
     .expect("candidate expiry must not release the slot before verification finishes");
+}
+
+/// A block whose parent is not the committed tip can never be published, so it doesn't reserve
+/// the candidate slot while its verification waits for the parent.
+#[tokio::test]
+async fn mining_candidate_with_a_missing_parent_does_not_reserve_the_slot() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let network = Network::Mainnet;
+        let genesis = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+            .zcash_deserialize_into::<Arc<Block>>()
+            .unwrap();
+        let (state, read_state, _, _) = populated_state([genesis], &network).await;
+        let ReadResponse::ChainInfo(context) = read_state
+            .clone()
+            .oneshot(ReadRequest::ChainInfo)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return chain info");
+        };
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+            .zcash_deserialize_into::<Block>()
+            .unwrap();
+        let header = Arc::make_mut(&mut block.header);
+        header.time = context.min_time.into();
+        header.difficulty_threshold = context.expected_difficulty;
+        let block = Arc::new(block);
+        let ReadResponse::MiningCandidateChanges(_changes) = read_state
+            .oneshot(ReadRequest::MiningCandidateChanges)
+            .await
+            .unwrap()
+        else {
+            panic!("state must return a candidate subscription");
+        };
+
+        let mut orphan = (*block).clone();
+        Arc::make_mut(&mut orphan.header).previous_block_hash = block::Hash([0xab; 32]);
+        let orphan_response = state
+            .clone()
+            .oneshot(Request::MiningCandidate(Arc::new(orphan)))
+            .await
+            .unwrap();
+        assert!(
+            matches!(orphan_response, Response::MiningCandidate(None)),
+            "a block with a missing parent must not reserve the slot"
+        );
+
+        // The orphan's response is still held, as a verifier holds it until the commit ends.
+        assert!(matches!(
+            state
+                .oneshot(Request::MiningCandidate(block))
+                .await
+                .unwrap(),
+            Response::MiningCandidate(Some(_))
+        ));
+        drop(orphan_response);
+    })
+    .await
+    .expect("candidate admission should finish within the timeout");
 }
 
 /// A live verifier cannot authorize a candidate after its sibling becomes the committed tip.

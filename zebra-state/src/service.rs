@@ -1339,6 +1339,14 @@ impl Service<Request> for StateService {
                 if !self.read_service.mining_candidate_is_allowed(hash) {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
+                // Only a child of the committed tip can be published, and the slot is held until
+                // verification ends. A block with a missing parent can wait in the queue for a long
+                // time, so it must not reserve the slot.
+                if self.read_service.best_tip().map(|(_, tip)| tip)
+                    != Some(block.header.previous_block_hash)
+                {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
                 let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 };
