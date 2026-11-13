@@ -3733,6 +3733,55 @@ async fn v2_listener_answers_attempts_beyond_its_accept_rate_at_once() {
     listener_task.abort();
 }
 
+/// The version 2 listener's per-IP limits count an IPv6 address by its `/48`, so one site's
+/// allocation cannot take a slot for each of its 65,536 `/64`s, and an IPv4 address by itself.
+#[test]
+fn v2_inbound_limits_group_ipv6_by_48() {
+    let ip = |addr: &str| addr.parse::<IpAddr>().expect("a valid IP address");
+
+    let group = ip("2001:db8:1::");
+    for same_group in [
+        "2001:db8:1::1",
+        "2001:db8:1:1::1",
+        "2001:db8:1:ffff:ffff:ffff:ffff:ffff",
+    ] {
+        assert_eq!(v2::inbound_group(ip(same_group)), group, "{same_group}");
+    }
+    assert_ne!(v2::inbound_group(ip("2001:db8:2::1")), group);
+    // IPv4 addresses are their own groups, whichever way they are written.
+    assert_eq!(v2::inbound_group(ip("192.0.2.1")), ip("192.0.2.1"));
+    assert_eq!(v2::inbound_group(ip("::ffff:192.0.2.1")), ip("192.0.2.1"));
+    assert_ne!(v2::inbound_group(ip("192.0.2.2")), ip("192.0.2.1"));
+
+    // An attempt is only recent for an instant here, so only the open connections limit.
+    let mut groups = v2::InboundGroups::new(1, Some(Duration::ZERO));
+    let first = ip("2001:db8:1:1::1");
+    let other_64 = ip("2001:db8:1:2::1");
+    let other_48 = ip("2001:db8:2:1::1");
+    assert!(!groups.is_full(first));
+    let opened = groups.opened(first);
+    assert_eq!(opened, group);
+    assert!(
+        groups.is_full(other_64),
+        "another /64 of the same /48 shares its connection limit"
+    );
+    assert!(!groups.is_full(other_48));
+    assert!(!groups.is_full(ip("192.0.2.1")));
+    groups.closed(opened);
+    assert!(!groups.is_full(other_64));
+
+    // Recent attempts are counted by the same group.
+    let mut groups = v2::InboundGroups::new(1, None);
+    assert!(!groups.is_past_recent_limit_or_add(first));
+    assert!(
+        groups.is_past_recent_limit_or_add(other_64),
+        "another /64 of the same /48 shares its rate limit"
+    );
+    assert!(!groups.is_past_recent_limit_or_add(other_48));
+    assert!(!groups.is_past_recent_limit_or_add(ip("192.0.2.1")));
+    assert!(groups.is_past_recent_limit_or_add(ip("::ffff:192.0.2.1")));
+}
+
 /// The version 2 listener refuses a second connection from the same IP, like the legacy one.
 #[tokio::test]
 async fn v2_listener_refuses_connections_past_per_ip_limit() {

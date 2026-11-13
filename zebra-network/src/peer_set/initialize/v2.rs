@@ -7,7 +7,7 @@
 //! legacy listener and connector feed, so the peer set treats version 2
 //! peers like any other.
 
-use std::{collections::HashMap, pin::pin, sync::OnceLock, time::Duration};
+use std::{collections::HashMap, net::IpAddr, pin::pin, sync::OnceLock, time::Duration};
 
 use futures::{sink::SinkExt, FutureExt};
 use indexmap::{IndexMap, IndexSet};
@@ -48,7 +48,9 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker, InventoryChange,
     },
     protocol::{
-        external::{canonical_peer_addr, types::PeerServices, MAX_USER_AGENT_LENGTH},
+        external::{
+            canonical_peer_addr, connection_limit_key, types::PeerServices, MAX_USER_AGENT_LENGTH,
+        },
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
@@ -66,6 +68,80 @@ type OpenInbound = HashMap<PeerSocketAddr, usize>;
 /// that dial at the same moment, such as this node's configured peers after it restarts, are
 /// all answered within their connect timeouts instead of one per interval.
 pub(super) const INBOUND_ACCEPT_BURST: u32 = 4;
+
+/// The group the version 2 listener's per-IP limits count an inbound peer's address in: the
+/// address itself for IPv4, and the `/48` prefix for IPv6.
+///
+/// # Security
+///
+/// The legacy limits group IPv6 addresses by `/64` (see [`connection_limit_key`]), but a `/48`
+/// is a common allocation for one site, and holds 65,536 of them: whoever has one could take
+/// every inbound slot, each from its own `/64`. Inbound version 2 connections are only limited
+/// here, so the wider group costs nothing elsewhere; nodes that share a `/48` share its limit.
+pub(super) fn inbound_group(ip: IpAddr) -> IpAddr {
+    match connection_limit_key(ip) {
+        IpAddr::V6(v6) => {
+            let mut octets = v6.octets();
+            octets[6..].fill(0);
+            IpAddr::V6(octets.into())
+        }
+        ipv4 @ IpAddr::V4(_) => ipv4,
+    }
+}
+
+/// The inbound version 2 connections and recent connection attempts of each [`inbound_group`],
+/// which the listener limits to the configured connections per IP.
+pub(super) struct InboundGroups {
+    /// The most connections one group may have open or handshaking at once, and the most
+    /// attempts it may make per reconnection delay.
+    max_per_group: usize,
+    /// The recent attempts of each group.
+    recent: recent_by_ip::RecentByIp,
+    /// The number of connections each group has open or handshaking.
+    open: HashMap<IpAddr, usize>,
+}
+
+impl InboundGroups {
+    /// Returns the limits for `max_per_group` connections per group, counting an attempt as
+    /// recent for `recent_time_limit`, or for the reconnection delay if it is `None`.
+    pub(super) fn new(max_per_group: usize, recent_time_limit: Option<Duration>) -> Self {
+        InboundGroups {
+            max_per_group,
+            recent: recent_by_ip::RecentByIp::new(recent_time_limit, Some(max_per_group)),
+            open: HashMap::new(),
+        }
+    }
+
+    /// Returns `true` if the group of `ip` already has as many connections as it may.
+    pub(super) fn is_full(&self, ip: IpAddr) -> bool {
+        self.open.get(&inbound_group(ip)).copied().unwrap_or(0) >= self.max_per_group
+    }
+
+    /// Returns `true` if the group of `ip` has made as many recent attempts as it may, and
+    /// counts this one if not.
+    pub(super) fn is_past_recent_limit_or_add(&mut self, ip: IpAddr) -> bool {
+        // The group's address is its own `/64` key, so the legacy grouping keeps it as it is.
+        self.recent.is_past_limit_or_add(inbound_group(ip))
+    }
+
+    /// Counts a connection from `ip`, and returns its group, which [`Self::closed`] takes when
+    /// the connection ends.
+    pub(super) fn opened(&mut self, ip: IpAddr) -> IpAddr {
+        let group = inbound_group(ip);
+        *self.open.entry(group).or_default() += 1;
+        group
+    }
+
+    /// Stops counting a connection of `group`.
+    pub(super) fn closed(&mut self, group: IpAddr) {
+        if let Some(count) = self.open.get_mut(&group) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.open.remove(&group);
+            }
+        }
+    }
+}
 
 /// What every version 2 connection attempt shares.
 #[derive(Clone)]
@@ -307,8 +383,10 @@ where
 /// Accepts inbound version 2 connections, handshakes with them, and sends
 /// the resulting clients to the peer set.
 ///
-/// Applies the same ban list and per-IP rate limit as the legacy listener,
-/// and this transport's share of the inbound connection limit.
+/// Applies the same ban list as the legacy listener, this transport's share
+/// of the inbound connection limit, and the per-IP connection and rate
+/// limits, which count an IPv6 address by its `/48` here (see
+/// [`inbound_group`]).
 ///
 /// # Security
 ///
@@ -334,11 +412,11 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(shared.max_connections_per_ip));
+    let mut inbound_groups = InboundGroups::new(shared.max_connections_per_ip, None);
     let mut active_inbound_connections =
         ActiveConnectionCounter::new_counter_with(shared.inbound_limit, "Inbound v2 Connections");
-    let mut handshakes: JoinSet<()> = JoinSet::new();
+    // Each task returns its connection's group when the connection ends.
+    let mut handshakes: JoinSet<IpAddr> = JoinSet::new();
     let mut accept_rate = TokenBucket::new(
         shared.inbound_interval,
         INBOUND_ACCEPT_BURST,
@@ -349,9 +427,13 @@ where
         let incoming = tokio::select! {
             biased;
             finished = handshakes.join_next(), if !handshakes.is_empty() => {
-                let _ = finished
+                // A cancelled task has no group to stop counting, and the listener cancels none.
+                if let Ok(group) = finished
                     .expect("the handshake set is not empty")
-                    .panic_if_task_has_panicked();
+                    .panic_if_task_has_panicked()
+                {
+                    inbound_groups.closed(group);
+                }
                 continue;
             }
             incoming = shared.endpoint.accept() => incoming,
@@ -393,8 +475,9 @@ where
         // the rate for everyone else.
         let now = Instant::now();
         if active_inbound_connections.update_count() >= shared.inbound_limit
+            || inbound_groups.is_full(addr.ip())
             || !accept_rate.is_available(now)
-            || recent_inbound_connections.is_past_limit_or_add(addr.ip())
+            || inbound_groups.is_past_recent_limit_or_add(addr.ip())
         {
             record_inbound_connection_rejected(&shared.network, addr, "capacity_or_rate_limited");
             incoming.refuse();
@@ -404,6 +487,7 @@ where
         let took_token = accept_rate.try_take(now);
         debug_assert!(took_token, "a token was available at the same instant");
 
+        let group = inbound_groups.opened(addr.ip());
         let connection_tracker = active_inbound_connections.track_connection();
         // The transport handshake has already started; the application deadline runs from here,
         // which is as close to the connection's establishment as this loop can get.
@@ -462,6 +546,7 @@ where
                         }
                     });
                 }
+                group
             }
             .in_current_span(),
         );

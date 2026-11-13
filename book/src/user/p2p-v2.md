@@ -73,7 +73,10 @@ peers are not recorded there (see below).
   seconds, by not reading further announcements until then, and ignores an
   announced header that fails the proof-of-work difficulty check.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
-  inbound and outbound limits of half the legacy ones. Protocol violations
+  inbound and outbound limits of half the legacy ones. For inbound version 2
+  connections, `max_connections_per_ip` and the limit of one connection
+  attempt per reconnection delay count an IPv6 address by its `/48` prefix,
+  not its `/64`, so nodes in the same `/48` share them. Protocol violations
   close the connection with the draft's error codes. Zebra does not let a
   peer move a connection to another address (QUIC connection migration), so
   the bans and limits keep applying to the address the peer connected from. A
