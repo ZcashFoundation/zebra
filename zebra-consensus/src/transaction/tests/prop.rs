@@ -384,15 +384,14 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
 ///   to be converted into a block height between zero and `block_height` (see
 ///   [`scale_block_height`] for details) to serve as the block height that created the input UTXO
 /// - `transaction_version`: a value that's either `4` or `5` indicating the transaction version to
-///   be generated; this value is sanitized by [`sanitize_transaction_version`], so it may not be
-///   able to create a V5 transaction if the `block_height` is before the NU5 activation height
+///   be generated; [`sanitize_transaction_version`] selects V4 from Sapling until NU5, V5 from NU7
+///   onward, and preserves either version between NU5 and NU7
 /// - `lock_time`: the transaction lock time to be used (note that all transparent inputs have a
 ///   sequence number of `0`, so the lock time is enabled by default)
 ///
 /// # Panics
 ///
-/// - if `transaction_version` is not `4` or `5` (the only transaction versions that are currently
-///   supported by the transaction verifier)
+/// - if the sanitized transaction version is not `4` or `5`
 /// - if `relative_source_heights` has more than `u32::MAX` items (see
 ///   [`mock_transparent_transfers`] for details)
 /// - if any item of `relative_source_heights` is not in the range `0.0..1.0` (see
@@ -426,17 +425,21 @@ fn mock_transparent_transaction(
     (transaction, known_utxos)
 }
 
-/// Sanitize a transaction version so that it is supported at the specified `block_height` of the
-/// `network`.
+/// Sanitize a V4 or V5 transaction version so that it is supported at the specified `block_height`
+/// of the `network`.
 ///
-/// The `transaction_version` might be reduced if it is not supported by the network upgrade active
-/// at the `block_height` of the specified `network`.
+/// The version is reduced to V4 between Sapling and NU5 and raised to V5 from NU7 onward.
 fn sanitize_transaction_version(
     network: &Network,
     transaction_version: u8,
     block_height: block::Height,
 ) -> (u8, NetworkUpgrade) {
     let network_upgrade = NetworkUpgrade::current(network, block_height);
+    let min_version = if network_upgrade >= NetworkUpgrade::Nu7 {
+        5
+    } else {
+        1
+    };
 
     let max_version = {
         use NetworkUpgrade::*;
@@ -446,7 +449,6 @@ fn sanitize_transaction_version(
             BeforeOverwinter => 2,
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
-            // FIXME: Use 6 for Nu7
             Nu5 | Nu6 | Nu6_1 | Nu6_2 | Nu6_3 | Nu7 => 5,
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -454,7 +456,7 @@ fn sanitize_transaction_version(
         }
     };
 
-    let sanitized_version = transaction_version.min(max_version);
+    let sanitized_version = transaction_version.clamp(min_version, max_version);
 
     (sanitized_version, network_upgrade)
 }

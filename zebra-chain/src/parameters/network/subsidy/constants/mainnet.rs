@@ -6,9 +6,11 @@ use crate::parameters::{
     constants::activation_heights,
     network::{Amount, Height, NonNegative},
     subsidy::{
-        constants::POST_NU6_FUNDING_STREAM_NUM_BLOCKS, FundingStreamReceiver,
-        FundingStreamRecipient, FundingStreams,
+        constants::POST_NU6_FUNDING_STREAM_NUM_BLOCKS, funding_stream_address_period,
+        nu7_funding_stream_end_height, FundingStreamReceiver, FundingStreamRecipient,
+        FundingStreams,
     },
+    Network, NetworkUpgrade,
 };
 
 /// The start height of post-NU6 funding streams on Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
@@ -177,10 +179,29 @@ pub(crate) const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES: [&str;
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub(crate) const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES: usize = 36;
 
-/// List of addresses for the Major Grants post-NU6.1 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
-pub(crate) const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES: [&str;
-    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES] =
-    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES];
+/// ZIP 2008 rotates only periods following the one containing the last pre-NU7 block.
+fn post_nu6_1_funding_stream_fpf_addresses(
+    network: &Network,
+) -> [&'static str; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES] {
+    let mut addresses =
+        ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES];
+    if let Some(activation) = NetworkUpgrade::Nu7.activation_height(network) {
+        let last_pre_nu7 = activation
+            .previous()
+            .expect("Mainnet NU7 activates after genesis");
+        let first_rotated = usize::try_from(
+            funding_stream_address_period(last_pre_nu7, network)
+                - funding_stream_address_period(activation_heights::mainnet::NU6_1, network)
+                + 1,
+        )
+        .expect("Mainnet NU7 activates after the revision-2 funding stream starts");
+        // If the stream has already expired, there are no remaining addresses to rotate.
+        if let Some(remaining) = addresses.get_mut(first_rotated..) {
+            remaining.fill("t1MkHnkxVjNpNbCrSs3AJ8J7ZSp6NTYiUcG");
+        }
+    }
+    addresses
+}
 
 lazy_static! {
     /// The funding streams for Mainnet as described in:
@@ -226,7 +247,11 @@ lazy_static! {
         },
 
         FundingStreams {
-            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
+            height_range: activation_heights::mainnet::NU6_1
+                ..nu7_funding_stream_end_height(
+                    Height(4_406_400),
+                    NetworkUpgrade::Nu7.activation_height(&Network::Mainnet),
+                ),
             recipients: [
                 (
                     FundingStreamReceiver::Deferred,
@@ -234,7 +259,10 @@ lazy_static! {
                 ),
                 (
                     FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES),
+                    FundingStreamRecipient::new(
+                        8,
+                        post_nu6_1_funding_stream_fpf_addresses(&Network::Mainnet),
+                    ),
                 ),
             ]
             .into_iter()
@@ -243,3 +271,6 @@ lazy_static! {
     ];
 
 }
+
+#[cfg(test)]
+mod tests;

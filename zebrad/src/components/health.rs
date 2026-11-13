@@ -300,6 +300,27 @@ where
     }
 }
 
+/// Checks the request limit, reading the clock only after the counter reaches the limit.
+fn allow_request(
+    num_recent_requests: &mut usize,
+    last_request_count_reset_time: &mut Instant,
+    now: impl FnOnce() -> Instant,
+) -> bool {
+    if *num_recent_requests < MAX_RECENT_REQUESTS {
+        *num_recent_requests += 1;
+        return true;
+    }
+
+    let now = now();
+    if now.duration_since(*last_request_count_reset_time) > RECENT_REQUEST_INTERVAL {
+        *num_recent_requests = 0;
+        *last_request_count_reset_time = now;
+        true
+    } else {
+        false
+    }
+}
+
 async fn run_health_server<SyncStatus>(
     listener: tokio::net::TcpListener,
     shared: Arc<HealthCtx<SyncStatus>>,
@@ -315,13 +336,12 @@ async fn run_health_server<SyncStatus>(
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                if num_recent_requests < MAX_RECENT_REQUESTS {
-                    num_recent_requests += 1;
-                } else if last_request_count_reset_time.elapsed() > RECENT_REQUEST_INTERVAL {
-                    num_recent_requests = 0;
-                    last_request_count_reset_time = Instant::now();
-                } else {
-                    // Drop the request if there have been too many recent requests
+                if !allow_request(
+                    &mut num_recent_requests,
+                    &mut last_request_count_reset_time,
+                    Instant::now,
+                ) {
+                    // Drop the request if there have been too many recent requests.
                     continue;
                 }
 

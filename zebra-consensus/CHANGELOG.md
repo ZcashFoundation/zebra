@@ -5,6 +5,40 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [18.0.0] - 2026-10-22
+
+### Breaking Changes
+
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0, `zcash_transparent` to 0.11.0 and `zcash_protocol` to 0.11.0 ([#11614](https://github.com/ZcashFoundation/zebra/pull/11614), [#11784](https://github.com/ZcashFoundation/zebra/pull/11784), [#11877](https://github.com/ZcashFoundation/zebra/pull/11877)).
+- Updated to the new major versions of `zebra-chain`, `zebra-state`, `zebra-script` and `zebra-node-services`, whose types appear in the public API.
+
+### Changed
+
+- `CheckpointVerifier` queues the children of a checkpoint block that failed to commit again, so only the invalid block needs to be submitted again. It sends verified blocks to the state in height order, and ignores late commit failures from before its last reset.
+- Raised the MSRV to 1.89.
+
+### Fixed
+
+- `tx_transparent_coinbase_spends_maturity()` computes the transaction's coinbase spend restriction once instead of once per spent outpoint, removing an O(inputs × outputs) cost.
+
+### Security
+
+- `CheckpointVerifier` now resets its progress to the state tip after a failed checkpoint block commit even if the caller dropped the verify future ([GHSA-2w9f-9wx8-f5c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2w9f-9wx8-f5c8)).
+- Converted failed transparent script checks into `TransactionError::Script`, so they get its misbehaviour score of 100. Previously, every transparent script failure became an unscored `InternalDowncastError` ([GHSA-jq45-ghw5-v37x](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x)).
+
+## [17.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- [ZIP 218](https://zips.z.cash/zip-0218) shielded action limits, enforced from NU7 activation before coinbase output recovery: at most 330 actions per Orchard or Ironwood pool, 300 Sapling inputs plus outputs, and zero Sprout JoinSplits per block. The shared budget requires Orchard actions + Ironwood actions + Sapling inputs and outputs + twice the JoinSplit count to be at most 330. Adds `block::check::shielded_action_limits_are_valid`, `block::{ORCHARD_BLOCK_ACTION_LIMIT, SAPLING_BLOCK_IO_LIMIT, SPROUT_BLOCK_JOIN_SPLIT_LIMIT, GLOBAL_SHIELDED_BUDGET}`, and shared `block::ShieldedActionCounts` accounting for template builders. Struct literals must include the public `ironwood_actions` field; exhaustive error matches must handle `BlockError::TooManyShieldedActions`. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- Removed `block::subsidy` and the crate-root `funding_stream_address` re-export. Use `zebra_chain::parameters::subsidy::funding_stream_address` ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- Exhaustive matches on `error::TransactionError` must handle the new `TooManyShieldedActions { pool, count, limit }` variant. NU7 mempool admission rejects transactions exceeding a ZIP 218 block budget before state access or proof verification; these policy rejections have zero peer misbehavior score ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Updated `zcash_primitives` and `zcash_proofs` to 0.31.0-pre.0 for NU7, along with `orchard` 0.16, `sapling-crypto` 0.9, `halo2_proofs` 0.4, `bellman` 0.15, `bls12_381` 0.9, `jubjub` 0.11, `reddsa` 0.6, `redjubjub` 0.9, `zcash_script` 0.6 and `libzcash_script` 0.2. Groth16 types now come from the `groth16` 0.2 crate instead of `bellman::groth16`, so `groth16::Item` converts from `groth16::batch::Item` and `groth16::SPROUT` holds `groth16` verifying keys. `ed25519::Item` is built from `ed25519-zebra` 5.0.0 types ([#11559](https://github.com/ZcashFoundation/zebra/pull/11559)).
+
+### Changed
+
+- From the configured NSM reissuance height, block verification leaves subsidy, funding-stream, and miner-fee validation to contextual state verification against the exact parent NSM balance; before that height semantic verification retains those checks ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+
 ## [16.0.0] - 2026-09-23
 
 ### Breaking Changes

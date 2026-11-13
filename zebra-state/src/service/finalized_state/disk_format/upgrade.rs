@@ -4,6 +4,7 @@ use std::{
     cmp::Ordering,
     sync::Arc,
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
@@ -110,7 +111,13 @@ fn format_upgrades(
         // and the genesis Ironwood anchor is missing for NU6.3 anchor validation). This is a
         // major-version upgrade that is restorable from the previous major database format version.
         Box::new(add_ironwood_tree::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        // Legacy value pools and block info default the absent NSM balance to zero, so existing
+        // records need no rewrite even though new writes use the wider v29 layout.
+        Box::new(no_migration::NoMigration::new(
+            "add NSM value balance",
+            Version::new(29, 0, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 7])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -856,6 +863,17 @@ impl DbFormatChangeThreadHandle {
     /// This method should be called during shutdown.
     pub fn wait_for_panics(&mut self) {
         self.update_task.wait_for_panics();
+    }
+
+    /// Wait for the spawned thread to exit, without joining it, so that other handles can still
+    /// check it for panics.
+    pub fn wait_for_exit(&self) {
+        if let Some(update_task) = self.update_task.as_ref() {
+            // Every handle shares the thread's `JoinHandle`, so none of them can join it.
+            while !update_task.is_finished() {
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 }
 

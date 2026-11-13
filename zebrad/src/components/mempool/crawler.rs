@@ -56,7 +56,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;
@@ -76,8 +76,9 @@ const FANOUT: usize = 3;
 
 /// The delay between crawl events.
 ///
-/// This should be less than the target block interval,
-/// so that we crawl peer mempools at least once per block.
+/// This must stay above `zebra_network`'s `DEFAULT_CRAWL_NEW_PEER_INTERVAL` plus `HANDSHAKE_TIMEOUT`,
+/// so address crawls, new connections, and mempool crawls stay ordered. It does not track the
+/// block interval.
 ///
 /// Using a prime number makes sure that mempool crawler fanouts
 /// don't synchronise with other crawls.

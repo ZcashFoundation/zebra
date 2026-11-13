@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "6.4.2"
+version = "7.0.0"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -81,11 +81,6 @@ internal-miner = [
     "zebra-rpc/internal-miner",
 ]
 
-# Experimental elasticsearch indexing
-elasticsearch = [
-    "zebra-state/elasticsearch",
-]
-
 # Tracing and monitoring
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
@@ -100,7 +95,7 @@ progress-bar = [
     "zebra-network/progress-bar",
 ]
 
-prometheus = ["metrics-exporter-prometheus"]
+prometheus = ["metrics-exporter-prometheus", "metrics-util"]
 
 # Production features that modify dependency behaviour
 
@@ -157,24 +152,24 @@ tokio-console = ["console-subscriber"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "13.0.1" }
-zebra-consensus = { path = "../zebra-consensus", version = "16.0.0" }
-zebra-network = { path = "../zebra-network", version = "13.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "11.0.0", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "17.0.0" }
-zebra-state = { path = "../zebra-state", version = "14.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "15.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "18.0.0" }
+zebra-network = { path = "../zebra-network", version = "15.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "13.0.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "19.0.0" }
+zebra-state = { path = "../zebra-state", version = "16.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "12.0.0" }
+zebra-script = { path = "../zebra-script", version = "14.0.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "10.0.2", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "10.0.4", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
-chrono = { workspace = true, features = ["clock", "std"] }
+chrono = { workspace = true }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true }
 lazy_static = { workspace = true }
@@ -185,7 +180,6 @@ toml = { workspace = true }
 futures = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process"] }
-tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
 
@@ -196,7 +190,6 @@ thiserror = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tracing-appender = { workspace = true }
 tracing-error = { workspace = true }
-tracing-futures = { workspace = true }
 tracing = { workspace = true }
 
 metrics = { workspace = true }
@@ -221,14 +214,13 @@ hyper-util = { workspace = true, features = ["service", "server", "tokio"] }
 # Configuration management
 config = { workspace = true }
 
-num-integer = { workspace = true }
 rand = { workspace = true }
 
 # prod feature internal-miner
 thread-priority = { workspace = true, optional = true }
 
 # prod feature sentry
-sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"], optional = true }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "metrics", "rustls", "tracing", "ureq"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { workspace = true, optional = true }
@@ -248,6 +240,7 @@ bytes = { workspace = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
+metrics-util = { workspace = true, optional = true }
 
 # prod feature release_max_level_info
 #
@@ -276,21 +269,14 @@ tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
-anyhow = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
-once_cell = { workspace = true }
 regex = { workspace = true }
-insta = { workspace = true, features = ["json"] }
-bytes = { workspace = true }
-http-body-util = { workspace = true }
-hyper-util = { workspace = true }
+insta = { workspace = true, features = ["json", "redactions"] }
 strum = { workspace = true }
-strum_macros = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
-tempfile = { workspace = true }
 
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
@@ -298,7 +284,8 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
 
-zcash_keys = { workspace = true }
+# test feature sentry
+sentry = { workspace = true, features = ["test"] }
 
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
@@ -308,13 +295,11 @@ tonic-prost = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 
-# enable span traces and track caller in tests
-color-eyre = { workspace = true }
-
-zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", features = ["proptest-impl", "json-conversion"] }
 zebra-consensus = { path = "../zebra-consensus", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", features = ["proptest-impl"] }
+zebra-node-services = { path = "../zebra-node-services", features = ["rpc-client"] }
 
 zebra-test = { path = "../zebra-test" }
 

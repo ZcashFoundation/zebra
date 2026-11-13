@@ -16,8 +16,7 @@
 
 use group::{
     ff::{FromUniformBytes, PrimeField},
-    prime::PrimeCurveAffine,
-    GroupEncoding,
+    CurveAffine, GroupEncoding,
 };
 use halo2::pasta::pallas;
 use nonempty::NonEmpty;
@@ -25,6 +24,7 @@ use nonempty::NonEmpty;
 use orchard::{
     bundle::{Authorized, BundleVersion, Flags},
     note::{ExtractedNoteCommitment, Nullifier, TransmittedNoteCiphertext},
+    note_encryption::NoteBytesData,
     primitives::redpallas::{self, SpendAuth},
     value::ValueCommitment,
     Action, Anchor, Bundle, Proof,
@@ -57,7 +57,7 @@ fn scalar_from_seed(seed: u64) -> pallas::Scalar {
 /// rather than picking bytes directly.
 fn verification_key_from_seed(seed: u64) -> redpallas::VerificationKey<SpendAuth> {
     let sk_bytes = scalar_from_seed(seed).to_repr();
-    let sk = reddsa::SigningKey::<reddsa::orchard::SpendAuth>::try_from(sk_bytes)
+    let sk = reddsa::SigningKey::<reddsa::orchard::SpendAuth>::from_bytes(&sk_bytes)
         .expect("a canonical scalar is a valid signing key");
     let pk_bytes: [u8; 32] = reddsa::VerificationKey::from(&sk).into();
 
@@ -84,7 +84,7 @@ fn fake_action(seed: u64) -> Action<redpallas::Signature<SpendAuth>> {
     // `Action::from_parts` rejects an identity ephemeral key, so use the curve generator.
     let encrypted_note = TransmittedNoteCiphertext {
         epk_bytes: pallas::Affine::generator().to_bytes(),
-        enc_ciphertext: [0u8; 580],
+        enc_ciphertext: NoteBytesData([0u8; 580]),
         out_ciphertext: [0u8; 80],
     };
 
@@ -203,7 +203,7 @@ pub fn fake_orchard_bundle_with_note(
             .expect("the test vector's cmx is a valid note commitment"),
         TransmittedNoteCiphertext {
             epk_bytes,
-            enc_ciphertext,
+            enc_ciphertext: NoteBytesData(enc_ciphertext),
             out_ciphertext,
         },
         ValueCommitment::from_bytes(cv_net).expect("the test vector's cv_net is a valid point"),

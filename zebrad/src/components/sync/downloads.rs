@@ -19,10 +19,10 @@ use thiserror::Error;
 use tokio::{
     sync::{oneshot, watch},
     task::JoinHandle,
-    time::timeout,
+    time::{timeout, timeout_at, Instant},
 };
-use tower::{hedge, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tower::{Service, ServiceExt};
+use tracing::Instrument;
 
 use zebra_chain::{
     block::{self, Height, HeightDiff},
@@ -32,6 +32,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
@@ -69,18 +70,6 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// so a slow state read costs the peer nothing.
 const PARENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Copy, Clone, Debug)]
-pub(super) struct AlwaysHedge;
-
-impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
-    fn can_retry(&self, _req: &Request) -> bool {
-        true
-    }
-    fn clone_request(&self, req: &Request) -> Option<Request> {
-        Some(req.clone())
-    }
-}
-
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
 #[allow(dead_code)]
@@ -106,6 +95,14 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
         hash: block::Hash,
     },
+
+    /// No peer delivered the block before the download round's deadline.
+    ///
+    /// The round covers waiting for a peer that might have the block, retries, and both hedged
+    /// requests. The syncer treats this like a missing block: a hedged request that already
+    /// failed with `NotFound` can still be waiting for its sibling when the deadline drops both.
+    #[error("block download round timed out: {hash:?}")]
+    DownloadTimedOut { hash: block::Hash },
 
     /// A downloaded block was a long way ahead of the state chain tip.
     /// This error should be very rare during normal operation.
@@ -179,10 +176,11 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
-    #[error(
-        "timeout during service readiness, download, verification, or internal downloader operation"
-    )]
+    #[error("timeout waiting for the network service to be ready")]
     Timeout,
+
+    #[error("the genesis block wasn't downloaded and verified before the genesis timeout")]
+    GenesisTimeout,
 }
 
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
@@ -251,8 +249,17 @@ where
     >,
 
     /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// verify tasks, with the time each task was queued.
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, std::time::Instant)>,
+
+    /// The pending tasks in `cancel_handles` that might still be running.
+    in_flight_blocks: InFlightBlocks,
+
+    /// Whether [`Self::download_and_verify`] is waiting for network capacity.
+    ///
+    /// It stays set when an enclosing timeout cancels that wait, so the syncer can count the
+    /// timeout as the block's error.
+    awaiting_network_capacity: bool,
 }
 
 impl<ZN, ZV, ZS, ZSTip> Stream for Downloads<ZN, ZV, ZS, ZSTip>
@@ -282,17 +289,15 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
-
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
-                }
+            let result = join_result.expect("block download and verify tasks must not panic");
+            let hash = match &result {
+                Ok((_, hash)) | Err((_, hash)) => *hash,
+            };
+            if let Some((_cancel, queued_at)) = this.cancel_handles.remove(&hash) {
+                this.in_flight_blocks.remove(queued_at, hash);
             }
+
+            Poll::Ready(Some(result.map_err(|(e, _hash)| e)))
         } else {
             Poll::Ready(None)
         }
@@ -323,9 +328,8 @@ where
     /// that are too far ahead of the current state tip.
     /// Uses `max_checkpoint_height` to work around a known block timeout (#5125).
     ///
-    /// The [`Downloads`] stream is agnostic to the network policy, so retry and
-    /// timeout limits should be applied to the `network` service passed into
-    /// this constructor.
+    /// Retry and hedge policies are supplied by `network`. A single deadline bounds network
+    /// readiness and the complete download round, including retries and hedges.
     pub fn new(
         network: ZN,
         verifier: ZV,
@@ -351,14 +355,15 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            in_flight_blocks: InFlightBlocks::default(),
+            awaiting_network_capacity: false,
         }
     }
 
     /// Queue a block for download and verification.
     ///
-    /// This method waits for the network to become ready, and returns an error
-    /// only if the network service fails. It returns immediately after queuing
-    /// the request.
+    /// This method waits for the network to become ready, returning an error if readiness fails
+    /// or the download deadline expires. It returns immediately after queuing the request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
@@ -376,12 +381,16 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        let block_req = self
-            .network
-            .ready()
-            .await
+        let deadline = Instant::now() + BLOCK_DOWNLOAD_ROUND_TIMEOUT;
+        self.awaiting_network_capacity = true;
+        let ready = timeout_at(deadline, self.network.ready()).await;
+        self.awaiting_network_capacity = false;
+        let block_req = ready?
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
+            .call(zn::Request::BlockDownload {
+                hash,
+                advertiser: None,
+            });
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -410,7 +419,9 @@ where
                             .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
+                    rsp = timeout_at(deadline, block_req) => rsp
+                        .map_err(|_| BlockDownloadVerifyError::DownloadTimedOut { hash })?
+                        .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
                 let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
@@ -657,11 +668,16 @@ where
         // Try to start the spawned task before queueing the next block request
         tokio::task::yield_now().await;
 
+        let queued_at = std::time::Instant::now();
+        let task_handle = task.abort_handle();
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(hash, (cancel_tx, queued_at))
+                .is_none(),
             "blocks are only queued once"
         );
+        self.in_flight_blocks.insert(queued_at, hash, task_handle);
 
         Ok(())
     }
@@ -674,9 +690,11 @@ where
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        for (_hash, (cancel, _queued_at)) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
+        self.in_flight_blocks.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -692,9 +710,20 @@ where
             .send(false);
     }
 
+    /// Returns whether an enclosing timeout cancelled a wait for network capacity, and forgets
+    /// that wait.
+    pub fn take_cancelled_network_wait(&mut self) -> bool {
+        std::mem::take(&mut self.awaiting_network_capacity)
+    }
+
     /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
+    }
+
+    /// Returns the tasks that might still be running, which the sync diagnostics share.
+    pub fn in_flight_blocks(&self) -> InFlightBlocks {
+        self.in_flight_blocks.clone()
     }
 
     /// Returns true if there are no in-flight download and verify tasks.

@@ -34,7 +34,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 28;
+const DATABASE_FORMAT_VERSION: u64 = 29;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -45,6 +45,11 @@ const DATABASE_FORMAT_VERSION: u64 = 28;
 /// - breaking changes with compatibility code in all supported Zebra versions.
 ///
 /// Version history:
+/// - 29.0.0: the NU7 Network Sustainability Mechanism pool widens new `ValueBalance` writes from
+///   48 to 56 bytes and `BlockInfo` writes from 52 to 60 bytes. Legacy records remain readable with
+///   a zero NSM balance. The registered upgrade reuses compatible v28 state by moving its network
+///   directory to `state/v29`, without a resync or record migration. Retain a v28 backup for rollback:
+///   disabling old-database cleanup does not prevent this move, and v28 readers cannot use new records.
 /// - 28.0.0: the NU6.3 Ironwood shielded pool. Adds the `ironwood_*` column families (initially
 ///   empty) and widens the chain value pool `ValueBalance` serialization from 40 to 48 bytes for
 ///   the `ironwood` pool (read code accepts 32/40/48-byte records). Also widens the history-tree
@@ -101,6 +106,12 @@ pub const MAX_LEGACY_CHAIN_BLOCKS: usize = 100_000;
 /// `10 forks * 1000 blocks * 2 MB per block = 20 GB`
 pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 
+/// The maximum number of non-finalized chain forks Zebra will track on test networks.
+///
+/// Minimum-difficulty blocks can create many equal-work sibling forks at once (#11133). A fork of
+/// coinbase-only blocks copies about 2.7 MB of indexes, so 100 of them use about 270 MB.
+pub const MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS: usize = 100;
+
 /// The maximum number of block hashes allowed in `getblocks` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 
@@ -116,6 +127,6 @@ pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 pub const MAX_INVALIDATED_BLOCKS: usize = 100;
 
 lazy_static! {
-    /// Regex that matches the RocksDB error when its lock file is already open.
-    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)|(Database likely already open)").expect("regex is valid");
+    /// Regex that matches the panic when another process holds the state database lock.
+    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("is locked by another process").expect("regex is valid");
 }

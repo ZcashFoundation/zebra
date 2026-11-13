@@ -39,12 +39,14 @@ use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
-use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
+use crate::error::TransactionError;
 
 use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerifier};
 
 #[cfg(test)]
 mod prop;
+#[cfg(test)]
+mod transparent_scripts;
 
 /// Returns the timeout duration for tests, extended when running under coverage
 /// instrumentation to account for the performance overhead.
@@ -530,6 +532,124 @@ async fn mempool_request_with_missing_input_is_rejected() {
     }
 }
 
+/// ZIP 218 mempool admission uses the candidate height and rejects oversized transactions
+/// before state access or verification of their deliberately invalid Sapling proofs.
+#[tokio::test]
+async fn mempool_zip218_sapling_limit_precedes_state_and_proofs() {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            nu6_1: Some(4),
+            nu6_2: Some(5),
+            nu6_3: Some(6),
+            nu7: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let fixture = v5_transactions(Network::Mainnet.block_iter())
+        .find(|tx| tx.sapling_outputs().next().is_some())
+        .expect("mainnet fixtures contain a V5 Sapling output");
+    let bundle = fixture.sapling_bundle().expect("fixture has Sapling data");
+    let output = &bundle.shielded_outputs()[0];
+    let output = sapling_crypto::bundle::OutputDescription::from_parts(
+        output.cv().clone(),
+        *output.cmu(),
+        output.ephemeral_key().clone(),
+        *output.enc_ciphertext(),
+        *output.out_ciphertext(),
+        [0; 192],
+    );
+
+    for (height, sapling_io, coinbase, exceeds_budget) in [
+        (Height(999), 301, false, false),
+        (Height(1_000), 300, false, false),
+        (Height(1_000), 301, false, true),
+        (Height(1_001), 301, false, true),
+        (Height(1_000), 301, true, true),
+    ] {
+        let (input, transparent_output, _) =
+            mock_transparent_transfer(Height(1), true, 0, Amount::zero());
+        let outpoint = input.outpoint().expect("transfer has a previous output");
+        let input = if coinbase {
+            mock_coinbase_transparent_output(height).0
+        } else {
+            input
+        };
+        let template = Transaction::test_v5(
+            NetworkUpgrade::current(&network, height),
+            vec![input],
+            vec![transparent_output],
+            LockTime::unlocked(),
+            Height(0),
+        );
+        let data = zcash_primitives::transaction::TransactionData::from_parts(
+            template.tx_version(),
+            template.consensus_branch_id(),
+            0,
+            zcash_protocol::consensus::BlockHeight::from_u32(0),
+            template.transparent_bundle().cloned(),
+            None,
+            sapling_crypto::bundle::Bundle::from_parts(
+                Vec::new(),
+                vec![output.clone(); sapling_io],
+                zcash_protocol::value::ZatBalance::zero(),
+                *bundle.authorization(),
+            ),
+            None,
+        );
+        let mut bytes = Vec::new();
+        data.freeze()
+            .expect("test transaction has well-formed components")
+            .write(&mut bytes)
+            .expect("test transaction serializes");
+        let transaction = Transaction::zcash_deserialize(bytes.as_slice())
+            .expect("invalid proofs do not prevent transaction parsing");
+
+        let expected = if coinbase {
+            TransactionError::CoinbaseInMempool
+        } else if exceeds_budget {
+            let error = TransactionError::TooManyShieldedActions {
+                pool: "Sapling inputs and outputs",
+                count: 301,
+                limit: 300,
+            };
+            assert_eq!(error.mempool_misbehavior_score(), 0);
+            error
+        } else {
+            TransactionError::TransparentInputNotFound
+        };
+        let state = service_fn(move |request| {
+            assert!(
+                !coinbase && !exceeds_budget,
+                "coinbase and oversized transactions must be rejected before state access"
+            );
+            assert_eq!(
+                request,
+                zebra_state::Request::UnspentBestChainUtxo(outpoint)
+            );
+            async { Ok(zebra_state::Response::UnspentBestChainUtxo(None)) }
+        });
+        let result = timeout(
+            test_timeout(),
+            MempoolTxVerifier::new_for_tests(&network, state).oneshot(MempoolRequest {
+                transaction: Arc::new(transaction).into(),
+                height,
+            }),
+        )
+        .await
+        .expect("mempool admission completes without proof verification");
+        assert_eq!(
+            result,
+            Err(expected),
+            "{height:?}, {sapling_io} Sapling outputs, coinbase: {coinbase}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn mempool_request_with_present_input_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -871,7 +991,7 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 #[tokio::test]
 async fn mempool_request_with_unmined_output_spends_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let verifier = MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
     mempool_setup_tx
@@ -969,9 +1089,12 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
         "spent_mempool_outpoints in tx verifier response should match input_outpoint"
     );
 
-    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
-    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
-    // is successfully verified
+    mempool
+        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .await
+        .expect("successful verification should trigger a mempool check")
+        .respond(mempool::Response::CheckedForVerifiedTransactions);
+    // The service is polled before requesting the output and before checking verified transactions.
     assert_eq!(
         mempool.poll_count(),
         2,
@@ -987,7 +1110,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 #[tokio::test(flavor = "multi_thread")]
 async fn block_verification_does_not_use_mempool_verified_state() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let mempool_verifier = Buffer::new(
         MempoolTxVerifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx),
@@ -1070,9 +1193,6 @@ async fn block_verification_does_not_use_mempool_verified_state() {
             .respond(mempool::Response::UnspentOutput(output));
     });
 
-    // Briefly yield and sleep so the spawned task can first expect an await output request.
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     let verifier_response = mempool_verifier
         .clone()
         .oneshot(MempoolRequest {
@@ -1125,9 +1245,6 @@ async fn block_verification_does_not_use_mempool_verified_state() {
             .respond(zebra_state::Response::Utxo(utxo));
     });
 
-    // Briefly yield and sleep so the spawned task can first expect the requests.
-    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
     let crate::transaction::BlockResponse { .. } = block_verifier
         .clone()
         .oneshot(make_request())
@@ -1140,9 +1257,12 @@ async fn block_verification_does_not_use_mempool_verified_state() {
         .await
         .expect("should succeed after calling state service");
 
-    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
-    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
-    // is successfully verified.
+    mempool
+        .expect_request(mempool::Request::CheckForVerifiedTransactions)
+        .await
+        .expect("successful verification should trigger a mempool check")
+        .respond(mempool::Response::CheckedForVerifiedTransactions);
+    // The service is polled before requesting the output and before checking verified transactions.
     assert_eq!(
         mempool.poll_count(),
         2,
@@ -2089,10 +2209,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     assert_eq!(
         result,
-        Err(TransactionError::InternalDowncastError(
-            "downcast to known transaction error type failed, original error: ScriptInvalid"
-                .to_string()
-        ))
+        Err(TransactionError::Script(zebra_script::Error::ScriptInvalid))
     );
 }
 
@@ -2568,7 +2685,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
     // Create a non-coinbase V5 tx. Its branch must be the one active at `height_max`, so the
     // expiry-height rule is what rejects it rather than the consensus branch ID check.
     let transaction = Transaction::test_v5(
-        NetworkUpgrade::Nu6_3,
+        NetworkUpgrade::current(&Network::Mainnet, height_max),
         vec![input],
         vec![output],
         LockTime::unlocked(),
@@ -2698,10 +2815,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     assert_eq!(
         result,
-        Err(TransactionError::InternalDowncastError(
-            "downcast to known transaction error type failed, original error: ScriptInvalid"
-                .to_string()
-        ))
+        Err(TransactionError::Script(zebra_script::Error::ScriptInvalid))
     );
 }
 
@@ -3818,6 +3932,151 @@ async fn v5_consensus_branch_ids() {
 
 // Utility functions
 
+// ZIP 2003: v4 transactions are disallowed from NU7 activation.
+//
+// <https://zips.z.cash/zip-2003>
+
+/// ZIP 2003: the V4 version rule must accept V4 for every network upgrade from Sapling to NU6.3,
+/// and reject it from NU7 onward.
+#[test]
+fn v4_transactions_are_rejected_from_nu7_onward() {
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::Height(Height(0)),
+        Height(1),
+    );
+
+    for nu in NetworkUpgrade::iter() {
+        let result = super::verify_v4_transaction_network_upgrade(&tx, nu);
+
+        match nu {
+            NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
+            | NetworkUpgrade::Nu6_3 => {
+                assert_eq!(result, Ok(()), "V4 must be supported by {nu:?}");
+            }
+            _ => assert_eq!(
+                result,
+                Err(TransactionError::UnsupportedByNetworkUpgrade(4, nu)),
+                "V4 must be rejected by {nu:?}",
+            ),
+        }
+    }
+}
+
+/// ZIP 2003 rejects V4 at NU7 in block and mempool verification, including coinbase transactions.
+#[tokio::test]
+async fn v4_transaction_is_rejected_at_nu7_activation() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let nu7_height = NetworkUpgrade::Nu7
+        .activation_height(&network)
+        .expect("NU7 activation height is scheduled on Testnet");
+    let pre_nu7_height = (nu7_height - 1).expect("NU7 does not activate at the genesis height");
+
+    // Pay a ZIP 317 conventional fee so mempool admission reaches the version check.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        (pre_nu7_height - 1).expect("block height is too small"),
+        true,
+        0,
+        Amount::try_from(10_001).expect("invalid value"),
+    );
+    let known_utxos = Arc::new(known_utxos);
+    let tx = Arc::new(Transaction::test_v4(
+        vec![input],
+        vec![output],
+        LockTime::Height(Height(0)),
+        (nu7_height + 1).expect("expiry height is too large"),
+    ));
+    let (input, output) = mock_coinbase_transparent_output(nu7_height);
+    let coinbase = Arc::new(Transaction::test_v4(
+        vec![input],
+        vec![output],
+        LockTime::Height(Height(0)),
+        nu7_height,
+    ));
+
+    // The transfer succeeds before NU7; both it and the coinbase fail at activation.
+    for (transaction, height) in [
+        (tx.clone(), pre_nu7_height),
+        (tx.clone(), nu7_height),
+        (coinbase, nu7_height),
+    ] {
+        let expected = if height < nu7_height {
+            Ok(transaction.unmined_id())
+        } else {
+            Err(TransactionError::UnsupportedByNetworkUpgrade(
+                4,
+                NetworkUpgrade::Nu7,
+            ))
+        };
+        let result = BlockTxVerifier::new(
+            &network,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        )
+        .oneshot(BlockRequest {
+            transaction_hash: transaction.hash(),
+            known_utxos: if transaction.is_coinbase() {
+                Arc::default()
+            } else {
+                known_utxos.clone()
+            },
+            transaction,
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+        assert_eq!(
+            result.map(|response| response.tx_id),
+            expected,
+            "{height:?}"
+        );
+    }
+
+    // Mempool admission also rejects V4 when the next block height reaches NU7.
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool_verifier = MempoolTxVerifier::new_for_tests(&network, state.clone());
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    // The verifier loads the spent UTXO before dispatching on the transaction version.
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+    });
+
+    assert_eq!(
+        mempool_verifier
+            .oneshot(MempoolRequest {
+                transaction: tx.into(),
+                height: nu7_height,
+            })
+            .await
+            .map(|_| ()),
+        Err(TransactionError::UnsupportedByNetworkUpgrade(
+            4,
+            NetworkUpgrade::Nu7
+        ))
+    );
+}
+
 /// Create a mock transparent transfer to be included in a transaction.
 ///
 /// First, this creates a fake unspent transaction output from a fake transaction included in the
@@ -4002,7 +4261,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     let second_nullifier = sprout::note::Nullifier([1u8; 32].into());
     let commitment = sprout::commitment::NoteCommitment::from([0u8; 32]);
     let ephemeral_key =
-        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(rand::thread_rng()));
+        x25519::PublicKey::from(&x25519::EphemeralSecret::random_from_rng(&mut rand::rng()));
     let random_seed = sprout::RandomSeed::from([0u8; 32]);
     let mac = sprout::note::Mac::zcash_deserialize(&[0u8; 32][..])
         .expect("Failure to deserialize dummy MAC");
@@ -4024,7 +4283,7 @@ fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::Signi
     };
 
     // Create a usable signing key
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
 
     // Populate join split data with the dummy join split.
@@ -4100,7 +4359,7 @@ fn modify_joinsplit_bytes_and_resign(
     // The sighash commits to `joinSplitPubKey` (but not to `joinSplitSig`), so write the new
     // public key before computing the sighash to sign below. In a V4 transaction with JoinSplits,
     // `joinSplitPubKey` is the 32 bytes preceding the final 64-byte `joinSplitSig`.
-    let signing_key = ed25519::SigningKey::new(rand::thread_rng());
+    let signing_key = ed25519::SigningKey::new(rand::rng());
     let verification_key = ed25519::VerificationKey::from(&signing_key);
     let pub_key_offset = tx_bytes.len() - 96;
     tx_bytes[pub_key_offset..pub_key_offset + 32]

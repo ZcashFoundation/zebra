@@ -5,15 +5,16 @@
 # different circumstances than a Continuous Deployment, for example.
 #
 # This workflow is triggered if:
-# - A release is published
-# - A pre-release is changed to a release
+# - A release or pre-release is published, from any branch
 # - A maintainer manually validates binary preparation before a release
+#
+# Promoting a pre-release to a release does not trigger it again, so each version is built once.
 name: Release binaries
 
 on:
   release:
     types:
-      - released
+      - published
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,7 @@ jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
     permissions:
       contents: read
       id-token: write
@@ -45,7 +46,7 @@ jobs:
       rust_log: ${{ vars.RUST_LOG }}
       # Build releases without the shared (poisonable) Docker Build Cloud cache.
       no_cache: true
-      # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
+      # Enable Docker Hub publishing for every release and pre-release (this is the single source of truth for Docker Hub images)
       # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
       publish_to_dockerhub: true
     # This step needs access to Docker Hub secrets to run successfully
@@ -56,8 +57,8 @@ jobs:
   # Resolve the release tag into the version used in binary asset names.
   binary-version:
     name: Resolve release binary version
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
-    runs-on: ubuntu-latest
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -83,7 +84,7 @@ jobs:
 
   validate-binaries:
     name: Validate release binary preparation
-    if: github.event_name == 'workflow_dispatch' && github.repository_owner == 'ZcashFoundation'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ZcashFoundation/zebra'
     permissions:
       contents: read
       id-token: write # authenticate test provenance and signatures
@@ -102,9 +103,10 @@ jobs:
     with:
       release_tag: ${{ github.event.release.tag_name }}
 
+  # Only full releases update the Docker Hub description, because it is pushed from the release commit's README.
   dockerhub-description:
-    if: github.repository_owner == 'ZcashFoundation' && startsWith(github.event.release.tag_name, 'v')
-    runs-on: ubuntu-latest
+    if: github.repository == 'ZcashFoundation/zebra' && startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -122,14 +124,14 @@ jobs:
 
   release-binaries-success:
     name: Release binaries success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Only run for the official v-prefixed zebrad release tags.
     # `always()` keeps this aggregator running when `build` fails or is cancelled;
     # otherwise GitHub skips jobs with failed `needs`.
     if: >-
       ${{
         always() &&
-        github.repository_owner == 'ZcashFoundation' &&
+        github.repository == 'ZcashFoundation/zebra' &&
         startsWith(github.event.release.tag_name, 'v')
       }}
     needs:
@@ -150,7 +152,7 @@ jobs:
     needs: [ build, binary-version, prepare-binaries, attach-binaries ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       issues: write

@@ -20,6 +20,10 @@ mod unmined;
 #[cfg(any(test, feature = "proptest-impl"))]
 #[allow(clippy::unwrap_in_result)]
 pub mod arbitrary;
+#[cfg(any(test, feature = "proptest-impl"))]
+mod test_signing;
+#[cfg(test)]
+mod test_signing_tests;
 #[cfg(test)]
 mod tests;
 
@@ -35,6 +39,8 @@ pub use serialize::{
     MIN_TRANSPARENT_TX_V5_SIZE,
 };
 pub use sighash::{HashType, SigHash, SigHasher};
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use test_signing::TransparentSigningKey;
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
@@ -207,13 +213,23 @@ impl Transaction {
     }
 
     /// Returns `true` if this transaction has transparent inputs.
+    ///
+    /// Reads the bundle's input count directly: `inputs()` rebuilds and converts the whole
+    /// input vector, which is wasteful when only the count is needed.
     pub fn has_transparent_inputs(&self) -> bool {
-        !self.inputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vin.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent outputs.
+    ///
+    /// Reads the bundle's output count directly: `outputs()` rebuilds and converts the whole
+    /// output vector, which is wasteful when only the count is needed.
     pub fn has_transparent_outputs(&self) -> bool {
-        !self.outputs().is_empty()
+        self.0
+            .transparent_bundle()
+            .is_some_and(|bundle| !bundle.vout.is_empty())
     }
 
     /// Returns `true` if this transaction has transparent inputs or outputs.
@@ -748,7 +764,7 @@ impl Transaction {
         network: &crate::parameters::Network,
         spend_height: block::Height,
     ) -> transparent::CoinbaseSpendRestriction {
-        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
+        if !self.has_transparent_outputs() || network.should_allow_unshielded_coinbase_spends() {
             transparent::CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height }
         } else {
             transparent::CoinbaseSpendRestriction::DisallowCoinbaseSpend
@@ -1101,10 +1117,10 @@ impl Clone for Transaction {
     }
 }
 
-// Human-readable Serialize for elasticsearch, tests, and snapshots.
+// Human-readable Serialize for tests and snapshots.
 // Produces structured output matching the old Transaction enum format
 // so that RON snapshot tests remain human-readable.
-#[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl serde::Serialize for Transaction {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStructVariant;
@@ -1263,7 +1279,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V5,
             branch_id,
@@ -1285,7 +1301,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
         Self::build_transparent(
             zcash_primitives::transaction::TxVersion::V6,
             branch_id,
@@ -1344,7 +1360,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts(
             zp_tx::TxVersion::V5,
@@ -1378,7 +1394,7 @@ impl Transaction {
         let branch_id = network_upgrade
             .branch_id()
             .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
-            .unwrap_or(zcash_protocol::consensus::BranchId::Nu6_3);
+            .expect("the test transaction upgrade has a supported consensus branch ID");
 
         let tx_data = zp_tx::TransactionData::from_parts_v6(
             branch_id,
@@ -1411,8 +1427,13 @@ impl Transaction {
     }
 
     /// Rebuild this transaction with new transparent inputs.
+    ///
+    /// Drops the transparent bundle if it ends up with no inputs and no outputs, because
+    /// librustzcash hashes an empty bundle differently from an absent one, and the
+    /// serialized transaction always parses as absent. This keeps the v5 and v6 txid
+    /// matching the one parsed from the serialized transaction.
     pub fn with_transparent_inputs(self, inputs: Vec<transparent::Input>) -> Self {
-        let vin = inputs
+        let vin: Vec<_> = inputs
             .iter()
             .map(crate::transaction::compat::input_to_txin)
             .collect();
@@ -1421,11 +1442,12 @@ impl Transaction {
             .transparent_bundle()
             .map(|b| b.vout.clone())
             .unwrap_or_default();
-        let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
-            vin,
-            vout,
-            authorization: zcash_transparent::bundle::Authorized,
-        });
+        let transparent_bundle =
+            (!vin.is_empty() || !vout.is_empty()).then_some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            });
         self.rebuild_with_transparent(transparent_bundle)
     }
 

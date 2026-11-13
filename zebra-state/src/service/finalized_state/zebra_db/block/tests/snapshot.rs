@@ -166,13 +166,8 @@ fn test_block_and_transaction_data_with_network(network: Network) {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
 
-    let mut state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let mut state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     // Assert that empty databases are the same, regardless of the network.
     let mut settings = insta::Settings::clone_current();
@@ -269,6 +264,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 .expect("hashes up to tip have heights");
             let stored_block = state
                 .block(query_height.into())
+                .expect("stored block body is complete")
                 .expect("heights up to tip have blocks");
 
             // Check the shielded note commitment trees.
@@ -333,8 +329,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
             // Check block transaction hashes and transactions.
             //
             // TODO: split out transaction snapshots into their own function (#3151)
-            for tx_index in 0..stored_block.transactions.len() {
-                let block_transaction = &stored_block.transactions[tx_index];
+            for (tx_index, block_transaction) in stored_block.transactions.iter().enumerate() {
                 let transaction_location = TransactionLocation::from_usize(query_height, tx_index);
 
                 let transaction_hash = block_transaction.hash();
@@ -375,8 +370,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 stored_transaction_hashes.push(stored_transaction_hash);
                 stored_transactions.push(transaction_data);
 
-                for output_index in 0..stored_block.transactions[tx_index].outputs().len() {
-                    let output = &stored_block.transactions[tx_index].outputs()[output_index];
+                for (output_index, output) in block_transaction.outputs().iter().enumerate() {
                     let outpoint =
                         transparent::OutPoint::from_usize(transaction_hash, output_index);
                     let output_location =
@@ -528,9 +522,11 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         }
 
         let mut stored_transaction_locations = Vec::new();
-        for transaction_location in
-            state.address_transaction_locations(stored_address_location, ADDRESS_HEIGHTS_FULL_RANGE)
-        {
+        for transaction_location in state.address_transaction_locations(
+            stored_address_location,
+            ADDRESS_HEIGHTS_FULL_RANGE,
+            None,
+        ) {
             assert_eq!(
                 transaction_location.address_location(),
                 stored_address_location

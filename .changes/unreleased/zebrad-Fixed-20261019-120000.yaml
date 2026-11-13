@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Misbehaving peers reach the ban threshold reliably under load, because score increments are no longer lost while earlier scores are being applied ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).'
+time: 2026-10-19T12:00:00.000000000Z

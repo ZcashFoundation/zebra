@@ -108,6 +108,7 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned_addr,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     assert!(
@@ -462,6 +463,7 @@ fn ban_removes_every_entry_for_the_banned_ip() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned_addr,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     assert!(
@@ -504,6 +506,7 @@ fn ipv6_rotation_within_one_64_cannot_evade_a_ban() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: "[2001:db8::1]:8233".parse().unwrap(),
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     let group: IpAddr = "2001:db8::".parse().unwrap();
@@ -555,6 +558,7 @@ fn ipv4_ban_does_not_affect_neighbouring_addresses() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: misbehaving,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     assert!(
@@ -603,6 +607,7 @@ fn only_a_threshold_misbehavior_score_bans_the_peer_group() {
         address_book.update(MetaAddrChange::UpdateMisbehavior {
             addr: misbehaving,
             score_increment: score,
+            reason: "test misbehavior".to_string(),
         });
 
         assert_eq!(
@@ -648,6 +653,7 @@ fn misbehavior_score_is_reported_per_group() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     assert_eq!(
@@ -684,6 +690,7 @@ async fn bans_expire_after_the_ban_duration() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
     assert!(
         address_book.bans().is_banned(banned.ip()),
@@ -742,6 +749,7 @@ async fn applying_a_ban_prunes_lapsed_bans() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: lapsed,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     tokio::time::advance(BAN_DURATION).await;
@@ -760,6 +768,7 @@ async fn applying_a_ban_prunes_lapsed_bans() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: fresh,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     let bans = address_book.bans();
@@ -792,6 +801,7 @@ async fn a_lapsed_group_can_be_banned_again() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
     assert!(address_book.bans().is_banned(banned.ip()));
 
@@ -806,6 +816,7 @@ async fn a_lapsed_group_can_be_banned_again() {
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: sibling,
         score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        reason: "test misbehavior".to_string(),
     });
 
     assert_eq!(

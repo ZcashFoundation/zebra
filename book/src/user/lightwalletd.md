@@ -24,6 +24,8 @@ Contents:
   - [Experimental: serving light clients directly from Zebra](#experimental-serving-light-clients-directly-from-zebra)
     - [The port is not protected](#the-port-is-not-protected)
     - [Do not run it on a user's machine](#do-not-run-it-on-a-users-machine)
+    - [Serving mobile wallets through a TLS proxy](#serving-mobile-wallets-through-a-tls-proxy)
+    - [What has not been verified](#what-has-not-been-verified)
 
 ## Configure zebra for lightwalletd
 
@@ -215,7 +217,9 @@ Zebra can also implement the `CompactTxStreamer` gRPC interface itself, so light
 connect to Zebra with no `lightwalletd` process in between. This is **experimental**: its
 behaviour and configuration may change in any release, including in ways that break
 clients, and it has had far less production exposure than `lightwalletd`. Do not depend
-on it for a service you operate for others yet, and read the caveats below before
+on it for a service you operate for others yet: it has not been tested against the
+light-client SDKs that mobile wallets are built on (see
+[What has not been verified](#what-has-not-been-verified)). Read the caveats below before
 enabling it.
 
 It is disabled by default. To enable it, set a listen address:
@@ -253,3 +257,57 @@ local process can reach it, and so can a web page loaded in a browser on that ma
 which can make requests to loopback addresses. Since the port has no authentication, a
 page the user did not trust can use their node to submit transactions or to learn what
 their wallet is querying.
+
+### Serving mobile wallets through a TLS proxy
+
+[#serving-mobile-wallets-through-a-tls-proxy]: #serving-mobile-wallets-through-a-tls-proxy
+
+Mobile light wallets connect to their server over TLS. To serve them from Zebra, bind the
+gRPC port to loopback and put a reverse proxy that supports gRPC in front of it:
+
+```toml
+[rpc]
+lightwalletd_listen_addr = '127.0.0.1:9067'
+```
+
+With nginx 1.25.1 or later:
+
+```nginx
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name lightwalletd.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/lightwalletd.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lightwalletd.example.com/privkey.pem;
+
+    location / {
+        grpc_pass grpc://127.0.0.1:9067;
+        # Block range and mempool requests are long-lived streams.
+        grpc_read_timeout 1h;
+        grpc_send_timeout 1h;
+    }
+}
+```
+
+Or with Caddy, which obtains the certificate itself:
+
+```caddyfile
+lightwalletd.example.com {
+    reverse_proxy h2c://127.0.0.1:9067
+}
+```
+
+Wallet users then enter `lightwalletd.example.com:443` as a custom server in their
+wallet's settings.
+
+### What has not been verified
+
+[#what-has-not-been-verified]: #what-has-not-been-verified
+
+- No light-client SDK or mobile wallet has been tested against this server
+  ([#11158](https://github.com/ZcashFoundation/zebra/issues/11158)).
+- `Ping` returns `unimplemented`, as it does in `lightwalletd`'s default configuration.
+- `GetLightdInfo` leaves `git_commit`, `branch`, `build_date`, `build_user`, and
+  `donation_address` empty.
+- Compact blocks have an empty `header` field.

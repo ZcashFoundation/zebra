@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
-    amount::{Amount, DeferredPoolBalanceChange, NonNegative},
+    amount::{Amount, NonNegative},
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
     orchard,
@@ -19,14 +19,13 @@ use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    request::ContextuallyVerifiedBlock,
     service::{
         finalized_state::{calculate_deferred_pool_balance_change, FinalizedState},
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
-        ReconsiderError,
+        InvalidateError, ReconsiderError,
     },
     tests::FakeChainHelper,
-    Config, SemanticallyVerifiedBlock,
+    Config,
 };
 
 #[test]
@@ -150,13 +149,8 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
     let expected_hash = block2.hash();
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state.commit_new_chain(block2.prepare(), &finalized_state)?;
     state.commit_new_chain(child.prepare(), &finalized_state)?;
@@ -188,13 +182,8 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     let child = block1.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -234,13 +223,8 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     let block3 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -321,47 +305,74 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
 /// regression tests below.
 fn new_invalidate_test_state(network: &Network) -> (NonFinalizedState, FinalizedState) {
     let state = NonFinalizedState::new(network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), network)
+        .expect("opening an ephemeral database should succeed");
     finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
     (state, finalized_state)
 }
 
-/// Invalidating the non-finalized root of a tracked chain previously called
-/// `BTreeSet::remove(&chain)`, which compared the stored chain against
-/// itself via `Chain::cmp` and reached an `unreachable!()` for matching tip
-/// hashes. The root branch now retains by tip hash and the call returns
-/// successfully without panicking.
+/// Reject invalidating the only root before changing either live chains or invalidation records.
 #[test]
-fn invalidating_non_finalized_root_does_not_panic() {
+fn invalidating_only_non_finalized_root_preserves_state() {
     let _init_guard = zebra_test::init();
-
     let network = Network::Mainnet;
-    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
-    let block2 = block1.make_fake_child().set_work(10);
-
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let child = root.make_fake_child().set_work(10);
     let (mut state, finalized_state) = new_invalidate_test_state(&network);
-
     state
-        .commit_new_chain(block1.clone().prepare(), &finalized_state)
-        .expect("fake root block should commit to an empty non-finalized state");
+        .commit_new_chain(root.clone().prepare(), &finalized_state)
+        .unwrap();
     state
-        .commit_block(block2.prepare(), &finalized_state)
-        .expect("fake child block should extend the fake root chain");
-
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    // Keep an existing invalidation record to check that rejection preserves it too.
+    let grandchild = child.make_fake_child().set_work(1);
     state
-        .invalidate_block(block1.hash())
-        .expect("invalidating the chain root should not panic");
+        .commit_block(grandchild.clone().prepare(), &finalized_state)
+        .unwrap();
+    state.invalidate_block(grandchild.hash()).unwrap();
+    let before = state.clone();
 
-    assert!(
-        state.best_chain().is_none(),
-        "invalidating the root should leave no live non-finalized chain"
+    let result = state.invalidate_block(root.hash());
+    assert!(matches!(result, Err(InvalidateError::OnlyChainRoot(hash)) if hash == root.hash()));
+    assert!(state.eq_internal_state(&before));
+    assert_eq!(
+        state.invalidated_blocks.len(),
+        before.invalidated_blocks.len()
     );
+    for (height, blocks) in &before.invalidated_blocks {
+        assert!(Arc::ptr_eq(
+            blocks,
+            state.invalidated_blocks.get(height).unwrap()
+        ));
+    }
+}
+
+/// A root can still be invalidated when another chain remains available.
+#[test]
+fn invalidating_non_finalized_root_preserves_other_chain() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let root: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let other_root = root.clone().set_work(20);
+    let child = root.make_fake_child().set_work(10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state
+        .commit_new_chain(root.clone().prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_block(child.clone().prepare(), &finalized_state)
+        .unwrap();
+    state
+        .commit_new_chain(other_root.clone().prepare(), &finalized_state)
+        .unwrap();
+
+    assert_eq!(state.invalidate_block(root.hash()).unwrap(), root.hash());
+    assert_eq!(state.chain_count(), 1);
+    assert_eq!(state.best_tip_block().unwrap().hash, other_root.hash());
+    assert!(!state.any_chain_contains(&root.hash()));
+    assert!(!state.any_chain_contains(&child.hash()));
+    assert_eq!(state.invalidated_blocks.values().next().unwrap().len(), 2);
 }
 
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
@@ -492,6 +503,11 @@ fn reconsider_block_preserves_record_when_parent_chain_missing() {
         .commit_block(block3.prepare(), &finalized_state)
         .expect("fake grandchild should extend the child chain");
 
+    // Keep another root live so invalidating block1 does not empty the state.
+    state
+        .commit_new_chain(block1.clone().set_work(20).prepare(), &finalized_state)
+        .expect("independent root should commit");
+
     state
         .invalidate_block(block2.hash())
         .expect("invalidating the child should succeed");
@@ -539,13 +555,8 @@ fn reconsider_block_inserts_block_and_descendants_into_chain_for_network(
     let block3 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -628,13 +639,8 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
     let child2 = block2.make_fake_child().set_work(1);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -673,13 +679,8 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -719,13 +720,8 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
     let short_chain_block = block1.make_fake_child().set_work(3);
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -764,13 +760,8 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
     let expected_hash = more_work_child.hash();
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
     finalized_state.set_finalized_value_pool(fake_value_pool);
@@ -813,13 +804,8 @@ fn history_tree_is_updated_for_network_upgrade(
     );
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
@@ -916,13 +902,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     );
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
     state
         .commit_new_chain(prev_block.clone().prepare(), &finalized_state)
@@ -985,19 +966,14 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
 async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_cache() {
     let network = Network::Mainnet;
 
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)
+        .expect("opening an ephemeral database should succeed");
 
-    let backup_dir_path = tempfile::Builder::new()
+    let backup_dir = tempfile::Builder::new()
         .prefix("zebra-non-finalized-state-backup-cache")
         .tempdir()
-        .expect("temporary directory is created successfully")
-        .keep();
+        .expect("temporary directory is created successfully");
+    let backup_dir_path = backup_dir.path().to_path_buf();
 
     let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
         NonFinalizedState::new(&network)
@@ -1030,12 +1006,29 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         .send(non_finalized_state.clone())
         .expect("backup task should have a receiver, channel should be open");
 
-    // Wait for the minimum update time
-    tokio::time::sleep(Duration::from_secs(1) + MIN_DURATION_BETWEEN_BACKUP_UPDATES).await;
-
-    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
-        .with_backup(Some(backup_dir_path), &finalized_state.db, true, false)
-        .await;
+    // Poll restoration until the rate-limited writer has finished writing a readable backup.
+    let non_finalized_state = tokio::time::timeout(
+        MIN_DURATION_BETWEEN_BACKUP_UPDATES + Duration::from_secs(30),
+        async {
+            loop {
+                let (restored_state, _sender, _receiver) = NonFinalizedState::new(&network)
+                    .with_backup(
+                        Some(backup_dir_path.clone()),
+                        &finalized_state.db,
+                        true,
+                        // Only the original state should write backups while restoration is polled.
+                        true,
+                    )
+                    .await;
+                if restored_state.best_chain_len().is_some() {
+                    break restored_state;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        },
+    )
+    .await
+    .expect("the backup task should write a restorable non-finalized block");
 
     assert_eq!(
         non_finalized_state.best_chain_len(),
@@ -1102,80 +1095,384 @@ fn fork_drops_subtrees_above_fork_point() -> Result<()> {
     Ok(())
 }
 
-/// Check that the `deferred_pool_balance_change` passed to `with_block_and_spent_utxos`
-/// flows through to the resulting block's `chain_value_pool_change`.
+/// From the NSM reissuance height, the deferred (lockbox) funding stream is a
+/// fraction of the whole block subsidy, including the additional subsidy that depends on the parent
+/// block's chain value pools.
 #[test]
-fn with_block_and_spent_utxos_preserves_deferred_pool_balance_change() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-    let prepared = SemanticallyVerifiedBlock::from(block);
-
-    let zero_output = transparent::Output {
-        value: Amount::zero(),
-        lock_script: transparent::Script::new(&[]),
+fn deferred_pool_balance_change_uses_nsm_subsidy() -> Result<()> {
+    use zebra_chain::parameters::{
+        subsidy::{
+            block_subsidy_with_parent_pools, funding_stream_values, scheduled_block_subsidy,
+            FundingStreamReceiver,
+        },
+        testnet::{
+            ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams, RegtestParameters,
+        },
     };
-    let zero_utxo = transparent::OrderedUtxo::new(zero_output, Height(1), 1);
-    let spent_utxos = prepared
-        .block
-        .transactions
-        .iter()
-        .map(AsRef::as_ref)
-        // `inputs()` returns an owned Vec under the newtype transaction.
-        .flat_map(|tx| tx.inputs())
-        .filter_map(|input| input.outpoint())
-        .map(|outpoint| (outpoint, zero_utxo.clone()))
-        .collect();
 
-    let expected_deferred = Amount::try_from(123_456_789)?;
-    let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-        prepared,
-        spent_utxos,
-        DeferredPoolBalanceChange::new(expected_deferred),
-    )?;
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            nu5: Some(1),
+            nu6: Some(1),
+            nu6_3: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        },
+        funding_streams: Some(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator: 12,
+                addresses: None,
+            }]),
+        }]),
+        nsm_reissuance_height: Some(Height(10)),
+        ..Default::default()
+    });
+
+    let deferred = |height, subsidy| {
+        funding_stream_values(height, &network, subsidy)
+            .unwrap()
+            .remove(&FundingStreamReceiver::Deferred)
+            .expect("the deferred funding stream is active")
+    };
+
+    let height = Height(12);
+    let mut parent_pools = ValueBalance::<NonNegative>::zero();
+    parent_pools.set_nsm_amount(Amount::try_from(1_000_000_000_i64)?);
+
+    let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)?;
+    let expected = deferred(height, subsidy);
+    assert_ne!(
+        expected,
+        deferred(height, scheduled_block_subsidy(height, &network)?)
+    );
 
     assert_eq!(
-        contextual.chain_value_pool_change.deferred_amount(),
-        expected_deferred,
+        calculate_deferred_pool_balance_change(height, &network, parent_pools)?.value(),
+        expected.constrain::<zebra_chain::amount::NegativeAllowed>()?,
+    );
+
+    // Before activation the parent's chain value pools don't matter.
+    let height = Height(9);
+    assert_eq!(
+        calculate_deferred_pool_balance_change(height, &network, parent_pools)?,
+        calculate_deferred_pool_balance_change(height, &network, ValueBalance::zero())?,
     );
 
     Ok(())
 }
 
-/// Check that after committing a block via `commit_new_chain`, the non-finalized chain's
-/// deferred pool amount matches what `calculate_deferred_pool_balance_change` returns for
-/// the block's height and network.
+/// Committed blocks track the NSM value balance: the NU7 activation block seeds it, blocks before
+/// the NSM reissuance height leave it unchanged, and from the deployment height each block
+/// reissues from the balance after its parent. A block paying the scheduled subsidy instead is
+/// rejected from the deployment height.
+///
+/// Each block after activation credits the balance with the fees it removes from circulation.
+/// From the deployment height a block whose coinbase claims those fees is rejected.
 #[test]
-fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let network = Network::Mainnet;
+fn nsm_subsidy_tracks_the_nsm_value_balance() -> Result<()> {
+    use chrono::Duration;
+    use zebra_chain::{
+        block::{
+            ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash,
+            CHAIN_HISTORY_ACTIVATION_RESERVED,
+        },
+        parameters::{
+            subsidy::{
+                additional_block_subsidy, block_subsidy_with_parent_pools, nsm_fee_contribution,
+                scheduled_block_subsidy, CoinbaseTransactionError, SubsidyError,
+            },
+            testnet::{ConfiguredActivationHeights, RegtestParameters},
+        },
+        transaction::{self, LockTime, Transaction},
+    };
 
-    let block: Arc<Block> = Arc::new(network.test_block(653_599, 583_999).unwrap());
-    let height = block.coinbase_height().expect("coinbase height");
-    assert!(
-        height > network.slow_start_interval(),
-        "test block must be past slow_start_interval to exercise the non-trivial branch \
-         of calculate_deferred_pool_balance_change",
+    use crate::ValidateContextError;
+
+    let _init_guard = zebra_test::init();
+
+    // Every upgrade from Heartwood activates together, so the activation block's parent is
+    // pre-Heartwood and its block commitment only needs the reserved chain history root.
+    const ACTIVATION_HEIGHT: u32 = 11;
+    const DEPLOYMENT_HEIGHT: u32 = ACTIVATION_HEIGHT + 2;
+    const INITIAL_NSM_VALUE_BALANCE: i64 = 1_000_000_000;
+    // Each block after activation spends two outputs of `FUNDING_VALUE`, paying these fees. ZIP 235
+    // rounds the fees it removes once per block: `floor(1_002 * 6 / 10)` is 601, but rounding each
+    // transaction's fee would remove 600.
+    const FUNDING_VALUE: i64 = 10_000;
+    const FEES: [i64; 2] = [1_001, 1];
+
+    let zats = |zats: i64| Amount::<NonNegative>::try_from(zats).expect("valid amount");
+
+    let network = Network::new_regtest(RegtestParameters {
+        activation_heights: ConfiguredActivationHeights {
+            sapling: Some(1),
+            blossom: Some(1),
+            heartwood: Some(ACTIVATION_HEIGHT),
+            canopy: Some(ACTIVATION_HEIGHT),
+            nu5: Some(ACTIVATION_HEIGHT),
+            nu6: Some(ACTIVATION_HEIGHT),
+            nu6_3: Some(ACTIVATION_HEIGHT),
+            nu7: Some(ACTIVATION_HEIGHT),
+            ..Default::default()
+        },
+        funding_streams: Some(Vec::new()),
+        initial_nsm_value_balance: Some(zats(INITIAL_NSM_VALUE_BALANCE)),
+        nsm_reissuance_height: Some(Height(DEPLOYMENT_HEIGHT)),
+        ..Default::default()
+    });
+
+    // The outputs that the transactions in the block at `height` spend. They aren't created by any
+    // transaction, so the test adds them to the outputs of the block that spends them.
+    let funding_outpoints = |height: Height| {
+        (0..FEES.len() as u32).map(move |index| transparent::OutPoint {
+            hash: transaction::Hash([height.0 as u8; 32]),
+            index,
+        })
+    };
+    let funding_output = || transparent::Output {
+        value: zats(FUNDING_VALUE),
+        lock_script: transparent::Script::new(&[]),
+    };
+    let prepare_with_funding = |block: Arc<Block>, height: Height| {
+        let mut prepared = block.prepare();
+        prepared
+            .new_outputs
+            .extend(funding_outpoints(height).map(|outpoint| {
+                let utxo = transparent::Utxo::new(funding_output(), height, false);
+                (outpoint, transparent::OrderedUtxo::from_utxo(utxo, 0))
+            }));
+        prepared
+    };
+
+    // The transactions in the block at `height`, which spend that block's funding outputs and pay
+    // `FEES`.
+    let spends = |height: Height| -> Vec<Arc<Transaction>> {
+        funding_outpoints(height)
+            .zip(FEES)
+            .map(|(outpoint, fee)| {
+                Arc::new(Transaction::test_v4(
+                    vec![transparent::Input::PrevOut {
+                        outpoint,
+                        unlock_script: transparent::Script::new(&[]),
+                        sequence: u32::MAX,
+                    }],
+                    vec![transparent::Output {
+                        value: zats(FUNDING_VALUE - fee),
+                        lock_script: transparent::Script::new(&[]),
+                    }],
+                    LockTime::unlocked(),
+                    height,
+                ))
+            })
+            .collect()
+    };
+    let fees = zats(FEES.iter().sum());
+
+    // A block at `height` whose coinbase pays `coinbase_value`, followed by `transactions`. Block
+    // times increase with height, so each block's time is after the median time of the blocks
+    // before it.
+    let block = |height: Height,
+                 previous_block_hash,
+                 coinbase_value,
+                 transactions: Vec<Arc<Transaction>>|
+     -> Arc<Block> {
+        let mut block = zebra_test::vectors::BLOCK_MAINNET_347499_BYTES
+            .zcash_deserialize_into::<Block>()
+            .expect("block should deserialize");
+
+        let header = Arc::make_mut(&mut block.header);
+        header.time += Duration::minutes(height.0.into());
+
+        block.transactions = vec![Arc::new(Transaction::test_v4(
+            vec![transparent::Input::Coinbase {
+                height,
+                data: vec![0],
+                sequence: u32::MAX,
+            }],
+            vec![transparent::Output {
+                value: coinbase_value,
+                lock_script: transparent::Script::new(&[]),
+            }],
+            LockTime::unlocked(),
+            height,
+        ))];
+        block.transactions.extend(transactions);
+        Arc::make_mut(&mut block.header).previous_block_hash = previous_block_hash;
+
+        Arc::new(block)
+    };
+
+    // A block at `height` whose coinbase pays `coinbase_value`, followed by `transactions`,
+    // committing to `history_root`.
+    let committed_block = |height: Height,
+                           previous_block_hash,
+                           coinbase_value,
+                           transactions,
+                           history_root: &ChainHistoryMmrRootHash| {
+        let child = block(height, previous_block_hash, coinbase_value, transactions);
+        let commitment = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+            history_root,
+            &child.auth_data_root(),
+        );
+
+        child.set_block_commitment(commitment.into())
+    };
+
+    // A block at `height` paying the ZIP's subsidy for `parent_pools`, and the part of `fees` that
+    // ZIP 235 leaves to the miner, committing to `history_root`.
+    let subsidy_block = |height: Height,
+                         previous_block_hash,
+                         parent_pools,
+                         fees: Amount<NonNegative>,
+                         transactions,
+                         history_root: &_| {
+        let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)
+            .expect("the block subsidy is valid");
+        let miner_fees = (fees - nsm_fee_contribution(height, &network, fees))
+            .expect("the contribution is at most the fees");
+
+        committed_block(
+            height,
+            previous_block_hash,
+            (subsidy + miner_fees).expect("valid amount"),
+            transactions,
+            history_root,
+        )
+    };
+
+    let finalized_state = FinalizedState::new(&Config::ephemeral(), &network)?;
+
+    let parent_height = Height(ACTIVATION_HEIGHT - 1);
+    let activation = Height(ACTIVATION_HEIGHT);
+
+    // The block before activation pays the scheduled subsidy, and leaves the NSM value balance empty.
+    let parent = block(
+        parent_height,
+        block::Hash([1; 32]),
+        scheduled_block_subsidy(parent_height, &network)?,
+        Vec::new(),
     );
 
     let mut state = NonFinalizedState::new(&network);
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        &network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    )
-    .expect("opening an ephemeral database should succeed");
-    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+    state.commit_new_chain(parent.clone().prepare(), &finalized_state)?;
+    let pools_before_activation = state
+        .best_chain()
+        .expect("the chain was just committed")
+        .chain_value_pools;
+    assert_eq!(pools_before_activation.nsm_amount(), zats(0));
 
-    state.commit_new_chain(block.prepare(), &finalized_state.db)?;
+    // The activation block seeds the balance, and pays only the scheduled subsidy because the
+    // deployment height is later.
+    let initial = zats(INITIAL_NSM_VALUE_BALANCE);
+    let activation_block = subsidy_block(
+        activation,
+        parent.hash(),
+        pools_before_activation,
+        zats(0),
+        Vec::new(),
+        &CHAIN_HISTORY_ACTIVATION_RESERVED.into(),
+    );
+    assert_eq!(
+        activation_block.transactions[0].outputs()[0].value(),
+        scheduled_block_subsidy(activation, &network)?,
+    );
+    state.commit_block(activation_block.clone().prepare(), &finalized_state)?;
 
-    let chain = state.best_chain().expect("chain was just committed");
-    let expected = calculate_deferred_pool_balance_change(height, &network)
-        .value()
-        .constrain::<NonNegative>()?;
+    let chain = state
+        .best_chain()
+        .expect("the activation block was committed");
+    assert_eq!(chain.chain_value_pools.nsm_amount(), initial);
 
-    assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
+    // Later blocks commit to the chain history tree, which starts at the activation block. The
+    // blocks have no shielded transactions, so the note commitment tree roots never change.
+    let sapling_root = chain.sapling_note_commitment_tree_for_tip().root();
+    let orchard_root = chain.orchard_note_commitment_tree_for_tip().root();
+    let ironwood_root = chain.ironwood_note_commitment_tree_for_tip().root();
+    let roots = || BlockCommitmentTreeRoots {
+        sapling: &sapling_root,
+        orchard: &orchard_root,
+        ironwood: &ironwood_root,
+    };
+    let mut tree = NonEmptyHistoryTree::from_block(&network, activation_block, roots())?;
+
+    let mut previous = state.best_tip().expect("the chain has a tip");
+    for height in (ACTIVATION_HEIGHT + 1..=DEPLOYMENT_HEIGHT + 2).map(Height) {
+        let parent_pools = state
+            .best_chain()
+            .expect("the chain has blocks")
+            .chain_value_pools;
+        let reissued = additional_block_subsidy(height, &network, parent_pools.nsm_amount());
+        let contributed = nsm_fee_contribution(height, &network, fees);
+        let miner_fees = (fees - contributed)?;
+        assert_eq!(contributed, zats(601));
+
+        if height < Height(DEPLOYMENT_HEIGHT) {
+            assert_eq!(
+                reissued,
+                zats(0),
+                "no reissuance before the deployment height"
+            );
+        } else {
+            assert!(reissued > zats(0), "reissuance from the deployment height");
+
+            // From the deployment height, a block paying only the scheduled subsidy is rejected,
+            // and so is one claiming the fees that ZIP 235 removes from circulation.
+            let subsidy = block_subsidy_with_parent_pools(height, &network, parent_pools)?;
+            let mut invalid_coinbase_values =
+                vec![(scheduled_block_subsidy(height, &network)? + miner_fees)?];
+            if !contributed.is_zero() {
+                invalid_coinbase_values.push((subsidy + fees)?);
+            }
+
+            for coinbase_value in invalid_coinbase_values {
+                let invalid = committed_block(
+                    height,
+                    previous.1,
+                    coinbase_value,
+                    spends(height),
+                    &tree.hash(),
+                );
+                assert!(matches!(
+                    state.commit_block(prepare_with_funding(invalid, height), &finalized_state),
+                    Err(ValidateContextError::InvalidSubsidy {
+                        subsidy_error: CoinbaseTransactionError::Subsidy(
+                            SubsidyError::InvalidMinerFees
+                        ),
+                        ..
+                    })
+                ));
+            }
+        }
+
+        let next_block = subsidy_block(
+            height,
+            previous.1,
+            parent_pools,
+            fees,
+            spends(height),
+            &tree.hash(),
+        );
+        state.commit_block(
+            prepare_with_funding(next_block.clone(), height),
+            &finalized_state,
+        )?;
+
+        // The block debits exactly what it reissued, and credits the fees it removed from
+        // circulation.
+        let chain = state.best_chain().expect("the block was committed");
+        assert_eq!(
+            chain.chain_value_pools.nsm_amount(),
+            ((parent_pools.nsm_amount() - reissued)? + contributed)?,
+        );
+
+        tree.push(next_block, roots())?;
+        previous = state.best_tip().expect("the chain has a tip");
+    }
 
     Ok(())
 }
@@ -1258,6 +1555,192 @@ fn equal_work_ties_prefer_first_received() -> Result<()> {
             "more cumulative work must override receipt order"
         );
     }
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// At the fork limit, a newly inserted chain is kept even if it has the lowest work, and
+/// equal-work ties evict the earliest-received chain other than the best chain. So a late
+/// sibling survives both its own insertion and the insertion of another sibling after it.
+#[test]
+fn fork_limit_keeps_new_chains_and_evicts_earliest_received_ties() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    let received = std::time::Instant::now();
+    let mut commit = |block: &Arc<Block>, secs: u64| {
+        let mut prepared = block.clone().prepare();
+        prepared.received_time = Some(received + Duration::from_secs(secs));
+        state.commit_block(prepared, &finalized_state)
+    };
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    let siblings: Vec<_> = (0..=max_forks + 1).map(sibling).collect();
+    for (secs, block) in (0..).zip(&siblings) {
+        commit(block, secs)?;
+    }
+    let late = &siblings[usize::from(max_forks)];
+
+    // A chain with strictly less work than all the others.
+    let low = block1.make_fake_child().set_work(1);
+    commit(&low, u64::from(max_forks) + 2)?;
+
+    let late_child = late.make_fake_child().set_work(10);
+    commit(&late_child, u64::from(max_forks) + 3)?;
+
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    for (i, block) in siblings.iter().enumerate() {
+        assert_eq!(
+            !(1..=3).contains(&i),
+            state.any_chain_contains(&block.hash()),
+            "only the earliest-received siblings after the best one are evicted, sibling {i}",
+        );
+    }
+    assert!(state.any_chain_contains(&low.hash()));
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        late_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// After a restart that restores 10 equal-work forks from the non-finalized backup, a live
+/// sibling is kept at the fork limit, and its child becomes the best chain tip. Restored
+/// blocks have no receipt time, so they rank as received first.
+#[test]
+fn fork_limit_keeps_live_sibling_after_backup_restore() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    let sibling = |i: u8| {
+        block1
+            .make_fake_child()
+            .set_work(10)
+            .set_block_commitment([i; 32])
+    };
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    let max_forks = u8::try_from(crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .expect("the fork limit fits in a u8");
+    for i in 0..max_forks {
+        state.commit_block(sibling(i).prepare(), &finalized_state)?;
+    }
+
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+    let mut state = super::super::backup::restore_backup(
+        NonFinalizedState::new(&network),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        state.chain_count()
+    );
+    assert!(state
+        .chain_iter()
+        .all(|chain| chain.tip_block().unwrap().received_time.is_none()));
+
+    let live = sibling(max_forks);
+    let mut prepared = live.clone().prepare();
+    prepared.received_time = Some(std::time::Instant::now());
+    state.commit_block(prepared, &finalized_state)?;
+    assert!(state.any_chain_contains(&live.hash()));
+
+    let live_child = live.make_fake_child().set_work(10);
+    state.commit_block(live_child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        state.best_chain().unwrap().non_finalized_tip_hash(),
+        live_child.hash(),
+    );
+
+    Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
+///
+/// Test networks keep more equal-work sibling forks than Mainnet before evicting any.
+#[test]
+fn fork_limit_is_higher_on_test_networks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let siblings = 30u8;
+    for (network, expected_forks) in [
+        (
+            Network::Mainnet,
+            crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        ),
+        (Network::new_default_testnet(), usize::from(siblings)),
+    ] {
+        let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+        let (mut state, finalized_state) = new_invalidate_test_state(&network);
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+        for i in 0..siblings {
+            let sibling = block1
+                .make_fake_child()
+                .set_work(10)
+                .set_block_commitment([i; 32]);
+            state.commit_block(sibling.prepare(), &finalized_state)?;
+        }
+
+        assert_eq!(expected_forks, state.chain_count(), "{network}");
+    }
+
+    Ok(())
+}
+
+/// The backup task writes each block once, even when several chains share it.
+#[test]
+fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for i in 0..3u8 {
+        let sibling = block1.make_fake_child().set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    assert_eq!(3, state.chain_count());
+
+    // Claim every block is already backed up, so nothing should be written.
+    let backup_dir = tempfile::tempdir()?;
+    let backup_blocks = state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        .map(|block| (block.hash, backup_dir.path().join("unused")))
+        .collect();
+    super::super::backup::update_non_finalized_state_backup(
+        backup_dir.path(),
+        &state,
+        backup_blocks,
+    );
+
+    assert_eq!(0, std::fs::read_dir(backup_dir.path())?.count());
 
     Ok(())
 }

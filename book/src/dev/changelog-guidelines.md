@@ -28,9 +28,18 @@ changie new -j zebra-chain -j zebra-state -k breaking -b "Renamed ..."
 
 Kinds are `breaking` (rendered as `Breaking Changes`), `Added`, `Changed`,
 `Deprecated`, `Removed`, `Fixed` and `Security`; `-j` takes a project key, which
-is `zebrad` or a crate directory name. Running `changie new` with no flags
+is `zebrad` or a crate directory name. A release that activates a network upgrade
+also takes one `zebrad` fragment of kind `network-upgrade` (rendered as `Network
+Upgrade`). It is the only kind that gives `zebrad` a new major version, only
+`zebrad` may use it, and like `breaking` it needs a `!` in the PR title. Running `changie new` with no flags
 prompts for all of them. Fragments land in `.changes/unreleased/` and are
 committed with the PR.
+
+The PR Gate dry-runs the release batching over every pending fragment on pull
+requests, in the merge queue and on `main`, and fails if changie cannot batch
+them. Create fragments with `changie new`: a fragment written by hand needs a
+valid project and kind, and a body in single quotes must double any apostrophe
+it contains.
 
 At release time, releasing a project turns its fragments into a version file and
 regenerates the changelogs:
@@ -76,7 +85,12 @@ These apply to all Zebra changelogs regardless of audience.
 
 ### One entry per distinct change
 
-Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, and do not group multiple PRs in one entry.
+Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, except a breaking crate addition (see [Section priority](#section-priority)), and do not group multiple PRs in one entry.
+
+Verification-only files and documentation do not need fragments. A lockfile-only
+change needs an operator entry only when it changes the node's production
+dependency graph, including supported non-default features and target-specific
+dependencies. Test-only features and development dependencies are excluded.
 
 Good:
 
@@ -101,7 +115,7 @@ Bad, multiple PRs on one line:
 ### Section order
 
 Sections appear in the order the `kinds` are listed in `.changie.yaml`: Zebra's
-own `breaking` kind first, then [Keep a
+own `network-upgrade` and `breaking` kinds first, then [Keep a
 Changelog](https://keepachangelog.com/en/1.0.0/) order:
 
 ```text
@@ -109,6 +123,7 @@ Changelog](https://keepachangelog.com/en/1.0.0/) order:
 
 [2-4 sentence summary]
 
+### Network Upgrade
 ### Breaking Changes
 ### Added
 ### Changed
@@ -133,16 +148,13 @@ When a single change touches multiple categories, place it in **one section only
 6. Added
 7. Fixed
 
-A change that is both breaking and additive (for example, adding a variant to a
-public enum that is not `#[non_exhaustive]`) still gets one fragment, filed
-under `Breaking Changes` by the priority order above and worded so it names the
-new capability too; two fragments for the same change render as two entries.
-
-A PR that makes several distinct changes is a different case: each one gets its
-own fragment. `zebra-chain` 12.0.0 lists the new `ValueBalanceError::Total`
-variant under `Breaking Changes` and the new `ValueBalance::total` method under
-`Added`, both from #10817, because those are two changes, not one change filed
-twice.
+Exception for crate changelogs: a change that is both breaking and additive gets two
+fragments, `breaking` for what consumers must change and `Added` naming the new
+capability, so consumers see both signals. For example, a new variant on a public enum
+that is not `#[non_exhaustive]`, a new public field on a struct callers build with
+literals, or a new required method on a public trait that downstream code implements.
+Breaks that add no capability, such as removals, renames and signature changes, get
+only a `breaking` fragment.
 
 Fixed vs Changed: use Fixed only when the fix is invisible, meaning the bug is gone but output looks the same. If users see anything different (error messages, logs, behavior), use Changed.
 

@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Changed
+body: 'Avoid formatting whole verified blocks into commit spans; retain compact height and hash context.'
+time: 2026-10-18T14:00:00.000000000+00:00

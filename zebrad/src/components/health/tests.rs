@@ -12,9 +12,8 @@ use tokio::{
 use zebra_chain::{chain_sync_status::mock::MockSyncStatus, parameters::Network};
 use zebra_network::{address_book_peers::MockAddressBookPeers, PeerSocketAddr};
 
-// Build a config tailored for tests: enable the listener and disable the
-// built-in rate limiter so assertions don't race the cooldown unless a test
-// overrides it.
+// Build a config tailored for tests: enable the listener and enforce readiness
+// checks on all networks.
 fn config_for(addr: SocketAddr) -> Config {
     Config {
         listen_addr: Some(addr),
@@ -174,49 +173,36 @@ async fn not_ready_when_tip_is_too_old() {
     task.abort();
 }
 
-#[tokio::test]
-async fn rate_limiting_drops_bursts() {
-    // With a sleep shorter than the configured interval we should only be able
-    // to observe one successful request before the limiter responds with 429.
-    let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+#[test]
+fn rate_limiting_drops_bursts() {
+    let start = Instant::now();
+    let mut num_recent_requests = 0;
+    let mut last_request_count_reset_time = start;
+    let mut allow_at = |now| {
+        allow_request(
+            &mut num_recent_requests,
+            &mut last_request_count_reset_time,
+            || now,
+        )
+    };
 
-    let mut sync_status = MockSyncStatus::default();
-    sync_status.set_is_close_to_tip(true);
-
-    let (chain_tip_metrics_sender, chain_tip_metrics_receiver) = ChainTipMetrics::channel();
-    let _ = chain_tip_metrics_sender.send(ChainTipMetrics::new(Instant::now(), Some(0)));
-
-    let (task, addr_opt) = init(
-        cfg,
-        Network::Mainnet,
-        chain_tip_metrics_receiver,
-        sync_status,
-        peers_with_count(1),
-    )
-    .await;
-    let addr = addr_opt.expect("addr");
-
-    let (first_status, first_body) = http_get(addr, "/healthy").await.unwrap();
-    assert_eq!(first_status, 200, "first response: {}", first_body);
-
-    let mut was_request_dropped = false;
-    for i in 0..(MAX_RECENT_REQUESTS + 10) {
-        if http_get(addr, "/healthy").await.is_none() {
-            was_request_dropped = true;
-            tracing::info!("got expected status after some reqs: {i}");
-            break;
+    for window_start in [
+        start,
+        start + RECENT_REQUEST_INTERVAL + Duration::from_nanos(1),
+    ] {
+        for _ in 0..MAX_RECENT_REQUESTS {
+            assert!(allow_at(window_start));
         }
+
+        assert!(!allow_at(window_start));
+        assert!(!allow_at(
+            window_start + RECENT_REQUEST_INTERVAL - Duration::from_nanos(1)
+        ));
+        assert!(!allow_at(window_start + RECENT_REQUEST_INTERVAL));
+
+        // The reset-triggering request is allowed without incrementing the new window's counter.
+        assert!(allow_at(
+            window_start + RECENT_REQUEST_INTERVAL + Duration::from_nanos(1)
+        ));
     }
-
-    assert!(
-        was_request_dropped,
-        "requests should be dropped past threshold"
-    );
-
-    tokio::time::sleep(RECENT_REQUEST_INTERVAL + Duration::from_millis(100)).await;
-
-    let (third_status, third_body) = http_get(addr, "/healthy").await.unwrap();
-    assert_eq!(third_status, 200, "last response: {}", third_body);
-
-    task.abort();
 }

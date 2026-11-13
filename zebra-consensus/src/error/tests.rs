@@ -30,6 +30,18 @@ fn boxed_signature_errors_are_preserved() {
     );
 }
 
+/// Boxed transparent script verification errors must keep their type when converted back from a
+/// [`BoxError`], so that the existing `TransactionError::Script` misbehaviour score applies. See
+/// <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x>.
+#[test]
+fn boxed_script_errors_are_preserved() {
+    let script_error: BoxError = Box::new(zebra_script::Error::ScriptInvalid);
+    assert_eq!(
+        TransactionError::from(script_error),
+        TransactionError::Script(zebra_script::Error::ScriptInvalid)
+    );
+}
+
 /// Every shielded proof/signature verification failure, and non-canonical Orchard/Ironwood proof
 /// sizes, must earn a ban-worthy mempool misbehaviour score, so a peer forcing expensive
 /// verification with invalid proofs is disconnected rather than allowed to keep sending. See
@@ -44,6 +56,7 @@ fn verification_errors_have_high_misbehavior_score() {
         TransactionError::Ed25519(zebra_chain::primitives::ed25519::Error::InvalidSignature),
         TransactionError::RedJubjub(zebra_chain::primitives::redjubjub::Error::InvalidSignature),
         TransactionError::RedPallas(zebra_chain::primitives::reddsa::Error::InvalidSignature),
+        TransactionError::Script(zebra_script::Error::ScriptInvalid),
     ] {
         assert_eq!(error.mempool_misbehavior_score(), 100, "{error:?}");
     }

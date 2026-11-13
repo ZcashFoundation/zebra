@@ -1,6 +1,4 @@
 .PHONY: \
-	compat-docker-build \
-	compat-docker-start \
 	compat-zebrad-start-supervised-managed \
 	compat-zebrad-start-supervised \
 	compat-zebrad-start-unsupervised \
@@ -30,7 +28,6 @@ ZEBRA_RPC_URL ?= http://127.0.0.1:8232
 ZEBRA_COOKIE_FILE ?= $(ZEBRA_STATE_CACHE_DIR)/.cookie
 HEIGHT_MAX_DRIFT ?= 10
 
-ZEBRA_DOCKER_IMAGE ?= zebra:zcashd-compat
 ZCASHD_COMPAT_MANIFEST ?= $(CURDIR)/zebrad/zcashd-compat-manifest.json
 ZCASHD_COMPAT_TARGET_TRIPLE ?= x86_64-pc-linux-gnu
 ZCASHD_COMPAT_RELEASE_TAG ?= $(shell jq -er '.release_tag' $(ZCASHD_COMPAT_MANIFEST))
@@ -60,35 +57,6 @@ compat-zcashd-prepare:
 		tar -xzf "$(ZCASHD_COMPAT_ARCHIVE_PATH)" -C "$(ZCASHD_COMPAT_EXTRACT_DIR)"; \
 		test -x "$(ZCASHD_COMPAT_EXTRACT_DIR)/bin/zcashd"; \
 	fi
-
-# The runtime-zcashd-compat stage downloads and hash-verifies the sidecar
-# zcashd itself, so no build context or preparation step is needed. Override
-# the baked-in sidecar release with ZCASHD_COMPAT_IMAGE_ARCHIVE_URL/SHA256.
-ZCASHD_COMPAT_IMAGE_ARCHIVE_URL ?=
-ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256 ?=
-
-compat-docker-build:
-	@echo "Building Docker zcashd-compat image..."
-	docker build -f ./docker/Dockerfile --target runtime-zcashd-compat \
-		$(if $(ZCASHD_COMPAT_IMAGE_ARCHIVE_URL),--build-arg "ZCASHD_COMPAT_ARCHIVE_URL=$(ZCASHD_COMPAT_IMAGE_ARCHIVE_URL)") \
-		$(if $(ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256),--build-arg "ZCASHD_COMPAT_ARCHIVE_SHA256=$(ZCASHD_COMPAT_IMAGE_ARCHIVE_SHA256)") \
-		--tag "$(ZEBRA_DOCKER_IMAGE)" .
-
-compat-docker-start:
-	@echo "Starting Docker zcashd-compat container..."
-	docker run --rm -it \
-		-e ZCASHD_COMPAT_ENABLED=true \
-		-e ZEBRA_NETWORK__NETWORK="$(NETWORK)" \
-		-e ZEBRA_NETWORK__LISTEN_ADDR="[::]:8233" \
-		-e ZEBRA_STATE__CACHE_DIR="/home/zebra/.cache/zebra" \
-		-e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR="/home/zebra/.cache/zcashd" \
-		-e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]' \
-		--mount type=bind,src="$(ZEBRA_STATE_CACHE_DIR)",dst="/home/zebra/.cache/zebra" \
-		--mount type=bind,src="$(ZCASHD_DATADIR)",dst="/home/zebra/.cache/zcashd" \
-		-p 8233:8233 \
-		-p 127.0.0.1:8232:8232 \
-		"$(ZEBRA_DOCKER_IMAGE)" \
-		zebrad start --zcashd-compat
 
 compat-zebrad-start-supervised-managed:
 	@echo "Starting zebrad in zcashd-compat mode with embedded zcashd download..."

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use color_eyre::eyre::Result;
 
 use zebra_chain::parameters::Network::*;
@@ -125,20 +123,17 @@ fn start_no_args() -> Result<()> {
     // start caches state, so run one of the start tests with persistent state
     let testdir = testdir()?.with_config(&mut persistent_test_config(&Mainnet)?)?;
 
-    let mut child = testdir.spawn_child(args!["-v", "start"])?;
+    let mut child = testdir
+        .spawn_child(args!["-v", "start"])?
+        .with_timeout(LAUNCH_DELAY)?;
 
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    child.expect_stdout_line_matches("Starting zebrad")?;
+    child.expect_stdout_line_matches("starting legacy chain check")?;
+    child.expect_stdout_line_matches("no legacy chain found")?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    output.stdout_line_contains("Starting zebrad")?;
-
-    // Make sure the command passed the legacy chain check
-    output.stdout_line_contains("starting legacy chain check")?;
-    output.stdout_line_contains("no legacy chain found")?;
 
     // Make sure the command was killed
     output.assert_was_killed()?;
@@ -153,9 +148,10 @@ fn start_args() -> Result<()> {
     let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
-    let mut child = testdir.spawn_child(args!["start"])?;
-    // Run the program and kill it after a few seconds
-    std::thread::sleep(LAUNCH_DELAY);
+    let mut child = testdir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+    child.expect_stdout_line_matches("Starting zebrad")?;
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -182,12 +178,12 @@ fn version_no_args() -> Result<()> {
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
-    // The output should only contain the version
+    // The output should only contain the build version, which deployment tooling parses
     output.output_check(
-        is_zebrad_version,
+        |stdout| stdout.trim() == format!("zebrad {}", zebrad::application::build_version()),
         &output.output.stdout,
         "stdout",
-        "a valid zebrad semantic version",
+        "contain only the zebrad build version",
     )?;
 
     Ok(())
@@ -224,22 +220,26 @@ fn version_args() -> Result<()> {
 #[test]
 fn external_address() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut external_address_test_config(&Mainnet)?)?;
-    let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Give enough time to start connecting to some peers.
-    std::thread::sleep(Duration::from_secs(10));
+    // Zebra logs its external address when it sends a version message on an outbound
+    // connection. A local listener accepts the TCP connection, so the node doesn't need any
+    // live network peers.
+    let peer_listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let mut config = external_address_test_config(&Mainnet)?;
+    config.network.initial_mainnet_peers = [peer_listener.local_addr()?.to_string()].into();
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let mut child = testdir
+        .spawn_child(args!["start"])?
+        .with_timeout(LAUNCH_DELAY)?;
+
+    child.expect_stdout_line_matches("Starting zebrad")?;
+    child.expect_stdout_line_matches("using external address for Version messages")?;
 
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
     let output = output.assert_failure()?;
-
-    // Zebra started
-    output.stdout_line_contains("Starting zebrad")?;
-
-    // Make sure we are using external address for Version messages.
-    output.stdout_line_contains("using external address for Version messages")?;
 
     // Make sure the command was killed.
     output.assert_was_killed()?;

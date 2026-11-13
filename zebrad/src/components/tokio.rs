@@ -98,8 +98,11 @@ impl RuntimeRun for Runtime {
             Ok(()) => {
                 info!("shutting down Zebra");
             }
-            Err(error) => {
-                warn!(?error, "shutting down Zebra due to an error");
+            Err(report) => {
+                // Recording the error as an error, not as text, lets Sentry build exceptions
+                // from its chain and give each cause its own issue.
+                let error: &(dyn std::error::Error + 'static) = report.as_ref();
+                error!(error, ?report, "shutting down Zebra due to an error");
                 APPLICATION.shutdown(Shutdown::Forced);
             }
         }

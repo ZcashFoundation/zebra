@@ -72,3 +72,154 @@ fn zs_iter_opts_increments_key_by_one() {
         }
     }
 }
+
+/// Check that held locks are told apart from other I/O errors, using the messages
+/// RocksDB writes on each platform.
+#[test]
+fn lock_holder_matches_rocksdb_lock_messages() {
+    use super::LockHolder;
+
+    let _init_guard = zebra_test::init();
+
+    let cases = [
+        (
+            "IO error: While lock file: /state/LOCK: Resource temporarily unavailable",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: While lock file: /state/LOCK: Permission denied",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: Failed to create lock file: C:\\state\\LOCK: The process cannot access \
+             the file because it is being used by another process.\r\n",
+            Some(LockHolder::OtherProcess),
+        ),
+        (
+            "IO error: lock hold by current process, acquire time 1761209419 acquiring thread \
+             139890000000000: /state/LOCK: No locks available",
+            Some(LockHolder::ThisProcess),
+        ),
+        (
+            "IO error: While lock file: /state/LOCK: No locks available",
+            None,
+        ),
+        (
+            "IO error: Failed to create lock file: C:\\state\\LOCK: Access is denied.\r\n",
+            None,
+        ),
+        (
+            "IO error: while open a file for lock: /state/LOCK: Is a directory",
+            None,
+        ),
+        (
+            "IO error: No space left on device: While appending to file: /state/000001.log",
+            None,
+        ),
+    ];
+
+    for (message, expected) in cases {
+        assert_eq!(DiskDb::lock_holder(message), expected, "{message}");
+    }
+}
+
+/// Check that real RocksDB open errors are classified by who holds the lock.
+#[test]
+fn open_errors_distinguish_lock_holders_from_io_errors() {
+    use super::LockHolder;
+
+    let _init_guard = zebra_test::init();
+
+    let dir = tempfile::tempdir().expect("temporary directory is writable");
+    let mut opts = rocksdb::Options::default();
+    opts.create_if_missing(true);
+
+    let db_path = dir.path().join("db");
+    let _db = DB::open(&opts, &db_path).expect("new database opens in an empty directory");
+    let lock_error = DB::open(&opts, &db_path)
+        .expect_err("second open fails because the first instance holds the lock");
+    let holder = DiskDb::lock_holder(lock_error.as_ref());
+
+    if cfg!(windows) {
+        // RocksDB on Windows has no per-process lock table, so a second open in this
+        // process fails like an open in another process. The system message is
+        // localized, so only English installations are classified as a held lock.
+        assert!(
+            lock_error.as_ref().contains("Failed to create lock file"),
+            "{lock_error}"
+        );
+        assert!(
+            matches!(holder, Some(LockHolder::OtherProcess) | None),
+            "{lock_error}"
+        );
+    } else {
+        assert_eq!(holder, Some(LockHolder::ThisProcess), "{lock_error}");
+    }
+
+    let blocked_path = dir.path().join("blocked");
+    std::fs::create_dir_all(blocked_path.join("LOCK")).expect("temporary directory is writable");
+    let io_error = DB::open(&opts, &blocked_path)
+        .expect_err("open fails because the lock file path is a directory");
+    assert_eq!(io_error.kind(), rocksdb::ErrorKind::IOError, "{io_error}");
+    assert_eq!(DiskDb::lock_holder(io_error.as_ref()), None, "{io_error}");
+}
+
+/// Check that a read-only secondary removes its temporary directory once its last clone is
+/// dropped, and leaves the primary database in place.
+#[test]
+fn read_only_secondary_removes_its_directory_on_drop() {
+    use zebra_chain::parameters::Network;
+
+    use crate::{
+        constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+        Config,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let cache_dir = tempfile::tempdir().expect("temporary directory is writable");
+    let config = Config {
+        cache_dir: cache_dir.path().to_path_buf(),
+        ephemeral: false,
+        ..Config::default()
+    };
+    let network = Network::Mainnet;
+    let version = state_database_format_version_in_code();
+    let open = |read_only| {
+        DiskDb::new(
+            &config,
+            STATE_DATABASE_KIND,
+            &version,
+            &network,
+            [],
+            read_only,
+        )
+        .expect("database opens in a fresh cache directory")
+    };
+
+    let primary = open(false);
+    let secondary = open(true);
+    let secondary_path = secondary
+        .secondary_dir
+        .as_ref()
+        .expect("read-only instances have a secondary directory")
+        .path()
+        .to_path_buf();
+    assert!(secondary_path.exists());
+
+    drop(secondary.clone());
+    assert!(
+        secondary_path.exists(),
+        "dropping a clone must keep the secondary directory"
+    );
+
+    drop(secondary);
+    assert!(
+        !secondary_path.exists(),
+        "secondary directory {secondary_path:?} was not removed"
+    );
+    assert!(
+        primary.path().exists(),
+        "dropping a secondary must keep the primary database"
+    );
+}

@@ -1,7 +1,6 @@
 //! Cached state configuration for Zebra.
 
 use std::{
-    fmt,
     fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -20,37 +19,6 @@ use crate::{
     service::finalized_state::restorable_db_versions,
     state_database_format_version_in_code, BoxError,
 };
-
-/// A wrapper for [`String`] which hides its contents from `Debug` output, so that secrets
-/// are not written to logs by types that derive `Debug`.
-///
-/// Serialization is unaffected, so the value still round-trips through the config file. Use
-/// [`RedactedString::as_str()`] to reach the contents deliberately.
-#[derive(Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct RedactedString(String);
-
-impl fmt::Debug for RedactedString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad("[REDACTED]")
-    }
-}
-
-impl RedactedString {
-    /// Return the wrapped string, which exposes its sensitive contents.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl<S> From<S> for RedactedString
-where
-    S: Into<String>,
-{
-    fn from(value: S) -> Self {
-        Self(value.into())
-    }
-}
 
 /// Configuration for the state service.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -156,20 +124,6 @@ pub struct Config {
     /// This is intended for testing scenarios where blocks are committed rapidly and the
     /// async backup task may not flush all blocks before shutdown.
     pub debug_skip_non_finalized_state_backup_task: bool,
-
-    // Elasticsearch configs
-    //
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database url.
-    pub elasticsearch_url: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database username.
-    pub elasticsearch_username: String,
-
-    #[cfg(feature = "elasticsearch")]
-    /// The elasticsearch database password.
-    pub elasticsearch_password: RedactedString,
 }
 
 fn gen_temp_path(prefix: &str) -> PathBuf {
@@ -191,7 +145,7 @@ impl Config {
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
         let major_version = format!("v{major_version}");
-        let net_dir = network.lowercase_name();
+        let net_dir = network.directory_name();
 
         if self.ephemeral {
             gen_temp_path(&format!("zebra-{db_kind}-{major_version}-{net_dir}-"))
@@ -213,7 +167,7 @@ impl Config {
             return None;
         }
 
-        let net_dir = network.lowercase_name();
+        let net_dir = network.directory_name();
         Some(self.cache_dir.join("non_finalized_state").join(net_dir))
     }
 
@@ -251,12 +205,6 @@ impl Default for Config {
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_url: "https://localhost:9200".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_username: "elastic".to_string(),
-            #[cfg(feature = "elasticsearch")]
-            elasticsearch_password: RedactedString::default(),
         }
     }
 }
@@ -328,7 +276,7 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
     // Check and remove the network path.
     assert_eq!(
         db_path.file_name(),
-        Some(network.lowercase_name().as_ref()),
+        Some(network.directory_name().as_ref()),
         "unexpected database network path structure"
     );
     assert!(db_path.pop());
@@ -472,7 +420,7 @@ pub fn state_database_format_version_on_disk(
 /// returns `Ok(Some(major_version.0.0))`.
 /// (This happens even if the database directory was just newly created.)
 ///
-/// If there is no existing on-disk database, returns `Ok(None)`.
+/// If there is no existing on-disk database, or `config` is ephemeral, returns `Ok(None)`.
 ///
 /// This is the format of the data on disk, the version
 /// implemented by the running Zebra code can be different.
@@ -482,6 +430,11 @@ pub fn database_format_version_on_disk(
     major_version: u64,
     network: &Network,
 ) -> Result<Option<Version>, BoxError> {
+    // Each ephemeral database is created in a new temporary directory when it is opened.
+    if config.ephemeral {
+        return Ok(None);
+    }
+
     let version_path = config.version_file_path(&db_kind, major_version, network);
     let db_path = config.db_path(db_kind, major_version, network);
 
@@ -538,7 +491,8 @@ pub(crate) fn database_format_version_at_path(
 // Hide this destructive method from the public API, except in tests.
 #[allow(unused_imports)]
 pub(crate) use hidden::{
-    write_database_format_version_to_disk, write_state_database_format_version_to_disk,
+    write_database_format_version_at_path, write_database_format_version_to_disk,
+    write_state_database_format_version_to_disk,
 };
 
 pub(crate) mod hidden {
@@ -590,37 +544,23 @@ pub(crate) mod hidden {
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
+        write_database_format_version_at_path(
+            config.version_file_path(db_kind, major_version_in_code, network),
+            changed_version,
+        )
+    }
+
+    /// Writes `changed_version` to the version file at `version_path`.
+    ///
+    /// See [`write_database_format_version_to_disk()`] for details.
+    pub(crate) fn write_database_format_version_at_path(
+        version_path: PathBuf,
+        changed_version: &Version,
+    ) -> Result<(), BoxError> {
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
-        atomic_write(
-            config.version_file_path(db_kind, major_version_in_code, network),
-            changed_version.to_string().as_bytes(),
-        )??;
+        atomic_write(version_path, changed_version.to_string().as_bytes())??;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redacted_string_hides_contents_from_debug() {
-        let secret = RedactedString::from("hunter2");
-
-        assert_eq!(format!("{secret:?}"), "[REDACTED]");
-        assert_eq!(secret.as_str(), "hunter2");
-    }
-
-    #[cfg(feature = "elasticsearch")]
-    #[test]
-    fn config_debug_does_not_contain_elasticsearch_password() {
-        let config = Config {
-            elasticsearch_password: RedactedString::from("hunter2"),
-            ..Config::default()
-        };
-
-        assert!(!format!("{config:?}").contains("hunter2"));
     }
 }

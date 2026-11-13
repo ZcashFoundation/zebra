@@ -33,7 +33,7 @@ jobs:
     name: zcashd-compat regtest suite
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
 
     steps:

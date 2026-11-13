@@ -250,6 +250,18 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
 
+    // Mempool admission policy: this transaction cannot fit in the next block's ZIP 218 budget.
+    // Block consensus checks the aggregate budget and uses BlockError::TooManyShieldedActions.
+    #[error(
+        "mempool transaction has {count} {pool}, exceeding the next block's ZIP 218 limit of {limit}"
+    )]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    TooManyShieldedActions {
+        pool: &'static str,
+        count: usize,
+        limit: usize,
+    },
+
     // Mempool standardness (policy) rejections, applied before script verification.
     // These are not consensus rules: the same input scripts are valid in blocks.
     #[error(
@@ -348,6 +360,14 @@ impl From<BoxError> for TransactionError {
         // Halo2 proof, Orchard binding signature, or Sprout JoinSplit signature would collapse to
         // `InternalDowncastError` (score 0), letting a peer force verification without being banned.
         // See <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2p4c-3q4q-p463>.
+        //
+        // Transparent script failures need the same treatment, see
+        // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jq45-ghw5-v37x>.
+        match err.downcast::<zebra_script::Error>() {
+            Ok(e) => return TransactionError::Script(*e),
+            Err(e) => err = e,
+        }
+
         match err.downcast::<zebra_chain::primitives::ed25519::Error>() {
             Ok(e) => return TransactionError::Ed25519(*e),
             Err(e) => err = e,
@@ -494,6 +514,15 @@ pub enum BlockError {
     #[error("transaction has wrong consensus branch id for block network upgrade")]
     WrongTransactionConsensusBranchId,
 
+    #[error("block {height:?} {hash:?} has {count} {pool}, but the limit is {limit}")]
+    TooManyShieldedActions {
+        height: zebra_chain::block::Height,
+        hash: zebra_chain::block::Hash,
+        pool: &'static str,
+        count: usize,
+        limit: usize,
+    },
+
     #[error(
         "block {height:?} {hash:?} has {sigops} legacy transparent signature operations, \
          but the limit is {MAX_BLOCK_SIGOPS}"
@@ -548,6 +577,9 @@ impl BlockError {
             | BadMerkleRoot { .. }
             | WrongTransactionConsensusBranchId
             | TooManyTransparentSignatureOperations { .. }
+            // A block over a ZIP 218 shielded action limit is unambiguously invalid from its own
+            // contents, so an honest peer never relays one.
+            | TooManyShieldedActions { .. }
             // A block with duplicate transaction hashes is unambiguously invalid, and honest
             // nodes never produce one: it is the CVE-2012-2459 Merkle-malleability case,
             // checked in `block::check::merkle_root_validity()`.

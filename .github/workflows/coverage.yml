@@ -24,7 +24,7 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       coverage: ${{ steps.filter.outputs.coverage || 'true' }}
@@ -48,8 +48,12 @@ jobs:
     permissions:
       id-token: write
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
+    env:
+      # The Sentry tests read source paths from stack traces, which need line tables.
+      # Setting this before setup-rust-toolchain stops it from defaulting to 0.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -82,7 +86,7 @@ jobs:
           files: lcov.info
 
   coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
     needs:
       - changes

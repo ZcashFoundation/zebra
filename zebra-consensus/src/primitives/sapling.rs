@@ -10,7 +10,6 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use rand::thread_rng;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl, RequestWeight};
@@ -143,7 +142,7 @@ impl Drop for Verifier {
             let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
             // Validate the batch and send the result through the channel.
-            let res = batch.validate(&spend_vk, &output_vk, thread_rng());
+            let res = batch.validate(&spend_vk, &output_vk, rand::rng());
             let _ = tx.send(Some(res));
         });
     }
@@ -201,7 +200,7 @@ impl Service<BatchControl<Item>> for Verifier {
                     let start = std::time::Instant::now();
                     let spawn_result = tokio::task::spawn_blocking(move || {
                         let (spend_vk, output_vk) = SAPLING.verifying_keys();
-                        batch.validate(&spend_vk, &output_vk, thread_rng())
+                        batch.validate(&spend_vk, &output_vk, rand::rng())
                     })
                     .await;
                     let duration = start.elapsed().as_secs_f64();
@@ -245,7 +244,7 @@ pub fn verify_single(
         let is_valid = tokio::task::spawn_blocking(move || {
             let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
-            mem::take(&mut verifier.batch).validate(&spend_vk, &output_vk, thread_rng())
+            mem::take(&mut verifier.batch).validate(&spend_vk, &output_vk, rand::rng())
         })
         .await
         .map_err(|_| BoxError::from("Sapling bundle validation thread panicked"))?;

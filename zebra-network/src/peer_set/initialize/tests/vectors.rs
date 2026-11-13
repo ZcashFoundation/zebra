@@ -14,8 +14,12 @@
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
+    collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -23,7 +27,7 @@ use chrono::Utc;
 use futures::{channel::mpsc, FutureExt, StreamExt};
 use indexmap::IndexSet;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpSocket, TcpStream},
     task::JoinHandle,
 };
@@ -31,10 +35,8 @@ use tower::{service_fn, Layer, Service, ServiceExt};
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 
-use zebra_test::net::random_known_port;
-
 use crate::{
-    address_book_updater::AddressBookUpdater,
+    address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
@@ -42,14 +44,14 @@ use crate::{
     peer_set::{
         crawler_services,
         initialize::{
-            accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
-            DiscoveredPeer,
+            accept_inbound_connections, add_initial_peers, batch_misbehavior_updates,
+            crawl_and_dial, limit_initial_peers, open_listener, DiscoveredPeer,
         },
         set::MorePeers,
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -59,15 +61,14 @@ use Network::*;
 /// Using a very short time can make the crawler not run at all.
 const CRAWLER_TEST_DURATION: Duration = Duration::from_secs(10);
 
-/// The amount of time to run the peer cache updater task, before testing what it has done.
+/// The crawl timer interval for crawler tests.
 ///
-/// Using a very short time can make the peer cache updater not run at all.
-const PEER_CACHE_UPDATER_TEST_DURATION: Duration = Duration::from_secs(25);
+/// Much shorter than [`CRAWLER_TEST_DURATION`], so the timer refills freed outbound slots many
+/// times during each test, rather than only on its first tick.
+const CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL: Duration = Duration::from_millis(100);
 
-/// The amount of time to run the listener, before testing what it has done.
-///
-/// Using a very short time can make the listener not run at all.
-const LISTENER_TEST_DURATION: Duration = Duration::from_secs(10);
+/// The deadline for every test connection to be handshaken or rejected by the listener.
+const LISTENER_TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The amount of time to run zcashd-compat listener tests.
 const ZCASHD_COMPAT_LISTENER_TEST_DURATION: Duration = Duration::from_millis(500);
@@ -179,28 +180,24 @@ async fn local_listener_unspecified_port_localhost_addr_v6() {
     }
 }
 
-/// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
+/// Test that zebra-network propagates a bound localhost listener port to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_fixed_port_localhost_addr_v4() {
+async fn local_listener_bound_port_localhost_addr_v4() {
     let _init_guard = zebra_test::init();
-
-    let localhost_v4 = "127.0.0.1".parse().unwrap();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
     }
 
     for network in Network::iter() {
-        local_listener_port_with(SocketAddr::new(localhost_v4, random_known_port()), network).await;
+        local_listener_bound_port_with("127.0.0.1:0".parse().unwrap(), network).await;
     }
 }
 
-/// Test that zebra-network propagates fixed localhost listener ports to the `AddressBook`.
+/// Test that zebra-network propagates a bound localhost listener port to the `AddressBook`.
 #[tokio::test]
-async fn local_listener_fixed_port_localhost_addr_v6() {
+async fn local_listener_bound_port_localhost_addr_v6() {
     let _init_guard = zebra_test::init();
-
-    let localhost_v6 = "::1".parse().unwrap();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return;
@@ -211,7 +208,7 @@ async fn local_listener_fixed_port_localhost_addr_v6() {
     }
 
     for network in Network::iter() {
-        local_listener_port_with(SocketAddr::new(localhost_v6, random_known_port()), network).await;
+        local_listener_bound_port_with("[::1]:0".parse().unwrap(), network).await;
     }
 }
 
@@ -227,7 +224,7 @@ async fn peer_limit_zero_mainnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book =
+    let (_network, address_book) =
         init_with_peer_limit(0, unreachable_inbound_service, Mainnet, None, None).await;
     assert_eq!(
         address_book.lock().unwrap().peers().count(),
@@ -249,7 +246,7 @@ async fn peer_limit_zero_testnet() {
     let unreachable_inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         0,
         unreachable_inbound_service,
         Network::new_default_testnet(),
@@ -277,7 +274,7 @@ async fn peer_limit_one_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(1, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -296,7 +293,7 @@ async fn peer_limit_one_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         1,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -322,7 +319,7 @@ async fn peer_limit_two_mainnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
+    let _network = init_with_peer_limit(2, nil_inbound_service, Mainnet, None, None).await;
 
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
@@ -341,7 +338,7 @@ async fn peer_limit_two_testnet() {
 
     let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
 
-    let _ = init_with_peer_limit(
+    let _network = init_with_peer_limit(
         2,
         nil_inbound_service,
         Network::new_default_testnet(),
@@ -356,105 +353,58 @@ async fn peer_limit_two_testnet() {
     // Any number of address book peers is valid here, because some peers might have failed.
 }
 
-/// Test zebra-network writes a peer cache file, and can read it back manually.
-#[tokio::test]
-async fn written_peer_cache_can_be_read_manually() {
-    let _init_guard = zebra_test::init();
-
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
-    let peer_cache_dir =
-        tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let config = Config {
-        cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
-        ..Config::default()
-    };
-    let address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
-
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    let approximate_peer_count = address_book
-        .lock()
-        .expect("previous thread panicked while holding address book lock")
-        .len();
-    if approximate_peer_count > 0 {
-        let cached_peers = config
-            .load_peer_cache()
-            .await
-            .expect("unexpected error reading peer cache");
-
-        assert!(
-            !cached_peers.is_empty(),
-            "unexpected empty peer cache from manual load: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
-}
-
-/// Test zebra-network writes a peer cache file, and reads it back automatically.
+/// Test that startup loads exactly the written cache into its connection candidates and address book.
 #[tokio::test]
 async fn written_peer_cache_is_automatically_read_on_startup() {
     let _init_guard = zebra_test::init();
 
-    if zebra_test::net::zebra_skip_network_tests() {
-        return;
-    }
-
-    let nil_inbound_service = service_fn(|_| async { Ok(Response::Nil) });
-
-    // Use a temporary peer cache directory, so this test doesn't read or write the default
-    // peer cache directory, which is shared with other tests and local zebrad instances.
     let peer_cache_dir =
         tempfile::tempdir().expect("creating a temporary cache directory should succeed");
-    let mut config = Config {
+    let config = Config {
         cache_dir: CacheDir::custom_path(peer_cache_dir.path()),
+        // The disk cache must be the only source of initial peers.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
         ..Config::default()
     };
-    let _address_book =
-        init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let expected_peers: HashSet<PeerSocketAddr> = ["127.1.1.1:8233", "127.1.1.2:8233"]
+        .into_iter()
+        .map(|addr| addr.parse().expect("test peer addresses are valid"))
+        .collect();
 
-    // Let the peer cache updater run for a while.
-    tokio::time::sleep(PEER_CACHE_UPDATER_TEST_DURATION).await;
-
-    // The address book also contains unverified DNS seed addresses, so only test automatic
-    // loading when the peer cache updater actually wrote at least one cacheable peer.
-    let cached_peers = config
-        .load_peer_cache()
+    // The persistent_mode_peer_cache integration test covers the background writer with a
+    // real local peer. Here, write the cache directly: DNS seeds have no last-seen timestamp,
+    // so finding seeds alone does not guarantee any cacheable peers.
+    config
+        .update_peer_cache(expected_peers.clone())
         .await
-        .expect("unexpected error reading peer cache");
-    if !cached_peers.is_empty() {
-        // Make sure our only peers are coming from the disk cache
-        config.initial_mainnet_peers = Default::default();
+        .expect("writing the temporary peer cache should succeed");
 
-        let address_book =
-            init_with_peer_limit(25, nil_inbound_service, Mainnet, None, config.clone()).await;
+    let (
+        address_book,
+        _bans_receiver,
+        _address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_task_handle,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
-        // Let the peer cache reader run and fill the address book.
-        tokio::time::sleep(CRAWLER_TEST_DURATION).await;
+    // Exercise the startup loader without opening sockets or handshaking with public peers.
+    let initial_peers = limit_initial_peers(&config, &address_book_service).await;
+    assert_eq!(initial_peers, expected_peers);
 
-        // We should have loaded at least one peer from the cache
-        let approximate_cached_peer_count = address_book
-            .lock()
-            .expect("previous thread panicked while holding address book lock")
-            .len();
-        assert!(
-            approximate_cached_peer_count > 0,
-            "unexpected empty address book using cache from previous instance: {:?}",
-            config.cache_dir.peer_cache_file_path(&config.network)
-        );
-    }
+    // The loader adds the peers to the address book before returning.
+    let loaded_peers: HashSet<_> = address_book
+        .lock()
+        .expect("previous thread panicked while holding address book lock")
+        .peers()
+        .map(|peer| peer.addr)
+        .collect();
+    assert_eq!(loaded_peers, expected_peers);
 }
 
 /// Test the crawler with an outbound peer limit of zero peers, and a connector that panics.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_zero_connect_panic() {
     let _init_guard = zebra_test::init();
 
@@ -478,7 +428,7 @@ async fn crawler_peer_limit_zero_connect_panic() {
 }
 
 /// Test the crawler with an outbound peer limit of one peer, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -502,7 +452,7 @@ async fn crawler_peer_limit_one_connect_error() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -551,7 +501,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
 
 /// Test the crawler with an outbound peer limit of one peer,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_one_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -609,6 +559,15 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -626,7 +585,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
 }
 
 /// Test the crawler with the default outbound peer limit, and a connector that always errors.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_error() {
     let _init_guard = zebra_test::init();
 
@@ -650,7 +609,7 @@ async fn crawler_peer_limit_default_connect_error() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then disconnects the peer.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_then_drop() {
     let _init_guard = zebra_test::init();
 
@@ -701,7 +660,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
 
 /// Test the crawler with the default outbound peer limit,
 /// and a connector that returns success then holds the peer open.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_peer_limit_default_connect_ok_stay_open() {
     let _init_guard = zebra_test::init();
 
@@ -760,6 +719,15 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
     }
 
     assert!(
+        peer_change_count > 0,
+        "expected successful peer connections"
+    );
+    assert_eq!(
+        peer_tracker_count, peer_change_count,
+        "expected one held tracker per successful peer connection",
+    );
+
+    assert!(
         peer_change_count <= config.peerset_outbound_connection_limit(),
         "unexpected number of peer changes {}, over limit of {}, had {} peer trackers",
         peer_change_count,
@@ -780,7 +748,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
 /// using existing address book candidates, without any demand signals, and even when
 /// crawls return no new addresses. Then test that it replaces dropped connections,
 /// and doesn't dial over the limit once it is reached.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn crawler_refills_spare_outbound_capacity_on_timer() {
     let _init_guard = zebra_test::init();
 
@@ -919,7 +887,447 @@ async fn crawler_refills_spare_outbound_capacity_on_timer() {
          without dialing over the limit",
     );
 
-    // Stop the crawler and check for panics or errors.
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that a timer crawl which discovers a candidate does not also refresh initial peers.
+#[tokio::test]
+async fn crawler_does_not_readd_initial_peers_after_finding_candidates() {
+    let _init_guard = zebra_test::init();
+
+    let initial_addr: PeerSocketAddr = "127.1.1.1:8233".parse().unwrap();
+    let discovered_addr: PeerSocketAddr = "127.1.1.2:8233".parse().unwrap();
+    let config = Config {
+        initial_mainnet_peers: [initial_addr.remove_socket_addr_privacy().to_string()].into(),
+        cache_dir: CacheDir::disabled(),
+        // Only the first timer tick should run during this test.
+        crawl_new_peer_interval: CRAWLER_TEST_DURATION * 2,
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+
+    let peer_set = service_fn(move |req| async move {
+        match req {
+            Request::Peers => Ok(Response::Peers(vec![MetaAddr::new_gossiped_meta_addr(
+                discovered_addr,
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            )])),
+            _ => unreachable!("unexpected request: {req:?}"),
+        }
+    });
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), peer_set);
+    let (outbound_connector, _dial_count, _peer_tracker_rx) = counting_connector(0);
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, mut peerset_rx) = mpsc::channel(channel_size);
+    let (demand_tx, demand_rx) = mpsc::channel(channel_size);
+
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+    ));
+
+    let (connected_addr, _client) = tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
+        .await
+        .expect("the crawl discovers a peer and queues connection demand")
+        .expect("the crawler holds the peer set sender");
+    assert_eq!(connected_addr, discovered_addr);
+
+    // Allow an incorrectly spawned refresh to finish resolving the literal initial address.
+    tokio::time::sleep(CRAWLER_TEST_DURATION / 10).await;
+    stop_crawler(crawl_task_handle).await;
+
+    assert!(
+        address_book
+            .lock()
+            .expect("no task panicked while holding the address book")
+            .get(initial_addr)
+            .is_none(),
+        "a successful crawl should not trigger an initial peer refresh",
+    );
+}
+
+/// Test that a crawler with no peers adds its initial peers to the address book,
+/// and dials them.
+#[tokio::test(start_paused = true)]
+async fn crawler_dials_readded_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 2;
+
+    let (outbound_connector, _dial_count, _peer_tracker_rx) = counting_connector(0);
+    // Start with an empty address book, so the crawler can only dial re-added peers.
+    // The crawl timer only ticks once during the test, so the dials must come from the
+    // demand that the re-add queues.
+    let (_address_book, mut peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        false,
+        CRAWLER_TEST_DURATION * 2,
+        outbound_connector,
+    )
+    .await;
+
+    let connected_peer = tokio::time::timeout(CRAWLER_TEST_DURATION, peerset_rx.next())
+        .await
+        .expect("crawler connects to a re-added initial peer before the timeout")
+        .expect("crawler holds the peer set sender while it is running");
+
+    assert!(
+        initial_peer_addrs(PEER_COUNT).contains(&connected_peer.0),
+        "expected a connection to an initial peer, got {:?}",
+        connected_peer.0,
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that a crawler whose initial peers all failed adds them again, keeping their
+/// reconnection delay, at most once every `MIN_INITIAL_PEER_RECOVERY_INTERVAL`.
+#[tokio::test(start_paused = true)]
+async fn crawler_readds_failed_initial_peers_at_most_once_per_interval() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 2;
+
+    let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(usize::MAX);
+    let (address_book, _peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
+
+    // The address book uses `std::time::Instant`, which doesn't advance while tokio time is
+    // paused, so the re-added peers stay within their reconnection delay for the whole test.
+    while dial_count.load(Ordering::SeqCst) < PEER_COUNT {
+        tokio::time::sleep(CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL).await;
+    }
+    tokio::time::sleep(CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL * 5).await;
+
+    for peer in initial_peers_in_address_book(&address_book, PEER_COUNT) {
+        let peer = peer.expect("initial peers stay in the address book");
+        assert_eq!(
+            peer.last_connection_state,
+            PeerAddrState::NeverAttemptedGossiped,
+            "expected a failed initial peer to be added again",
+        );
+        assert!(
+            peer.last_failure().is_some(),
+            "expected a re-added peer to keep its last failure time",
+        );
+    }
+
+    // Fail the peers again, then check they are only added again after the interval.
+    for addr in initial_peer_addrs(PEER_COUNT) {
+        address_book
+            .lock()
+            .expect("panic in previous thread while accessing the address book")
+            .update(MetaAddr::new_errored(addr, None));
+    }
+
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL / 2).await;
+    for peer in initial_peers_in_address_book(&address_book, PEER_COUNT) {
+        assert_eq!(
+            peer.expect("initial peers stay in the address book")
+                .last_connection_state,
+            PeerAddrState::Failed,
+            "expected no re-add before the interval",
+        );
+    }
+
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL / 2).await;
+    for peer in initial_peers_in_address_book(&address_book, PEER_COUNT) {
+        assert_eq!(
+            peer.expect("initial peers stay in the address book")
+                .last_connection_state,
+            PeerAddrState::NeverAttemptedGossiped,
+            "expected a re-add after the interval",
+        );
+    }
+
+    assert_eq!(
+        dial_count.load(Ordering::SeqCst),
+        PEER_COUNT,
+        "expected no dials within the reconnection delay",
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that the crawler doesn't add the initial peers again while it has an open
+/// outbound connection, even if it has no other candidates.
+#[tokio::test(start_paused = true)]
+async fn crawler_does_not_readd_initial_peers_while_connected() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 2;
+
+    // The first dial fails, so the crawler is left with one connection and one failed peer.
+    let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(1);
+    let (address_book, mut peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
+
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL * 2).await;
+
+    assert_eq!(dial_count.load(Ordering::SeqCst), PEER_COUNT);
+    assert!(
+        peerset_rx.try_recv().is_ok(),
+        "expected one peer connection"
+    );
+    let failed_peers = initial_peers_in_address_book(&address_book, PEER_COUNT)
+        .into_iter()
+        .flatten()
+        .filter(|peer| peer.last_connection_state == PeerAddrState::Failed)
+        .count();
+    assert_eq!(
+        failed_peers, 1,
+        "expected the failed initial peer to stay failed while an outbound connection is open",
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Test that re-adding the initial peers doesn't add a banned initial peer.
+#[tokio::test(start_paused = true)]
+async fn crawler_does_not_readd_banned_initial_peers() {
+    let _init_guard = zebra_test::init();
+
+    // This test does not require network access, because the initial peers are IP addresses,
+    // and the outbound connector and peer set are fake.
+
+    const PEER_COUNT: usize = 1;
+
+    let (outbound_connector, dial_count, _peer_tracker_rx) = counting_connector(usize::MAX);
+    let (address_book, _peerset_rx, crawl_task_handle) = spawn_crawler_with_initial_peers(
+        PEER_COUNT,
+        true,
+        CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        outbound_connector,
+    )
+    .await;
+
+    // Wait for the first dial to fail, then ban the peer.
+    while dial_count.load(Ordering::SeqCst) < PEER_COUNT {
+        tokio::time::sleep(CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL).await;
+    }
+    for addr in initial_peer_addrs(PEER_COUNT) {
+        address_book
+            .lock()
+            .expect("panic in previous thread while accessing the address book")
+            .update(MetaAddr::new_misbehavior(
+                addr,
+                constants::MAX_PEER_MISBEHAVIOR_SCORE,
+                "test ban",
+            ));
+    }
+
+    tokio::time::sleep(constants::MIN_INITIAL_PEER_RECOVERY_INTERVAL * 2).await;
+
+    assert!(
+        initial_peers_in_address_book(&address_book, PEER_COUNT)
+            .iter()
+            .all(Option::is_none),
+        "expected a banned initial peer to stay out of the address book",
+    );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// Returns a fake outbound connector that fails its first `fail_first` dials, then connects
+/// and keeps each connection open, the dial count, and a receiver for the open connections.
+fn counting_connector(
+    fail_first: usize,
+) -> (
+    impl Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+            Future: Send,
+        > + Clone
+        + Send
+        + 'static,
+    Arc<AtomicUsize>,
+    mpsc::UnboundedReceiver<ConnectionTracker>,
+) {
+    let dial_count = Arc::new(AtomicUsize::new(0));
+    let (peer_tracker_tx, peer_tracker_rx) = mpsc::unbounded();
+
+    let outbound_connector = {
+        let dial_count = dial_count.clone();
+        service_fn(move |req: OutboundConnectorRequest| {
+            let previous_dials = dial_count.fetch_add(1, Ordering::SeqCst);
+            let peer_tracker_tx = peer_tracker_tx.clone();
+            async move {
+                if previous_dials < fail_first {
+                    return Err("test outbound connector fails the first dials".into());
+                }
+
+                let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Make the connection stay open.
+                peer_tracker_tx
+                    .unbounded_send(req.connection_tracker)
+                    .expect("unexpected error sending to unbounded channel");
+
+                Ok((req.addr, fake_client))
+            }
+        })
+    };
+
+    (outbound_connector, dial_count, peer_tracker_rx)
+}
+
+/// Returns the initial peer addresses used by [`spawn_crawler_with_initial_peers`].
+fn initial_peer_addrs(peer_count: usize) -> HashSet<PeerSocketAddr> {
+    (0..peer_count)
+        .map(|address_number| {
+            let address_number = u8::try_from(address_number).expect("tests use a few peers");
+            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number).into(), 1).into()
+        })
+        .collect()
+}
+
+/// Returns the address book entries for the addresses in [`initial_peer_addrs`].
+fn initial_peers_in_address_book(
+    address_book: &std::sync::Mutex<AddressBook>,
+    peer_count: usize,
+) -> Vec<Option<MetaAddr>> {
+    let mut address_book = address_book
+        .lock()
+        .expect("panic in previous thread while accessing the address book");
+
+    initial_peer_addrs(peer_count)
+        .into_iter()
+        .map(|addr| address_book.get(addr))
+        .collect()
+}
+
+/// Starts a crawler configured with `peer_count` initial peers and no other peers,
+/// using `crawl_new_peer_interval`.
+///
+/// If `add_to_address_book` is true, adds the initial peers to the address book like startup
+/// does, so the crawler dials them as new candidates before any re-add.
+///
+/// Returns the address book, the peer set receiver, and the crawler task.
+async fn spawn_crawler_with_initial_peers<C>(
+    peer_count: usize,
+    add_to_address_book: bool,
+    crawl_new_peer_interval: Duration,
+    outbound_connector: C,
+) -> (
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Receiver<DiscoveredPeer>,
+    JoinHandle<Result<(), BoxError>>,
+)
+where
+    C: Service<
+            OutboundConnectorRequest,
+            Response = (PeerSocketAddr, peer::Client),
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    C::Future: Send + 'static,
+{
+    // This address isn't actually bound - it just gets passed to the address book.
+    let unused_v4 = "0.0.0.0:0".parse().unwrap();
+
+    let config = Config {
+        initial_mainnet_peers: initial_peer_addrs(peer_count)
+            .iter()
+            .map(|addr| addr.remove_socket_addr_privacy().to_string())
+            .collect(),
+        // We want exactly the above list of peers, without any cached peers.
+        cache_dir: CacheDir::disabled(),
+        network: Network::Mainnet,
+        listen_addr: unused_v4,
+        peerset_initial_target_size: peer_count,
+        crawl_new_peer_interval,
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, unused_v4);
+
+    if add_to_address_book {
+        let initial_peers = limit_initial_peers(&config, &address_book_service).await;
+        assert_eq!(initial_peers.len(), peer_count);
+    }
+
+    // A peer set with no peers to crawl. Any crawl response, even an empty one, queues
+    // demand, so fail the crawl like a peer set with no ready peers does.
+    let empty_peer_set = service_fn(|req| async move {
+        match req {
+            Request::Peers => Err::<Response, BoxError>("test peer set has no peers".into()),
+            _ => unreachable!("unexpected request: {:?}", req),
+        }
+    });
+
+    // Leave room for every connection and failed dial demand signal.
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(channel_size);
+    let (demand_tx, demand_rx) = mpsc::channel::<MorePeers>(channel_size);
+
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), empty_peer_set);
+
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+    ));
+
+    (address_book, peerset_rx, crawl_task_handle)
+}
+
+/// Stops the crawler task, and checks it didn't panic or return an error.
+async fn stop_crawler(crawl_task_handle: JoinHandle<Result<(), BoxError>>) {
     crawl_task_handle.abort();
     tokio::task::yield_now().await;
 
@@ -940,8 +1348,13 @@ async fn listener_peer_limit_zero_handshake_panic() {
         return;
     }
 
-    let unreachable_inbound_handshaker = service_fn(|_| async {
-        unreachable!("inbound handshaker should never be called with a zero peer limit")
+    // The listener can stop before a panicking handshake task reports its panic, so also record
+    // whether the handshaker was called.
+    let handshaker_called = Arc::new(AtomicBool::new(false));
+    let called = handshaker_called.clone();
+    let unreachable_inbound_handshaker = service_fn(move |_| {
+        called.store(true, Ordering::SeqCst);
+        async { unreachable!("inbound handshaker should never be called with a zero peer limit") }
     });
 
     let (_config, mut peerset_rx) =
@@ -953,6 +1366,10 @@ async fn listener_peer_limit_zero_handshake_panic() {
         // `Err(TryRecvError::Closed)` means the channel is closed.
         peer_result.is_err(),
         "unexpected peer when inbound limit is zero: {peer_result:?}",
+    );
+    assert!(
+        !handshaker_called.load(Ordering::SeqCst),
+        "inbound handshaker was called with a zero peer limit",
     );
 }
 
@@ -1006,9 +1423,6 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
             std::mem::drop(connection_tracker);
             std::mem::drop(tcp_stream);
 
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
             Ok(fake_client)
         });
 
@@ -1056,12 +1470,15 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
             let peer_tracker_tx = peer_tracker_tx.clone();
             async move {
                 let HandshakeRequest {
-                    data_stream: tcp_stream,
+                    data_stream: mut tcp_stream,
                     connected_addr: _,
                     connection_tracker,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Signal acceptance without closing the connection.
+                tcp_stream.write_all(&[0]).await.expect("test peer is open");
 
                 // Make the connection staying open.
                 peer_tracker_tx
@@ -1563,7 +1980,7 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
         ..Config::default()
     };
 
-    let (mut peer_set, address_book, misbehavior_tx) = init(
+    let (mut peer_set, address_book, misbehavior_tx, _advertiser) = init(
         config,
         peers_inbound_service,
         NoChainTip,
@@ -1606,9 +2023,10 @@ async fn banned_connected_inbound_peer_is_dropped_from_peer_set() {
 
     // Ban the peer, using the same channel that block and transaction verification uses.
     misbehavior_tx
-        .send((
+        .send(MisbehaviorReport::new(
             PeerSocketAddr::from(SocketAddr::new(peer_ip.into(), ipv4_listen_addr.port())),
             constants::MAX_PEER_MISBEHAVIOR_SCORE,
+            "test misbehavior",
         ))
         .await
         .expect("misbehavior channel is open");
@@ -1738,9 +2156,6 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
             std::mem::drop(connection_tracker);
             std::mem::drop(tcp_stream);
 
-            // Give the crawler time to get the message.
-            tokio::task::yield_now().await;
-
             Ok(fake_client)
         });
 
@@ -1788,12 +2203,15 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
             let peer_tracker_tx = peer_tracker_tx.clone();
             async move {
                 let HandshakeRequest {
-                    data_stream: tcp_stream,
+                    data_stream: mut tcp_stream,
                     connected_addr: _,
                     connection_tracker,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+                // Signal acceptance without closing the connection.
+                tcp_stream.write_all(&[0]).await.expect("test peer is open");
 
                 // Make the connection staying open.
                 peer_tracker_tx
@@ -1850,6 +2268,81 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
         config.peerset_inbound_connection_limit(),
         peer_change_count,
     );
+}
+
+/// Test that Zebra sets `TCP_NODELAY` on the TCP sockets of inbound and outbound peer connections.
+#[tokio::test]
+async fn peer_tcp_connections_disable_nagle() {
+    let _init_guard = zebra_test::init();
+
+    // This test requires an IPv4 network stack with 127.0.0.1 as localhost.
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let (inbound_nodelay_tx, mut inbound_nodelay_rx) = mpsc::unbounded();
+
+    // The listener has already called `set_tcp_nodelay()` on the stream when it calls the
+    // handshaker, so this reads the option the real inbound handshake would see.
+    let nodelay_inbound_handshaker = service_fn(move |req: HandshakeRequest<TcpStream>| {
+        let inbound_nodelay_tx = inbound_nodelay_tx.clone();
+        async move {
+            inbound_nodelay_tx
+                .unbounded_send(req.data_stream.nodelay())
+                .expect("unexpected error sending to unbounded channel");
+
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+
+            Ok(fake_client)
+        }
+    });
+
+    let config = Config {
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
+        ..Config::default()
+    };
+    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+
+    let (peerset_tx, _peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
+    let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
+
+    let listen_fut = accept_inbound_connections(
+        config,
+        tcp_listener,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        nodelay_inbound_handshaker,
+        peerset_tx,
+        bans_rx,
+        Vec::new(),
+    );
+    let listen_task_handle = tokio::spawn(listen_fut);
+
+    // Outbound side: the socket from the connect helper that the outbound connector uses.
+    let outbound_stream = peer::connect_tcp_nodelay(listen_addr)
+        .await
+        .expect("connecting to a local listener should succeed");
+    assert!(
+        outbound_stream
+            .nodelay()
+            .expect("reading TCP_NODELAY on an open socket should succeed"),
+        "outbound peer connections should disable Nagle's algorithm",
+    );
+
+    // Inbound side: the result from the fake handshaker, for the same connection.
+    let inbound_nodelay = tokio::time::timeout(LISTENER_TEST_TIMEOUT, inbound_nodelay_rx.next())
+        .await
+        .expect("the listener should hand the inbound connection to the handshaker")
+        .expect("the handshaker keeps its sender until it is dropped with the listener");
+    assert!(
+        inbound_nodelay.expect("reading TCP_NODELAY on an open socket should succeed"),
+        "inbound peer connections should disable Nagle's algorithm",
+    );
+
+    listen_task_handle.abort();
+    tokio::task::yield_now().await;
+    assert_listener_task_cancelled(listen_task_handle);
+
+    std::mem::drop(outbound_stream);
 }
 
 /// Test if the initial seed peer connections is rate-limited.
@@ -1937,7 +2430,7 @@ async fn self_connections_should_fail() {
         ..Config::default()
     };
 
-    let address_book = init_with_peer_limit(
+    let (_network, address_book) = init_with_peer_limit(
         TEST_PEERSET_INITIAL_TARGET_SIZE,
         unreachable_inbound_service,
         Mainnet,
@@ -1988,23 +2481,23 @@ async fn self_connections_should_fail() {
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
 
-    // Wait until the crawler has tried at least one self-connection
-    tokio::time::sleep(TEST_CRAWL_NEW_PEER_INTERVAL * 3).await;
+    // Wait for the crawler's failed self-connection to reach the address book.
+    let self_connection_status = tokio::time::timeout(CRAWLER_TEST_DURATION, async {
+        loop {
+            let status = address_book
+                .lock()
+                .expect("unexpected panic in address book")
+                .get(real_self_listener.addr())
+                .expect("unexpected dropped listener address in address book");
+            if status.last_connection_state == PeerAddrState::Failed {
+                break status;
+            }
 
-    // Check that the self-connection failed
-    let self_connection_status = {
-        let mut unlocked_address_book = address_book
-            .lock()
-            .expect("unexpected panic in address book");
-
-        let self_connection_status = unlocked_address_book
-            .get(real_self_listener.addr())
-            .expect("unexpected dropped listener address in address book");
-
-        std::mem::drop(unlocked_address_book);
-
-        self_connection_status
-    };
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the crawler should finish a self-connection attempt");
 
     // Make sure we fetched from the address book correctly
     assert_eq!(
@@ -2188,7 +2681,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2200,19 +2693,11 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         .unwrap()
         .local_listener_meta_addr(Utc::now());
 
-    if listen_addr.port() == 0 {
-        assert_ne!(
-            local_listener.addr.port(),
-            0,
-            "dynamic ports are replaced with OS-assigned ports"
-        );
-    } else {
-        assert_eq!(
-            local_listener.addr.port(),
-            listen_addr.port(),
-            "fixed ports are correctly propagated"
-        );
-    }
+    assert_ne!(
+        local_listener.addr.port(),
+        0,
+        "dynamic ports are replaced with OS-assigned ports"
+    );
 
     assert_eq!(
         local_listener.addr.ip(),
@@ -2221,20 +2706,50 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     );
 }
 
+/// Checks that the address book advertises the actual port while its listener is held open.
+async fn local_listener_bound_port_with(listen_addr: SocketAddr, network: Network) {
+    let config = Config {
+        listen_addr,
+        network,
+        ..Config::default()
+    };
+    let (listener, bound_addr) = open_listener(&config).await;
+    let (address_book, _, _, _, _, updater_task) = AddressBookUpdater::spawn(&config, bound_addr);
+    let local_listener = address_book
+        .lock()
+        .unwrap()
+        .local_listener_meta_addr(Utc::now());
+
+    assert_eq!(
+        local_listener.addr.port(),
+        listener
+            .local_addr()
+            .expect("the listener has bound its address")
+            .port(),
+        "bound ports are correctly propagated"
+    );
+    assert_eq!(
+        local_listener.addr.ip(),
+        listen_addr.ip(),
+        "IP addresses are correctly propagated"
+    );
+    updater_task.abort();
+}
+
 /// Initialize a peer set with `peerset_initial_target_size`, `inbound_service`, and `network`.
 ///
 /// If `force_listen_addr` is set, binds the network listener to that address.
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the network owner and newly created [`AddressBook`] for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
     network: Network,
     force_listen_addr: impl Into<Option<SocketAddr>>,
     default_config: impl Into<Option<Config>>,
-) -> Arc<std::sync::Mutex<AddressBook>>
+) -> (crate::NetworkService, Arc<std::sync::Mutex<AddressBook>>)
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
@@ -2254,7 +2769,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (peer_service, address_book, _, _advertiser) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -2262,12 +2777,13 @@ where
     )
     .await;
 
-    address_book
+    (peer_service, address_book)
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
 ///
-/// Uses the default values for all other config fields.
+/// Uses the default values for all other config fields, except the initial peers and disk cache,
+/// which are empty.
 /// Does not bind a local listener.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
@@ -2286,7 +2802,15 @@ where
     C::Future: Send + 'static,
 {
     // Create a test config.
-    let mut config = Config::default();
+    let mut config = Config {
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        // Without initial peers or a disk cache, a crawler with no connections has no initial
+        // peers to add again, which would add DNS seeder or cached peers to the address book.
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        ..Config::default()
+    };
     if let Some(peerset_initial_target_size) = peerset_initial_target_size.into() {
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
@@ -2371,16 +2895,7 @@ where
     // Let the crawler run for a while.
     tokio::time::sleep(CRAWLER_TEST_DURATION).await;
 
-    // Stop the crawler and let it finish.
-    crawl_task_handle.abort();
-    tokio::task::yield_now().await;
-
-    // Check for panics or errors in the crawler.
-    let crawl_result = crawl_task_handle.now_or_never();
-    assert!(
-        crawl_result.is_none() || matches!(crawl_result, Some(Err(ref e)) if e.is_cancelled()),
-        "unexpected error or panic in peer crawler task: {crawl_result:?}",
-    );
+    stop_crawler(crawl_task_handle).await;
 
     // Check the final address book contents.
     assert_eq!(
@@ -2449,6 +2964,7 @@ fn assert_listener_task_cancelled(listen_task_handle: JoinHandle<Result<(), BoxE
 ///
 /// Binds the local listener to an unused localhost port.
 /// Uses the default values for all other config fields.
+/// Fake handshakers that keep connections open must send one byte to signal completion.
 ///
 /// Returns the generated [`Config`], and the peer set receiver.
 async fn spawn_inbound_listener_with_peer_limit<S>(
@@ -2508,21 +3024,18 @@ where
             // Let other tasks run before we block on reading.
             tokio::task::yield_now().await;
 
-            if let Ok(outbound_stream) = outbound_result {
-                // Wait until the listener closes the connection.
-                // The handshaker is fake, so it never sends any data.
-                let readable_result = outbound_stream.readable().await;
-                debug!(
-                    ?readable_result,
-                    "outbound connection became readable or errored: \
-                     closing connection to test inbound listener"
-                );
+            if let Ok(mut outbound_stream) = outbound_result {
+                // A held-open handshake sends one byte; rejection or disconnection sends EOF.
+                let read_result = outbound_stream.read_exact(&mut [0]).await;
+                debug!(?read_result, "inbound listener processed test connection");
+                Some(outbound_stream)
             } else {
                 // If the connection is closed quickly, we might get errors here.
                 debug!(
                     ?outbound_result,
                     "outbound connection error in inbound listener test"
                 );
+                None
             }
         };
 
@@ -2530,20 +3043,26 @@ where
         outbound_task_handles.push(outbound_task_handle);
     }
 
-    // Let the listener run for a while.
-    tokio::time::sleep(LISTENER_TEST_DURATION).await;
+    // Keep accepted connections open until all attempts have reached the listener.
+    let _outbound_connections = tokio::time::timeout(LISTENER_TEST_TIMEOUT, async {
+        let mut connections = Vec::new();
+        for outbound_task_handle in outbound_task_handles {
+            connections.push(
+                outbound_task_handle
+                    .await
+                    .expect("outbound connection task should not panic"),
+            );
+        }
+        connections
+    })
+    .await
+    .expect("the listener should handshake or reject every test connection");
 
-    // Stop the listener and outbound tasks, and let them finish.
+    // Stop the listener and check that it did not panic or fail.
     listen_task_handle.abort();
-    for outbound_task_handle in outbound_task_handles {
-        outbound_task_handle.abort();
-    }
-    tokio::task::yield_now().await;
-
-    // Check for panics or errors in the listener.
-    let listen_result = listen_task_handle.now_or_never();
+    let listen_result = listen_task_handle.await;
     assert!(
-        listen_result.is_none() || matches!(listen_result, Some(Err(ref e)) if e.is_cancelled()),
+        matches!(&listen_result, Err(e) if e.is_cancelled()),
         "unexpected error or panic in inbound peer listener task: {listen_result:?}",
     );
 
@@ -2604,14 +3123,72 @@ where
     let (
         _address_book,
         _bans_receiver,
-        address_book_updater,
-        _address_book_service,
+        _address_book_updater,
+        address_book_service,
         _address_metrics,
         address_book_updater_guard,
     ) = AddressBookUpdater::spawn(&config, unused_v4);
 
-    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
+    let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_service);
     let add_task_handle = tokio::spawn(add_fut);
 
     (add_task_handle, peerset_rx, address_book_updater_guard)
+}
+
+/// Check that misbehaviour reports sent while a flush is waiting on the address book
+/// updater are received, rather than filling up the channel and being dropped.
+#[tokio::test]
+async fn misbehavior_reports_are_received_during_flush() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    const CHANNEL_SIZE: usize = 4;
+    const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
+    let (misbehavior_tx, misbehavior_rx) = tokio::sync::mpsc::channel(CHANNEL_SIZE);
+
+    // A full address book channel, which nothing reads until the end of the test,
+    // makes the flush wait.
+    let (address_book_updater, mut address_book_rx) = change_channel(1);
+
+    let batch_task = tokio::spawn(batch_misbehavior_updates(
+        misbehavior_rx,
+        address_book_updater,
+        FLUSH_INTERVAL,
+    ));
+
+    let report = |port| {
+        MisbehaviorReport::new(
+            PeerSocketAddr::from(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port)),
+            1,
+            "test",
+        )
+    };
+
+    // The first flush sends one of these updates, then waits to send the other one.
+    misbehavior_tx.send(report(1)).await.unwrap();
+    misbehavior_tx.send(report(2)).await.unwrap();
+    tokio::time::sleep(FLUSH_INTERVAL * 2).await;
+
+    // Verification code uses `try_send()`, which fails if the channel is full.
+    for _ in 0..CHANNEL_SIZE * 3 {
+        misbehavior_tx
+            .try_send(report(3))
+            .expect("the batch task should keep receiving while it waits to flush");
+        tokio::task::yield_now().await;
+    }
+
+    // Unblock the flush, then wait for the next one, which has all the reports for peer 3.
+    let mut updates = 0;
+    while tokio::time::timeout(FLUSH_INTERVAL * 3, address_book_rx.recv())
+        .await
+        .is_ok_and(|update| update.is_some())
+    {
+        updates += 1;
+    }
+
+    assert_eq!(updates, 3, "expected one address book update for each peer");
+
+    drop(misbehavior_tx);
+    batch_task.await.expect("batch task should not panic");
 }

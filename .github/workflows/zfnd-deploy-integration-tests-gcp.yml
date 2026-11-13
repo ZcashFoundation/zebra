@@ -108,8 +108,9 @@ permissions:
   contents: read
 
 jobs:
-  # Resolve the workflow environment once so every downstream job and the
-  # SENTRY_ENVIRONMENT / GCP labels stay in lockstep.
+  # Resolve the workflow environment once so every downstream job and the GCP
+  # labels stay in lockstep. Test nodes report to Sentry as `ci` instead, so they
+  # don't count toward the dev, stage, or prod fleet in Sentry.
   #
   # Also resolve the GCE instance and data-disk names once, here, so every job that
   # creates, inspects or deletes them agrees. Both names identify the run that owns
@@ -141,7 +142,7 @@ jobs:
   # instance labels, where there is no 63-character budget to compete for.
   determine-environment:
     name: Determine environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 1
     outputs:
       environment: ${{ steps.set.outputs.environment }}
@@ -195,7 +196,7 @@ jobs:
 
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
-  # - state version (from the source code) - v{N}
+  # - state version (from the source code) - v{N}, or v{N-1} when there is no v{N} image and zebrad can upgrade it in place
   # - network (network) - mainnet or testnet
   # - disk target height kind (disk_suffix) - checkpoint or tip
   #
@@ -336,8 +337,9 @@ jobs:
             MOUNT_PATHS+=" ${LWD_STATE_DIR}"
           fi
 
-          # Environment variables for the container
-          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${WORKFLOW_ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
+          # Environment variables for the container. SENTRY_ENVIRONMENT is `ci` for every
+          # trigger, so test runs stay out of the fleet's release health in Sentry.
+          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=ci,GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
 
           # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
@@ -484,18 +486,27 @@ jobs:
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
       #
-      # If the container has already finished, `docker wait` should return its status.
-      # But sometimes this doesn't work, so we use `docker inspect` as a fallback.
+      # If the container has already finished, `docker wait` returns its status. A failed
+      # `docker wait` prints no status, which must fail the step, not count as success.
       #
       # `docker wait` prints the container exit status as a string, but we need to exit the `ssh` command
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
+      #
+      # The `failure-issue` job in zfnd-ci-integration-tests-gcp.yml finds this step by its
+      # `Result of ` name prefix to tell a failed test from a failed setup step.
+      #
+      # `ssh` exits 255 when it cannot connect or loses the connection, and the remote command
+      # only exits 0 or 1. On 255 the test result is unknown, so this step passes and the next
+      # step fails the job, which reports it as an infrastructure failure.
       - name: Result of ${{ inputs.test_id }} test
+        id: test-status
         env:
           INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
         run: |
           CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           echo "Using pre-discovered container ID: ${CONTAINER_ID}"
+          SSH_STATUS=0
           gcloud compute ssh "${INSTANCE_NAME}" \
           --zone ${{ steps.create-instance.outputs.instance_zone }} \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -509,14 +520,28 @@ jobs:
           EXIT_STATUS=\$(sudo docker wait ${CONTAINER_ID});
           echo 'Container exit status: '\$EXIT_STATUS;
 
-          if [ \"\$EXIT_STATUS\" -ne 0 ]; then
+          if [ \"\$EXIT_STATUS\" != 0 ]; then
             echo 'Test failed with exit code: '\$EXIT_STATUS;
             exit 1;
           else
             echo 'Test successful with exit code: '\$EXIT_STATUS;
             exit 0;
           fi
-          "
+          " || SSH_STATUS=$?
+
+          if [[ "${SSH_STATUS}" == 255 ]]; then
+            echo "ssh_failed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          exit "${SSH_STATUS}"
+
+      - name: Check the SSH connection to the test instance
+        if: steps.test-status.outputs.ssh_failed == 'true'
+        env:
+          INSTANCE_NAME: ${{ needs.determine-environment.outputs.instance_name }}
+        run: |
+          echo "::error::The SSH connection to ${INSTANCE_NAME} failed before the test result was known."
+          exit 1
 
       # Collect VM-level diagnostics when the test, or any earlier step, failed, or
       # when the job was cancelled or hit its `timeout-minutes`.
@@ -612,7 +637,7 @@ jobs:
   # generation tests.
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
@@ -675,7 +700,7 @@ jobs:
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, test-result ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
@@ -706,17 +731,26 @@ jobs:
       # Disk images in GCP are required to be in lowercase, but the blockchain network
       # uses sentence case, so we need to downcase ${{ inputs.network }}.
       #
-      # Disk image names in GCP are limited to 63 characters, so we need to limit
-      # branch names to 12 characters.
+      # Disk image names in GCP are limited to 63 characters, so the cache scope is
+      # limited to 12. The scope is the branch slug in ZcashFoundation/zebra and
+      # `r<repository id>` elsewhere, so a copy of the repository never writes `main` images.
+      # The lookup in `zfnd-find-cached-disks.yml` must compute the same scope.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
-      - name: Format network name and branch name for disks
+      # Passes the cache scope to subsequent steps using $CACHE_SCOPE env variable.
+      - name: Format network name and cache scope for disks
+        env:
+          NETWORK_INPUT: ${{ inputs.network }}
+          SCOPE: ${{ github.repository == 'ZcashFoundation/zebra' && env.GITHUB_REF_POINT_SLUG_URL || format('r{0}', github.repository_id) }}
         run: |
-          NETWORK_CAPS="${{ inputs.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
-          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
+          echo "NETWORK=${NETWORK_INPUT,,}" >> "$GITHUB_ENV"
+          cache_scope="${SCOPE:0:12}"
+          # The lookup skips `r<digits>` scopes in ZcashFoundation/zebra as copies' images,
+          # so a branch slug of that shape gets a prefix.
+          if [[ "${GITHUB_REPOSITORY}" == "ZcashFoundation/zebra" && "${cache_scope}" =~ ^r[0-9]+$ ]]; then
+            cache_scope="b${cache_scope:0:11}"
+          fi
+          echo "CACHE_SCOPE=${cache_scope}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
       - name: Install private SSH key
@@ -958,7 +992,7 @@ jobs:
       # Using the newest image makes future jobs faster, because it is closer to the chain tip.
       #
       # Skips creating updated images if the original image is less than $CACHED_STATE_UPDATE_LIMIT behind the current tip.
-      # Full sync images are always created.
+      # Full sync images, and images upgraded from an earlier database major version, are always created.
       #
       # The image can contain:
       # - Zebra cached state, or
@@ -1003,8 +1037,14 @@ jobs:
           REPOSITORY_LABEL="${REPOSITORY_LABEL//[^a-z0-9_-]/-}"
           REPOSITORY_LABEL="${REPOSITORY_LABEL:0:63}"
 
+          # Versions look like `v29-0-0`, so the text before the first dash is the major version.
+          MAJOR_UPGRADED=false
+          if [[ "$INITIAL_DISK_DB_VERSION" != "new" && "${INITIAL_DISK_DB_VERSION%%-*}" != "${RUNNING_DB_VERSION%%-*}" ]]; then
+            MAJOR_UPGRADED=true
+          fi
+
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
-          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]]; then
+          if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${FORCE_SAVE_TO_DISK}" == "true" ]] || [[ "$MAJOR_UPGRADED" == "true" ]]; then
 
              # Use RUNNING_DB_VERSION for image naming (more reliable than STATE_VERSION)
              # Extract just the major version number for the image name
@@ -1023,7 +1063,7 @@ jobs:
 
              # Create image from the test disk
              gcloud compute images create \
-              "${DISK_PREFIX}-${SHORT_GITHUB_REF}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${DISK_PREFIX}-${CACHE_SCOPE}-${GITHUB_SHA_SHORT}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${DISK_SUFFIX}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk="${DISK_NAME}" \
               --source-disk-zone=${{ needs.test-result.outputs.instance_zone }} \
@@ -1037,7 +1077,7 @@ jobs:
   # delete the Google Cloud instance for this test
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: [ determine-environment, create-state-image, upload-checkpoint-artifact ]
     environment: ${{ needs.determine-environment.outputs.environment }}
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
@@ -1122,7 +1162,7 @@ jobs:
 
   deployment-success:
     name: Integration test deployment success
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Always run this job to check the status of dependent jobs
     if: always()
     needs:

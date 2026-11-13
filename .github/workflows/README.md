@@ -162,12 +162,17 @@ Three rules keep the quota usable:
 
 1. **Only main writes.** The main building jobs set
    `cache-save-if: ${{ github.ref == 'refs/heads/main' }}`. PRs restore from main and write nothing. (There are some minor exceptions to this rule.)
-2. **Wide matrices share one key.** The `test-crates.yml` matrices use
-   `cache-shared-key` and seed the shared cache from a single build (`zebrad`
-   which has the widest dependency closure; `zebra-rpc` for the MSRV build since
-   it does not build `zebrad` and `zebra-rpc` is second widest option).
-3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
-   crate-matrix generator in `test-crates.yml` set `cache: false`.
+2. **Wide matrices share keys.** The `test-crates.yml` matrices use
+   `cache-shared-key`: one key for each half of the build matrix, and one for
+   the MSRV matrix. Each is seeded from a single build (`zebrad`, which has the
+   widest dependency closure; `zebra-rpc` for the MSRV build since it does not
+   build `zebrad` and `zebra-rpc` is second widest option).
+3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, and the crate-matrix generator
+   in `test-crates.yml` set `cache: false`.
+   The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
+
+The dependency-check Docker action provides its own Rust toolchain. The `deny` matrix therefore
+does not install Rust or restore a Rust cache on the host.
 
 To inspect the current state:
 
@@ -215,22 +220,30 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 
 ### Main Workflows
 
-- **Unit Tests** (`tests-unit.yml`): OS matrix unit tests via nextest
+- **Unit Tests** (`tests-unit.yml`): Linux unit tests via nextest
+  Source PRs targeting upstream `main` use workspace optimisation level 0; dependencies keep their
+  configured profiles. The merge queue validates level 3 before merge. Other contexts, including
+  `next` PRs and forks' own repositories, retain the unmodified release command.
 - **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
+  The local builder is cleaned up on self-hosted runners; hosted VMs discard it with the job.
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
-- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, API compatibility, and complete generated Release PR readiness
+  The library MSRV matrix excludes `zebrad`; the lint workflow checks the binary's own MSRV.
+- **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
-- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, adds the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book at `/next`, and publishes them to Pages
+- **Book (next)** (`book-next.yml`): Builds the book after a push to `next` changes it; `book.yml` on `main` then publishes it
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release** (`release.yml`): Creates or updates Release PRs with release-plz, then uses `ZcashFoundation/cargo-release` and native Cargo to reconcile crates, tags, and one `zebrad` GitHub Release. See the [release process](../../book/src/dev/release-process.md#release-candidate--release-process) for operational instructions.
 - **Release Binaries** (`release-binaries.yml`): Orchestrates release images, prepares and attaches downloadable binaries, and supports manual preparation validation without release attachment
 - **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
+- **Sync main to next** (`sync-next.yml`): Keeps the `sync/main-to-next` branch at `main` and opens its pull request into the [`next` branch](../../book/src/dev/next-branch.md)
 
 ### Supporting/Reusable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+  Hosted VMs discard local builders; self-hosted runners and remote drivers retain cleanup.
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
@@ -404,6 +417,7 @@ docker run --rm zebra-tests
   `pr-gate-result`, and `merge-policy`); Merge Freeze separately reports its
   `mergefreeze` status on the merge group
 
-It does **not** cover the GCP integration tests: `trigger-integration-tests.yml` runs on
-`pull_request` and `push` only, so a fork PR still needs a maintainer to dispatch it
-manually with the PR number.
+It does **not** cover the [zcash/integration-tests](https://github.com/zcash/integration-tests)
+interop suite (Zaino/Zallet RPC tests): `trigger-integration-tests.yml` runs weekly against
+`main` only, so to test a PR (same-repo or fork) a maintainer dispatches it manually with
+the PR number.

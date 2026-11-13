@@ -1,0 +1,10 @@
+# Ignore file for .oss-scanner/Dockerfile only. BuildKit prefers
+# <Dockerfile>.dockerignore over the repository's .dockerignore, which keeps
+# docs and tests out of the release images. The OSS Scanner's agent needs the
+# whole checkout in /src, so only build outputs and the git directory (which the
+# scanner adds back itself) are left out.
+.git
+target
+zebra-fuzz/fuzz/target
+zebra-fuzz/fuzz/corpus
+zebra-fuzz/fuzz/artifacts

@@ -3,8 +3,10 @@ name: Merge Policy
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [main]
+    # `edited` covers a pull request retargeted from another branch, which has no
+    # earlier result for this required check.
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+    branches: [main, next]
   merge_group:
     types: [checks_requested]
 
@@ -17,7 +19,7 @@ permissions: {}
 jobs:
   merge-policy:
     name: merge-policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       pull-requests: read # reads the labels of the pull requests in a merge group

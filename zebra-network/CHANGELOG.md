@@ -5,6 +5,67 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [15.0.0] - 2026-10-22
+
+### Breaking Changes
+
+- Added `Request::PollPeerSet`, which the peer set sends itself from a new background task, so it routes queued block requests as soon as a busy peer becomes ready. Peers never send it, so services that handle inbound peer requests can treat it as unreachable ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+- The misbehavior sender returned by `init` and `init_with_block_gossip_peer_ips` now takes a `MisbehaviorReport` instead of a `(PeerSocketAddr, u32)` tuple; the report also carries the `reason` the peer was scored. `MetaAddrChange::UpdateMisbehavior` has a new `reason` field, `MetaAddr::new_misbehavior` takes a `reason` argument, and `MetaAddrChange::misbehavior_reason` returns it.
+- Removed `protocol::external::codec::Builder::with_metrics_addr_label`: peer connection, request, message, byte and handshake metrics no longer carry per-peer `addr`, `remote_ip` or `user_agent` labels, and `zcash.net.peers.initial` and `zcash.net.peers.cache` count peers without a `remote_ip` label.
+- `init` and `init_with_block_gossip_peer_ips` return a fourth result, `BlockAdvertiser`, which callers must use for outbound block advertisements instead of the ordinary network service. Readiness waits for an eligible connected peer, independently of ordinary request readiness. Its bounded fanout reaches eligible busy peers and succeeds only after every selected local transport write completes; full queues, revoked connections, and write failures return errors. `PeerError` adds `AdvertRequiresDedicatedService` and `AdvertAuthorizationRevoked`; downstream exhaustive matches must handle both variants ([#11839](https://github.com/ZcashFoundation/zebra/pull/11839)).
+- `init` and `init_with_block_gossip_peer_ips` now return `NetworkService` instead of a raw Tower `Buffer`. Releasing the last owning handle and unfinished `NetworkResponseFuture` stops the buffer worker, crawler, listener, and pending handshakes. Pass `NetworkService::background_service()` to inbound handlers and their downloaders so internally retained handles and requests do not prevent shutdown ([#11749](https://github.com/ZcashFoundation/zebra/issues/11749)).
+- Added `Request::BlockDownload { hash, advertiser }` for outbound single-block downloads that retain a known advertiser and wait for eligible capacity without consuming retries on local refusals. Update exhaustive `Request` matches; inbound handlers can treat this variant as unreachable, and callers must bound readiness plus the complete response with a deadline ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+
+### Added
+
+- `constants::INVENTORY_BUSY_PEER_WAIT_TIMEOUT` ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521))
+- Expose `constants::FIND_BUSY_SERVING_PEER_WAIT_TIMEOUT`, the serving-peer preference timeout for `FindBlocks` and `FindHeaders` requests ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
+- With the `proptest-impl` feature, `test_support::PeerSetHarness` provides a buffered peer set and real client channels for consumer tests, including inventory advertisements and busy-peer control ([#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+
+### Changed
+
+- `Request::{FindBlocks, FindHeaders}` rotate fairly across ready block-serving connections. When all serving peers are busy, discovery waits up to 1.5 seconds and takes priority over queued block downloads, then falls back to any ready peer. With no serving peers connected, any ready peer is eligible immediately. Successful replies, including empty ones, reset failure counts. Completed failures count regardless of sync state; configured zcashd-compat sidecars remain exempt ([#10910](https://github.com/ZcashFoundation/zebra/pull/10910)).
+- Only retry peers that recently failed to return a block when no other peer might have it, whether the last-resort peer is ready or busy. Completed peer errors and response timeouts record failures; explicit missing responses and caller cancellations do not. Repeated failures refresh bounded cache recency, and failed advertisements do not enable speculative non-serving fallback. Failures belong to their connection, so a replacement inherits neither cached failures nor delayed predecessor errors ([#11525](https://github.com/ZcashFoundation/zebra/pull/11525)).
+- Prefer eligible block-serving peers for single-block requests without a ready advertiser. General `BlocksByHash` requests wait up to `INVENTORY_BUSY_PEER_WAIT_TIMEOUT` from enqueueing for busy peers. Queued requests reconsider advertisements and disconnected candidates without requiring unrelated traffic. Banned, outdated, and indefinitely backpressured connections do not suppress fallback. Busy connections that remain unready past `REQUEST_TIMEOUT` are dropped when the peer set is next polled, releasing their connection slots. After queued block requests take the last ready peer, they leave the next one to the request waiting to enter the peer set, so discovery does not wait for every queued block download. Queue and refusal counters include the network label ([#11515](https://github.com/ZcashFoundation/zebra/pull/11515), [#11748](https://github.com/ZcashFoundation/zebra/issues/11748), [#11521](https://github.com/ZcashFoundation/zebra/pull/11521)).
+- Limit the combined `FindBlocks` and `FindHeaders` queue to 16 requests, falling back to any ready peer on overflow. Count queued requests in `zcash.net.peer_set.find_queued` and non-serving discovery fallbacks in `zcash.net.peer_set.find_fallback` with `reason` labels `queue_full`, `no_serving_peer`, and `expired` ([#11532](https://github.com/ZcashFoundation/zebra/pull/11532)).
+- Block-advertisement broadcasts retain started delivery futures until completion and report delivery errors.
+- Peer connections now ignore `notfound` messages that name none of a pending request's blocks or transactions, instead of failing the request with `NotFoundResponse`.
+- Empty inventory messages no longer complete block-locator requests, preventing late mempool replies from being mistaken for locator results. An empty `Response::BlockHashes` from the inbound service now sends no message, like zcashd, instead of an empty inventory.
+- Changed `CURRENT_NETWORK_PROTOCOL_VERSION` to 170190 for the NU7 Mainnet activation.
+- Raised the MSRV to 1.89.
+
+### Fixed
+
+- Applying a large batch of gossiped peer addresses no longer blocks other address book users until the whole batch is done ([#11702](https://github.com/ZcashFoundation/zebra/pull/11702)).
+
+### Security
+
+- Fix a panic when a peer connection task is cancelled while it is sending a request to the peer, for example when its `Client` is dropped. The request now fails with the connection's error instead ([GHSA-6v36-c42v-v98p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-6v36-c42v-v98p)).
+
+## [14.0.0] - 2026-10-01
+
+### Breaking Changes
+
+- Explicitly empty funding-stream lists disable defaults on configured Testnets and survive configuration round-trips, as they already did on Regtest. Testnet and Regtest reject combining an empty list with either legacy funding field; remove both legacy fields to disable streams, or omit the empty list to retain legacy payouts. Omitted settings retain network defaults, and legacy post-NU6 streams use post-NU6 defaults independently of the pre-NU6 field. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Incompatible configured Testnets reject public Testnet magic even when public seeds are omitted. Public seed matching now ignores hostname case, trailing dots, and ports. Configure distinct `network_magic` and non-public peers for incompatible consensus rules. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `config::CacheDir::peer_cache_file_path` includes configured Testnet wire magic in peer cache names. Existing unsuffixed custom-network caches are not reused; public-network and Regtest paths are unchanged. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- Configured Testnets using public Testnet magic inherit the historical public NSM seed when omitted. Explicitly matching that seed leaves network identity and state paths unchanged. A different seed requires distinct `network_magic` and non-public peers; Regtest and distinct-magic networks default to zero ([#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+- `Config` deserialization rejects custom Testnet subsidy schedules that exceed the monetary cap, including early spacing upgrades with the default slow-start interval. Set `slow_start_interval = 0` for accelerated test networks. ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529))
+- `Config` deserialization rejects overlapping nonempty funding-stream height ranges on Testnet and Regtest, including overlaps introduced by inherited NU7 defaults. Use disjoint ranges; adjacent and empty ranges are accepted, including empty recipient lists with automatic address extension ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+- `Config` deserialization rejects TEX funding-stream recipients on Testnet and Regtest before node startup. Configure P2SH or P2PKH recipients instead; deferred recipients do not require addresses ([#11554](https://github.com/ZcashFoundation/zebra/pull/11554)).
+
+### Added
+
+- `initial_nsm_value_balance` and `nsm_reissuance_height` under `[network.testnet_parameters]` are available for Regtest and configured Testnets. Serialization preserves omitted settings. The effective reissuance height follows ZIP 237's scheduled-issuance crossover, with explicit overrides for accelerated testing ([#11454](https://github.com/ZcashFoundation/zebra/pull/11454), [#11530](https://github.com/ZcashFoundation/zebra/pull/11530)).
+
+### Changed
+
+- [ZIP 259](https://zips.z.cash/zip-0259) NU7 peer-version checks require 170180 on Testnet and Regtest and 170190 on Mainnet. `CURRENT_NETWORK_PROTOCOL_VERSION` is now 170180, up from 170160, until a Mainnet activation height is scheduled. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+- `Config` rejects explicitly out-of-order upgrade heights even when coincident activations previously hid the invalid ordering ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- Serializing and deserializing a Regtest `Config` preserves the effective activation heights of coincident upgrades instead of applying earlier defaults ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527)).
+- Peer-service requirements and stall detection use the local tip timestamp for freshness, preserving the elapsed-time allowance when NU7 shortens block spacing ([#11529](https://github.com/ZcashFoundation/zebra/pull/11529)).
+- Regtest skips public DNS seeders before resolving initial peers, while retaining explicitly configured local peers. ([#11527](https://github.com/ZcashFoundation/zebra/pull/11527))
+
 ## [13.0.0] - 2026-09-23
 
 ### Breaking Changes

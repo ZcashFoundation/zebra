@@ -9,7 +9,7 @@
 #![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::{thread_rng, Rng};
+use rand::RngExt;
 use reddsa::{
     batch,
     orchard::{Binding, SpendAuth},
@@ -41,18 +41,18 @@ enum Item {
 /// and signature over the empty message, "".
 fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     std::iter::repeat_with(|| {
-        let mut rng = thread_rng();
-        match rng.gen::<u8>() % 2 {
+        let mut rng = rand::rng();
+        match rng.random::<u8>() % 2 {
             0 => {
-                let sk = SigningKey::<SpendAuth>::new(thread_rng());
+                let sk = SigningKey::<SpendAuth>::new(rand::rng());
                 let vk_bytes = VerificationKey::from(&sk).into();
-                let sig = sk.sign(thread_rng(), &MESSAGE_BYTES[..]);
+                let sig = sk.sign(rand::rng(), &MESSAGE_BYTES[..]);
                 Item::SpendAuth { vk_bytes, sig }
             }
             1 => {
-                let sk = SigningKey::<Binding>::new(thread_rng());
+                let sk = SigningKey::<Binding>::new(rand::rng());
                 let vk_bytes = VerificationKey::from(&sk).into();
-                let sig = sk.sign(thread_rng(), &MESSAGE_BYTES[..]);
+                let sig = sk.sign(rand::rng(), &MESSAGE_BYTES[..]);
                 Item::Binding { vk_bytes, sig }
             }
             _ => panic!(),
@@ -117,7 +117,7 @@ fn bench_batch_verify(c: &mut Criterion) {
                             }
                         }
                     }
-                    assert!(batch.verify(thread_rng()).is_ok())
+                    assert!(batch.verify(rand::rng()).is_ok())
                 })
             },
         );

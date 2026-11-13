@@ -72,11 +72,7 @@ pub async fn zebrad_graceful_shutdown_stops_zcashd() -> Result<()> {
         .managed
         .take()
         .expect("managed process is present in regtest mode");
-    let zebrad_pid = zebrad
-        .child
-        .as_ref()
-        .expect("zebrad has not been waited on yet")
-        .id();
+    let zebrad_pid = zebrad.id();
 
     send_signal(zebrad_pid, "-TERM")?;
 

@@ -19,7 +19,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
+    constants::{
+        MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
+        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+    },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{
@@ -273,13 +276,40 @@ impl NonFinalizedState {
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
     {
-        self.chain_set.insert(chain);
+        self.chain_set.insert(chain.clone());
 
         chain_filter(&mut self.chain_set);
 
-        while self.chain_set.len() > MAX_NON_FINALIZED_CHAIN_FORKS {
-            // The first chain is the chain with the lowest work.
-            self.chain_set.pop_first();
+        let max_forks = if self.network.is_a_test_network() {
+            MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS
+        } else {
+            MAX_NON_FINALIZED_CHAIN_FORKS
+        };
+        while self.chain_set.len() > max_forks {
+            // Keep the inserted chain and the best chain, so late forks can grow. Evict the
+            // lowest-work chain, and on a work tie the one whose tip was received first.
+            let best_chain = self.chain_set.last().cloned();
+            let evicted = self
+                .chain_set
+                .iter()
+                .filter(|c| **c != chain && Some(*c) != best_chain.as_ref())
+                .min_by(|a, b| {
+                    let received_time = |c: &Chain| c.tip_block().map(|tip| tip.received_time);
+                    a.partial_cumulative_work
+                        .cmp(&b.partial_cumulative_work)
+                        .then_with(|| received_time(a).cmp(&received_time(b)))
+                        .then_with(|| a.cmp(b))
+                })
+                .expect("the fork limit allows more than two chains")
+                .clone();
+
+            self.chain_set.remove(&evicted);
+            tracing::warn!(
+                tip = ?evicted.non_finalized_tip_hash(),
+                height = ?evicted.non_finalized_tip_height(),
+                max_forks,
+                "the fork limit evicted a chain: if the node stops advancing, restart it"
+            );
         }
 
         self.update_metrics_bars();
@@ -386,6 +416,8 @@ impl NonFinalizedState {
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
+    ///
+    /// Returns an error without modifying the state if the block is the root of the only chain.
     #[allow(clippy::unwrap_in_result)]
     pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
@@ -393,6 +425,10 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
+            if self.chain_set.len() == 1 {
+                return Err(InvalidateError::OnlyChainRoot(block_hash));
+            }
+
             self.chain_set.remove(&chain);
             chain.blocks.values().cloned().collect()
         } else {
@@ -558,7 +594,11 @@ impl NonFinalizedState {
     ///
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
-    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
+    #[tracing::instrument(
+        level = "debug",
+        skip(self, finalized_state, new_chain, prepared),
+        fields(height = ?prepared.height, hash = %prepared.hash)
+    )]
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
@@ -599,28 +639,56 @@ impl NonFinalizedState {
             &prepared,
         );
 
-        // Quick check that doesn't read from disk
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared.clone(),
-            spent_utxos.clone(),
-            calculate_deferred_pool_balance_change(prepared.height, &self.network),
+        let (height, block_hash) = (prepared.height, prepared.hash);
+        let transaction_count = prepared.block.transactions.len();
+        let spent_utxo_count = spent_utxos.len();
+        let deferred_pool_balance_change = calculate_deferred_pool_balance_change(
+            height,
+            &self.network,
+            new_chain.chain_value_pools,
+        )
+        .map_err(|subsidy_error| ValidateContextError::InvalidSubsidy {
+            subsidy_error: subsidy_error.into(),
+            height,
+            block_hash,
+        })?;
+
+        let (contextual, block_fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            prepared,
+            spent_utxos,
+            deferred_pool_balance_change,
+            &self.network,
+            new_chain.chain_value_pools,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {
                 value_balance_error,
-                height: prepared.height,
-                block_hash: prepared.hash,
-                transaction_count: prepared.block.transactions.len(),
-                spent_utxo_count: spent_utxos.len(),
+                height,
+                block_hash,
+                transaction_count,
+                spent_utxo_count,
             }
         })?;
+
+        // The semantic verifier defers parent-dependent payouts to this exact-parent check.
+        if zebra_chain::parameters::subsidy::nsm_reissuance_is_active(height, &self.network) {
+            check::nsm_subsidy_is_valid(
+                &contextual,
+                &self.network,
+                new_chain.chain_value_pools,
+                block_fees.expect("reissuance starts no earlier than NU7 fee accounting"),
+            )?;
+        }
 
         Self::validate_and_update_parallel(new_chain, contextual, sprout_final_treestates)
     }
 
     /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
     #[allow(clippy::unwrap_in_result)]
-    #[tracing::instrument(skip(new_chain, sprout_final_treestates))]
+    #[tracing::instrument(
+        skip(new_chain, contextual, sprout_final_treestates),
+        fields(height = ?contextual.height, hash = %contextual.hash)
+    )]
     fn validate_and_update_parallel(
         new_chain: Arc<Chain>,
         contextual: ContextuallyVerifiedBlock,

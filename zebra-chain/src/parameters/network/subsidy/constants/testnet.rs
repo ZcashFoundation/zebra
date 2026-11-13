@@ -11,12 +11,6 @@ use crate::parameters::{
     },
 };
 
-/// The first halving height in the testnet is at block height `1_116_000`
-/// as specified in [protocol specification §7.10.1][7.10.1]
-///
-/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub(crate) const FIRST_HALVING: Height = Height(1_116_000);
-
 /// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 pub(crate) const POST_NU6_FUNDING_STREAM_START_HEIGHT: u32 = 2_976_000;
 
@@ -182,6 +176,9 @@ pub(crate) const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES: usize = 13;
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub(crate) const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES: usize = 27;
 
+/// The revision-2 funding stream end before ZIP 214's NU7 adjustment.
+pub(crate) const POST_NU6_1_FUNDING_STREAM_END_HEIGHT: Height = Height(4_476_000);
+
 /// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub(crate) const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES] =
@@ -235,7 +232,7 @@ lazy_static! {
             .collect(),
         },
         FundingStreams {
-            height_range: activation_heights::testnet::NU6_1..Height(4_476_000),
+            height_range: activation_heights::testnet::NU6_1..POST_NU6_1_FUNDING_STREAM_END_HEIGHT,
             recipients: [
                 (
                     FundingStreamReceiver::Deferred,

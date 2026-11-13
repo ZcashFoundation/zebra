@@ -38,8 +38,6 @@ pub mod legacy;
 use legacy::LegacyNoteCommitmentTree;
 
 /// The type that is used to update the note commitment tree.
-///
-/// Unfortunately, this is not the same as `orchard::NoteCommitment`.
 pub type NoteCommitmentUpdate = pallas::Base;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;

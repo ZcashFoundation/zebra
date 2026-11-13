@@ -2,6 +2,8 @@
 
 use std::env;
 
+use tokio::sync::oneshot;
+
 use zebra_chain::{
     block::Height,
     parameters::{
@@ -14,11 +16,9 @@ use zebra_test::prelude::*;
 
 use crate::{
     config::Config,
-    service::{
-        arbitrary::PreparedChain,
-        finalized_state::{CheckpointVerifiedBlock, FinalizedState},
-    },
+    service::{arbitrary::PreparedChain, finalized_state::FinalizedState, ChainTipBlock},
     tests::FakeChainHelper,
+    CheckpointVerifiedBlock,
 };
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;
@@ -31,7 +31,7 @@ fn blocks_with_v5_transactions() -> Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, count, network, _history_tree) in PreparedChain::default())| {
-            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false).expect("opening an ephemeral database should succeed");
+            let mut state = FinalizedState::new(&Config::ephemeral(), &network).expect("opening an ephemeral database should succeed");
             let mut height = Height(0);
             // use `count` to minimize test failures, so they are easier to diagnose
             for block in chain.iter().take(count) {
@@ -59,10 +59,11 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
     let _init_guard = zebra_test::init();
 
     let network = ParametersBuilder::default()
+        .with_slow_start_interval(zebra_chain::block::Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             // These are dummy values. The particular values don't matter much,
-            // as long as the nu5 one is smaller than the chains being generated
-            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure that upgrade is exercised
+            // as long as the nu7 one is smaller than the chains being generated
+            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure all upgrades are exercised
             // in the test below. (The test will fail if that does not happen.)
             before_overwinter: Some(1),
             overwinter: Some(10),
@@ -78,7 +79,19 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu7: Some(50),
         })
         .expect("failed to set activation heights")
-        .extend_funding_streams()
+        .with_nsm_reissuance_height(Height(50))
+        // These short chains have no historical funding-stream deposits to disburse.
+        .clear_funding_streams()
+        .with_lockbox_disbursements(vec![]);
+
+    // Seed the NSM value balance at NU7 activation, so that committing blocks past it reissues
+    // from the balance and debits it.
+    let initial_nsm_value_balance =
+        zebra_chain::amount::Amount::try_from(10 * zebra_chain::amount::COIN)
+            .expect("valid amount");
+    let network = network.with_initial_nsm_value_balance(initial_nsm_value_balance);
+
+    let network = network
         .to_network()
         .expect("failed to build configured network");
     let ledger_strategy =
@@ -91,8 +104,9 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
         |((chain, _count, network, _history_tree) in PreparedChain::default().with_ledger_strategy(ledger_strategy).with_valid_commitments().no_shrink())| {
 
-            let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false).expect("opening an ephemeral database should succeed");
+            let mut state = FinalizedState::new(&Config::ephemeral(), &network).expect("opening an ephemeral database should succeed");
             let mut height = Height(0);
+            let mut note_commitment_trees = None;
             let heartwood_height = NetworkUpgrade::Heartwood.activation_height(&network).unwrap();
             let heartwood_height_plus1 = (heartwood_height + 1).unwrap();
             let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
@@ -111,27 +125,64 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
                         h == nu5_height_plus1 => {
                             let block = block.block.clone().set_block_commitment([0x42; 32]);
                             let checkpoint_verified = CheckpointVerifiedBlock::from(block);
-                            state.commit_finalized_direct(
-                                checkpoint_verified.into(),
-                                None,
-                                "all_upgrades test"
+                            let (rsp_tx, mut rsp_rx) = oneshot::channel();
+                            let error = state.commit_finalized(
+                                (checkpoint_verified, rsp_tx),
+                                note_commitment_trees.clone(),
                             ).expect_err("Must fail commitment check");
+                            let response_error = rsp_rx.try_recv().unwrap().unwrap_err();
+                            prop_assert_eq!(error.inner(), response_error.inner());
+                            prop_assert_eq!(state.finalized_tip_height(), Some(Height(height.0 - 1)));
                             failure_count += 1;
                         },
                     _ => {},
                 }
                 let checkpoint_verified = CheckpointVerifiedBlock::from(block.block.clone());
-                let (hash, _) = state.commit_finalized_direct(
-                    checkpoint_verified.into(),
-                    None,
-                    "all_upgrades test"
+                let expected_tip = ChainTipBlock::from(checkpoint_verified.clone());
+                let (rsp_tx, mut rsp_rx) = oneshot::channel();
+                let (tip, trees) = state.commit_finalized(
+                    (checkpoint_verified, rsp_tx),
+                    note_commitment_trees.take(),
                 ).unwrap();
+                prop_assert_eq!(tip, expected_tip);
+                prop_assert_eq!(rsp_rx.try_recv().unwrap().unwrap(), block_hash);
                 prop_assert_eq!(Some(height), state.finalized_tip_height());
-                prop_assert_eq!(hash, block_hash);
+                note_commitment_trees = Some(trees);
                 height = Height(height.0 + 1);
             }
             // Make sure the failure path was triggered
             prop_assert_eq!(failure_count, 4);
+
+            // The finalized state tracked the NSM value balance from NU7 activation: seeded, then
+            // debited by each block's additional subsidy and credited with its ZIP 235 fee
+            // contribution.
+            {
+                use zebra_chain::{
+                    parameters::subsidy::{additional_block_subsidy, nsm_fee_contribution},
+                    transparent::utxos_from_ordered_utxos,
+                };
+
+                let utxos = utxos_from_ordered_utxos(
+                    chain.iter().flat_map(|block| block.new_outputs.iter().map(|(outpoint, utxo)| (*outpoint, utxo.clone()))),
+                );
+
+                let nu7_height = NetworkUpgrade::Nu7.activation_height(&network).unwrap();
+                let tip_height = state.finalized_tip_height().unwrap();
+                prop_assert!(tip_height >= nu7_height, "the chain must reach NU7");
+
+                let mut expected = initial_nsm_value_balance;
+                for height in (nu7_height.0..=tip_height.0).map(Height) {
+                    let fees = chain[height.0 as usize].block.transaction_fees(&utxos).expect("valid fees");
+
+                    expected = (expected - additional_block_subsidy(height, &network, expected))
+                        .expect("the balance never goes negative");
+                    expected = (expected + nsm_fee_contribution(height, &network, fees))
+                        .expect("the balance stays a valid amount");
+                }
+
+                prop_assert_eq!(state.finalized_value_pool().nsm_amount(), expected);
+                prop_assert!(expected > zebra_chain::amount::Amount::<zebra_chain::amount::NonNegative>::zero());
+            }
     });
 
     Ok(())

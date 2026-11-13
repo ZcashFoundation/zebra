@@ -2,7 +2,10 @@ name: Test Crate Build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
+    # `edited` covers a pull request retargeted to `next`, whose required checks must
+    # be evaluated against `next` rather than kept from a run against `main`.
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
   merge_group:
@@ -11,9 +14,14 @@ on:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
-# to run, cancelling any workflows in between
+# to run, cancelling any workflows in between. Edits to pull requests into `main`
+# get a group of their own, so they cannot cancel the run for the latest commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'push' && github.run_id || github.ref }}${{
+      github.event.action == 'edited' && github.base_ref != 'next' &&
+      format('-ignored-edit-{0}', github.run_id) || ''
+    }}
   cancel-in-progress: true
 
 permissions:
@@ -29,10 +37,12 @@ env:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
-      test_crates: ${{ steps.filter.outputs.test_crates || 'true' }}
+      # Edits report the checks as skipped for `main`, whose merge queue reruns them.
+      # `next` has no queue, so edits there, such as a retarget, rerun the filter.
+      test_crates: ${{ github.event.action == 'edited' && github.base_ref != 'next' && 'false' || steps.filter.outputs.test_crates || 'true' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -51,7 +61,7 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -67,10 +77,10 @@ jobs:
           # This job only runs `cargo tree` to build the matrix, so a cache here
           # only consumes quota.
           cache: false
-      - uses: ./.github/actions/setup-zebra-build
 
       # This step dynamically creates a JSON containing the values of each crate
-      # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
+      # in the workspace, including crates outside `default-members`.
+      # We use `cargo tree --workspace` to accomplish this task.
       #
       # The result from `cargo tree` is then sorted so the longest job (zebrad) runs first,
       # transformed to JSON values between double quotes, and separated by commas,
@@ -83,7 +93,7 @@ jobs:
         name: Dynamically build crates JSON
         run: |
           TEMP_DIR=$(mktemp -d)
-          cargo tree --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --prefix none | cut -d ' ' -f1 | sed '/^$/d' | LC_ALL=C sort --reverse | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//' > $TEMP_DIR/crates.txt
+          cargo tree --workspace --depth 0 --edges no-normal,no-dev,no-build,no-proc-macro --prefix none | cut -d ' ' -f1 | sed '/^$/d' | LC_ALL=C sort --reverse | awk '{ printf "\"%s\",\n", $0 }' | sed '$ s/.$//' > $TEMP_DIR/crates.txt
           MATRIX=$( (
             echo '{ "crate" : ['
             echo "$(cat $TEMP_DIR/crates.txt)"
@@ -94,7 +104,7 @@ jobs:
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.crate }} crate
+    name: Build ${{ matrix.crate }} crate, ${{ matrix.features }}
     needs: [changes, crates-matrix]
     if: needs.changes.outputs.test_crates == 'true'
     permissions:
@@ -102,13 +112,15 @@ jobs:
       statuses: write
     timeout-minutes: 90
     # Some of these builds take more than 14GB disk space
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
-      # avoid rate-limit errors by only launching a few of these jobs at a time,
-      # but still finish in a similar time to the longest tests
-      max-parallel: 4
       fail-fast: true
-      matrix: ${{ fromJson(needs.crates-matrix.outputs.matrix) }}
+      # One job per crate ran all four configurations in a row, up to 8 minutes for the slowest
+      # crates. Two jobs per crate split them, pairing the configurations that share the most
+      # build artifacts.
+      matrix:
+        crate: ${{ fromJson(needs.crates-matrix.outputs.matrix).crate }}
+        features: [default-features, no-default-and-all-features]
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -119,40 +131,41 @@ jobs:
         with:
           toolchain: 1.97.0
           components: clippy
-          # One cache for the whole matrix instead of one per crate. These jobs
+          # One cache per half of the matrix instead of one per job. These jobs
           # compile overlapping subsets of the same dependency graph, so 12
           # per-crate caches stored ~12 GB of near-duplicate artifacts and blew
           # through the repo's default 10 GB quota on their own.
-          cache-shared-key: crate-build
+          cache-shared-key: crate-build-${{ matrix.features }}
           cache-on-failure: true
-          # Only main writes the shared cache, and only from the crate with the
+          # Only main writes the shared caches, and only from the crate with the
           # widest dependency closure, so the other legs restore a superset
           # rather than whichever leg happened to finish first.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebrad' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
-      # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
-      # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
-      #
       # Some Zebra crates do not have any features, and most don't have any default features.
       # Some targets activate features, but we still need to be able to build without them.
       - name: Build ${{ matrix.crate }} crate with default features
+        if: matrix.features == 'default-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} -- -D warnings
           cargo build --package ${{ matrix.crate }}
 
       - name: Build ${{ matrix.crate }} crate with no default features and all targets
+        if: matrix.features == 'no-default-and-all-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --no-default-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --no-default-features --all-targets
 
       - name: Build ${{ matrix.crate }} crate with default features and all targets
+        if: matrix.features == 'default-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-targets
 
       - name: Build ${{ matrix.crate }} crate with all features and all targets
+        if: matrix.features == 'no-default-and-all-features'
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
@@ -165,13 +178,14 @@ jobs:
       contents: read
       statuses: write
     timeout-minutes: 90
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
-      # avoid rate-limit errors by only launching a few of these jobs at a time,
-      # but still finish in a similar time to the longest tests
-      max-parallel: 4
       fail-fast: true
-      matrix: ${{ fromJson(needs.crates-matrix.outputs.matrix) }}
+      matrix:
+        crate: ${{ fromJson(needs.crates-matrix.outputs.matrix).crate }}
+        # The binary's higher MSRV is checked separately in lint.yml.
+        exclude:
+          - crate: zebrad
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
@@ -191,22 +205,18 @@ jobs:
           # One cache for the whole matrix, see the `build` job above.
           cache-shared-key: crate-build-msrv
           cache-on-failure: true
-          # `zebrad` can't seed this matrix: the build step below skips it, so
-          # that leg compiles nothing. `zebra-rpc` has the widest closure of
-          # the crates that do build here.
+          # `zebra-rpc` has the widest dependency closure of the library crates.
           cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.crate == 'zebra-rpc' }}
 
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
-        # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
-        if: matrix.crate != 'zebrad'
         env:
           CRATE: ${{ matrix.crate }}
         run: cargo build --package "$CRATE" --all-features --all-targets
 
   test-crates:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: always()
     needs:
       - changes

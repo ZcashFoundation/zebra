@@ -7,17 +7,21 @@
 use std::{env, sync::Arc, time::Duration};
 
 use tokio::runtime::Runtime;
-use tower::{buffer::Buffer, util::BoxService};
+use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt as _};
 
 use zebra_chain::{
     amount::DeferredPoolBalanceChange,
     block::{self, Block, CountedHeader, Height},
     chain_tip::ChainTip,
     fmt::SummaryDebug,
-    parameters::{Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    parameters::{
+        testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        Network, NetworkUpgrade,
+    },
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction, transparent,
     value_balance::ValueBalance,
+    LedgerState,
 };
 
 use zebra_test::{prelude::*, transcript::Transcript};
@@ -25,12 +29,76 @@ use zebra_test::{prelude::*, transcript::Transcript};
 use crate::{
     arbitrary::Prepare,
     init_test,
-    service::{arbitrary::populated_state, chain_tip::TipAction, StateService},
+    service::{
+        arbitrary::{populated_state, populated_state_with_debug, PreparedChain},
+        chain_tip::TipAction,
+        StateService,
+    },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, Config, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, Request, Response,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn state_propagates_incomplete_block_body_errors() {
+    use crate::{BlockReadError, DiskWriteBatch, TransactionLocation, WriteDisk};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .values()
+            .take(2)
+            .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+            .collect();
+        let block = blocks.last().unwrap().clone();
+        let height = block.coinbase_height().unwrap();
+        let (state, read_state, _, _) =
+            populated_state_with_debug(blocks, &Network::Mainnet, true).await;
+        let db = read_state.db();
+        let mut batch = DiskWriteBatch::new();
+        batch.zs_delete_range(
+            &db.cf_handle("tx_by_loc").unwrap(),
+            TransactionLocation::min_for_height(height),
+            TransactionLocation::min_for_height(height.next().unwrap()),
+        );
+        // Exercise the size fallback used before block-info backfilling has finished.
+        batch.zs_delete(&db.cf_handle("block_info").unwrap(), height);
+        db.write_batch(batch).unwrap();
+
+        let expected = BlockReadError::BlockBodyUnavailable { height };
+        for query in [height.into(), block.hash().into()] {
+            for request in [
+                ReadRequest::Block(query),
+                ReadRequest::AnyChainBlock(query),
+                ReadRequest::BlockAndSize(query),
+                ReadRequest::SpentOutputs(query),
+                ReadRequest::TipBlockSize,
+            ] {
+                let error = read_state.clone().oneshot(request).await.unwrap_err();
+                assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+            }
+            let error = state
+                .clone()
+                .oneshot(Request::Block(query))
+                .await
+                .unwrap_err();
+            assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+        }
+
+        let ancestors = super::block_iter::any_ancestor_blocks(
+            &read_state.latest_non_finalized_state(),
+            db,
+            block.hash(),
+        );
+        let error =
+            super::check::legacy_chain(Height(0), ancestors, &Network::Mainnet, 10).unwrap_err();
+        assert_eq!(error.downcast_ref::<BlockReadError>(), Some(&expected));
+    })
+    .await
+    .unwrap();
+}
 
 async fn test_populated_state_responds_correctly(
     mut state: Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -310,7 +378,7 @@ proptest! {
     fn some_block_less_than_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(4, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Canopy)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -327,7 +395,7 @@ proptest! {
             .coinbase_height()
             .expect("chain contains valid blocks");
 
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(
@@ -365,7 +433,7 @@ proptest! {
 
         let response = crate::service::check::legacy_chain(
             nu_activation_height,
-            chain.clone().into_iter().rev(),
+            chain.clone().into_iter().rev().map(Ok),
             &network,
             TEST_LEGACY_CHAIN_LIMIT,
         ).map_err(|error| error.to_string());
@@ -384,7 +452,7 @@ proptest! {
     fn at_least_one_transaction_with_valid_network_upgrade(
         (network, nu_activation_height, chain) in partial_nu5_chain_strategy(5, true, UNDER_LEGACY_CHAIN_LIMIT, NetworkUpgrade::Nu5)
     ) {
-        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev(), &network, TEST_LEGACY_CHAIN_LIMIT)
+        let response = crate::service::check::legacy_chain(nu_activation_height, chain.into_iter().rev().map(Ok), &network, TEST_LEGACY_CHAIN_LIMIT)
             .map_err(|error| error.to_string());
 
         prop_assert_eq!(response, Ok(()));
@@ -425,7 +493,7 @@ proptest! {
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
                 let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
-                let block_value_pool = &block.block.chain_value_pool_change(utxos, DeferredPoolBalanceChange::zero())?;
+                let block_value_pool = &block.block.chain_value_pool_change(utxos, DeferredPoolBalanceChange::zero(), &network, expected_finalized_value_pool.clone()?.constrain()?)?;
                 expected_finalized_value_pool += *block_value_pool;
             }
 
@@ -452,7 +520,7 @@ proptest! {
         let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
         for block in non_finalized_blocks {
             let utxos = block.new_outputs.clone();
-            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero())?;
+            let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), DeferredPoolBalanceChange::zero(), &network, expected_non_finalized_value_pool.clone()?.constrain()?)?;
             expected_non_finalized_value_pool += *block_value_pool;
 
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
@@ -477,7 +545,6 @@ proptest! {
     }
 }
 
-// This test sleeps for every block, so we only ever want to run it once
 proptest! {
     #![proptest_config(
         proptest::test_runner::Config::with_cases(1)
@@ -487,7 +554,7 @@ proptest! {
     ///
     /// 1. Generate a finalized chain and some non-finalized blocks.
     /// 2. Check that initially the best tip height is empty.
-    /// 3. Commit the finalized blocks and check that the best tip height is updated accordingly.
+    /// 3. Commit the finalized blocks, await each tip notification, and check the best tip height.
     /// 4. Commit the non-finalized blocks and check that the best tip height is also updated
     ///    accordingly.
     #[test]
@@ -497,10 +564,12 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let (mut state_service, _read_only_state_service, latest_chain_tip, mut chain_tip_change) = Runtime::new().unwrap().block_on(async {
-            // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
-            StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
-        });
+        let runtime = Runtime::new().unwrap();
+        let (mut state_service, _read_only_state_service, mut latest_chain_tip, mut chain_tip_change) =
+            runtime.block_on(async {
+                // Each block is committed separately, so the maximum checkpoint height is unused.
+                StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await
+            });
 
         prop_assert_eq!(latest_chain_tip.best_tip_height(), None);
         prop_assert_eq!(chain_tip_change.last_tip_change(), None);
@@ -526,9 +595,13 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
-            // Wait for the channels to be updated by the block commit task.
-            // TODO: add a blocking method on ChainTipChange
-            std::thread::sleep(Duration::from_secs(1));
+            // Await publication without consuming the tip action checked below.
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), latest_chain_tip.best_tip_changed())
+                    .await
+                    .expect("the committed block's tip notification should arrive")
+                    .expect("the state service keeps the tip channel open");
+            });
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
@@ -550,9 +623,13 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
 
-            // Wait for the channels to be updated by the block commit task.
-            // TODO: add a blocking method on ChainTipChange
-            std::thread::sleep(Duration::from_secs(1));
+            // Await publication without consuming the tip action checked below.
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), latest_chain_tip.best_tip_changed())
+                    .await
+                    .expect("the committed block's tip notification should arrive")
+                    .expect("the state service keeps the tip channel open");
+            });
 
             prop_assert_eq!(latest_chain_tip.best_tip_height(), Some(expected_block.height));
             prop_assert_eq!(chain_tip_change.last_tip_change(), Some(expected_action));
@@ -685,4 +762,181 @@ fn read_only_open_with_ephemeral_config_returns_error() {
             panic!("expected an error when opening a read-only state with an ephemeral config")
         }
     }
+}
+
+/// Returns a copy of `block` with one byte of its coinbase miner data flipped.
+///
+/// ZIP-244 excludes scriptSigs from v5 transaction IDs, so the block hash is unchanged,
+/// but the authorizing data commitment is not.
+fn coinbase_authorization_twin(block: &Arc<Block>) -> Arc<Block> {
+    let mut coinbase = block.transactions[0]
+        .zcash_serialize_to_vec()
+        .expect("coinbase serializes");
+
+    // A v5 header is 20 bytes, followed by the input count and the 36-byte null prevout.
+    const SCRIPT_LEN_OFFSET: usize = 20 + 1 + 36;
+    assert_eq!(
+        coinbase[SCRIPT_LEN_OFFSET - 4..SCRIPT_LEN_OFFSET],
+        [0xff; 4]
+    );
+    let script_end = SCRIPT_LEN_OFFSET + 1 + usize::from(coinbase[SCRIPT_LEN_OFFSET]);
+    coinbase[script_end - 1] ^= 0x01;
+
+    let coinbase: transaction::Transaction = coinbase
+        .zcash_deserialize_into()
+        .expect("mutated coinbase parses");
+
+    let mut twin = block.clone();
+    Arc::make_mut(&mut twin).transactions[0] = Arc::new(coinbase);
+    twin
+}
+
+/// Returns a ledger strategy for a Testnet that activates NU5 at height 7, so the generated
+/// chain has v5 transactions and the finalized state checks the authorizing data commitment.
+fn nu5_ledger_strategy() -> BoxedStrategy<LedgerState> {
+    // Keep this early-upgrade schedule within the monetary cap.
+    let network = ParametersBuilder::default()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            ..Default::default()
+        })
+        .expect("valid activation heights")
+        .extend_funding_streams()
+        .expect("valid funding streams")
+        .to_network()
+        .expect("valid test network");
+
+    LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, 5, false)
+}
+
+/// Checks that after a checkpoint block fails the finalized commitment check, no block above the
+/// finalized tip is reported as known or left waiting in the queue, so the syncer can download
+/// them again and the honest range commits without a restart.
+///
+/// Covers blocks dropped by the write task, queued before the reset, arriving after the reset,
+/// and queued behind a gap while the range is re-sent out of order.
+#[test]
+fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let ledger_strategy = nu5_ledger_strategy();
+
+    proptest!(
+        ProptestConfig::with_cases(1),
+        |((chain, _count, network, _history_tree) in PreparedChain::default()
+            .with_ledger_strategy(ledger_strategy)
+            .with_valid_commitments()
+            .no_shrink())| {
+            let nu5_height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+            let honest_index = chain.iter().position(|block| block.height == nu5_height).unwrap();
+            let range = &chain[honest_index..honest_index + 4];
+            let parent_height = chain[honest_index - 1].height;
+
+            let twin = coinbase_authorization_twin(&range[0].block);
+            prop_assert_eq!(twin.hash(), range[0].hash);
+            prop_assert_ne!(twin.auth_data_root(), range[0].block.auth_data_root());
+
+            let runtime = Runtime::new().unwrap();
+            // A large concurrency limit makes every block "close to the final checkpoint".
+            let (mut state, _, _, _) = runtime.block_on(StateService::new(
+                Config::ephemeral(),
+                &network,
+                range[3].height,
+                1_000,
+            ));
+
+            for block in chain.iter().take(honest_index) {
+                state
+                    .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.block.clone()))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("valid prefix commits");
+            }
+
+            let checkpoint_verified = |index: usize| CheckpointVerifiedBlock::from(range[index].block.clone());
+            let known_block = |state: &mut StateService, index: usize| {
+                runtime
+                    .block_on(state.call(Request::KnownBlock(range[index].hash)))
+                    .expect("KnownBlock succeeds")
+            };
+
+            // The first child is sent right behind the twin, and the third one waits in the queue
+            // for its parent when the twin fails.
+            let twin_rx = state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(twin));
+            let child_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(1));
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
+
+            let twin_error = twin_rx.blocking_recv().expect("write task responds").expect_err("twin is rejected");
+            prop_assert!(
+                matches!(
+                    twin_error.inner(),
+                    CommitBlockError::ValidateContextError(error)
+                        if matches!(
+                            **error,
+                            ValidateContextError::InvalidBlockCommitment(
+                                block::CommitmentError::InvalidChainHistoryBlockTxAuthCommitment { .. }
+                            )
+                        )
+                ),
+                "unexpected twin error: {twin_error:?}"
+            );
+            // The write task drops the child after it sends the reset, so waiting for the child's
+            // response also guarantees the reset is queued before the checks below.
+            prop_assert!(child_rx.blocking_recv().is_err(), "dropped child gets no response");
+            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(parent_height));
+
+            // The second child reaches the state after the reset, ahead of the reset height.
+            let late_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(2));
+
+            // The reset fails the queued block, and the late block is failed instead of queued.
+            for rx in [queued_rx, late_rx] {
+                let error = rx
+                    .blocking_recv()
+                    .expect("state responds")
+                    .expect_err("block above the reset is failed");
+                prop_assert!(
+                    matches!(error.inner(), CommitBlockError::WriteTaskExited),
+                    "unexpected error: {error:?}"
+                );
+            }
+            prop_assert!(state.finalized_state_queued_blocks.is_empty());
+            for index in 0..range.len() {
+                prop_assert_eq!(known_block(&mut state, index), Response::KnownBlock(None));
+            }
+
+            // The range is sent again out of order: the fourth block waits for the third one,
+            // and it isn't reported as known until it is sent.
+            for index in [0, 1] {
+                state
+                    .queue_and_commit_to_finalized_state(checkpoint_verified(index))
+                    .blocking_recv()
+                    .expect("write task responds")
+                    .expect("honest block commits");
+            }
+            let queued_rx = state.queue_and_commit_to_finalized_state(checkpoint_verified(3));
+            for index in [2, 3] {
+                prop_assert_eq!(known_block(&mut state, index), Response::KnownBlock(None));
+            }
+
+            state
+                .queue_and_commit_to_finalized_state(checkpoint_verified(2))
+                .blocking_recv()
+                .expect("write task responds")
+                .expect("honest block commits");
+            prop_assert_eq!(
+                queued_rx.blocking_recv().expect("write task responds").expect("queued block commits"),
+                range[3].hash
+            );
+            prop_assert_eq!(state.read_service.db.finalized_tip_height(), Some(range[3].height));
+        }
+    );
+
+    Ok(())
 }

@@ -4,6 +4,7 @@ use std::{
     fmt::Debug,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use color_eyre::{
@@ -12,9 +13,13 @@ use color_eyre::{
     section::SectionExt,
 };
 use futures::future::{ready, Ready};
+use tokio::time::timeout;
 use tower::{Service, ServiceExt};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Maximum time for one transcript request, including readiness and its response.
+const TRANSCRIPT_STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// An error-checking function: is the value an expected error?
 ///
@@ -90,23 +95,29 @@ where
     R: Debug,
     S: Debug + Eq,
 {
-    /// Check this transcript against the responses from the `to_check` service
+    /// Check this transcript against the responses from the `to_check` service.
+    ///
+    /// Each request has a 60-second deadline covering both readiness and the response. A timeout
+    /// returns an error identifying the request.
     pub async fn check<C>(mut self, mut to_check: C) -> Result<(), Report>
     where
         C: Service<R, Response = S>,
         C::Error: Into<BoxError>,
     {
         for (req, expected_rsp) in &mut self.messages {
-            // These unwraps could propagate errors with the correct
-            // bound on C::Error
-            let fut = to_check
-                .ready()
-                .await
-                .map_err(Into::into)
-                .map_err(|e| eyre!(e))
-                .expect("expected service to not fail during execution of transcript");
+            let request_context = format!("{req:?}");
+            let response = timeout(TRANSCRIPT_STEP_TIMEOUT, async {
+                let service = to_check
+                    .ready()
+                    .await
+                    .map_err(Into::into)
+                    .map_err(|e| eyre!(e))
+                    .expect("expected service to not fail during execution of transcript");
 
-            let response = fut.call(req).await;
+                service.call(req).await
+            })
+            .await
+            .wrap_err_with(|| format!("transcript timed out for request: {request_context}"))?;
 
             match (response, expected_rsp) {
                 (Ok(rsp), Ok(expected_rsp)) => {
@@ -171,20 +182,18 @@ where
     #[track_caller]
     fn call(&mut self, request: R) -> Self::Future {
         if let Some((expected_request, response)) = self.messages.next() {
+            if request != expected_request {
+                return ready(
+                    Err(eyre!("received unexpected request"))
+                        .with_section(|| {
+                            format!("{expected_request:?}").header("Expected Request:")
+                        })
+                        .with_section(|| format!("{request:?}").header("Found Request:")),
+                );
+            }
+
             match response {
-                Ok(response) => {
-                    if request == expected_request {
-                        ready(Ok(response))
-                    } else {
-                        ready(
-                            Err(eyre!("received unexpected request"))
-                                .with_section(|| {
-                                    format!("{expected_request:?}").header("Expected Request:")
-                                })
-                                .with_section(|| format!("{request:?}").header("Found Request:")),
-                        )
-                    }
-                }
+                Ok(response) => ready(Ok(response)),
                 Err(check_fn) => ready(Err(check_fn.mock())),
             }
         } else {

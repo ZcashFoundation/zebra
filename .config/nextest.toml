@@ -1,7 +1,7 @@
 # Nextest configuration for Zebra
 #
 # Profiles:
-#   default       Local dev: runs unit + integration (excludes stateful + e2e)
+#   default       Local dev: runs unit + integration (excludes stateful, e2e, zcashd-compat)
 #   ci            PR CI: same scope, CI-tuned output
 #   ci-stateful   GCP: runs stateful tests selected by --filter-expr
 #   ci-e2e        GCP: runs E2E tests selected by --filter-expr
@@ -10,37 +10,51 @@
 [profile.default]
 fail-fast = true
 status-level = "pass"
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+# Keep this 20-minute backstop in sync with profile.ci. In-test deadlines,
+# sequential phases, and cleanup need time to report failures before termination.
+slow-timeout = { period = "5m", terminate-after = 4 }
+# The zcashd-compat suite needs a zcashd sidecar and passes without testing anything when
+# `TEST_ZCASHD_COMPAT` is unset, so it runs only under its own profiles.
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
 
 # --- CI Profile (PRs) ---
 
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
+# Many of the slowest tests wait on timers or live peers rather than the CPU, so run 8 tests at a
+# time on the 4-CPU runners.
+test-threads = 8
 slow-timeout = { period = "5m", terminate-after = 4 }
-default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(/^integration::zcashd_compat::/) and not test(=unit::end_of_support::check_no_git_dependencies)'
+
+# Record retry attempts for the unit test job summary.
+[profile.ci.junit]
+path = "junit.xml"
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
 retries = 2
-slow-timeout = { period = "5m", terminate-after = 2 }
 
-[[profile.ci.overrides]]
-filter = 'test(/^integration::sync::/)'
-test-group = 'serial-live-mainnet'
-
-# These tests sync mainnet to genesis from live peers; they normally finish in
-# ~10-30s, but a slow/unreachable peer can stall them. Fail fast after 10m and
-# retry instead of hanging near the old 30m hard limit, where they flaked.
+# These tests sync Mainnet genesis from a local `GenesisPeer`. A failed initial
+# localhost handshake is not retried by `zebrad` (#11504), so retry the whole
+# attempt once; nextest still reports it as FLAKY. Keep this in sync with the
+# 'profile.default' copy below. The profile backstop leaves room for the child
+# deadlines and cleanup, including both sequential phases of the restart test.
 [[profile.ci.overrides]]
 filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
-slow-timeout = { period = "5m", terminate-after = 2 }
+retries = 1
+
+# The live handshake smoke test depends on public peers. Retry it, so it only fails
+# when every attempt finds no responsive peer, and nextest still reports a retry as
+# FLAKY.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::live_mainnet_peer_handshake)'
 retries = 2
 
 [[profile.ci.overrides]]
 filter = "test(=peer_set::set::tests::vectors::peer_set_ready_multiple_connections) or test(=peer_set::set::tests::vectors::peer_set_ready_single_connection) or test(=peer_set::set::tests::vectors::peer_set_rejects_connections_past_per_ip_limit) or test(=peer_set::set::tests::vectors::peer_set_route_inv_advertised_registry)"
 retries = 2
-slow-timeout = { period = "30s", terminate-after = 2 }
 
 # --- CI Stateful Profile (GCP VMs) ---
 # CI selects specific tests via --filter-expr / NEXTEST_FILTER. The scoped
@@ -67,23 +81,20 @@ serial-live-testnet = { max-threads = 1 }
 # under a parallel profile invoked with --run-ignored=all.
 serial-zcashd-compat = { max-threads = 1 }
 
-# Force tests that start fresh live Mainnet nodes to run serially in local
-# parallel test runs. The CI overrides above assign the same test group while
-# preserving their profile-specific retries and timeouts.
+# Keep local-peer sync retries in the coverage workflow's default profile as
+# well. See the 'profile.ci' copy above.
 [[profile.default.overrides]]
-filter = 'test(/^integration::sync::/)'
-test-group = 'serial-live-mainnet'
+filter = 'test(=integration::sync::sync_one_checkpoint_mainnet) or test(=integration::sync::restart_stop_at_height)'
+retries = 1
 
 # Force live Testnet peer-limit tests to run serially with each other, while
 # allowing them to run concurrently with live Mainnet tests.
 #
 # This split is only safe while no other running test dials live Testnet peers.
 # `integration::sync::sync_one_checkpoint_testnet` and the Testnet half of
-# `integration::sync::restart_stop_at_height` are currently disabled; if they are
-# re-enabled, they join 'serial-live-mainnet' via the filter above and can then
-# contend with this group for Testnet connections. A test can only belong to one
-# group, and `restart_stop_at_height` syncs both networks, so re-enabling them
-# means merging these two groups back into one live-peer group.
+# `integration::sync::restart_stop_at_height` are currently disabled. They sync
+# from a local `GenesisPeer` like the Mainnet tests, so re-enabling them doesn't
+# add any live Testnet connections.
 #
 # Keep the 'profile.default' and 'profile.ci' copies of each filter below in
 # sync: nextest is invoked with '--profile ci' by the test workflows, and with
@@ -96,8 +107,8 @@ test-group = 'serial-live-testnet'
 filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_testnet$/)'
 test-group = 'serial-live-testnet'
 
-# Force zcashd-compat integration tests serial in every profile, so a parallel
-# --run-ignored=all run cannot collide on their released RPC/P2P ports.
+# Force zcashd-compat integration tests serial in every profile, so an explicitly selected
+# parallel run cannot collide on their released RPC/P2P ports.
 [[profile.default.overrides]]
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
@@ -106,42 +117,27 @@ test-group = 'serial-zcashd-compat'
 filter = 'test(~integration::zcashd_compat::)'
 test-group = 'serial-zcashd-compat'
 
-# All other tests that dial live Mainnet peers: zebra-network's crawler and
-# peer-cache tests, and every zebrad test that starts a node without clearing
-# the default DNS seeders. Remote Zebra peers accept then drop any second
-# connection from the same IP within ~2 minutes (max_connections_per_ip is 1 by
-# default), so concurrent live tests on one runner reject each other's
-# handshakes. These overrides set only the test-group; retries and timeouts fall
-# through to earlier overrides or profile defaults.
+# The other tests that dial live Mainnet peers: zebra-network's Mainnet peer-limit
+# tests, `config_tests`, which starts zebrad with the generated default config, and
+# the `live_mainnet_peer_handshake` smoke test.
+# Remote Zebra peers accept then drop any second connection from the same IP within
+# ~2 minutes (max_connections_per_ip is 1 by default), so concurrent live tests on
+# one runner reject each other's handshakes. Other zebrad tests only dial live peers
+# if they call `use_live_peers()`, and those tests must join this group too. These
+# overrides set only the test-group; retries and timeouts fall through to earlier
+# overrides or profile defaults.
 [[profile.default.overrides]]
-filter = '''
-test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
-or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
-or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
-or test(=unit::config::config_tests)
-or test(=unit::config::non_blocking_logger)
-or test(=unit::end_of_support::end_of_support_is_checked_at_start)
-or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
-or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
-or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
-'''
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
 
 [[profile.ci.overrides]]
-filter = '''
-test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/)
-or test(/^peer_set::initialize::tests::vectors::written_peer_cache_/)
-or test(/^unit::cli::(start_no_args|start_args|external_address)$/)
-or test(/^unit::config::(misconfigured_)?ephemeral_(existing|missing)_directory$/)
-or test(=unit::config::config_tests)
-or test(=unit::config::non_blocking_logger)
-or test(=unit::end_of_support::end_of_support_is_checked_at_start)
-or test(/^integration::network::zebra_(zcash_listener|metrics|tracing|rpc)_conflict$/)
-or test(/^integration::rpc::(metrics_endpoint|tracing_endpoint|rpc_endpoint_single_thread|rpc_endpoint_parallel_threads|rpc_endpoint_client_content_type)$/)
-or test(/^integration::database::(zebra_state_conflict|delete_old_databases)$/)
-'''
+filter = 'test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_mainnet$/) or test(=unit::config::config_tests) or test(=integration::network::live_mainnet_peer_handshake)'
 test-group = 'serial-live-mainnet'
+
+# Start the slowest tests first, so they overlap the rest of the run instead of extending it.
+[[profile.ci.overrides]]
+filter = 'test(=integration::network::disconnects_from_misbehaving_peers) or test(=integration::network::synced_node_keeps_upstream_peer_connected) or test(=unit::config::persistent_mode_peer_cache) or test(=methods::types::get_block_template::tests::coinbase) or test(/^peer_set::initialize::tests::vectors::peer_limit_(one|two)_(mainnet|testnet)$/)'
+priority = 100
 
 # Stateful tests share on-disk state, so run them serially. This override sets
 # only the test-group: adding slow-timeout here would shadow every per-test

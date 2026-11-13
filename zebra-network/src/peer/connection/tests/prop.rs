@@ -32,8 +32,7 @@ use crate::{
 use InventoryResponse::*;
 
 proptest! {
-    // The default value of proptest cases (256) causes this test to take more than ten seconds on
-    // most machines, so this reduces the value a little to reduce the test time.
+    // Keep the existing case count while running absence checks on a virtual clock.
     // Set the PROPTEST_CASES env var to override this default.
     #![proptest_config(
         proptest::test_runner::Config::with_cases(env::var("PROPTEST_CASES")
@@ -53,6 +52,9 @@ proptest! {
         let (runtime, _init_guard) = zebra_test::init_async();
 
         runtime.block_on(async move {
+            // All peer traffic uses in-memory channels, so absence checks can use virtual time.
+            tokio::time::pause();
+
             // The real stream and sink are from a split TCP connection,
             // but that doesn't change how the state machine behaves.
             let (mut peer_tx, peer_rx) = mpsc::channel(1);

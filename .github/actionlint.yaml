@@ -2,3 +2,5 @@ self-hosted-runner:
   labels:
     - ubuntu-latest-xl
     - zfnd-runners
+    # GitHub-hosted, but actionlint 1.7.12 does not list it yet.
+    - ubuntu-26.04
