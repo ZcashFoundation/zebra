@@ -245,10 +245,17 @@ pub enum SyncPeerError {
     #[error("the peer does not have the requested data")]
     NotFound,
 
-    /// The peer reset the stream with `REFUSED` before sending any data. The
-    /// scheduler treats the peer as not serving this type for 10 minutes.
+    /// The peer reset the stream with `REFUSED` before sending any data: it
+    /// does not serve this request on this connection. Peers that predate
+    /// `BUSY` also send it when they are at a limit.
     #[error("the peer refused the request")]
     Refused,
+
+    /// The peer reset the stream with `BUSY` or `INTERNAL_ERROR` before
+    /// sending any data: it serves this kind of request, but not right now.
+    /// The request is worth repeating after a short delay.
+    #[error("the peer is busy")]
+    Busy,
 
     /// The stream was cancelled (`CANCELLED`), by either side.
     #[error("the request was cancelled")]

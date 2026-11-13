@@ -210,8 +210,24 @@ How it works:
   every peer it can use. The legacy syncer then downloads the rest of the
   chain, including every block above the final checkpoint. If version 2 peers
   come back while the tip is still far behind, the engine takes over again a
-  minute later, without using peers at the IP addresses it blamed for its
-  last hand-back, even over new connections.
+  minute later, without using peers at the IP addresses it blamed for a
+  hand-back in the last 10 minutes, even over new connections.
+- A peer that answers a request with `BUSY` is serving as many ranges as it
+  allows. The engine asks it again after 5 seconds, and waits twice as long
+  after each further `BUSY`, up to a minute, until the peer delivers a block.
+  It never stops using a peer or blames it for being busy. A peer that
+  answers `REFUSED` is left alone for 30 seconds, and for 10 minutes if it
+  refuses again without delivering a block in between; only then is it blamed
+  when the engine hands back for too few peers.
+- A request that is too slow is cancelled and its blocks are asked of another
+  peer; the peer waits 30 seconds before its next request, and is not
+  penalized. The engine judges a request by the bytes it delivered over the
+  last 10 or 15 seconds, so a burst now and then does not keep a trickle
+  alive. A peer may end a response early, but one that ends three in a row
+  with less than a quarter of what was asked also waits 30 seconds after each
+  further one. When the oldest blocks the engine needs hold up everything it
+  has downloaded above them, and one peer has been sending them for 20
+  seconds, the engine asks a second peer for them as well.
 - While the engine downloads, the mempool and block gossip stay off, as they do
   during a legacy initial sync.
 
@@ -228,7 +244,7 @@ Its settings are in the `[sync]` section:
 | --- | --- | --- |
 | `v2_checkpoint_sync` | `false` | Turns the engine on. |
 | `v2_lookahead_bytes` | `536870912` (512 MiB) | The most block data the engine requests ahead of the committed tip. More keeps more peers busy and uses more memory. Values below `2000000`, one maximum-size block, are raised to it. |
-| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
+| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this on average over 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
 | `v2_target_peers` | `8` | The number of peers the engine downloads from at once. `0` is raised to `1`. |
 
 The engine reports which component owns block download and how its downloads
@@ -240,7 +256,7 @@ go in these metrics, and its progress in the usual `state.*` and
 | `sync.v2.owner` | gauge | `1` while the engine owns block download, `0` while the legacy syncer does |
 | `sync.v2.lookahead.bytes` | gauge | The block data the engine has requested or downloaded and not yet committed, counted against `v2_lookahead_bytes` (downloaded blocks count three times their size, for their size in memory) |
 | `sync.v2.peer.rate` | histogram | Each downloading peer's measured rate, in bytes per second, sampled four times a second |
-| `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (below `v2_min_peer_rate` for 10 seconds) or `slow` (below a quarter of the median rate for 15 seconds) |
+| `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (an average below `v2_min_peer_rate` over 10 seconds) or `slow` (an average below a quarter of the median rate over 15 seconds) |
 | `sync.v2.unit.bytes` | histogram | The bytes of each completed download unit, one or more checkpoint intervals |
 
 ## Known limitations

@@ -1,7 +1,7 @@
 //! Supervisor tests: the claim protocol, the hand-back, and the
 //! fast-forward checkpoint.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, net::IpAddr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tokio::sync::{mpsc, watch};
@@ -214,10 +214,11 @@ async fn supervisor_hands_back_at_the_durable_tip_after_a_mid_interval_failure()
 }
 
 /// Peers the last run blamed for its lack of progress do not count toward
-/// the next claim, even over a new connection.
+/// the next claim, even over a new connection, until the blame lapses.
 #[tokio::test]
 async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     let _init_guard = zebra_test::init();
+    tokio::time::pause();
 
     let chain = TestChain::new();
     let peers: Vec<MockPeer> = (1..=3)
@@ -243,7 +244,7 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     assert!(supervisor.claim_target(block::Height(0)).is_some());
 
     // Two of the three peers were blamed: one unblamed peer is too few.
-    supervisor.blamed = [ips[0], ips[1]].into_iter().collect();
+    supervisor.blame([ips[0], ips[1]].into_iter().collect(), time::Instant::now());
     assert_eq!(supervisor.claim_target(block::Height(0)), None);
 
     // A blamed peer that reconnects still does not count.
@@ -253,8 +254,130 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     peers_tx.send_replace(peers.into_iter().chain([reconnected]).collect());
     assert_eq!(supervisor.claim_target(block::Height(0)), None);
 
-    supervisor.blamed = [ips[0]].into_iter().collect();
+    // Blame lapses on its own, without another run in between: with too
+    // few unblamed peers to claim, there is no run to replace it.
+    time::advance(BLAME_TTL - Duration::from_secs(1)).await;
+    assert_eq!(supervisor.claim_target(block::Height(0)), None);
+    assert_eq!(supervisor.blamed_at(time::Instant::now()).len(), 2);
+    time::advance(Duration::from_secs(1)).await;
     assert!(supervisor.claim_target(block::Height(0)).is_some());
+    assert!(supervisor.blamed_at(time::Instant::now()).is_empty());
+
+    supervisor.blame([ips[0]].into_iter().collect(), time::Instant::now());
+    assert!(supervisor.claim_target(block::Height(0)).is_some());
+}
+
+/// Connections from one IP address count once toward the target, so a
+/// single host cannot lower or raise it with tips that no one checked.
+#[tokio::test]
+async fn supervisor_target_counts_each_address_once() {
+    let _init_guard = zebra_test::init();
+
+    let chain = TestChain::new();
+    let honest_tip = block::Height(1_000_000);
+    let honest: Vec<MockPeer> = (1..=2)
+        .map(|id| MockPeer::new(id, chain.clone(), Behaviour::Honest).with_tip(honest_tip))
+        .collect();
+    let (peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(honest.clone()));
+
+    let (latest_chain_tip, _tip_sender) = MockChainTip::new();
+    let (commits_tx, _commits_rx) = mpsc::unbounded_channel();
+    let (engine_side, _legacy, _checkpoint_tip) = ownership_channels();
+    let supervisor = Supervisor::new(
+        EngineConfig::default(),
+        Network::Mainnet,
+        peers_rx,
+        mock_state(commits_tx, |_, _| false),
+        latest_chain_tip,
+        engine_side,
+        None,
+    );
+    let honest_target = supervisor
+        .claim_target(block::Height(0))
+        .expect("a claim with two honest peers");
+
+    // Three connections from one address, a majority of the connections,
+    // advertise a low tip, then the highest one.
+    let host = MockPeer::new(3, chain.clone(), Behaviour::Honest).peer_ip();
+    for tip in [block::Height(100_000), block::Height::MAX] {
+        let crowd = (3..=5).map(|id| {
+            MockPeer::new(id, chain.clone(), Behaviour::Honest)
+                .with_ip(host)
+                .with_tip(tip)
+        });
+        peers_tx.send_replace(honest.iter().cloned().chain(crowd).collect());
+        assert_eq!(
+            supervisor.claim_target(block::Height(0)),
+            Some(honest_target),
+            "one address advertising {tip:?} does not move the target"
+        );
+    }
+}
+
+/// Blame from earlier runs is kept until it lapses, so two groups of peers
+/// that take turns failing a run are both left out of the next claim, and
+/// the blame the supervisor keeps is bounded.
+#[tokio::test]
+async fn supervisor_keeps_the_blame_of_earlier_runs_until_it_lapses() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let chain = TestChain::new();
+    let peers: Vec<MockPeer> = (1..=5)
+        .map(|id| {
+            MockPeer::new(id, chain.clone(), Behaviour::Honest).with_tip(block::Height(1_000_000))
+        })
+        .collect();
+    let ips: Vec<_> = peers.iter().map(MockPeer::peer_ip).collect();
+    let (_peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(peers));
+
+    let (latest_chain_tip, _tip_sender) = MockChainTip::new();
+    let (commits_tx, _commits_rx) = mpsc::unbounded_channel();
+    let (engine_side, _legacy, _checkpoint_tip) = ownership_channels();
+    let mut supervisor = Supervisor::new(
+        EngineConfig::default(),
+        Network::Mainnet,
+        peers_rx,
+        mock_state(commits_tx, |_, _| false),
+        latest_chain_tip,
+        engine_side,
+        None,
+    );
+
+    // One run blames the first group, the next run the second.
+    let first: BTreeSet<_> = [ips[0], ips[1]].into_iter().collect();
+    let second: BTreeSet<_> = [ips[2], ips[3]].into_iter().collect();
+    supervisor.blame(first.clone(), time::Instant::now());
+    assert!(supervisor.claim_target(block::Height(0)).is_some());
+    time::advance(Duration::from_secs(120)).await;
+    supervisor.blame(second.clone(), time::Instant::now());
+    assert_eq!(
+        supervisor.blamed_at(time::Instant::now()),
+        first.union(&second).copied().collect(),
+        "the second run's blame does not clear the first's"
+    );
+    assert_eq!(
+        supervisor.claim_target(block::Height(0)),
+        None,
+        "one unblamed peer is too few"
+    );
+
+    // Each blame lapses in its own time, and a run that blames no one
+    // clears nothing.
+    supervisor.blame(BTreeSet::new(), time::Instant::now());
+    time::advance(BLAME_TTL - Duration::from_secs(120)).await;
+    assert_eq!(supervisor.blamed_at(time::Instant::now()), second);
+    assert!(supervisor.claim_target(block::Height(0)).is_some());
+
+    // The kept blame is bounded: the blame that lapses soonest goes first.
+    // The limit is small: the cast is exact.
+    let flood: BTreeSet<IpAddr> = (0..MAX_BLAMED as u32)
+        .map(|index| std::net::Ipv4Addr::from(0x0a00_0000 + index).into())
+        .collect();
+    time::advance(Duration::from_secs(1)).await;
+    supervisor.blame(flood.clone(), time::Instant::now());
+    assert_eq!(supervisor.blamed.len(), MAX_BLAMED);
+    assert_eq!(supervisor.blamed_at(time::Instant::now()), flood);
 }
 
 /// A commit that an engine run timed out on can land after the hand-back:

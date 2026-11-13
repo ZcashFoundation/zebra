@@ -542,6 +542,74 @@ async fn refused_reset_is_reported() {
     .expect("the test completes well within the timeout");
 }
 
+/// A reset with `BUSY` or `INTERNAL_ERROR` before any data says the request
+/// is worth repeating, unlike `REFUSED`. After a block, the same reset is an
+/// ordinary transport failure: the peer was serving the request.
+#[tokio::test]
+async fn busy_and_internal_error_resets_are_reported_as_busy() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = fixture().await;
+        let blocks = chain();
+        let raw = raw_blocks(&blocks);
+
+        for code in [ErrorCode::Busy, ErrorCode::InternalError] {
+            tokio::spawn({
+                let connection = fixture.raw.clone();
+                async move {
+                    let (mut send, _) = accept_range(&connection).await;
+                    send.reset(app_error_code(code)).expect("resets");
+                    let _ = send.stopped().await;
+                }
+            });
+
+            let mut stream = fixture
+                .peer
+                .get_block_range(request(blocks[0].hash(), 3))
+                .await
+                .expect("the stream opens");
+            assert_eq!(
+                stream.next().await.expect("an item"),
+                Err(SyncPeerError::Busy),
+                "{code:?} before any data",
+            );
+            assert!(stream.next().await.is_none());
+            assert!(!fixture.peer.is_closed());
+        }
+
+        let (read_tx, read_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn({
+            let connection = fixture.raw.clone();
+            let response = found(&raw[..1]);
+            async move {
+                let (mut send, _) = accept_range(&connection).await;
+                send.write_all(&response).await.expect("writes");
+                // A reset discards unread data, so wait for the block to be read.
+                let _ = read_rx.await;
+                send.reset(app_error_code(ErrorCode::Busy)).expect("resets");
+                let _ = send.stopped().await;
+            }
+        });
+
+        let mut stream = fixture
+            .peer
+            .get_block_range(request(blocks[0].hash(), 3))
+            .await
+            .expect("the stream opens");
+        let item = stream.next().await.expect("an item").expect("a block");
+        assert!(matches!(item, RangeItem::Block { .. }));
+        read_tx.send(()).expect("the responder is waiting");
+        assert!(matches!(
+            stream.next().await,
+            Some(Err(SyncPeerError::Transport(_)))
+        ));
+        assert!(!fixture.peer.is_closed());
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// A request above the protocol's bounds is not sent, and takes no permit.
 #[tokio::test]
 async fn oversized_request_is_not_sent() {

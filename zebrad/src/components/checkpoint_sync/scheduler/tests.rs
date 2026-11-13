@@ -285,6 +285,225 @@ fn a_slow_large_block_above_the_minimum_rate_does_not_stall() {
     }
 }
 
+/// A stream that trickles, and bursts just often enough to lift a smoothed
+/// rate over the threshold for one sample, is judged by what it delivered
+/// over the whole window: it stalls under rule 2 against the minimum rate,
+/// and under rule 3 against the median.
+#[test]
+fn a_burst_does_not_reset_the_stall_rules() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let kib: u64 = 1024;
+
+    // Rule 2: 400 KiB in one sample every 9 s is 1,600 KiB/s for that
+    // sample, and about 44 KiB/s on average, against a 256 KiB/s minimum.
+    let config = EngineConfig::default();
+    let start = Instant::now();
+    let mut scheduler = scheduler(&config, block::Height(1), checkpoints[50], start);
+    scheduler.set_peers(&[(peer(1), block::Height::MAX)], start);
+    let stream = scheduler.next_assignment(start).unwrap().stream;
+
+    let mut now = start;
+    let mut received = 0;
+    let stalled_at = loop {
+        now += SAMPLE_INTERVAL;
+        let sample = now.duration_since(start).as_millis() / SAMPLE_INTERVAL.as_millis();
+        // A byte in every sample, so that rule 1 never applies.
+        received += if sample % 36 == 1 { 400 * kib } else { 1 };
+        scheduler.on_bytes(stream, received, now);
+        if scheduler.tick(now) == vec![stream] {
+            break now;
+        }
+        assert!(
+            now.duration_since(start) < Duration::from_secs(60),
+            "the bursting stream never stalled"
+        );
+    };
+    assert_eq!(stalled_at.duration_since(start), STALL_MIN_RATE_FOR);
+    assert!(scheduler.peers[&peer(1)].backing_off(stalled_at));
+
+    // Rule 3: two peers at 4 MiB/s, and one that sends 1.5 MiB in one
+    // sample every 14 s, and 32 KiB/s in between: 6 MiB/s for that sample,
+    // above a quarter of the median, and about 140 KiB/s on average. The
+    // minimum rate is below all of it.
+    let config = EngineConfig {
+        min_peer_rate: 16 * kib,
+        ..EngineConfig::default()
+    };
+    let start = Instant::now();
+    let mut scheduler = self::scheduler(&config, block::Height(1), checkpoints[400], start);
+    scheduler.set_peers(
+        &[
+            (peer(1), block::Height::MAX),
+            (peer(2), block::Height::MAX),
+            (peer(3), block::Height::MAX),
+        ],
+        start,
+    );
+    let mut streams: BTreeMap<ConnectionId, StreamId> = BTreeMap::new();
+    while let Some(assignment) = scheduler.next_assignment(start) {
+        streams.entry(assignment.peer).or_insert(assignment.stream);
+    }
+    assert_eq!(streams.len(), 3, "each peer streams a unit");
+    let bursting = streams[&peer(3)];
+
+    let mut now = start;
+    let mut received: BTreeMap<StreamId, u64> = BTreeMap::new();
+    let stalled_at = loop {
+        now += SAMPLE_INTERVAL;
+        let sample = now.duration_since(start).as_millis() / SAMPLE_INTERVAL.as_millis();
+        for (id, stream) in &streams {
+            let bytes = if *stream != bursting {
+                MIB
+            } else if sample % 56 == 1 {
+                3 * MIB / 2
+            } else {
+                8 * kib
+            };
+            let total = received.entry(*stream).or_default();
+            *total += bytes;
+            // Only the first stream of each peer is driven: the others
+            // stall under rule 1, which backs their peers off.
+            scheduler.on_bytes(streams[id], *total, now);
+        }
+        let stalled = scheduler.tick(now);
+        if stalled.contains(&bursting) {
+            break now;
+        }
+        assert!(
+            now.duration_since(start) < Duration::from_secs(60),
+            "the bursting stream never stalled"
+        );
+    };
+    assert_eq!(stalled_at.duration_since(start), STALL_SLOW_FOR);
+    assert!(scheduler.is_live(streams[&peer(1)]));
+    assert!(scheduler.is_live(streams[&peer(2)]));
+}
+
+/// A peer that keeps ending its streams after a small part of the unit is
+/// not failed or excluded, since a response may finish early, but after
+/// [`SHORT_END_LIMIT`] of them in a row it waits, and another peer pulls the
+/// rest of the frontier unit.
+#[test]
+fn repeated_short_responses_back_off_without_a_failure() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let config = EngineConfig::default();
+    let now = Instant::now();
+    let index = first_short_interval(&checkpoints);
+    let start = checkpoints[index].next().unwrap();
+    let mut scheduler = scheduler(&config, start, checkpoints[index + 20], now);
+    scheduler.set_peers(&[(peer(1), block::Height::MAX)], now);
+
+    // One block of a 32 MiB interval per stream.
+    let one_block_stream = |scheduler: &mut Scheduler, bytes: u64| {
+        let assignment = scheduler.next_assignment(now).expect("the peer pulls");
+        assert_eq!(assignment.peer, peer(1));
+        assert_eq!(assignment.unit.start, start, "the frontier unit");
+        scheduler.on_block(
+            assignment.stream,
+            assignment.unit.end,
+            bytes,
+            block::Hash([6; 32]),
+            true,
+            now,
+        );
+        scheduler.on_end(assignment.stream, now);
+    };
+
+    for _ in 1..SHORT_END_LIMIT {
+        one_block_stream(&mut scheduler, 1_000);
+        assert!(!scheduler.peers[&peer(1)].backing_off(now));
+    }
+    // A response that is not short starts the count again.
+    let (_, queued) = scheduler.queue.first().copied().unwrap();
+    let not_short = scheduler.units[&queued].unit.est_bytes / SHORT_END_DIVISOR;
+    one_block_stream(&mut scheduler, not_short);
+    assert!(!scheduler.peers[&peer(1)].backing_off(now));
+    assert_eq!(scheduler.peers[&peer(1)].short_ends, 0);
+
+    for _ in 0..SHORT_END_LIMIT {
+        assert!(!scheduler.peers[&peer(1)].backing_off(now));
+        one_block_stream(&mut scheduler, 1_000);
+    }
+    let waiting = &scheduler.peers[&peer(1)];
+    assert!(waiting.backing_off(now));
+    assert!(!waiting.backing_off(now + STALL_BACKOFF));
+    assert!(!waiting.excluded(now));
+    assert!(waiting.selected);
+    assert_eq!(scheduler.frontier_failures(), 0, "truncation is no failure");
+    assert_eq!(scheduler.next_assignment(now), None);
+
+    // Another peer takes the rest of the frontier unit meanwhile.
+    scheduler.set_peers(
+        &[(peer(1), block::Height::MAX), (peer(2), block::Height::MAX)],
+        now,
+    );
+    let rest = scheduler
+        .next_assignment(now)
+        .expect("the other peer pulls");
+    assert_eq!((rest.peer, rest.unit.start), (peer(2), start));
+}
+
+/// With the lookahead full behind it, a frontier unit that one peer has
+/// streamed for [`FRONTIER_DUPLICATE_AFTER`], above every stall threshold,
+/// is given to a second peer too, as in the end-game.
+#[test]
+fn a_frontier_unit_that_blocks_the_lookahead_is_duplicated() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let index = first_short_interval(&checkpoints);
+    let start = checkpoints[index].next().unwrap();
+    let config = EngineConfig {
+        // Below one interval's charge: only the frontier unit is admitted.
+        lookahead_bytes: 16 * MIB,
+        ..EngineConfig::default()
+    };
+    let begin = Instant::now();
+    let mut scheduler = scheduler(&config, start, checkpoints[index + 20], begin);
+    scheduler.set_peers(
+        &[(peer(1), block::Height::MAX), (peer(2), block::Height::MAX)],
+        begin,
+    );
+    let frontier = scheduler.next_assignment(begin).expect("the frontier unit");
+    assert_eq!(frontier.unit.start, start);
+
+    // The first peer delivers at 400 KiB/s, above the minimum rate.
+    let mut now = begin;
+    let mut received = 0;
+    while now.duration_since(begin) < FRONTIER_DUPLICATE_AFTER {
+        assert_eq!(
+            scheduler.next_assignment(now),
+            None,
+            "nothing fits the lookahead, and the frontier unit is not duplicated yet"
+        );
+        now += SAMPLE_INTERVAL;
+        received += 100 * 1024;
+        scheduler.on_bytes(frontier.stream, received, now);
+        assert_eq!(scheduler.tick(now), Vec::new());
+    }
+
+    let duplicate = scheduler
+        .next_assignment(now)
+        .expect("the frontier unit is duplicated");
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.unit, frontier.unit);
+    assert_ne!(duplicate.peer, frontier.peer);
+    assert_eq!(
+        scheduler.charged(),
+        scheduler.frontier_charge(),
+        "a duplicate adds no charge"
+    );
+    assert_eq!(
+        scheduler.next_assignment(now),
+        None,
+        "one duplicate per unit"
+    );
+}
+
 /// A peer that refused is not selected for 30 s, and for 10 minutes if it
 /// refuses again without delivering in between, and a failed peer backs off
 /// for 30 s.
@@ -360,6 +579,74 @@ fn refused_peers_are_excluded_and_failed_peers_back_off() {
     let again = scheduler.next_assignment(later).expect("pulls again");
     scheduler.on_failure(again.stream, StreamFailure::Refused, later);
     assert!(!scheduler.peers[&peer(1)].excluded(later + STALL_BACKOFF));
+}
+
+/// A peer that answers `BUSY` waits a few seconds, twice as long after each
+/// consecutive `BUSY` up to a minute, and from the start again once it has
+/// delivered a block. It is never excluded, it does not fail the frontier,
+/// and it is not among the peers a run blames.
+#[test]
+fn busy_peers_wait_briefly_and_are_never_excluded() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let config = EngineConfig::default();
+    let mut now = Instant::now();
+    let mut scheduler = scheduler_for_one_peer(&config, &checkpoints, now);
+
+    for wait in [5, 10, 20, 40, 60, 60, 60] {
+        let wait = Duration::from_secs(wait);
+        let busy = scheduler
+            .next_assignment(now)
+            .expect("pulls after the wait");
+        assert_eq!(busy.unit.start, block::Height(1), "the frontier unit");
+        scheduler.on_failure(busy.stream, StreamFailure::Busy, now);
+
+        let peer = &scheduler.peers[&peer(1)];
+        assert!(peer.selected, "a busy peer stays selected");
+        assert!(!peer.excluded(now));
+        assert!(peer.backing_off(now + wait - Duration::from_millis(1)));
+        assert!(!peer.backing_off(now + wait));
+        assert_eq!(scheduler.next_assignment(now), None);
+        assert_eq!(scheduler.serving_peers(), 0);
+        assert_eq!(scheduler.selected_peers(), 1);
+
+        now += wait;
+        assert_eq!(scheduler.tick(now), Vec::new());
+    }
+    assert_eq!(scheduler.frontier_failures(), 0);
+    assert!(scheduler.frontier_failed_peers().is_empty());
+    assert_eq!(scheduler.refused_peers(now).count(), 0);
+    assert!(!scheduler.frontier_stuck(1, now));
+
+    // A delivered block ends the run of `BUSY` answers.
+    let delivering = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_block(
+        delivering.stream,
+        delivering.unit.end,
+        1_000,
+        block::Hash([6; 32]),
+        true,
+        now,
+    );
+    assert_eq!(scheduler.serving_peers(), 1);
+    scheduler.on_end(delivering.stream, now);
+    let busy = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_failure(busy.stream, StreamFailure::Busy, now);
+    assert!(!scheduler.peers[&peer(1)].backing_off(now + BUSY_BACKOFF));
+
+    // One `REFUSED` is not blamed either: only a peer that does not serve
+    // ranges is.
+    now += BUSY_BACKOFF;
+    let refused = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_failure(refused.stream, StreamFailure::Refused, now);
+    assert!(scheduler.peers[&peer(1)].excluded(now));
+    assert_eq!(scheduler.refused_peers(now).count(), 0);
+    now += STALL_BACKOFF;
+    scheduler.tick(now);
+    let refused = scheduler.next_assignment(now).expect("selected again");
+    scheduler.on_failure(refused.stream, StreamFailure::Refused, now);
+    assert_eq!(scheduler.refused_peers(now).collect::<Vec<_>>(), [peer(1)]);
 }
 
 fn scheduler_for_one_peer(
