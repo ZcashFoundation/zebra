@@ -64,6 +64,13 @@ pub(super) struct CompactRelay {
 }
 
 impl CompactRelay {
+    /// Returns true if an admitted compact block that extends `parent` is retained.
+    pub(super) fn announces_child_of(&self, parent: block::Hash) -> bool {
+        self.received
+            .as_ref()
+            .is_some_and(|(block, _, _)| block.header.previous_block_hash == parent)
+    }
+
     pub(super) fn clear_sent(&mut self) {
         self.sent = None;
     }

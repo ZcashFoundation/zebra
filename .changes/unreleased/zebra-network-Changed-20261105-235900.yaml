@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Changed
+body: A peer's compact block announcement now completes a pending `FindBlocks` tip poll to that peer, and answers later tip polls from the announced block's parent, so the announced block's download no longer waits for the peer to commit it.
+time: 2026-11-05T23:59:00.000000000-05:00

@@ -746,3 +746,92 @@ async fn compact_recovery_expiry_releases_snapshot_before_stalled_close() {
     .await
     .expect("the retention deadline cancels backpressured recovery before closing");
 }
+
+/// A compact block completes a pending tip poll, and a later tip poll from the announced block's
+/// parent is answered without holding the request slot. Both get no hashes, so the syncer doesn't
+/// verify the block the inbound downloader is already fetching.
+#[tokio::test]
+async fn compact_announcement_answers_tip_polls() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1687108_BYTES
+            .as_slice()
+            .zcash_deserialize_into()
+            .unwrap();
+        let parent = block.header.previous_block_hash;
+        let source = "127.0.0.1:8233".parse().unwrap();
+        let (mut connection, mut client, mut inbound, mut outbound, _errors) =
+            new_test_connection::<PanicAssertion>();
+        let info = Arc::make_mut(&mut connection.connection_info);
+        info.early_block_relay = true;
+        info.connected_addr = crate::ConnectedAddr::new_outbound_direct(source);
+        let (mut peer, peer_rx) = mpsc::channel(1);
+        let task = tokio::spawn(connection.run(peer_rx));
+        assert_eq!(
+            outbound.next().await,
+            Some(Message::SendCompact {
+                high_bandwidth: true,
+                version: 1
+            })
+        );
+
+        let find_blocks = |client: &mut mpsc::Sender<ClientRequest>| {
+            let (tx, rx) = oneshot::channel();
+            client
+                .try_send(ClientRequest {
+                    request: Request::FindBlocks {
+                        known_blocks: vec![parent],
+                        stop: None,
+                    },
+                    tx,
+                    inv_collector: None,
+                    transient_addr: Some(source),
+                    span: tracing::Span::none(),
+                })
+                .expect("the connection has taken any earlier request");
+            rx
+        };
+
+        let first_poll = find_blocks(&mut client);
+        assert_eq!(
+            outbound.next().await,
+            Some(Message::GetBlocks {
+                known_blocks: vec![parent],
+                stop: None,
+            })
+        );
+
+        let compact = Arc::new(CompactBlock::from_block(&block, 7).unwrap());
+        peer.send(Ok(Message::CompactBlock(compact.clone())))
+            .await
+            .unwrap();
+        inbound
+            .expect_request(Request::CheckCompactHeader(compact.clone()))
+            .await
+            .respond(Response::Nil);
+        inbound
+            .expect_request(Request::AdvertiseCompactBlock(block.hash(), Some(source)))
+            .await
+            .respond(Response::Nil);
+        assert_eq!(
+            first_poll.await.unwrap().unwrap(),
+            Response::BlockHashes(vec![]),
+            "the announcement completes the pending tip poll",
+        );
+
+        let second_poll = find_blocks(&mut client);
+        assert_eq!(
+            second_poll.await.unwrap().unwrap(),
+            Response::BlockHashes(vec![]),
+            "a tip poll from the announced block's parent is answered locally",
+        );
+        assert!(
+            outbound.next().now_or_never().is_none(),
+            "no getblocks is sent while the announcement is retained",
+        );
+
+        task.abort();
+    })
+    .await
+    .expect("the tip polls finish without waiting for the peer");
+}

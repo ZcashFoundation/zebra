@@ -429,6 +429,15 @@ impl Handler {
                 }
                 Handler::Finished(Ok(Response::BlockHashes(hashes)))
             }
+            // A compact block announces the peer's new tip, so the peer won't answer the tip poll
+            // until it commits that block. The inbound downloader fetches the announced block, so
+            // complete the poll with no hashes, which keeps the syncer from verifying it again,
+            // and handle the announcement. The peer's inventory after its commit still reaches
+            // the syncer if the announcement isn't admitted.
+            (Handler::FindBlocks, Message::CompactBlock(block)) => {
+                ignored_msg = Some(Message::CompactBlock(block));
+                Handler::Finished(Ok(Response::BlockHashes(Vec::new())))
+            }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
             }
@@ -1354,6 +1363,16 @@ where
                          })
             }
 
+            // The peer only answers a tip poll after it commits the admitted compact block it just
+            // announced, and the poll would hold this connection's request slot until then. The
+            // inbound downloader already has that block, so answer with no hashes now.
+            (AwaitingRequest, FindBlocks { known_blocks, stop: None })
+                if known_blocks
+                    .first()
+                    .is_some_and(|tip| self.compact.announces_child_of(*tip)) =>
+            {
+                Ok(Handler::Finished(Ok(Response::BlockHashes(Vec::new()))))
+            }
             (AwaitingRequest, FindBlocks { known_blocks, stop }) => {
                 self
                     .peer_tx
