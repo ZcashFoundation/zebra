@@ -52,7 +52,7 @@ groups:
       # Blocks failing verification. Download errors, such as peers not having a block, are
       # expected during sync and aren't counted.
       - alert: ZebraHighErrorRate
-        expr: sum(rate(sync_block_error_count{kind=~"invalid|auth_commitment_mismatch|validation_request|verifier_service|verify_timeout|utxo_lookup_timeout|final_checkpoint_verify_timeout"}[5m])) > 0.1
+        expr: sum without (kind) (rate(sync_block_error_count{kind=~"invalid|auth_commitment_mismatch|validation_request|verifier_service|verify_timeout|utxo_lookup_timeout|final_checkpoint_verify_timeout"}[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
