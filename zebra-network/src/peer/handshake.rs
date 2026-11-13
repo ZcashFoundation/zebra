@@ -24,8 +24,7 @@ use tokio::{
 use tokio_stream::wrappers::IntervalStream;
 use tokio_util::{codec::Framed, task::AbortOnDropHandle};
 use tower::Service;
-use tracing::{span, Level, Span};
-use tracing_futures::Instrument;
+use tracing::{span, Instrument, Level, Span};
 
 use zebra_chain::{
     block,
@@ -462,7 +461,7 @@ where
         self
     }
 
-    /// Share the live ban list with connection advert delivery.
+    /// Share the live ban list with connection request and advert delivery.
     pub fn with_bans(mut self, bans: tokio::sync::watch::Receiver<crate::BanList>) -> Self {
         self.bans_receiver = Some(bans);
         self
@@ -1224,12 +1223,7 @@ where
             let alternate_addrs = connected_addr
                 .get_alternate_addrs(remote_canonical_addr)
                 .map(|addr| {
-                    // Assume the connecting node is a server node, and it's available now.
-                    MetaAddr::new_gossiped_meta_addr(
-                        addr,
-                        PeerServices::NODE_NETWORK,
-                        DateTime32::now(),
-                    )
+                    MetaAddr::new_gossiped_meta_addr(addr, remote_services, DateTime32::now())
                 });
 
             let mut server = Connection::new(

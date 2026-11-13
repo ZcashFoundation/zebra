@@ -103,14 +103,15 @@ jobs:
               scalar: single-quote it and double any apostrophe inside it when it contains a
               colon followed by a space, or starts with a character YAML treats specially.
             - One fragment per distinct user-visible change per project. Do not split one change
-              into several fragments for the same project, but a PR with independent changes gets
-              one fragment each, and a change that affects several projects gets one fragment per
-              project with the same body.
+              into several fragments for the same project, except the crate case below, but a PR
+              with independent changes gets one fragment each, and a change that affects several
+              projects gets one fragment per project with the same body.
             - File names only have to be unique and end in `.yaml`; use
               `<project>-<kind>-<n>.yaml`.
-            - A breaking addition gets one `breaking` fragment that names the new capability
-              and explains its impact (for example, a new variant on an enum that is not
-              `#[non_exhaustive]`). Do not duplicate it in an `Added` fragment.
+            - For crate fragments only: a change that is both breaking and additive (for example,
+              a new variant on an enum that is not `#[non_exhaustive]`) gets a `breaking` fragment
+              for its impact and an `Added` fragment for the new capability. Breaks that add no
+              capability get only a `breaking` fragment.
             - The `zebrad` project is for node operators: config, CLI, RPC, and behavior, framed
               by what an operator observes. Omit it when the PR has no operator-visible effect
               (pure library API, internal refactor, CI, tests, non-security dependency bumps).
@@ -119,7 +120,8 @@ jobs:
             - Breaking for a crate (`kind: breaking`): a removal, a signature, field,
               or type change, reduced visibility, an MSRV bump, new feature-gating, or an
               addition that breaks downstream builds, meaning a new variant on an enum that is
-              NOT marked `#[non_exhaustive]`, or a new field on a struct callers build by literal.
+              NOT marked `#[non_exhaustive]`, a new field on a struct callers build by literal,
+              or a new required method on a public trait that downstream code implements.
             - Breaking for operators (`kind: breaking` on the zebrad fragment): a removed,
               renamed, or retyped config field or environment variable, a changed CLI argument,
               a changed or removed RPC response or endpoint, a database-format bump, or a changed

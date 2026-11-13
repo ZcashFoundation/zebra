@@ -27,6 +27,7 @@ use rlimit::increase_nofile_limit;
 
 use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
+use tempfile::TempDir;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
@@ -113,6 +114,13 @@ pub struct DiskDb {
     /// In [`MultiThreaded`](rocksdb::MultiThreaded) mode,
     /// only [`Drop`] requires exclusive access.
     db: Arc<DB>,
+
+    /// The temporary directory a read-only secondary instance keeps its own files in,
+    /// removed when the last clone is dropped. `None` for read-write primaries.
+    ///
+    /// Declared after `db` so the database closes before its directory is removed.
+    #[allow(dead_code)]
+    secondary_dir: Option<Arc<TempDir>>,
 }
 
 /// Wrapper struct to ensure low-level database writes go through the correct API.
@@ -396,9 +404,20 @@ enum DbMode {
     /// A read-write primary backed by temporary files that are deleted on drop.
     Ephemeral,
 
-    /// A read-only secondary that follows an existing primary's on-disk state. It owns
-    /// no files and never writes, flushes, or deletes them.
+    /// A read-only secondary that follows an existing primary's on-disk state. It never
+    /// writes, flushes, or deletes the primary's files, and only owns its temporary
+    /// secondary directory.
     ReadOnlySecondary,
+}
+
+/// The holder of a database lock that RocksDB failed to acquire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LockHolder {
+    /// Another process has the database open.
+    OtherProcess,
+
+    /// This process already has the database open.
+    ThisProcess,
 }
 
 impl DbMode {
@@ -1084,22 +1103,26 @@ impl DiskDb {
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
-        let db_result = if read_only {
-            // Use a tempfile for the secondary instance cache directory
-            let secondary_config = Config {
-                ephemeral: true,
-                ..config.clone()
-            };
-            let secondary_path =
-                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
-            let create_dir_result = std::fs::create_dir_all(&secondary_path);
+        let secondary_dir = read_only.then(|| {
+            let secondary_dir = tempfile::Builder::new()
+                .prefix(&format!(
+                    "zebra-secondary_state-v{}-{}-",
+                    format_version_in_code.major,
+                    network.directory_name(),
+                ))
+                .tempdir()
+                .expect("temporary directory is created successfully");
 
-            info!(?create_dir_result, "creating secondary db directory");
+            info!(path = ?secondary_dir.path(), "created secondary db directory");
 
+            Arc::new(secondary_dir)
+        });
+
+        let db_result = if let Some(secondary_dir) = &secondary_dir {
             DB::open_cf_descriptors_as_secondary(
                 &db_options,
-                &path,
-                &secondary_path,
+                path.as_path(),
+                secondary_dir.path(),
                 column_families,
             )
         } else {
@@ -1116,6 +1139,7 @@ impl DiskDb {
                     network: network.clone(),
                     mode,
                     db: Arc::new(db),
+                    secondary_dir,
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                     cached_size: Arc::new(AtomicU64::new(0)),
                 };
@@ -1129,20 +1153,53 @@ impl DiskDb {
                 Ok(db)
             }
 
-            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
-                "Database likely already open {path:?} \
-                         Hint: Check if another zebrad process is running."
-            ),
+            Err(e) => match (DiskDb::lock_holder(e.as_ref()), e.kind()) {
+                (Some(LockHolder::OtherProcess), _) => panic!(
+                    "Database {path:?} is locked by another process. \
+                     Hint: Check if another zebrad process is running. \
+                     Error: {e}"
+                ),
 
-            Err(e) => panic!(
-                "Opening database {path:?} failed. \
-                        Hint: Try changing the state cache_dir in the Zebra config. \
-                        Error: {e}",
-            ),
+                (Some(LockHolder::ThisProcess), _) => panic!(
+                    "Database {path:?} is already open in this zebrad process. \
+                     This is a bug in Zebra. \
+                     Error: {e}"
+                ),
+
+                (None, ErrorKind::IOError) => panic!(
+                    "I/O error opening database {path:?}. \
+                     Hint: Check that the state cache_dir exists, is mounted, \
+                     is writable by zebrad, and has free disk space. \
+                     Error: {e}"
+                ),
+
+                (None, _) => panic!(
+                    "Opening database {path:?} failed. \
+                     Hint: Try changing the state cache_dir in the Zebra config. \
+                     Error: {e}",
+                ),
+            },
         }
     }
 
     // Accessor methods
+
+    /// Returns true for a secondary instance following a primary database.
+    pub(super) fn is_read_only(&self) -> bool {
+        self.mode.is_read_only()
+    }
+
+    /// Returns an iterator borrowing raw keys and values without serialized copies.
+    pub(super) fn raw_iterator_cf_opt<C>(
+        &self,
+        cf: &C,
+        options: ReadOptions,
+    ) -> rocksdb::DBRawIteratorWithThreadMode<'_, DB>
+    where
+        C: rocksdb::AsColumnFamilyRef,
+    {
+        self.db.raw_iterator_cf_opt(cf, options)
+    }
 
     /// Returns the configured database kind for this database.
     pub fn db_kind(&self) -> String {
@@ -1785,6 +1842,32 @@ impl DiskDb {
                 path: cache_dir.to_path_buf(),
                 source,
             }),
+        }
+    }
+
+    /// Returns who holds the database lock, if the RocksDB open error `message` means
+    /// the lock is already held.
+    ///
+    /// RocksDB reports a held lock as an I/O error, so the message text is the only way
+    /// to tell it apart from other I/O errors. These are the strings RocksDB 10.4 writes
+    /// in `env/fs_posix.cc` and `port/win/env_win.cc`. A held `fcntl` lock fails with
+    /// `EAGAIN` or `EACCES`; other `fcntl` failures, such as `ENOLCK` on a filesystem
+    /// without lock support, are not a held lock. The Windows check matches the English
+    /// system message, so on other system languages a held lock is reported as an I/O
+    /// error, which still includes the RocksDB error.
+    fn lock_holder(message: &str) -> Option<LockHolder> {
+        let posix_lock_held = message.contains("While lock file")
+            && (message.contains("Resource temporarily unavailable")
+                || message.contains("Permission denied"));
+        let windows_lock_held = message.contains("Failed to create lock file")
+            && message.contains("being used by another process");
+
+        if posix_lock_held || windows_lock_held {
+            Some(LockHolder::OtherProcess)
+        } else if message.contains("lock hold by current process") {
+            Some(LockHolder::ThisProcess)
+        } else {
+            None
         }
     }
 

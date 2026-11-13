@@ -166,12 +166,17 @@ Three rules keep the quota usable:
    `run-loom-tests` in `tests-unit.yml` also writes from `next`: it builds with its own
    `RUSTFLAGS`, so no other job's cache serves it, and PRs to `next` restore from their base
    branch. A push to `next` runs only that job of the workflow.
-2. **Wide matrices share one key.** The `test-crates.yml` matrices use
-   `cache-shared-key` and seed the shared cache from a single build (`zebrad`
-   which has the widest dependency closure; `zebra-rpc` for the MSRV build since
-   it does not build `zebrad` and `zebra-rpc` is second widest option).
-3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, `deny` (12 jobs wide), and the
-   crate-matrix generator in `test-crates.yml` set `cache: false`.
+2. **Wide matrices share keys.** The `test-crates.yml` matrices use
+   `cache-shared-key`: one key for each half of the build matrix, and one for
+   the MSRV matrix. Each is seeded from a single build (`zebrad`, which has the
+   widest dependency closure; `zebra-rpc` for the MSRV build since it does not
+   build `zebrad` and `zebra-rpc` is second widest option).
+3. **Jobs that don't build don't cache.** `fmt`, `no-test-deps`, and the crate-matrix generator
+   in `test-crates.yml` set `cache: false`.
+   The matrix generator also skips native build dependencies: `cargo tree` does not compile code.
+
+The dependency-check Docker action provides its own Rust toolchain. The `deny` matrix therefore
+does not install Rust or restore a Rust cache on the host.
 
 To inspect the current state:
 
@@ -219,11 +224,16 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 
 ### Main Workflows
 
-- **Unit Tests** (`tests-unit.yml`): OS matrix unit tests via nextest
+- **Unit Tests** (`tests-unit.yml`): Linux unit tests via nextest
+  Source PRs targeting upstream `main` use workspace optimisation level 0; dependencies keep their
+  configured profiles. The merge queue validates level 3 before merge. Other contexts, including
+  `next` PRs and forks' own repositories, retain the unmodified release command.
 - **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks
 - **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
 - **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
+  The local builder is cleaned up on self-hosted runners; hosted VMs discard it with the job.
 - **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
+  The library MSRV matrix excludes `zebrad`; the lint workflow checks the binary's own MSRV.
 - **PR Gate** (`pr-gate.yml`): Validates PR declarations, changelog policy, public API and dependency compatibility with [zc](https://github.com/ZcashFoundation/zc), and complete generated Release PR readiness
 - **Merge Policy** (`merge-policy.yml`): Fast required check for the `do-not-merge` label
 - **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages: the latest release's book at the root, `main`'s under `/main/`, and the newest [`next` branch](../../book/src/dev/next-branch.md#read-the-next-book) book under `/next/`
@@ -238,6 +248,7 @@ priority rules, CI batching and bisection, and Mergify's queue dashboard and sta
 ### Supporting/Reusable Workflows
 
 - **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+  Hosted VMs discard local builders; self-hosted runners and remote drivers retain cleanup.
 - **Prepare release binaries** (`zfnd-release-binaries.yml`): Builds, attests, checksums, signs, and uploads the immutable binary bundle
 - **Attach release binaries** (`zfnd-attach-release-binaries.yml`): Attaches the prepared binary bundle to an existing GitHub Release
 - **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests

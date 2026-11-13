@@ -284,9 +284,8 @@ fn v4_transactions_in_one_block_all_round_trip() {
 
 /// The hand-written `serde::Serialize` impl must give V6 its own variant.
 ///
-/// This impl backs the `elasticsearch` feature as well as tests, and V6 transactions have been on
-/// mainnet since NU6.3, so mislabelling them as V5 would silently drop the Ironwood bundle from
-/// indexed output.
+/// V6 transactions have been on mainnet since NU6.3, so mislabelling them as V5 would silently
+/// drop the Ironwood bundle from snapshot output.
 #[test]
 fn serde_serialize_labels_v6_transactions_correctly() {
     use crate::transaction::arbitrary::{fake_bundle_for_branch, fake_v6_transaction};

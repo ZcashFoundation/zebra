@@ -30,7 +30,6 @@
     - [Regtest](user/regtest.md)
     - [Forking the Testnet](user/fork-zebra-testnet.md)
   - [zk-SNARK parameters](user/parameters.md)
-  - [Elasticsearch indexing](user/elasticsearch.md)
   - [Troubleshooting](user/troubleshooting.md)
 - [Developer Documentation](dev.md)
   - [Contribution guide](CONTRIBUTING.md)

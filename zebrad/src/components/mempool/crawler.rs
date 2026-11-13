@@ -56,7 +56,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower::{timeout::Timeout, BoxError, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{block::Height, transaction::UnminedTxId};
 use zebra_network as zn;

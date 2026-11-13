@@ -1163,10 +1163,10 @@ impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
     }
 }
 
-// Human-readable Serialize for elasticsearch, tests, and snapshots.
+// Human-readable Serialize for tests and snapshots.
 // Produces structured output matching the old Transaction enum format
 // so that RON snapshot tests remain human-readable.
-#[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl serde::Serialize for Transaction {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStructVariant;

@@ -208,6 +208,10 @@ jobs:
           version: lab:latest
           driver: ${{ vars.DOCKER_BUILDER || 'docker-container' }}
           endpoint: ${{ vars.DOCKER_BUILDER == 'cloud' && 'zfnd/zebra' || '' }}
+          # Only local hosted builders disappear with the VM; remote drivers retain cleanup.
+          cleanup: >-
+            ${{ runner.environment != 'github-hosted' ||
+            (vars.DOCKER_BUILDER || 'docker-container') != 'docker-container' }}
 
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job

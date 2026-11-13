@@ -90,6 +90,7 @@ impl DiskFormatUpgrade for Upgrade {
                     // parsing is slow.
                     let (block, size) = db
                         .block_and_size(HashOrHeight::Height(height))
+                        .expect("block info reconstruction requires complete stored block bodies")
                         .expect("block info should be in the database");
 
                     // Load the utxos for all the transactions inputs in the block.
