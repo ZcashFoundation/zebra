@@ -89,7 +89,7 @@ groups:
       # High RPC latency. getblocktemplate long polls wait for a new template on purpose, so
       # they're left out.
       - alert: RPCHighLatency
-        expr: histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket{method!="getblocktemplate"}[5m])) by (le, method)) > 2
+        expr: histogram_quantile(0.99, rate(rpc_request_duration_seconds_bucket{method!="getblocktemplate"}[5m])) > 2
         for: 5m
         labels:
           severity: warning
@@ -99,7 +99,7 @@ groups:
 
       # High RPC error rate
       - alert: RPCHighErrorRate
-        expr: sum(rate(rpc_errors_total[5m])) by (method) / sum(rate(rpc_requests_total[5m])) by (method) > 0.1
+        expr: sum without (error_code) (rate(rpc_errors_total[5m])) / sum without (status) (rate(rpc_requests_total[5m])) > 0.1
         for: 5m
         labels:
           severity: warning
@@ -122,7 +122,7 @@ groups:
     rules:
       # High handshake failure rate
       - alert: HandshakeFailureRateHigh
-        expr: sum(rate(zcash_net_peer_handshake_failures_total[5m])) / (sum(rate(zcash_net_peer_handshake_duration_seconds_count[5m])) + 0.001) > 0.5
+        expr: sum without (reason) (rate(zcash_net_peer_handshake_failures_total[5m])) / (sum without (result) (rate(zcash_net_peer_handshake_duration_seconds_count[5m])) + 0.001) > 0.5
         for: 5m
         labels:
           severity: warning
