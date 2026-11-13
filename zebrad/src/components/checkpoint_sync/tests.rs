@@ -267,6 +267,53 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     assert!(supervisor.claim_target(block::Height(0)).is_some());
 }
 
+/// Connections from one IP address count once toward the target, so a
+/// single host cannot lower or raise it with tips that no one checked.
+#[tokio::test]
+async fn supervisor_target_counts_each_address_once() {
+    let _init_guard = zebra_test::init();
+
+    let chain = TestChain::new();
+    let honest_tip = block::Height(1_000_000);
+    let honest: Vec<MockPeer> = (1..=2)
+        .map(|id| MockPeer::new(id, chain.clone(), Behaviour::Honest).with_tip(honest_tip))
+        .collect();
+    let (peers_tx, peers_rx) = watch::channel(Arc::<[MockPeer]>::from(honest.clone()));
+
+    let (latest_chain_tip, _tip_sender) = MockChainTip::new();
+    let (commits_tx, _commits_rx) = mpsc::unbounded_channel();
+    let (engine_side, _legacy, _checkpoint_tip) = ownership_channels();
+    let supervisor = Supervisor::new(
+        EngineConfig::default(),
+        Network::Mainnet,
+        peers_rx,
+        mock_state(commits_tx, |_, _| false),
+        latest_chain_tip,
+        engine_side,
+        None,
+    );
+    let honest_target = supervisor
+        .claim_target(block::Height(0))
+        .expect("a claim with two honest peers");
+
+    // Three connections from one address, a majority of the connections,
+    // advertise a low tip, then the highest one.
+    let host = MockPeer::new(3, chain.clone(), Behaviour::Honest).peer_ip();
+    for tip in [block::Height(100_000), block::Height::MAX] {
+        let crowd = (3..=5).map(|id| {
+            MockPeer::new(id, chain.clone(), Behaviour::Honest)
+                .with_ip(host)
+                .with_tip(tip)
+        });
+        peers_tx.send_replace(honest.iter().cloned().chain(crowd).collect());
+        assert_eq!(
+            supervisor.claim_target(block::Height(0)),
+            Some(honest_target),
+            "one address advertising {tip:?} does not move the target"
+        );
+    }
+}
+
 /// Blame from earlier runs is kept until it lapses, so two groups of peers
 /// that take turns failing a run are both left out of the next claim, and
 /// the blame the supervisor keeps is bounded.
