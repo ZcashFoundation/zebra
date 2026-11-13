@@ -362,6 +362,74 @@ fn refused_peers_are_excluded_and_failed_peers_back_off() {
     assert!(!scheduler.peers[&peer(1)].excluded(later + STALL_BACKOFF));
 }
 
+/// A peer that answers `BUSY` waits a few seconds, twice as long after each
+/// consecutive `BUSY` up to a minute, and from the start again once it has
+/// delivered a block. It is never excluded, it does not fail the frontier,
+/// and it is not among the peers a run blames.
+#[test]
+fn busy_peers_wait_briefly_and_are_never_excluded() {
+    let _init_guard = zebra_test::init();
+
+    let checkpoints = checkpoints();
+    let config = EngineConfig::default();
+    let mut now = Instant::now();
+    let mut scheduler = scheduler_for_one_peer(&config, &checkpoints, now);
+
+    for wait in [5, 10, 20, 40, 60, 60, 60] {
+        let wait = Duration::from_secs(wait);
+        let busy = scheduler
+            .next_assignment(now)
+            .expect("pulls after the wait");
+        assert_eq!(busy.unit.start, block::Height(1), "the frontier unit");
+        scheduler.on_failure(busy.stream, StreamFailure::Busy, now);
+
+        let peer = &scheduler.peers[&peer(1)];
+        assert!(peer.selected, "a busy peer stays selected");
+        assert!(!peer.excluded(now));
+        assert!(peer.backing_off(now + wait - Duration::from_millis(1)));
+        assert!(!peer.backing_off(now + wait));
+        assert_eq!(scheduler.next_assignment(now), None);
+        assert_eq!(scheduler.serving_peers(), 0);
+        assert_eq!(scheduler.selected_peers(), 1);
+
+        now += wait;
+        assert_eq!(scheduler.tick(now), Vec::new());
+    }
+    assert_eq!(scheduler.frontier_failures(), 0);
+    assert!(scheduler.frontier_failed_peers().is_empty());
+    assert_eq!(scheduler.refused_peers(now).count(), 0);
+    assert!(!scheduler.frontier_stuck(1, now));
+
+    // A delivered block ends the run of `BUSY` answers.
+    let delivering = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_block(
+        delivering.stream,
+        delivering.unit.end,
+        1_000,
+        block::Hash([6; 32]),
+        true,
+        now,
+    );
+    assert_eq!(scheduler.serving_peers(), 1);
+    scheduler.on_end(delivering.stream, now);
+    let busy = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_failure(busy.stream, StreamFailure::Busy, now);
+    assert!(!scheduler.peers[&peer(1)].backing_off(now + BUSY_BACKOFF));
+
+    // One `REFUSED` is not blamed either: only a peer that does not serve
+    // ranges is.
+    now += BUSY_BACKOFF;
+    let refused = scheduler.next_assignment(now).expect("pulls again");
+    scheduler.on_failure(refused.stream, StreamFailure::Refused, now);
+    assert!(scheduler.peers[&peer(1)].excluded(now));
+    assert_eq!(scheduler.refused_peers(now).count(), 0);
+    now += STALL_BACKOFF;
+    scheduler.tick(now);
+    let refused = scheduler.next_assignment(now).expect("selected again");
+    scheduler.on_failure(refused.stream, StreamFailure::Refused, now);
+    assert_eq!(scheduler.refused_peers(now).collect::<Vec<_>>(), [peer(1)]);
+}
+
 fn scheduler_for_one_peer(
     config: &EngineConfig,
     checkpoints: &[block::Height],

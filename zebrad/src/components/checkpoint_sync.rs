@@ -30,7 +30,12 @@
 //! Re-claiming is allowed after a cooldown, when peers reappear and the gap
 //! is large again, so fallback works both ways.
 
-use std::{collections::BTreeSet, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::eyre::eyre;
 use tokio::{
@@ -128,6 +133,12 @@ pub const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// How long the supervisor waits after a hand-back before it may claim
 /// again, so the engine does not flap.
 pub const RECLAIM_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// How long the supervisor keeps the blame of a run. A blamed peer may have
+/// recovered, and blame is by IP address, which several nodes can share, so
+/// it must lapse on its own: otherwise blame that leaves too few peers to
+/// claim with would last until Zebra restarts.
+pub const BLAME_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// The capacity of the unit-length channel to the legacy syncer.
 const UNIT_LENGTHS_CAPACITY: usize = 64;
@@ -241,12 +252,13 @@ struct Supervisor<P, ZS, ZSTip> {
     charged: Charged,
     generation: u64,
     /// The IP addresses of the peers the last run blamed for its lack of
-    /// progress: they do not count toward the next claim, and the next run
-    /// does not use them, so that a few peers that keep failing the frontier
-    /// cannot make the engine claim block download, and the legacy syncer
-    /// cancel its downloads, over and over. Keyed by IP address rather than
-    /// connection, so that reconnecting does not clear the blame.
-    blamed: BTreeSet<IpAddr>,
+    /// progress, and when each blame lapses: until then they do not count
+    /// toward a claim, and a run does not use them, so that a few peers that
+    /// keep failing the frontier cannot make the engine claim block
+    /// download, and the legacy syncer cancel its downloads, over and over.
+    /// Keyed by IP address rather than connection, so that reconnecting does
+    /// not clear the blame.
+    blamed: BTreeMap<IpAddr, time::Instant>,
 }
 
 impl<P, ZS, ZSTip> Supervisor<P, ZS, ZSTip>
@@ -280,8 +292,25 @@ where
             hints_gate,
             charged: Charged::default(),
             generation: 0,
-            blamed: BTreeSet::new(),
+            blamed: BTreeMap::new(),
         }
+    }
+
+    /// The IP addresses whose blame has not lapsed at `now`.
+    fn blamed_at(&self, now: time::Instant) -> BTreeSet<IpAddr> {
+        self.blamed
+            .iter()
+            .filter(|(_, until)| now < **until)
+            .map(|(ip, _)| *ip)
+            .collect()
+    }
+
+    /// Records the blame of a run that ended at `now`.
+    fn blame(&mut self, blamed: BTreeSet<IpAddr>, now: time::Instant) {
+        // Only the last run's blame counts: a peer blamed earlier may have
+        // recovered, and the cooldown already limits how often a run can
+        // fail.
+        self.blamed = blamed.into_iter().map(|ip| (ip, now + BLAME_TTL)).collect();
     }
 
     async fn run(mut self) -> Result<(), color_eyre::Report> {
@@ -352,7 +381,7 @@ where
                     hints_gate: self.hints_gate.clone(),
                     unit_lengths: self.ownership.unit_lengths.clone(),
                     charged: self.charged.clone(),
-                    blamed: self.blamed.clone(),
+                    blamed: self.blamed_at(time::Instant::now()),
                 }
                 .run()
                 .await
@@ -401,11 +430,9 @@ where
                 durable_tip = ?durable.map(|(height, _)| height),
                 "checkpoint sync engine handed block download back to the legacy syncer"
             );
-            // Only the last run's blame counts: a peer blamed earlier may
-            // have recovered, and the cooldown already limits how often a
-            // run can fail. Blamed peers, including those that refused
-            // ranges, do not count toward the next claim.
-            self.blamed = outcome.blamed;
+            // Blamed peers, including those that do not serve ranges, do
+            // not count toward a claim until their blame lapses.
+            self.blame(outcome.blamed, time::Instant::now());
 
             match outcome.exit {
                 EngineExit::Defect(defect) => {
@@ -472,11 +499,12 @@ where
     /// hold.
     fn claim_target(&self, tip: block::Height) -> Option<block::Height> {
         let peers = self.peers.borrow().clone();
+        let blamed = self.blamed_at(time::Instant::now());
         let mut tips: Vec<block::Height> = peers
             .iter()
             .filter(|peer| peer.services().contains(PeerServices::NODE_NETWORK))
             .filter(|peer| !peer.is_closed())
-            .filter(|peer| !self.blamed.contains(&peer.ip()))
+            .filter(|peer| !blamed.contains(&peer.ip()))
             .map(|peer| peer.remote_tip_height())
             .collect();
         tips.sort();

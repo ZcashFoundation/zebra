@@ -214,10 +214,11 @@ async fn supervisor_hands_back_at_the_durable_tip_after_a_mid_interval_failure()
 }
 
 /// Peers the last run blamed for its lack of progress do not count toward
-/// the next claim, even over a new connection.
+/// the next claim, even over a new connection, until the blame lapses.
 #[tokio::test]
 async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     let _init_guard = zebra_test::init();
+    tokio::time::pause();
 
     let chain = TestChain::new();
     let peers: Vec<MockPeer> = (1..=3)
@@ -243,7 +244,7 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     assert!(supervisor.claim_target(block::Height(0)).is_some());
 
     // Two of the three peers were blamed: one unblamed peer is too few.
-    supervisor.blamed = [ips[0], ips[1]].into_iter().collect();
+    supervisor.blame([ips[0], ips[1]].into_iter().collect(), time::Instant::now());
     assert_eq!(supervisor.claim_target(block::Height(0)), None);
 
     // A blamed peer that reconnects still does not count.
@@ -253,7 +254,16 @@ async fn supervisor_does_not_reclaim_with_only_blamed_peers() {
     peers_tx.send_replace(peers.into_iter().chain([reconnected]).collect());
     assert_eq!(supervisor.claim_target(block::Height(0)), None);
 
-    supervisor.blamed = [ips[0]].into_iter().collect();
+    // Blame lapses on its own, without another run in between: with too
+    // few unblamed peers to claim, there is no run to replace it.
+    time::advance(BLAME_TTL - Duration::from_secs(1)).await;
+    assert_eq!(supervisor.claim_target(block::Height(0)), None);
+    assert_eq!(supervisor.blamed_at(time::Instant::now()).len(), 2);
+    time::advance(Duration::from_secs(1)).await;
+    assert!(supervisor.claim_target(block::Height(0)).is_some());
+    assert!(supervisor.blamed_at(time::Instant::now()).is_empty());
+
+    supervisor.blame([ips[0]].into_iter().collect(), time::Instant::now());
     assert!(supervisor.claim_target(block::Height(0)).is_some());
 }
 

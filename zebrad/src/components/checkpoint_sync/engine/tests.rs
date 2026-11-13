@@ -322,6 +322,8 @@ pub(crate) enum Behaviour {
     FailFirst(u32),
     /// Answers every request with `REFUSED`.
     Refused,
+    /// Answers its first this many requests with `BUSY`, then is honest.
+    BusyFirst(u32),
 }
 
 /// A simulated version 2 peer serving [`TestChain`].
@@ -456,6 +458,9 @@ impl RangePeer for MockPeer {
             let request_number = peer.requests.fetch_add(1, Ordering::SeqCst);
             if peer.behaviour == Behaviour::Refused {
                 return Err(SyncPeerError::Refused);
+            }
+            if matches!(peer.behaviour, Behaviour::BusyFirst(count) if request_number < count) {
+                return Err(SyncPeerError::Busy);
             }
             if matches!(peer.behaviour, Behaviour::FailFirst(count) if request_number < count) {
                 return Err(SyncPeerError::Transport("failing first".to_string()));
@@ -1062,6 +1067,48 @@ async fn engine_blames_peers_that_refuse_ranges() {
             .iter()
             .all(|peer| peer.requests.load(Ordering::SeqCst) >= 2),
         "each peer refused at least twice"
+    );
+}
+
+/// Peers that only answer `BUSY` serve ranges: the run hands back for too
+/// few peers that deliver, and blames none of them, however long they stay
+/// busy. Peers that are busy for a while are used again.
+#[tokio::test]
+async fn engine_retries_busy_peers_and_does_not_blame_them() {
+    let _init_guard = zebra_test::init();
+    tokio::time::pause();
+
+    let chain = TestChain::new();
+    let peers = vec![
+        MockPeer::new(1, chain.clone(), Behaviour::BusyFirst(u32::MAX)),
+        MockPeer::new(2, chain.clone(), Behaviour::BusyFirst(u32::MAX)),
+    ];
+    let harness = run_engine(peers.clone(), |_, _| false, None).await;
+    assert_eq!(
+        harness.outcome,
+        EngineOutcome {
+            exit: EngineExit::TooFewPeers,
+            base: block::Height(1),
+            blamed: BTreeSet::new(),
+        },
+        "busy peers are not blamed"
+    );
+    assert!(
+        peers
+            .iter()
+            .all(|peer| peer.requests.load(Ordering::SeqCst) >= 3),
+        "each peer was asked again after a short wait"
+    );
+
+    let peers = vec![
+        MockPeer::new(1, chain.clone(), Behaviour::BusyFirst(3)),
+        MockPeer::new(2, chain.clone(), Behaviour::BusyFirst(2)),
+    ];
+    let harness = run_engine(peers, |_, _| false, None).await;
+    assert_eq!(harness.outcome.exit, EngineExit::TargetReached);
+    assert_eq!(
+        harness.committed.iter().copied().collect::<BTreeSet<_>>(),
+        all_heights()
     );
 }
 

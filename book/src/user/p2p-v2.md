@@ -198,7 +198,14 @@ How it works:
   chain, including every block above the final checkpoint. If version 2 peers
   come back while the tip is still far behind, the engine takes over again a
   minute later, without using peers at the IP addresses it blamed for its
-  last hand-back, even over new connections.
+  last hand-back, even over new connections. Blame lasts 10 minutes.
+- A peer that answers a request with `BUSY` is serving as many ranges as it
+  allows. The engine asks it again after 5 seconds, and waits twice as long
+  after each further `BUSY`, up to a minute, until the peer delivers a block.
+  It never stops using a peer or blames it for being busy. A peer that
+  answers `REFUSED` is left alone for 30 seconds, and for 10 minutes if it
+  refuses again without delivering a block in between; only then is it blamed
+  when the engine hands back for too few peers.
 - While the engine downloads, the mempool and block gossip stay off, as they do
   during a legacy initial sync.
 

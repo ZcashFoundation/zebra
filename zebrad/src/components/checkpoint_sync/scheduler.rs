@@ -109,10 +109,18 @@ pub const STALL_BACKOFF: Duration = Duration::from_secs(30);
 /// block since its last refusal, or that did not find a checkpointed range
 /// below its own tip, is not selected.
 ///
-/// A first refusal excludes the peer for [`STALL_BACKOFF`] only: `REFUSED`
-/// also means that the server is at its stream limit, or still starting,
-/// which says nothing about later requests.
+/// A first refusal excludes the peer for [`STALL_BACKOFF`] only: a peer that
+/// predates `BUSY` answers `REFUSED` when it is at its stream limit, or
+/// still starting, which says nothing about later requests.
 pub const REFUSED_EXCLUSION: Duration = Duration::from_secs(10 * 60);
+
+/// How long a peer that answered `BUSY` waits before its next pull. The
+/// draft asks for a delay that starts at a few seconds.
+pub const BUSY_BACKOFF: Duration = Duration::from_secs(5);
+
+/// The longest wait after `BUSY`: the wait doubles with each consecutive
+/// `BUSY` from the peer, up to the draft's one minute.
+pub const MAX_BUSY_BACKOFF: Duration = Duration::from_secs(60);
 
 /// How often the probe slot rotates in an unselected peer.
 pub const PROBE_INTERVAL: Duration = Duration::from_secs(60);
@@ -144,6 +152,9 @@ pub enum StreamFailure {
     NotFound,
     /// The peer refused `get-block-range` before sending data.
     Refused,
+    /// The peer serves `get-block-range`, but answered `BUSY` or
+    /// `INTERNAL_ERROR` before sending data: it is at a limit.
+    Busy,
     /// A transport error, a cancellation by the peer, or a closed connection.
     Transport,
     /// The peer violated the protocol, and the connection is closed.
@@ -245,6 +256,11 @@ struct PeerState {
     measured: bool,
     /// Whether the peer refused a stream, and delivered no block since.
     refused: bool,
+    /// Whether `refused_until` is a [`REFUSED_EXCLUSION`]: the peer does not
+    /// serve ranges, rather than not serving one request.
+    not_serving: bool,
+    /// The `BUSY` answers since the peer last delivered a block.
+    busy_streak: u32,
 }
 
 impl PeerState {
@@ -254,6 +270,14 @@ impl PeerState {
 
     fn backing_off(&self, now: Instant) -> bool {
         self.backoff_until.is_some_and(|until| now < until)
+    }
+
+    /// The wait after the peer's `streak`th consecutive `BUSY`.
+    fn busy_backoff(streak: u32) -> Duration {
+        let doublings = streak.saturating_sub(1);
+        BUSY_BACKOFF
+            .checked_mul(1u32.checked_shl(doublings).unwrap_or(u32::MAX))
+            .map_or(MAX_BUSY_BACKOFF, |backoff| backoff.min(MAX_BUSY_BACKOFF))
     }
 }
 
@@ -379,6 +403,17 @@ impl Scheduler {
         self.peers.values().filter(|peer| peer.selected).count()
     }
 
+    /// The number of selected peers that are not in a run of `BUSY` answers.
+    ///
+    /// A busy peer stays selected, because `BUSY` is no reason to stop using
+    /// it, but a run needs [`MIN_ENGINE_PEERS`] peers that deliver.
+    pub fn serving_peers(&self) -> usize {
+        self.peers
+            .values()
+            .filter(|peer| peer.selected && peer.busy_streak == 0)
+            .count()
+    }
+
     /// Whether every height up to the target was planned and delivered.
     #[cfg(test)]
     pub fn is_done(&self) -> bool {
@@ -404,13 +439,14 @@ impl Scheduler {
         &self.frontier_failed_peers
     }
 
-    /// The peers excluded at `now` for refusing ranges: `REFUSED` again
+    /// The peers excluded at `now` for not serving ranges: `REFUSED` again
     /// without a block in between, or `NOT_FOUND` for a checkpointed range
-    /// below their tip.
+    /// below their tip. A peer in the short exclusion after one `REFUSED`,
+    /// or waiting after `BUSY`, is not among them.
     pub fn refused_peers(&self, now: Instant) -> impl Iterator<Item = ConnectionId> + '_ {
         self.peers
             .iter()
-            .filter(move |(_, peer)| peer.excluded(now))
+            .filter(move |(_, peer)| peer.not_serving && peer.excluded(now))
             .map(|(id, _)| *id)
     }
 
@@ -488,6 +524,8 @@ impl Scheduler {
                     duplicates: 0,
                     measured: false,
                     refused: false,
+                    not_serving: false,
+                    busy_streak: 0,
                 });
         }
 
@@ -569,7 +607,14 @@ impl Scheduler {
             .peers
             .iter()
             .filter(|(_, peer)| peer.selected)
-            .min_by(|a, b| a.1.rate.total_cmp(&b.1.rate).then(b.0.cmp(a.0)))
+            // A peer in a run of `BUSY` answers delivers nothing, whatever
+            // rate it had before.
+            .min_by(|a, b| {
+                (a.1.busy_streak == 0)
+                    .cmp(&(b.1.busy_streak == 0))
+                    .then(a.1.rate.total_cmp(&b.1.rate))
+                    .then(b.0.cmp(a.0))
+            })
             .map(|(id, _)| *id)
             .expect("the selection is full, so it is not empty");
 
@@ -964,6 +1009,7 @@ impl Scheduler {
         let unit_id = state.unit;
         if let Some(peer) = self.peers.get_mut(&state.peer) {
             peer.refused = false;
+            peer.busy_streak = 0;
         }
 
         if is_new {
@@ -1129,8 +1175,16 @@ impl Scheduler {
                     } else {
                         STALL_BACKOFF
                     };
+                    peer.not_serving = peer.refused;
                     peer.refused = true;
                     peer.refused_until = Some(now + exclusion);
+                }
+                // The peer is at a limit: it waits a little, longer each
+                // time, and is never excluded for it.
+                Release::Failure(StreamFailure::Busy) => {
+                    peer.busy_streak = peer.busy_streak.saturating_add(1);
+                    let until = now + PeerState::busy_backoff(peer.busy_streak);
+                    peer.backoff_until = Some(peer.backoff_until.map_or(until, |at| at.max(until)));
                 }
                 // A peer whose advertised tip covers a checkpoint has every
                 // block below it: not finding it is as good as a refusal.
@@ -1139,6 +1193,7 @@ impl Scheduler {
                         unit.anchor == Anchor::Checkpoint && unit.end <= peer.remote_tip
                     }) =>
                 {
+                    peer.not_serving = true;
                     peer.refused_until = Some(now + REFUSED_EXCLUSION);
                 }
                 Release::Failure(_) | Release::Stall | Release::EmptyEnd => {
@@ -1152,9 +1207,12 @@ impl Scheduler {
             return;
         };
         // A closed connection is the registry's business: its peer is gone,
-        // and it cannot fail the frontier again.
-        if !matches!(reason, Release::End | Release::Gone)
-            && unit.streams.is_empty()
+        // and it cannot fail the frontier again. A busy peer did not fail the
+        // unit: it asked for the request again later.
+        if !matches!(
+            reason,
+            Release::End | Release::Gone | Release::Failure(StreamFailure::Busy)
+        ) && unit.streams.is_empty()
             && self.is_frontier(&unit.unit)
         {
             self.frontier_failures += 1;
