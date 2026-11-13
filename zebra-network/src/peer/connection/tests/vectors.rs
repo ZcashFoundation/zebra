@@ -225,7 +225,8 @@ fn connection_state_commands_omit_serialization_details() {
     }
 }
 
-/// Bound block requests before inbound dispatch without capping transactions or counting duplicates.
+/// Bound block requests before inbound dispatch without capping transactions or counting duplicates,
+/// on legacy and negotiated early-relay connections.
 #[tokio::test]
 async fn getdata_block_hashes_are_bounded_before_dispatch() {
     let _init_guard = zebra_test::init();
@@ -259,7 +260,7 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
             .chain(blocks[..GETDATA_MAX_BLOCK_COUNT].iter().copied())
             .collect();
 
-        for items in [
+        let cases = [
             blocks[..1].to_vec(),
             blocks[..GETDATA_MAX_BLOCK_COUNT].to_vec(),
             blocks[..=GETDATA_MAX_BLOCK_COUNT].to_vec(),
@@ -269,7 +270,11 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
             transactions,
             ignored.to_vec(),
             Vec::new(),
-        ] {
+        ];
+        for (items, early_block_relay) in cases
+            .iter()
+            .flat_map(|items| [(items, false), (items, true)])
+        {
             // The connection keeps the first distinct block hashes, in inventory order.
             let mut expected_blocks = HashSet::new();
             for hash in items.iter().filter_map(InventoryHash::block_hash) {
@@ -284,7 +289,8 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
                 .collect();
             let (mut connection, _client_tx, mut inbound_service, _outbound, _error_slot) =
                 new_test_connection();
-            let message = Message::GetData(items);
+            Arc::make_mut(&mut connection.connection_info).early_block_relay = early_block_relay;
+            let message = Message::GetData(items.clone());
 
             if expected_blocks.is_empty() && expected_transactions.is_empty() {
                 assert_eq!(
@@ -299,7 +305,8 @@ async fn getdata_block_hashes_are_bounded_before_dispatch() {
                 async {
                     let request = inbound_service.expect_request_that(|_| true).await;
                     match request.request() {
-                        Request::RawBlocksByHash(hashes) => {
+                        Request::RawBlocksByHash(hashes)
+                        | Request::EarlyRawBlocksByHash(hashes) => {
                             assert!(
                                 !expected_blocks.is_empty(),
                                 "transactions stay transactions"
@@ -533,9 +540,9 @@ async fn early_block_getdata_preserves_negotiated_provenance() {
                 .insert(crate::types::PeerServices::NODE_COMPACT_BLOCKS);
             let hashes = HashSet::from([block.hash()]);
             let request = if negotiated {
-                Request::EarlyBlocksByHash(hashes)
+                Request::EarlyRawBlocksByHash(hashes)
             } else {
-                Request::BlocksByHash(hashes)
+                Request::RawBlocksByHash(hashes)
             };
             let (unhandled, (), message) = tokio::join!(
                 connection.handle_message_as_request(Message::GetData(vec![block.hash().into()])),
@@ -646,6 +653,8 @@ async fn early_block_outbound_requests_require_the_correct_service() {
     tokio::time::timeout(Duration::from_secs(2), async {
         for request in [
             Request::EarlyBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::RawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::EarlyRawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
             Request::AdvertiseEarlyBlock(block::Hash([0; 32]), None),
         ] {
             let (tx, rx) = oneshot::channel();
