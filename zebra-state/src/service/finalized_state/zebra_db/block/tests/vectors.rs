@@ -361,6 +361,7 @@ fn concurrent_block_body_deletion_never_returns_partial_data() {
     let (db, block) = complete_body_test_db(&Config::ephemeral());
     let height = block.coinbase_height().unwrap();
     let expected_size = block.zcash_serialized_size();
+    let expected_block = block.zcash_serialize_to_vec().unwrap();
     let expected_header = block.header.zcash_serialize_to_vec().unwrap();
     let expected_transactions: Vec<_> = block
         .transactions
@@ -416,6 +417,11 @@ fn concurrent_block_body_deletion_never_returns_partial_data() {
                 Err(error) => assert_eq!(error, unavailable),
                 other => panic!("known block must remain known: {other:?}"),
             }
+            match db.serialized_block(height.into()) {
+                Ok(Some(bytes)) => assert_eq!(bytes.as_ref(), expected_block.as_slice()),
+                Err(error) => assert_eq!(error, unavailable),
+                other => panic!("known block must remain known: {other:?}"),
+            }
         }
     });
 }
@@ -455,6 +461,14 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
     assert_eq!(
         secondary.block_and_size(height.into()).unwrap(),
         Some((block.clone(), block.zcash_serialized_size()))
+    );
+    assert_eq!(
+        secondary
+            .serialized_block(height.into())
+            .unwrap()
+            .unwrap()
+            .as_ref(),
+        block.zcash_serialize_to_vec().unwrap().as_slice()
     );
 
     let headers = primary.cf_handle("block_header_by_height").unwrap();
@@ -506,6 +520,7 @@ fn secondary_block_reads_wait_for_complete_cross_column_view() {
             assert!(secondary.block(query).unwrap().is_none());
             assert!(secondary.raw_block(query).unwrap().is_none());
             assert!(secondary.block_and_size(query).unwrap().is_none());
+            assert!(secondary.serialized_block(query).unwrap().is_none());
         }
         if lagging_column <= 2 {
             let tx = if lagging_column == 2 {
