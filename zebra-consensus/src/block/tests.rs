@@ -28,6 +28,7 @@ use super::check::{miner_fees_are_valid, subsidy_is_valid};
 use super::*;
 
 mod nu7;
+mod transparent_spends;
 
 static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
