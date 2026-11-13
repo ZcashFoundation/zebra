@@ -137,6 +137,8 @@ impl BlockRangeStream {
     ///
     /// - [`SyncPeerError::NotFound`]: `result = 0x02` (first call only);
     /// - [`SyncPeerError::Refused`]: reset with `REFUSED` before any data;
+    /// - [`SyncPeerError::Busy`]: reset with `BUSY` or `INTERNAL_ERROR`
+    ///   before any data;
     /// - [`SyncPeerError::Cancelled`]: reset with `CANCELLED`;
     /// - [`SyncPeerError::Violation`]: a hash-chain, size, count, byte-bound
     ///   (`FLOOD`) or framing (`PROTOCOL_ERROR`) violation; a close of the
@@ -336,18 +338,27 @@ fn io_error(error: io::Error, before_data: bool) -> SyncPeerError {
         Some(code) if before_data && code == app_error_code(ErrorCode::Refused) => {
             SyncPeerError::Refused
         }
+        Some(code) if before_data && is_busy(code) => SyncPeerError::Busy,
         Some(code) if code == app_error_code(ErrorCode::Cancelled) => SyncPeerError::Cancelled,
         _ => SyncPeerError::Transport(error.to_string()),
     }
 }
 
+/// Whether a stream error code says the peer serves the request, but not
+/// now: `BUSY`, or `INTERNAL_ERROR`, which a requester treats the same way.
+fn is_busy(code: quinn::VarInt) -> bool {
+    code == app_error_code(ErrorCode::Busy) || code == app_error_code(ErrorCode::InternalError)
+}
+
 /// The error for a failed write of the request: a peer that stops the
-/// request stream with `REFUSED` or `CANCELLED` is refusing or cancelling it.
+/// request stream with `REFUSED`, `BUSY` or `CANCELLED` is refusing,
+/// deferring or cancelling it.
 fn write_error(error: WriteError) -> SyncPeerError {
     match error {
         WriteError::Stopped(code) if code == app_error_code(ErrorCode::Refused) => {
             SyncPeerError::Refused
         }
+        WriteError::Stopped(code) if is_busy(code) => SyncPeerError::Busy,
         WriteError::Stopped(code) if code == app_error_code(ErrorCode::Cancelled) => {
             SyncPeerError::Cancelled
         }
