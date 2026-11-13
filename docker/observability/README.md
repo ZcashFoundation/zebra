@@ -151,7 +151,7 @@ observability/
 ├── grafana/
 │   ├── README.md                # Dashboard documentation
 │   ├── dashboards/
-│   │   ├── network_health.json  # Default home dashboard
+│   │   ├── zebra_overview.json  # Default home dashboard
 │   │   └── *.json               # Other dashboards
 │   └── provisioning/
 │       ├── dashboards/
