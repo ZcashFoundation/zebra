@@ -1,7 +1,9 @@
 //! Descriptions of the metrics this crate records.
 //!
 //! Applications that install a [`metrics`] recorder call [`describe`] right after installing it, so
-//! that exporters can document each metric, for example in Prometheus `# HELP` lines.
+//! that exporters can document each metric, for example in Prometheus `# HELP` lines. They also
+//! call [`register_failure_counters`], so that exporters publish the failure counters before the
+//! first failure.
 
 use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 
@@ -23,6 +25,26 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("zebra.consensus.cache.evict", &["verifier"]),
     ("zebra.consensus.cache.size", &["verifier"]),
 ];
+
+/// The counters of signatures and proofs that failed verification.
+///
+/// They are only recorded when a verification fails, and `rate()` can't see the first increase of
+/// a series that didn't exist before, so [`register_failure_counters`] registers them at zero.
+pub const FAILURE_COUNTERS: &[&str] = &[
+    "signatures.ed25519.invalid",
+    "signatures.redjubjub.invalid",
+    "signatures.redpallas.invalid",
+    "proofs.halo2.invalid",
+    "proofs.sapling.invalid",
+];
+
+/// Registers every counter in [`FAILURE_COUNTERS`] with the installed [`metrics`] recorder,
+/// without changing its value, so that exporters publish it at zero before the first failure.
+pub fn register_failure_counters() {
+    for name in FAILURE_COUNTERS {
+        metrics::counter!(*name).increment(0);
+    }
+}
 
 /// Describes every metric this crate records to the installed [`metrics`] recorder.
 pub fn describe() {

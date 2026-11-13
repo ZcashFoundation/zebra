@@ -120,3 +120,40 @@ fn exporter_renders_bucketed_histograms_and_summaries() {
         1
     );
 }
+
+/// The failure counters are exported at zero before any verification fails.
+#[test]
+fn failure_counters_are_exported_at_zero() {
+    let _init_guard = zebra_test::init();
+
+    let catalog = Catalog::build();
+    for name in zebra_consensus::metrics::FAILURE_COUNTERS {
+        assert_eq!(
+            catalog.get(name).map(|entry| entry.kind),
+            Some(Kind::Counter),
+            "{name} must be a described counter",
+        );
+        assert!(
+            catalog
+                .get(name)
+                .is_some_and(|entry| entry.labels.is_empty()),
+            "{name} is registered without labels, so it must not have any",
+        );
+    }
+
+    let (recorder, handle) = recorder();
+    metrics::with_local_recorder(
+        &recorder,
+        zebra_consensus::metrics::register_failure_counters,
+    );
+    let rendered = handle.render();
+
+    for name in zebra_consensus::metrics::FAILURE_COUNTERS {
+        let name = prometheus_name(name);
+        assert_eq!(
+            series_lines(&rendered, &name),
+            [format!("{name} 0")],
+            "{name} is exported at zero:\n{rendered}",
+        );
+    }
+}
