@@ -12,7 +12,7 @@ use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
 };
 
-/// The network this node runs on.
+/// The network this node runs on, once `zebrad start` or the progress task records it.
 static NETWORK: OnceLock<Network> = OnceLock::new();
 
 /// The best chain tip height, or [`UNKNOWN_TIP_HEIGHT`] until the progress task records one.
@@ -39,9 +39,20 @@ pub(crate) struct ChainPosition {
     pub(crate) near_tip: bool,
 }
 
+/// Records the network this node runs on. A node only runs on one network, so later calls keep
+/// the first one.
+pub(crate) fn set_network(network: &Network) {
+    NETWORK.get_or_init(|| network.clone());
+}
+
+/// Returns the network this node runs on, once it has been recorded.
+pub(crate) fn network() -> Option<&'static Network> {
+    NETWORK.get()
+}
+
 /// Records the best chain tip height on `network`, and whether the syncer is close to the tip.
 pub(crate) fn record(network: &Network, tip_height: Height, near_tip: bool) {
-    NETWORK.get_or_init(|| network.clone());
+    set_network(network);
     NEAR_TIP.store(near_tip, Ordering::Relaxed);
     TIP_HEIGHT.store(tip_height.0, Ordering::Relaxed);
 }
