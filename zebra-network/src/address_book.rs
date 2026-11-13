@@ -84,6 +84,11 @@ pub struct AddressBook {
     /// controls.
     bans: BanList,
 
+    /// Outbound targets and their most recent nonce-reuse time, oldest first.
+    /// Suppression expires after [`constants::SELF_CONNECTION_SUPPRESSION_DURATION`].
+    /// Bounded by `addr_limit`; the oldest target can be retried after eviction.
+    self_addrs: IndexMap<PeerSocketAddr, tokio::time::Instant>,
+
     /// The local listener address.
     local_listener: SocketAddr,
 
@@ -159,6 +164,7 @@ impl AddressBook {
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
             by_addr: IndexMap::new(),
+            self_addrs: IndexMap::new(),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
@@ -303,9 +309,8 @@ impl AddressBook {
 
         let mut peers = self.by_addr.clone();
 
-        // Unconditionally add our local listener address to the advertised peers,
-        // to replace any self-connection failures. The address book and change
-        // constructors make sure that the SocketAddr is canonical.
+        // Advertise our local listener even when it is suppressed as a dial target.
+        // The address book and change constructors make sure the SocketAddr is canonical.
         let local_listener = self.local_listener_meta_addr(now);
         peers.insert(local_listener.addr, local_listener);
 
@@ -348,7 +353,7 @@ impl AddressBook {
             //
             // This prevents Zebra from caching nodes that are likely unreachable,
             // which improves startup time and reliability.
-            .filter(|addr| addr.is_active_for_gossip(now))
+            .filter(|addr| !addr.is_inbound() && addr.is_active_for_gossip(now))
             .cloned()
             .collect()
     }
@@ -420,9 +425,10 @@ impl AddressBook {
     /// [`PeerSocketAddr`]s. Ignored addresses will never be used to connect to
     /// peers.
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        let previous_len = self.by_addr.len();
         let updated = self.update_without_metrics(change);
 
-        if updated.is_some() {
+        if updated.is_some() || self.by_addr.len() != previous_len {
             self.update_metrics(Instant::now(), Utc::now());
         }
 
@@ -438,6 +444,37 @@ impl AddressBook {
     /// mutex, so refreshing per change makes a batch quadratic.
     #[allow(clippy::unwrap_in_result)]
     fn update_without_metrics(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        let addr = change.addr();
+        let now = tokio::time::Instant::now();
+        if self.self_addrs.get(&addr).is_some_and(|suppressed_at| {
+            now.saturating_duration_since(*suppressed_at)
+                >= constants::SELF_CONNECTION_SUPPRESSION_DURATION
+        }) {
+            self.self_addrs.shift_remove(&addr);
+        }
+        if matches!(change, MetaAddrChange::UpdateSelfConnection { .. }) {
+            // A peer can echo an observed nonce, so bound this remote-influenced map.
+            // Refresh the time and eviction order only for a new nonce-reuse failure.
+            self.self_addrs.shift_remove(&addr);
+            self.self_addrs.insert(addr, now);
+            if self.self_addrs.len() > self.addr_limit {
+                self.self_addrs.shift_remove_index(0);
+            }
+            self.by_addr.shift_remove(&addr);
+            if self.should_remove_most_recent_by_ip(addr) {
+                if let Some(recent) = self.most_recent_by_ip.as_mut() {
+                    recent.remove(&connection_limit_key(addr.ip()));
+                }
+            }
+            return None;
+        }
+        // Misbehavior still needs to reach the group-ban path below.
+        if self.self_addrs.contains_key(&addr)
+            && !matches!(change, MetaAddrChange::UpdateMisbehavior { .. })
+        {
+            return None;
+        }
+
         if self.bans.is_banned(change.addr().ip()) {
             // Remote peers control how often this fires, so keep it below `warn` (#11134).
             tracing::debug!(
@@ -525,6 +562,11 @@ impl AddressBook {
                     "banned ip and removed banned peer addresses from address book",
                 );
 
+                return None;
+            }
+
+            // A sub-threshold misbehavior report must not restore a suppressed target.
+            if self.self_addrs.contains_key(&addr) {
                 return None;
             }
 
@@ -698,7 +740,8 @@ impl AddressBook {
         self.by_addr
             .values()
             .filter(move |peer| {
-                !self.bans.is_banned(peer.addr.ip())
+                !peer.is_inbound()
+                    && !self.bans.is_banned(peer.addr.ip())
                     && peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
                     && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
@@ -930,13 +973,14 @@ impl Extend<MetaAddrChange> for AddressBook {
     where
         T: IntoIterator<Item = MetaAddrChange>,
     {
+        let previous_len = self.by_addr.len();
         let mut any_updated = false;
 
         for change in iter.into_iter() {
             any_updated |= self.update_without_metrics(change).is_some();
         }
 
-        if any_updated {
+        if any_updated || self.by_addr.len() != previous_len {
             self.update_metrics(Instant::now(), Utc::now());
         }
     }
@@ -956,6 +1000,7 @@ impl Clone for AddressBook {
 
         AddressBook {
             by_addr: self.by_addr.clone(),
+            self_addrs: self.self_addrs.clone(),
             local_listener: self.local_listener,
             network: self.network.clone(),
             addr_limit: self.addr_limit,

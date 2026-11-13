@@ -451,6 +451,12 @@ pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(test)]
 pub const MISBEHAVIOR_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
+/// How long to suppress an outbound target after a nonce-reuse handshake failure.
+///
+/// A shared NAT or load balancer can route a later connection to a different node,
+/// and a peer can echo an observed nonce, so suppression must not be permanent.
+pub const SELF_CONNECTION_SUPPRESSION_DURATION: Duration = Duration::from_secs(3 * 60 * 60);
+
 /// The maximum number of banned IP addresses to be stored in-memory at any time.
 pub const MAX_BANNED_IPS: usize = 20_000;
 

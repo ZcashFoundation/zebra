@@ -39,7 +39,7 @@ use crate::{
     address_book_updater::{change_channel, AddressBookUpdater},
     config::CacheDir,
     connect_isolated_tcp_direct_with_inbound, constants, init,
-    meta_addr::{MetaAddr, PeerAddrState},
+    meta_addr::MetaAddr,
     peer::{self, ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest},
     peer_set::{
         crawler_services,
@@ -51,7 +51,8 @@ use crate::{
         ActiveConnectionCounter, ConnectionTracker,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, MisbehaviorReport, PeerSocketAddr, Request, Response,
+    AddressBook, BoxError, Config, MisbehaviorReport, PeerAddrState, PeerSocketAddr, Request,
+    Response,
 };
 
 use Network::*;
@@ -2396,6 +2397,96 @@ async fn add_initial_peers_is_rate_limited() {
     );
 }
 
+/// Startup must suppress nonce-reuse targets from both configuration and the disk cache.
+#[tokio::test]
+async fn initial_peer_nonce_reuse_is_suppressed() {
+    let _init_guard = zebra_test::init();
+    check_initial_peer_failure(true).await;
+}
+
+/// Other startup failures must leave their targets available for the crawler to retry.
+#[tokio::test]
+async fn initial_peer_other_errors_remain_retryable() {
+    let _init_guard = zebra_test::init();
+    check_initial_peer_failure(false).await;
+}
+
+async fn check_initial_peer_failure(nonce_reuse: bool) {
+    let addr: PeerSocketAddr = "127.1.1.1:8233".parse().unwrap();
+    for from_cache in [false, true] {
+        let cache = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            initial_mainnet_peers: IndexSet::new(),
+            initial_testnet_peers: IndexSet::new(),
+            cache_dir: CacheDir::disabled(),
+            listen_addr: "0.0.0.0:0".parse().unwrap(),
+            network: Mainnet,
+            peerset_initial_target_size: 1,
+            ..Config::default()
+        };
+        if from_cache {
+            config.cache_dir = CacheDir::custom_path(cache.path());
+            config.update_peer_cache([addr].into()).await.unwrap();
+        } else {
+            config
+                .initial_mainnet_peers
+                .insert(addr.remove_socket_addr_privacy().to_string());
+        }
+
+        let (
+            address_book,
+            _bans_receiver,
+            _address_book_updater,
+            address_book_service,
+            _address_metrics,
+            updater_task,
+        ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+        let connector_book = address_book.clone();
+        let outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+            assert_eq!(req.addr, addr);
+            assert!(connector_book.lock().unwrap().get(addr).is_some());
+            async move {
+                let error: BoxError = if nonce_reuse {
+                    peer::HandshakeError::RemoteNonceReuse.into()
+                } else {
+                    std::io::Error::from(std::io::ErrorKind::ConnectionRefused).into()
+                };
+                Err(error)
+            }
+        });
+        let (peerset_tx, mut peerset_rx) = mpsc::channel::<DiscoveredPeer>(1);
+        tokio::time::timeout(
+            LISTENER_TEST_TIMEOUT,
+            add_initial_peers(config, outbound_connector, peerset_tx, address_book_service),
+        )
+        .await
+        .expect("the initial handshake should finish")
+        .expect("a failed handshake should not fail startup");
+        assert!(matches!(peerset_rx.next().now_or_never(), Some(None)));
+
+        {
+            let mut book = address_book.lock().unwrap();
+            assert_eq!(
+                book.get(addr).is_none(),
+                nonce_reuse,
+                "from_cache={from_cache}"
+            );
+            if !nonce_reuse {
+                assert_eq!(
+                    book.get(addr).unwrap().last_connection_state,
+                    PeerAddrState::NeverAttemptedGossiped,
+                );
+            }
+            assert_eq!(
+                book.update(MetaAddr::new_initial_peer(addr)).is_none(),
+                nonce_reuse,
+                "suppressed initial peers must not be restored by seed recovery"
+            );
+        }
+        updater_task.abort();
+    }
+}
+
 /// Test that self-connections fail.
 //
 // TODO:
@@ -2481,37 +2572,22 @@ async fn self_connections_should_fail() {
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
 
-    // Wait for the crawler's failed self-connection to reach the address book.
-    let self_connection_status = tokio::time::timeout(CRAWLER_TEST_DURATION, async {
+    // Wait for the crawler's nonce-reuse failure to remove the dial target.
+    tokio::time::timeout(CRAWLER_TEST_DURATION, async {
         loop {
-            let status = address_book
+            if address_book
                 .lock()
                 .expect("unexpected panic in address book")
                 .get(real_self_listener.addr())
-                .expect("unexpected dropped listener address in address book");
-            if status.last_connection_state == PeerAddrState::Failed {
-                break status;
+                .is_none()
+            {
+                break;
             }
-
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("the crawler should finish a self-connection attempt");
-
-    // Make sure we fetched from the address book correctly
-    assert_eq!(
-        self_connection_status.addr(),
-        real_self_listener.addr(),
-        "wrong address fetched from address book"
-    );
-
-    // Make sure the self-connection failed
-    assert_eq!(
-        self_connection_status.last_connection_state,
-        PeerAddrState::Failed,
-        "self-connection should have failed"
-    );
+    .expect("the crawler should suppress the self address");
 }
 
 /// Test that the number of nonces is limited when peers send an invalid response or
