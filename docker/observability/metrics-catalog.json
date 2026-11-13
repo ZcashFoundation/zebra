@@ -1889,8 +1889,8 @@
     {
       "name": "zcash.mempool.size.weighted",
       "kind": "gauge",
-      "unit": "count",
-      "description": "Mempool transactions in each fee weight ratio bucket.",
+      "unit": "bytes",
+      "description": "Serialized size of the mempool transactions in each fee weight ratio bucket.",
       "labels": [
         "bk"
       ],
