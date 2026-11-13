@@ -231,7 +231,7 @@ impl CompactBlock {
         check_count(candidates.len())?;
         candidates
             .iter()
-            .try_fold(0, |bytes, tx| add_bytes(bytes, tx.size))?;
+            .try_fold(0, |bytes, tx| add_bytes(bytes, tx.size()))?;
         let keys = self.keys();
         let mut matching =
             self.matching_short_ids(candidates.iter().map(|tx| (short_id(keys, tx.id), tx.id)));
@@ -252,7 +252,7 @@ impl CompactBlock {
                         .next()
                         .expect("each non-prefilled slot has a short ID"),
                 ) {
-                    consumed_size = add_bytes(consumed_size, tx.size)?;
+                    consumed_size = add_bytes(consumed_size, tx.size())?;
                     *slot = Some(tx.transaction);
                 }
             }

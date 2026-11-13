@@ -46,7 +46,7 @@ fn mempool_unknown_sapling_anchor_rejection_precedes_proof_verification() {
         zip317::mempool_checks(
             zip317::unpaid_actions(&transaction, fee, &Network::Mainnet, height),
             fee,
-            transaction.size,
+            transaction.size(),
         )
         .expect("the fixture independently satisfies the mempool fee policy");
         let verifier = crate::primitives::sapling::VERIFIER.isolated();

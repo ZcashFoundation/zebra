@@ -362,9 +362,6 @@ fn compact_recovery_rejects_merkle_mismatch_and_duplicate_transactions() {
 fn compact_resource_and_coinbase_bounds() {
     let mut block = fixture();
     let compact = Arc::new(CompactBlock::from_block(&block, 14).unwrap());
-    let mut candidate = UnminedTx::from(&block.transactions[1]);
-    candidate.size = usize::try_from(MAX_BLOCK_BYTES).unwrap() + 1;
-    assert!(compact.clone().reconstruct(vec![candidate]).is_err());
     let mut invalid = (*compact).clone();
     invalid.short_ids.resize(
         usize::try_from(Transaction::max_allocation()).unwrap(),
@@ -384,6 +381,10 @@ fn compact_resource_and_coinbase_bounds() {
             .clone()
             .with_transparent_inputs(inputs(&vec![0; usize::try_from(MAX_BLOCK_BYTES).unwrap()])),
     );
+    assert!(compact
+        .clone()
+        .reconstruct(vec![oversized.clone().into()])
+        .is_err());
     let mut invalid = response(&block, &[1, 2, 3]);
     invalid.transactions[0] = oversized.clone();
     assert!(compact

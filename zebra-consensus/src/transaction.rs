@@ -579,7 +579,7 @@ where
             let miner_fee = miner_fee(tx.as_ref(), &spent_utxos)?;
             let unpaid_actions =
                 transaction::zip317::unpaid_actions(&unmined_tx, miner_fee, &network, height);
-            transaction::zip317::mempool_checks(unpaid_actions, miner_fee, unmined_tx.size)?;
+            transaction::zip317::mempool_checks(unpaid_actions, miner_fee, unmined_tx.size())?;
 
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
