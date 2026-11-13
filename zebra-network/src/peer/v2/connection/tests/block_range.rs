@@ -1353,6 +1353,66 @@ fn block_range_minimum_rate_serves_the_largest_response_within_the_stream_deadli
     assert!(RANGE_PROGRESS_WINDOW < RANGE_STALL_BACKOFF);
 }
 
+/// A range stream the peer stops while this node is reading its blocks is
+/// abandoned at once, releasing its permits, rather than when the read
+/// answers or reaches its deadline.
+#[tokio::test]
+async fn stopped_block_range_streams_abandon_their_read() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, mut requests) = chain_service.service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global.clone()),
+        );
+
+        let mut streams = Vec::new();
+        for _ in 0..RANGE_STREAMS_PER_PEER {
+            streams.push(request_range(&requester, tip_range(&chain)).await);
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_PEER).await;
+        assert_eq!(
+            global.available_permits(),
+            RANGE_STREAMS_GLOBAL - RANGE_STREAMS_PER_PEER
+        );
+
+        let started = Instant::now();
+        for stream in &mut streams {
+            stream
+                .stop(
+                    ErrorCode::Cancelled
+                        .code()
+                        .try_into()
+                        .expect("a small code"),
+                )
+                .expect("the stream is open");
+        }
+        while global.available_permits() < RANGE_STREAMS_GLOBAL {
+            assert!(
+                started.elapsed() < REQUEST_TIMEOUT / 4,
+                "the stopped streams still hold their node permits"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // The peer's own permits are free too: its next streams are read for.
+        for _ in 0..RANGE_STREAMS_PER_PEER {
+            streams.push(request_range(&requester, tip_range(&chain)).await);
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_PEER).await;
+    })
+    .await
+    .expect("the test completes");
+}
+
 /// Requests the tip range of `chain` from a server whose reads answer wrongly
 /// at `faults`, one block per read, and returns the parsed response, or the
 /// reset code if the stream was reset.

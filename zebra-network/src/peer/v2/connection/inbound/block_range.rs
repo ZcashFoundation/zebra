@@ -12,7 +12,8 @@
 //! within one request deadline, so a range response is not bounded by the
 //! whole-exchange deadline of the other request types. Instead:
 //! - each inbound service call must answer within [`REQUEST_TIMEOUT`], which
-//!   bounds this node's own reads;
+//!   bounds this node's own reads, and is abandoned if the peer stops the
+//!   stream meanwhile;
 //! - the peer must take the response at [`RANGE_MIN_SERVE_RATE`] or faster,
 //!   measured from the moment its request is complete and over the time the
 //!   response's writes wait for it, with [`RANGE_FIRST_WRITE_TIMEOUT`] to
@@ -833,8 +834,12 @@ where
     //
     // The read is bounded on its own, so a read that never answers does not hold the stream's
     // permits until the stream deadline. The peer is not on the clock while it runs.
+    //
+    // It is also abandoned as soon as the peer stops the stream or the connection is lost, so a
+    // peer that sends a request and cancels it at once does not keep its permits, or wait for a
+    // chunk of blocks nobody will read.
     let read_deadline = (Instant::now() + REQUEST_TIMEOUT).min(writer.stream_deadline);
-    let answer = tokio::time::timeout_at(
+    let read = tokio::time::timeout_at(
         read_deadline,
         call_service(
             service,
@@ -844,8 +849,20 @@ where
                 max_bytes,
             },
         ),
-    )
-    .await
+    );
+    let answer = tokio::select! {
+        biased;
+        // Before the response is finished, this only completes when the peer stops the stream
+        // or the connection is lost.
+        _stopped = writer.response.send.stopped() => {
+            tracing::debug!(
+                delivered = progress.delivered,
+                "get-block-range stream was stopped by the peer, abandoning its read"
+            );
+            return Err(Outcome::Transport);
+        }
+        answer = read => answer,
+    }
     .map_err(|_elapsed| {
         tracing::debug!(
             delivered = progress.delivered,
