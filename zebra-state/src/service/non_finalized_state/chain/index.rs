@@ -1,311 +1,222 @@
 //! Transparent address indexes for non-finalized chains.
+//!
+//! Each block's address changes are built once, when a chain adds the block, and every chain
+//! containing the block shares them. Chains keep these records by height, so forks, read
+//! snapshots, and finalization never copy address histories.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    ops::RangeInclusive,
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
-
-use mset::MultiSet;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
-    block::Height,
+    parameters::Network,
     transaction, transparent,
 };
 
-use crate::{OutputLocation, TransactionLocation, ValidateContextError};
+use crate::{ContextuallyVerifiedBlock, OutputLocation, TransactionLocation};
 
-use super::{RevertPosition, UpdateWith};
+/// The transparent transfers of one non-finalized block, by address.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct BlockTransparentTransfers {
+    by_address: HashMap<transparent::Address, AddressBlockTransfers>,
+}
 
+/// The transparent transfers of one address in one non-finalized block.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransparentTransfers {
-    /// The partial chain balance for a transparent address.
+pub(crate) struct AddressBlockTransfers {
+    /// The change this block makes to the address balance.
     balance: Amount<NegativeAllowed>,
 
-    /// The partial list of transactions that spent or received UTXOs to a transparent address.
-    ///
-    /// Since transactions can only be added to this set, it does not need
-    /// special handling for
-    /// [`ReadStateService`](crate::service::ReadStateService) response
-    /// inconsistencies.
-    ///
-    /// The `getaddresstxids` RPC needs these transaction IDs to be sorted in chain order.
-    tx_ids: MultiSet<transaction::Hash>,
+    /// The total value of the outputs this block creates for the address, saturating at
+    /// `u64::MAX` like the finalized index (#10556).
+    received: u64,
 
-    /// The partial list of UTXOs received by a transparent address.
-    ///
-    /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
-    /// but it might in future. So Zebra does it anyway.
-    ///
-    /// Optional TODOs:
-    /// - store `Utxo`s in the chain, and just store the created locations for this address
-    /// - if we add an OutputLocation to UTXO, remove this OutputLocation,
-    ///   and use the inner OutputLocation to sort Utxos in chain order
-    created_utxos: BTreeMap<OutputLocation, transparent::Output>,
+    /// The outputs this block creates for the address, in chain order. They are shared with the
+    /// block's output map.
+    created: Vec<(OutputLocation, Arc<transparent::OrderedUtxo>)>,
 
-    /// The partial list of UTXOs spent by a transparent address.
-    ///
-    /// The `getaddressutxos` RPC doesn't need these transaction IDs to be sorted in chain order,
-    /// but it might in future. So Zebra does it anyway.
-    ///
-    /// Optional TODO:
-    /// - store spent `Utxo`s by location in the chain, use the chain spent UTXOs to filter,
-    ///   and stop storing spent UTXOs by address
-    spent_utxos: BTreeSet<OutputLocation>,
+    /// The locations of the address outputs this block spends, in chain order.
+    spent: Vec<OutputLocation>,
+
+    /// The transactions in this block that send to or spend from the address, in chain order.
+    transactions: Vec<(TransactionLocation, transaction::Hash)>,
 }
 
-// A created UTXO
-//
-// TODO: replace arguments with a struct
-impl
-    UpdateWith<(
-        // The location of the UTXO
-        &transparent::OutPoint,
-        // The UTXO data
-        // Includes the location of the transaction that created the output
-        &transparent::OrderedUtxo,
-    )> for TransparentTransfers
-{
-    #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with(
-        &mut self,
-        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
-    ) -> Result<(), ValidateContextError> {
-        self.balance = (self.balance
-            + created_utxo
-                .utxo
-                .output
-                .value()
-                .constrain()
-                .expect("NonNegative values are always valid NegativeAllowed values"))
-        .expect("total UTXO value has already been checked");
-
-        let transaction_location = transaction_location(created_utxo);
-        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
-
-        let previous_entry = self
-            .created_utxos
-            .insert(output_location, created_utxo.utxo.output.clone());
-        assert_eq!(
-            previous_entry, None,
-            "unexpected created output: duplicate update or duplicate UTXO",
-        );
-
-        self.tx_ids.insert(outpoint.hash);
-
-        Ok(())
-    }
-
-    fn revert_chain_with(
-        &mut self,
-        &(outpoint, created_utxo): &(&transparent::OutPoint, &transparent::OrderedUtxo),
-        _position: RevertPosition,
-    ) {
-        self.balance = (self.balance
-            - created_utxo
-                .utxo
-                .output
-                .value()
-                .constrain()
-                .expect("NonNegative values are always valid NegativeAllowed values"))
-        .expect("reversing previous balance changes is always valid");
-
-        let transaction_location = transaction_location(created_utxo);
-        let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
-
-        let removed_entry = self.created_utxos.remove(&output_location);
-        assert!(
-            removed_entry.is_some(),
-            "unexpected revert of created output: duplicate update or duplicate UTXO",
-        );
-
-        let tx_id_was_removed = self.tx_ids.remove(&outpoint.hash);
-        assert!(
-            tx_id_was_removed,
-            "unexpected revert of created output transaction: \
-             duplicate revert, or revert of an output that was never updated",
-        );
-    }
-}
-
-// A transparent input
-//
-// TODO: replace arguments with a struct
-impl
-    UpdateWith<(
-        // The transparent input data
-        &transparent::Input,
-        // The hash of the transaction the input is from
-        // (not the transaction the spent output was created by)
-        &transaction::Hash,
-        // The output spent by the input
-        // Includes the location of the transaction that created the output
-        &transparent::OrderedUtxo,
-    )> for TransparentTransfers
-{
-    #[allow(clippy::unwrap_in_result)]
-    fn update_chain_tip_with(
-        &mut self,
-        &(spending_input, spending_tx_hash, spent_output): &(
-            &transparent::Input,
-            &transaction::Hash,
-            &transparent::OrderedUtxo,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        // Spending a UTXO subtracts value from the balance
-        self.balance = (self.balance
-            - spent_output
-                .utxo
-                .output
-                .value()
-                .constrain()
-                .expect("NonNegative values are always valid NegativeAllowed values"))
-        .expect("total UTXO value has already been checked");
-
-        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
-
-        let spent_output_tx_loc = transaction_location(spent_output);
-        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
-        let spend_was_inserted = self.spent_utxos.insert(output_location);
-        assert!(
-            spend_was_inserted,
-            "unexpected spent output: duplicate update or duplicate spend",
-        );
-
-        self.tx_ids.insert(*spending_tx_hash);
-
-        Ok(())
-    }
-
-    fn revert_chain_with(
-        &mut self,
-        &(spending_input, spending_tx_hash, spent_output): &(
-            &transparent::Input,
-            &transaction::Hash,
-            &transparent::OrderedUtxo,
-        ),
-        _position: RevertPosition,
-    ) {
-        self.balance = (self.balance
-            + spent_output
-                .utxo
-                .output
-                .value()
-                .constrain()
-                .expect("NonNegative values are always valid NegativeAllowed values"))
-        .expect("reversing previous balance changes is always valid");
-
-        let spent_outpoint = spending_input.outpoint().expect("checked by caller");
-
-        let spent_output_tx_loc = transaction_location(spent_output);
-        let output_location = OutputLocation::from_outpoint(spent_output_tx_loc, &spent_outpoint);
-        let spend_was_removed = self.spent_utxos.remove(&output_location);
-        assert!(
-            spend_was_removed,
-            "unexpected revert of spent output: \
-             duplicate revert, or revert of a spent output that was never updated",
-        );
-
-        let tx_id_was_removed = self.tx_ids.remove(spending_tx_hash);
-        assert!(
-            tx_id_was_removed,
-            "unexpected revert of spending input transaction: \
-             duplicate revert, or revert of an input that was never updated",
-        );
-    }
-}
-
-impl TransparentTransfers {
-    /// Returns true if there are no transfers for this address.
-    pub fn is_empty(&self) -> bool {
-        self.balance == Amount::<NegativeAllowed>::zero()
-            && self.tx_ids.is_empty()
-            && self.created_utxos.is_empty()
-            && self.spent_utxos.is_empty()
-    }
-
-    /// Returns the partial balance for this address.
-    #[allow(dead_code)]
-    pub fn balance(&self) -> Amount<NegativeAllowed> {
-        self.balance
-    }
-
-    /// Returns the partial received balance for this address.
-    ///
-    /// This is a cumulative total of every UTXO ever created for the address in this partial
-    /// chain (spent UTXOs are not removed from the count). An address that repeatedly receives
-    /// and re-sends can therefore push the total past `u64::MAX` even though its balance stays
-    /// bounded, so the sum saturates rather than overflowing, matching the finalized path. See
-    /// #10556.
-    pub fn received(&self) -> u64 {
-        self.created_utxos
-            .values()
-            .map(|out| u64::from(out.value()))
-            .fold(0, u64::saturating_add)
-    }
-
-    /// Returns the [`transaction::Hash`]es of the transactions that sent or
-    /// received transparent transfers to this address, in this partial chain,
-    /// filtered by `query_height_range`.
-    ///
-    /// The transactions are returned in chain order.
-    ///
-    /// `chain_tx_loc_by_hash` should be the `tx_loc_by_hash` field from the
-    /// [`Chain`][1] containing this index.
+impl BlockTransparentTransfers {
+    /// Builds the address changes of `block`.
     ///
     /// # Panics
     ///
-    /// If `chain_tx_loc_by_hash` is missing some transaction hashes from this
-    /// index.
-    ///
-    /// [1]: super::super::Chain
-    pub fn tx_ids(
-        &self,
-        chain_tx_loc_by_hash: &HashMap<transaction::Hash, TransactionLocation>,
-        query_height_range: RangeInclusive<Height>,
-    ) -> BTreeMap<TransactionLocation, transaction::Hash> {
-        self.tx_ids
-            .distinct_elements()
-            .filter_map(|tx_hash| {
-                let tx_loc = *chain_tx_loc_by_hash
-                    .get(tx_hash)
-                    .expect("all hashes are indexed");
+    /// If `block` is missing a created output, or outside tests, a spent output.
+    pub(crate) fn new(block: &ContextuallyVerifiedBlock, network: &Network) -> Self {
+        // Balances are summed in i128, so no partial sum can overflow.
+        let mut by_address: HashMap<transparent::Address, (i128, AddressBlockTransfers)> =
+            HashMap::new();
 
-                if query_height_range.contains(&tx_loc.height) {
-                    Some((tx_loc, *tx_hash))
-                } else {
-                    None
-                }
+        for (index, (transaction, hash)) in block
+            .block
+            .transactions
+            .iter()
+            .zip(block.transaction_hashes.iter())
+            .enumerate()
+        {
+            let tx_location = TransactionLocation::from_usize(block.height, index);
+            let output_count = transaction
+                .transparent_bundle()
+                .map_or(0, |bundle| bundle.vout.len());
+            for output_index in 0..output_count {
+                let outpoint = transparent::OutPoint {
+                    hash: *hash,
+                    index: output_index.try_into().expect("valid indexes fit in u32"),
+                };
+                let utxo = block
+                    .new_outputs
+                    .get(&outpoint)
+                    .expect("new_outputs contains all created UTXOs");
+                let Some(address) = utxo.utxo.output.address(network) else {
+                    continue;
+                };
+
+                let value = utxo.utxo.output.value();
+                let (balance, transfers) =
+                    address_entry(&mut by_address, address, tx_location, hash);
+                *balance += i128::from(value.zatoshis());
+                transfers.received = transfers.received.saturating_add(u64::from(value));
+                transfers.created.push((
+                    OutputLocation::from_outpoint(transaction_location(utxo), &outpoint),
+                    utxo.clone(),
+                ));
+            }
+
+            for spent_outpoint in transaction.spent_outpoints() {
+                // TODO: fix tests to supply correct spent outputs, then turn this into an expect()
+                let Some(spent_output) = block.spent_outputs.get(&spent_outpoint) else {
+                    if !cfg!(test) {
+                        panic!(
+                            "unexpected missing spent output: all spent outputs must be indexed"
+                        );
+                    }
+                    continue;
+                };
+                let Some(address) = spent_output.utxo.output.address(network) else {
+                    continue;
+                };
+
+                let (balance, transfers) =
+                    address_entry(&mut by_address, address, tx_location, hash);
+                *balance -= i128::from(spent_output.utxo.output.value().zatoshis());
+                transfers.spent.push(OutputLocation::from_outpoint(
+                    transaction_location(spent_output),
+                    &spent_outpoint,
+                ));
+            }
+        }
+
+        let by_address = by_address
+            .into_iter()
+            .map(|(address, (balance, mut transfers))| {
+                transfers.balance = Amount::try_from(balance)
+                    .expect("one block can't move more than the money supply for an address");
+                transfers.spent.sort_unstable();
+                (address, transfers)
             })
-            .collect()
+            .collect();
+
+        Self { by_address }
     }
 
-    /// Returns the new transparent outputs sent to this address,
-    /// in this partial chain, in chain order.
-    ///
-    /// Some of these outputs might already be spent.
-    /// [`TransparentTransfers::spent_utxos`] returns spent UTXOs.
-    #[allow(dead_code)]
-    pub fn created_utxos(&self) -> &BTreeMap<OutputLocation, transparent::Output> {
-        &self.created_utxos
+    /// Returns the transfers of each of `addresses` that this block changes.
+    pub(crate) fn for_addresses<'a>(
+        &'a self,
+        addresses: &'a HashSet<transparent::Address>,
+    ) -> impl Iterator<Item = &'a AddressBlockTransfers> + 'a {
+        // Look up whichever side is smaller.
+        let (by_lookup, by_scan) = if addresses.len() <= self.by_address.len() {
+            (Some(addresses), None)
+        } else {
+            (None, Some(addresses))
+        };
+
+        let looked_up = by_lookup
+            .into_iter()
+            .flatten()
+            .filter_map(|address| self.by_address.get(address));
+        let scanned = by_scan.into_iter().flat_map(move |addresses| {
+            self.by_address
+                .iter()
+                .filter(move |(address, _)| addresses.contains(*address))
+                .map(|(_, transfers)| transfers)
+        });
+
+        looked_up.chain(scanned)
     }
 
-    /// Returns the [`OutputLocation`]s of the spent transparent outputs sent to this address,
-    /// in this partial chain, in chain order.
-    #[allow(dead_code)]
-    pub fn spent_utxos(&self) -> &BTreeSet<OutputLocation> {
-        &self.spent_utxos
+    /// Returns the number of addresses this block changes.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.by_address.len()
+    }
+
+    /// Returns the transfers of `address` in this block, if it changes the address.
+    #[cfg(test)]
+    pub(crate) fn get(&self, address: &transparent::Address) -> Option<&AddressBlockTransfers> {
+        self.by_address.get(address)
     }
 }
 
-impl Default for TransparentTransfers {
-    fn default() -> Self {
-        Self {
-            balance: Amount::zero(),
-            tx_ids: Default::default(),
-            created_utxos: Default::default(),
-            spent_utxos: Default::default(),
-        }
+/// Returns the balance accumulator and transfers of `address` in a block being indexed, recording
+/// that the transaction at `tx_location` changes the address.
+fn address_entry<'a>(
+    by_address: &'a mut HashMap<transparent::Address, (i128, AddressBlockTransfers)>,
+    address: transparent::Address,
+    tx_location: TransactionLocation,
+    hash: &transaction::Hash,
+) -> (&'a mut i128, &'a mut AddressBlockTransfers) {
+    let (balance, transfers) = by_address.entry(address).or_insert_with(|| {
+        (
+            0,
+            AddressBlockTransfers {
+                balance: Amount::zero(),
+                received: 0,
+                created: Vec::new(),
+                spent: Vec::new(),
+                transactions: Vec::new(),
+            },
+        )
+    });
+    if transfers.transactions.last().map(|(location, _)| *location) != Some(tx_location) {
+        transfers.transactions.push((tx_location, *hash));
+    }
+    (balance, transfers)
+}
+
+impl AddressBlockTransfers {
+    /// Returns the change this block makes to the address balance.
+    pub(crate) fn balance(&self) -> Amount<NegativeAllowed> {
+        self.balance
+    }
+
+    /// Returns the total value of the outputs this block creates for the address.
+    pub(crate) fn received(&self) -> u64 {
+        self.received
+    }
+
+    /// Returns the outputs this block creates for the address, in chain order.
+    pub(crate) fn created(&self) -> &[(OutputLocation, Arc<transparent::OrderedUtxo>)] {
+        &self.created
+    }
+
+    /// Returns the locations of the address outputs this block spends, in chain order.
+    pub(crate) fn spent(&self) -> &[OutputLocation] {
+        &self.spent
+    }
+
+    /// Returns the transactions in this block that send to or spend from the address, in chain
+    /// order.
+    pub(crate) fn transactions(&self) -> &[(TransactionLocation, transaction::Hash)] {
+        &self.transactions
     }
 }
 
@@ -315,41 +226,4 @@ pub fn transaction_location(ordered_utxo: &transparent::OrderedUtxo) -> Transact
 }
 
 #[cfg(test)]
-mod tests {
-    use zebra_chain::{
-        amount::MAX_MONEY,
-        transparent::{Output, Script},
-    };
-
-    use super::*;
-
-    /// Regression test for #10556: the cumulative non-finalized `received` total for a
-    /// transparent address must saturate at `u64::MAX` rather than overflow.
-    ///
-    /// `received()` sums every UTXO ever created for the address in this partial chain, and
-    /// spent UTXOs are not removed from that set, so a high-churn self-transfer address can push
-    /// the total past `u64::MAX` while its balance stays bounded. Before the fix the plain
-    /// `.sum()` panicked in debug builds and wrapped in release builds.
-    #[test]
-    fn received_saturates_past_u64_max() {
-        let max_money = Amount::try_from(MAX_MONEY).expect("MAX_MONEY is a valid amount");
-        let output = Output::new(max_money, Script::new(&[]));
-
-        // `u64::MAX / MAX_MONEY` is ~8784, so 8786 max-money UTXOs overflow a plain sum.
-        let utxo_count = 8786;
-        assert!(
-            (utxo_count as u128) * (MAX_MONEY as u128) > u64::MAX as u128,
-            "test must actually exceed u64::MAX when summed exactly",
-        );
-
-        let mut transfers = TransparentTransfers::default();
-        for output_index in 0..utxo_count {
-            let output_location = OutputLocation::from_usize(Height(0), 0, output_index);
-            transfers
-                .created_utxos
-                .insert(output_location, output.clone());
-        }
-
-        assert_eq!(transfers.received(), u64::MAX);
-    }
-}
+pub(in crate::service::non_finalized_state) mod tests;

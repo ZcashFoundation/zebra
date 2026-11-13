@@ -29,35 +29,112 @@ use crate::{
 };
 
 #[test]
-fn construct_empty() {
-    let _init_guard = zebra_test::init();
-    let _chain = Chain::new(
-        &Network::Mainnet,
-        Height(0),
-        NoteCommitmentTrees::default(),
-        Default::default(),
-        ValueBalance::zero(),
+fn contextual_maps_preserve_intra_block_spends() -> Result<()> {
+    use crate::{ContextuallyVerifiedBlock, SemanticallyVerifiedBlock};
+    use std::collections::HashMap;
+    use zebra_chain::{
+        amount::DeferredPoolBalanceChange,
+        parameters::testnet::ConfiguredActivationHeights,
+        transaction::{LockTime, Transaction},
+    };
+
+    let height = Height(1_000);
+    let output = |value: u64| {
+        transparent::Output::new(
+            value.try_into().unwrap(),
+            transparent::Script::new(&[0; 1024]),
+        )
+    };
+    let coinbase = Arc::new(Transaction::test_v1(
+        vec![transparent::Input::Coinbase {
+            height,
+            data: vec![0],
+            sequence: u32::MAX,
+        }],
+        vec![output(10)],
+        LockTime::unlocked(),
+    ));
+    let mut transactions = vec![coinbase];
+    let mut spent = HashMap::new();
+    for value in [9, 8] {
+        let previous = transactions.last().unwrap();
+        let outpoint = transparent::OutPoint {
+            hash: previous.hash(),
+            index: 0,
+        };
+        spent.insert(
+            outpoint,
+            transparent::OrderedUtxo::new(
+                previous.outputs()[0].clone(),
+                height,
+                transactions.len() - 1,
+            ),
+        );
+        transactions.push(Arc::new(Transaction::test_v1(
+            vec![transparent::Input::PrevOut {
+                outpoint,
+                unlock_script: transparent::Script::new(&[]),
+                sequence: u32::MAX,
+            }],
+            vec![output(value)],
+            LockTime::unlocked(),
+        )));
+    }
+    let block = Arc::new(Block {
+        header: Arc::new(zebra_test::vectors::DUMMY_HEADER.zcash_deserialize_into()?),
+        transactions,
+    });
+    let plain = transparent::utxos_from_ordered_utxos(spent.clone());
+    let nu7 = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(height.0),
+            ..Default::default()
+        }
+        .into(),
     );
-}
-
-#[test]
-fn construct_single() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let block: Arc<Block> =
-        zebra_test::vectors::BLOCK_MAINNET_434873_BYTES.zcash_deserialize_into()?;
-
-    let mut chain = Chain::new(
-        &Network::Mainnet,
-        Height(0),
-        NoteCommitmentTrees::default(),
-        Default::default(),
-        ValueBalance::fake_populated_pool(),
-    );
-
-    chain = chain.push(block.prepare().test_with_zero_spent_utxos())?;
-
-    assert_eq!(1, chain.blocks.len());
-
+    for network in [Network::Mainnet, nu7] {
+        let expected = block.chain_value_pool_change_and_fees(
+            &plain,
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        let (contextual, fees) = ContextuallyVerifiedBlock::with_block_spent_utxos_and_fees(
+            block.clone().prepare(),
+            spent.clone(),
+            DeferredPoolBalanceChange::zero(),
+            &network,
+            ValueBalance::zero(),
+        )?;
+        assert_eq!((contextual.chain_value_pool_change, fees), expected);
+        assert_eq!(contextual.spent_outputs.as_ref(), &spent);
+        assert_eq!(block.transaction_fees(&spent)?.zatoshis(), 2);
+        let cloned = contextual.clone();
+        assert_eq!(cloned, contextual);
+        assert!(Arc::ptr_eq(&contextual.new_outputs, &cloned.new_outputs));
+        assert!(Arc::ptr_eq(
+            &contextual.spent_outputs,
+            &cloned.spent_outputs
+        ));
+        let semantic = SemanticallyVerifiedBlock::from(cloned);
+        let unshared = |outputs: &std::collections::HashMap<
+            transparent::OutPoint,
+            Arc<transparent::OrderedUtxo>,
+        >| {
+            outputs
+                .iter()
+                .map(|(outpoint, utxo)| (*outpoint, utxo.as_ref().clone()))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        assert_eq!(semantic.new_outputs, unshared(&contextual.new_outputs));
+        let unique = contextual;
+        let expected_outputs = unshared(&unique.new_outputs);
+        assert_eq!(Arc::strong_count(&unique.new_outputs), 1);
+        assert_eq!(
+            SemanticallyVerifiedBlock::from(unique).new_outputs,
+            expected_outputs
+        );
+    }
     Ok(())
 }
 
@@ -1825,6 +1902,7 @@ fn backup_update_skips_blocks_shared_by_chains() -> Result<()> {
 
     Ok(())
 }
+
 /// Returns a fake child of `parent` whose coinbase has the outputs of `template`'s coinbase,
 /// followed by `count` zero-value outputs paying `addresses` distinct addresses.
 fn busy_child(
@@ -1850,6 +1928,99 @@ fn busy_child(
         .transactions
         .insert(0, Arc::new(coinbase.with_transparent_outputs(outputs)));
     Arc::new(block)
+}
+
+/// Finalizing a busy root block with several forks, while a published snapshot shares their
+/// indexes, gives the same chains as popping each chain's root separately, and the forks keep
+/// sharing the busy block's records with the best chain instead of each copying them.
+#[test]
+fn finalizing_keeps_block_records_shared_between_chains() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 5_000, 50);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(busy.clone().prepare(), &finalized_state)?;
+    for i in 0..5u8 {
+        let sibling = busy_child(&busy, &block1, &network, 0, 1)
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+    assert_eq!(5, state.chain_count());
+
+    // Each chain with its root block popped separately.
+    let mut expected: Vec<Chain> = state
+        .chain_iter()
+        .map(|chain| {
+            let mut chain = Chain::clone(chain);
+            chain.pop_root();
+            chain
+        })
+        .collect();
+
+    // The write task publishes a snapshot that shares every chain before it finalizes.
+    let published = state.clone();
+    let finalized = state.finalize();
+    assert_eq!(finalized.inner_block().hash(), block1.hash());
+
+    let chains: Vec<_> = state.chain_iter().cloned().collect();
+    assert_eq!(expected.len(), chains.len());
+    for (chain, expected) in chains.iter().zip(expected.drain(..)) {
+        assert!(chain.eq_internal_state(&expected));
+        crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(chain);
+    }
+
+    // Every chain, and the published snapshot, still shares the busy block and its address
+    // changes, instead of each holding its own copy.
+    let busy_height = busy.coinbase_height().unwrap();
+    let best = &chains[0];
+    for chain in chains[1..].iter().chain(published.chain_iter()) {
+        assert!(Arc::ptr_eq(
+            &chain.blocks[&busy_height],
+            &best.blocks[&busy_height]
+        ));
+        assert!(Arc::ptr_eq(
+            &chain.transparent_transfers_by_height[&busy_height],
+            &best.transparent_transfers_by_height[&busy_height],
+        ));
+    }
+    assert!(best.transparent_transfers_by_height[&busy_height].len() >= 50);
+
+    Ok(())
+}
+
+/// Forks over a busy block share its created outputs, so the state counts them once.
+#[test]
+fn index_entries_count_shared_outputs_once() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 5_000, 50);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(busy.clone().prepare(), &finalized_state)?;
+    let one_chain = state.index_entry_count();
+
+    for i in 0..5u8 {
+        let sibling = busy_child(&busy, &block1, &network, 0, 1)
+            .set_work(10)
+            .set_block_commitment([i; 32]);
+        state.commit_block(sibling.prepare(), &finalized_state)?;
+    }
+
+    let logical: usize = state
+        .chain_iter()
+        .map(|chain| chain.index_entry_count())
+        .sum();
+    assert!(logical > 5 * 5_000);
+    // Each fork adds its own small tip block and the blocks and transactions it copied.
+    assert!(state.index_entry_count() < one_chain + 5 * 100);
+
+    Ok(())
 }
 
 /// Returns the resident set size of this process in bytes, or zero if it is not available.
@@ -1993,7 +2164,7 @@ fn index_entry_limit_evicts_forks_with_busy_blocks() -> Result<()> {
         state.commit_block(prepared, &finalized_state)
     };
 
-    // Each fork copies the indexes of the busy chain below it.
+    // Each fork adds the outputs of its own busy block.
     commit(&mut state, 0)?;
     commit(&mut state, 1)?;
     let max_index_entries = 2 * state.index_entry_count();
@@ -2012,6 +2183,9 @@ fn index_entry_limit_evicts_forks_with_busy_blocks() -> Result<()> {
         state.any_chain_contains(&siblings[9].hash()),
         "the newest fork is kept"
     );
+    for chain in state.chain_iter() {
+        crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(chain);
+    }
 
     // Only the evicted siblings are reported, not the blocks they share with the kept chains.
     let evicted: std::collections::HashSet<_> = siblings
@@ -2099,6 +2273,48 @@ fn index_entry_limit_finalizes_early_down_to_the_minimum() -> Result<()> {
     Ok(())
 }
 
+/// The chain's created output and address indexes share the block's outputs instead of copying
+/// them.
+#[test]
+fn chain_indexes_share_block_outputs() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 100, 10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+
+    // `new_outputs` can contain unrelated outputs, such as one past the end of a transaction.
+    let coinbase = busy.transactions[0].hash();
+    let past_end = transparent::OutPoint {
+        hash: coinbase,
+        index: u32::try_from(busy.transactions[0].outputs().len()).unwrap(),
+    };
+    let mut prepared = busy.clone().prepare();
+    let unrelated = prepared.new_outputs.values().next().unwrap().clone();
+    prepared.new_outputs.insert(past_end, unrelated);
+    state.commit_block(prepared, &finalized_state)?;
+
+    let chain = state.best_chain().unwrap();
+    let block = chain.tip_block().unwrap();
+    assert!(block.new_outputs.len() > 100);
+    for (outpoint, utxo) in block.new_outputs.iter() {
+        if *outpoint == past_end {
+            continue;
+        }
+        assert!(Arc::ptr_eq(
+            utxo,
+            chain.created_ordered_utxo(outpoint).unwrap()
+        ));
+    }
+
+    // The unrelated output isn't an output of the chain.
+    assert!(chain.created_ordered_utxo(&past_end).is_none());
+
+    Ok(())
+}
+
 /// Blocks restored into the non-finalized state count as sent, but the sent hashes don't copy
 /// their outputs, which readers find in the restored state.
 #[test]
@@ -2122,6 +2338,141 @@ fn sent_hashes_from_restored_blocks_hold_no_outputs() -> Result<()> {
         }
     }
     assert!(sent.can_fork_chain_at_hashes);
+
+    Ok(())
+}
+
+/// Address indexes count the address outputs a block spends, and give the same results when a
+/// query names more addresses than a block changes.
+#[test]
+fn address_indexes_track_spent_outputs() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy = busy_child(&block1, &block1, &network, 20, 4);
+
+    // A block with a transaction that spends ten of the busy block's address outputs.
+    let first_address_output = u32::try_from(block1.transactions[0].outputs().len()).unwrap();
+    let spent: Vec<_> = (0..10)
+        .map(|i| transparent::OutPoint {
+            hash: busy.transactions[0].hash(),
+            index: first_address_output + i * 2,
+        })
+        .collect();
+    let spend = zebra_chain::transaction::Transaction::clone(&busy.transactions[0])
+        .with_transparent_inputs(
+            spent
+                .iter()
+                .map(|outpoint| transparent::Input::PrevOut {
+                    outpoint: *outpoint,
+                    unlock_script: transparent::Script::new(&[]),
+                    sequence: 0,
+                })
+                .collect(),
+        )
+        .with_transparent_outputs(vec![transparent::Output {
+            value: Amount::zero(),
+            lock_script: transparent::Address::from_pub_key_hash(network.kind(), [9; 20]).script(),
+        }]);
+    let mut spender = Block::clone(&busy.make_fake_child());
+    spender.transactions.push(Arc::new(spend));
+    let spender = Arc::new(spender);
+
+    let mut chain = Chain::new(
+        &network,
+        (block1.coinbase_height().unwrap() - 1).unwrap(),
+        NoteCommitmentTrees::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    );
+    chain = chain.push(block1.prepare().test_with_zero_spent_utxos())?;
+    chain = chain.push(busy.prepare().test_with_zero_spent_utxos())?;
+    let spent_outputs = spent
+        .iter()
+        .map(|outpoint| {
+            let utxo = chain
+                .created_ordered_utxo(outpoint)
+                .expect("the busy block created the spent outputs");
+            (*outpoint, transparent::OrderedUtxo::clone(utxo))
+        })
+        .collect();
+    let spender = crate::ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+        spender.prepare(),
+        spent_outputs,
+        zebra_chain::amount::DeferredPoolBalanceChange::zero(),
+        &network,
+        chain.chain_value_pools,
+    )?;
+    chain = chain.push(spender)?;
+
+    let spent_addresses: std::collections::HashSet<_> = spent
+        .iter()
+        .map(|outpoint| {
+            chain
+                .created_ordered_utxo(outpoint)
+                .unwrap()
+                .utxo
+                .output
+                .address(&network)
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        chain.partial_transparent_spent_utxo_count(&spent_addresses),
+        10
+    );
+    crate::service::non_finalized_state::chain::index::tests::assert_legacy_indexes(&chain);
+
+    Ok(())
+}
+
+/// Address balance reads leave out the blocks below a height, which the finalized state already
+/// counts, without copying or changing the chain.
+#[test]
+fn address_balance_from_a_height_skips_lower_blocks() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child().set_work(10);
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(block2.clone().prepare(), &finalized_state)?;
+    let chain = state.best_chain().unwrap();
+
+    let coinbase_outputs = |block: &Block| block.transactions[0].outputs();
+    let addresses: std::collections::HashSet<_> = coinbase_outputs(&block1)
+        .iter()
+        .chain(coinbase_outputs(&block2).iter())
+        .filter_map(|output| output.address(&network))
+        .collect();
+    assert!(!addresses.is_empty());
+    let value_to = |block: &Block| -> u64 {
+        coinbase_outputs(block)
+            .iter()
+            .filter(|output| output.address(&network).is_some())
+            .map(|output| u64::from(output.value()))
+            .sum()
+    };
+
+    let root = chain.non_finalized_root_height();
+    let tip = chain.non_finalized_tip_height();
+    let (whole_balance, whole_received) = chain.partial_transparent_balance_change(&addresses);
+    let (tip_balance, tip_received) =
+        chain.partial_transparent_balance_change_from(&addresses, tip);
+    assert_eq!(whole_received, value_to(&block1) + value_to(&block2));
+    assert_eq!(tip_received, value_to(&block2));
+    assert_eq!(
+        whole_balance,
+        chain
+            .partial_transparent_balance_change_from(&addresses, root)
+            .0
+    );
+    assert_eq!(
+        i128::from(whole_balance.zatoshis()) - i128::from(tip_balance.zatoshis()),
+        i128::from(value_to(&block1)),
+    );
 
     Ok(())
 }

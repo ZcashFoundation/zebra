@@ -252,7 +252,13 @@ impl NonFinalizedBlocksListener {
         let new_blocks = non_finalized_state.chain_iter().flat_map(move |chain| {
             // Take blocks from the chain in reverse height order until we reach a block the
             // listener already has, then restore ascending height order.
-            let mut blocks: Vec<_> = chain.blocks.values().rev().take_while(take_cond).collect();
+            let mut blocks: Vec<_> = chain
+                .blocks
+                .values()
+                .map(Arc::as_ref)
+                .rev()
+                .take_while(take_cond)
+                .collect();
             blocks.reverse();
             blocks
         });

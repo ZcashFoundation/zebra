@@ -19,7 +19,7 @@ use zebra_chain::{
     serialization::SerializationError,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, UnminedTx},
-    transparent::{self, utxos_from_ordered_utxos},
+    transparent,
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
@@ -330,7 +330,9 @@ pub struct ContextuallyVerifiedBlock {
     /// earlier transaction.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) new_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ///
+    /// The non-finalized chain indexes share these outputs, instead of copying them.
+    pub(crate) new_outputs: Arc<HashMap<transparent::OutPoint, Arc<transparent::OrderedUtxo>>>,
 
     /// The outputs spent by this block, indexed by the [`transparent::Input`]'s
     /// [`OutPoint`](transparent::OutPoint).
@@ -339,7 +341,7 @@ pub struct ContextuallyVerifiedBlock {
     /// or earlier blocks in the chain.
     ///
     /// This field can also contain unrelated outputs, which are ignored.
-    pub(crate) spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    pub(crate) spent_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
 
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
@@ -513,9 +515,8 @@ impl ContextuallyVerifiedBlock {
     /// Create a block that's ready for non-finalized `Chain` contextual validation,
     /// using a [`SemanticallyVerifiedBlock`] and the UTXOs it spends.
     ///
-    /// When combined, `semantically_verified.new_outputs` and `spent_utxos` must contain
-    /// the [`Utxo`](transparent::Utxo)s spent by every transparent input in this block,
-    /// including UTXOs created by earlier transactions in this block.
+    /// `spent_outputs` must contain the [`Utxo`](transparent::Utxo)s spent by every transparent
+    /// input in this block, including UTXOs created by earlier transactions in this block.
     ///
     /// `previous_value_pools` and `deferred_pool_balance_change` must use the exact parent.
     /// This constructor calculates ledger changes, but does not validate coinbase payouts or
@@ -525,6 +526,10 @@ impl ContextuallyVerifiedBlock {
     /// A [`ContextuallyVerifiedBlock`] is only contextually valid after all state service
     /// validation succeeds; construction or
     /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) alone is not sufficient.
+    ///
+    /// # Panics
+    ///
+    /// If `spent_outputs` is missing the UTXO of a transparent input.
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
@@ -546,7 +551,7 @@ impl ContextuallyVerifiedBlock {
     /// fees, as returned by [`Block::chain_value_pool_change_and_fees`].
     pub(crate) fn with_block_spent_utxos_and_fees(
         semantically_verified: SemanticallyVerifiedBlock,
-        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
         deferred_pool_balance_change: DeferredPoolBalanceChange,
         network: &Network,
         previous_value_pools: ValueBalance<NonNegative>,
@@ -560,18 +565,8 @@ impl ContextuallyVerifiedBlock {
             received_time,
         } = semantically_verified;
 
-        // This is redundant for the non-finalized state,
-        // but useful to make some tests pass more easily.
-        //
-        // TODO: fix the tests, and stop adding unrelated outputs.
-        spent_outputs.extend(new_outputs.clone());
-
         let (chain_value_pool_change, transaction_fees) = block.chain_value_pool_change_and_fees(
-            &utxos_from_ordered_utxos(
-                spent_outputs
-                    .iter()
-                    .map(|(outpoint, utxo)| (*outpoint, utxo.clone())),
-            ),
+            &spent_outputs,
             deferred_pool_balance_change,
             network,
             previous_value_pools,
@@ -582,8 +577,13 @@ impl ContextuallyVerifiedBlock {
                 block,
                 hash,
                 height,
-                new_outputs,
-                spent_outputs,
+                new_outputs: Arc::new(
+                    new_outputs
+                        .into_iter()
+                        .map(|(outpoint, utxo)| (outpoint, Arc::new(utxo)))
+                        .collect(),
+                ),
+                spent_outputs: Arc::new(spent_outputs),
                 transaction_hashes,
                 chain_value_pool_change,
                 received_time,
@@ -661,7 +661,10 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             block: valid.block,
             hash: valid.hash,
             height: valid.height,
-            new_outputs: valid.new_outputs,
+            new_outputs: Arc::unwrap_or_clone(valid.new_outputs)
+                .into_iter()
+                .map(|(outpoint, utxo)| (outpoint, Arc::unwrap_or_clone(utxo)))
+                .collect(),
             transaction_hashes: valid.transaction_hashes,
             received_time: valid.received_time,
         }

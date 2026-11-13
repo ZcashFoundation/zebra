@@ -1,0 +1,4 @@
+project: zebra-state
+kind: breaking
+body: 'Contextually verified blocks share their `new_outputs` and `spent_outputs` maps through `Arc`, and value balances use the `zebra-chain` API that accepts `HashMap<OutPoint, U: AsRef<Utxo>>`; `zebra-chain` types appear in the public API, so upgrade both together. `ContextuallyVerifiedBlock::with_block_and_spent_utxos` now requires its spent-output map to include every transparent input''s UTXO, including outputs created by earlier transactions in the same block; it no longer fills these entries from the block''s new outputs.'
+time: 2026-10-12T18:56:05.782445082+02:00
