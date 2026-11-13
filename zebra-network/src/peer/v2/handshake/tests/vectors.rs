@@ -242,7 +242,7 @@ async fn unknown_kinds_are_ignored_and_early_streams_refused() {
             );
 
             // The responder's init arrives on the handshake stream.
-            let mut framed = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+            let mut framed = tokio_util::codec::FramedRead::new(recv, RecordCodec::default());
             let payload = framed.next().await.expect("a record").expect("well-formed");
             assert_eq!(payload[0], INIT_RECORD_KIND);
         };

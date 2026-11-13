@@ -50,6 +50,10 @@ pub const RELAY_CHANNEL_SIZE: usize = 16;
 /// briefly.
 const INBOX_SIZE: usize = 1024;
 
+/// How long a registration waits for room in the hub's queue before it is
+/// given up.
+const REGISTER_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The most addresses sent to one peer per trickle; the rest stay queued for
 /// the next one.
 ///
@@ -130,9 +134,10 @@ pub struct Registration {
 
 /// A handle to the address relay hub.
 ///
-/// Every method is best effort and never waits: a message that does not fit
-/// in the hub's queue is dropped. Cloning the handle shares the hub, which
-/// runs until every handle has been dropped.
+/// No method waits. Offers and deregistrations are best effort: one that
+/// does not fit in the hub's queue is dropped. A registration that does not
+/// fit is delivered once there is room. Cloning the handle shares the hub,
+/// which runs until every handle has been dropped.
 #[derive(Clone, Debug)]
 pub struct AddrRelayHandle {
     inbox: mpsc::Sender<Message>,
@@ -143,10 +148,48 @@ impl AddrRelayHandle {
     /// Registers the connection to `peer`, whose addresses to announce arrive
     /// on `tx`. While another open connection to `peer` is registered, the
     /// hub keeps that one and drops `tx`.
+    ///
+    /// A registration is never dropped for a full queue: the connection
+    /// would then get no relayed address for as long as it lasted. It is
+    /// delivered by a task instead, which waits for room for up to
+    /// [`REGISTER_TIMEOUT`], or until the connection ends, so the caller
+    /// never waits. A deregistration sent in the meantime can reach the hub
+    /// first: the hub drops the closed destination at the next registration.
+    ///
+    /// # Panics
+    ///
+    /// If the queue is full and this is called outside a Tokio runtime.
     pub fn register(&self, peer: PeerSocketAddr, tx: mpsc::Sender<Vec<MetaAddr>>) -> Registration {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.send(Message::Register { peer, id, tx });
-        Registration { peer, id }
+        let registration = Registration { peer, id };
+        let message = Message::Register {
+            peer,
+            id,
+            tx: tx.clone(),
+        };
+        let Err(mpsc::error::TrySendError::Full(message)) = self.inbox.try_send(message) else {
+            return registration;
+        };
+
+        let inbox = self.inbox.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                // The connection ended, so there is nothing left to register.
+                () = tx.closed() => {}
+                sent = tokio::time::timeout(REGISTER_TIMEOUT, inbox.send(message)) => {
+                    if sent.is_err() {
+                        metrics::counter!("zcash.net.v2.addresses.relay.unregistered")
+                            .increment(1);
+                        tracing::debug!(
+                            ?peer,
+                            "address relay hub stayed behind, so this peer gets no relayed \
+                             addresses"
+                        );
+                    }
+                }
+            }
+        });
+        registration
     }
 
     /// Deregisters a connection that has ended. The hub also drops a

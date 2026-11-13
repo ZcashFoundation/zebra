@@ -93,3 +93,45 @@ fn follows_the_watch() {
     keys_tx.send_replace(Arc::new(HashSet::new()));
     assert_eq!(connected.blocks_dial(addr), None);
 }
+
+/// The legacy crawler leaves every address of a configured version 2 peer's IP to the version 2
+/// dialer, which is not blocked itself, and every clone sees the configured peers.
+#[test]
+fn blocks_legacy_dials_to_configured_v2_peers() {
+    let connected = connected_to(&[], 1);
+    let crawler_view = connected.clone();
+    assert_eq!(
+        crawler_view.blocks_legacy_dial(peer("203.0.113.1:8233")),
+        None
+    );
+
+    connected.prefer_v2([peer("203.0.113.1:8233"), peer("[2001:db8:1:2::1]:8233")]);
+
+    for legacy in [
+        "203.0.113.1:8233",
+        "203.0.113.1:18233",
+        "[2001:db8:1:2::9]:8233",
+    ] {
+        assert_eq!(
+            crawler_view.blocks_legacy_dial(peer(legacy)),
+            Some("configured v2 peer"),
+            "{legacy}",
+        );
+    }
+    assert_eq!(
+        crawler_view.blocks_legacy_dial(peer("203.0.113.2:8233")),
+        None
+    );
+    assert_eq!(
+        crawler_view.blocks_legacy_dial(peer("[2001:db8:1:3::1]:8233")),
+        None
+    );
+    assert_eq!(connected.blocks_dial(peer("203.0.113.1:8233")), None);
+
+    // The other reasons still apply.
+    let connected = connected_to(&["203.0.113.5:50000"], 1);
+    assert_eq!(
+        connected.blocks_legacy_dial(peer("203.0.113.5:8233")),
+        Some("per-IP limit")
+    );
+}

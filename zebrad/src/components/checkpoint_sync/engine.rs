@@ -99,7 +99,7 @@ pub const COMMIT_PIPELINE_BYTES: u64 = 64 * 1024 * 1024;
 pub const COMMIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long the engine runs with fewer than [`MIN_ENGINE_PEERS`] selected
-/// peers before it drains.
+/// peers that deliver before it drains.
 pub const TOO_FEW_PEERS_FOR: Duration = Duration::from_secs(60);
 
 /// The frontier-unit failures without progress after which the engine
@@ -668,8 +668,8 @@ impl<B: WindowBlock> Window<B> {
 pub enum EngineExit {
     /// Every height up to the target is committed.
     TargetReached,
-    /// Fewer than [`MIN_ENGINE_PEERS`] selected peers for
-    /// [`TOO_FEW_PEERS_FOR`].
+    /// Fewer than [`MIN_ENGINE_PEERS`] selected peers that are not in a run
+    /// of `BUSY` answers, for [`TOO_FEW_PEERS_FOR`].
     TooFewPeers,
     /// The frontier unit failed [`FRONTIER_FAILURE_LIMIT`] times without
     /// progress.
@@ -693,8 +693,8 @@ pub struct EngineOutcome {
     /// failed since it last advanced, and of the peers that delivered
     /// mismatched authorizing data at the frontier, when the run ended with
     /// [`EngineExit::NoProgress`]; the IP addresses of the peers excluded for
-    /// refusing ranges, when it ended with [`EngineExit::TooFewPeers`];
-    /// otherwise empty.
+    /// not serving ranges, when it ended with [`EngineExit::TooFewPeers`];
+    /// otherwise empty. A peer that answered `BUSY` is never among them.
     pub blamed: BTreeSet<IpAddr>,
     /// The number of units the run anchored at a known hash.
     pub known_hash_units: u64,
@@ -722,9 +722,9 @@ pub struct EngineRun<P, ZS> {
     pub unit_lengths: mpsc::Sender<usize>,
     /// The shared lookahead charge.
     pub charged: Charged,
-    /// The IP addresses of the peers the last run blamed for its lack of
-    /// progress: this run does not download from them, whatever their
-    /// connection.
+    /// The IP addresses of the peers blamed for an earlier run's lack of
+    /// progress, whose blame has not lapsed: this run does not download from
+    /// them, whatever their connection.
     pub blamed: BTreeSet<IpAddr>,
     /// The known-hash list, if the network has one: units are anchored at
     /// its verified entries where they are resident, and at checkpoints
@@ -949,7 +949,7 @@ where
             if gate_open && scheduler.frontier_stuck(FRONTIER_FAILURE_LIMIT, now) {
                 break EngineExit::NoProgress;
             }
-            if gate_open && scheduler.selected_peers() < MIN_ENGINE_PEERS {
+            if gate_open && scheduler.serving_peers() < MIN_ENGINE_PEERS {
                 let since = *too_few_since.get_or_insert(now);
                 if now.saturating_duration_since(since) >= TOO_FEW_PEERS_FOR {
                     break EngineExit::TooFewPeers;
@@ -1156,9 +1156,10 @@ where
                 .chain(auth_mismatch_peers.iter())
                 .copied()
                 .collect(),
-            // Peers that refuse ranges must not count toward the next claim,
-            // or they could make the supervisor claim, and preempt the
-            // legacy syncer, again and again.
+            // Peers that do not serve ranges must not count toward the next
+            // claim, or they could make the supervisor claim, and preempt
+            // the legacy syncer, again and again. Peers that were only busy
+            // do serve ranges, and are not blamed.
             EngineExit::TooFewPeers => scheduler.refused_peers(Instant::now()).collect(),
             _ => Vec::new(),
         };
@@ -1383,6 +1384,7 @@ fn on_stream_event(
             let failure = match &error {
                 SyncPeerError::NotFound => StreamFailure::NotFound,
                 SyncPeerError::Refused => StreamFailure::Refused,
+                SyncPeerError::Busy => StreamFailure::Busy,
                 SyncPeerError::Violation { .. } => StreamFailure::Violation,
                 SyncPeerError::LocalRequest(reason) => {
                     warn!(%reason, "the engine built an invalid get-block-range request");

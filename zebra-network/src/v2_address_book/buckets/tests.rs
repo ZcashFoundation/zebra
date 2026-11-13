@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use crate::PeerSocketAddr;
 
-use super::{GossipBuckets, Group, V2_GOSSIP_BUCKET_SIZE, V2_SOURCE_GROUP_SPAN};
+use super::{
+    Admission, GossipBuckets, Group, Incumbent, V2_GOSSIP_BUCKET_SIZE, V2_SOURCE_GROUP_SPAN,
+};
 
 /// The bucket size, as a host number bound.
 // The cast is safe: the bucket size is a small constant.
@@ -32,6 +34,24 @@ fn source(group: u8) -> PeerSocketAddr {
         .expect("valid address")
 }
 
+/// An incumbent that is kept if `gossiped`, and gone otherwise.
+fn kept_if(gossiped: bool) -> Incumbent {
+    if gossiped {
+        Incumbent::Kept
+    } else {
+        Incumbent::Gone
+    }
+}
+
+/// An incumbent that is terrible if `gossiped`, and gone otherwise.
+fn terrible_if(gossiped: bool) -> Incumbent {
+    if gossiped {
+        Incumbent::Terrible
+    } else {
+        Incumbent::Gone
+    }
+}
+
 #[test]
 fn one_group_from_one_source_is_bounded_at_one_bucket() {
     let _init_guard = zebra_test::init();
@@ -43,9 +63,12 @@ fn one_group_from_one_source_is_bounded_at_one_bucket() {
     // simulating the book alongside.
     for host in 0..(3 * BUCKET_SIZE) {
         let new = addr(1, host);
-        let victim = buckets.admit(new, source(1), |entry| book.contains(&entry));
-        if let Some(victim) = victim {
-            assert!(book.remove(&victim), "victims are tracked entries");
+        match buckets.admit(new, source(1), |entry| terrible_if(book.contains(&entry))) {
+            Admission::Admitted => {}
+            Admission::Replaced(victim) => {
+                assert!(book.remove(&victim), "victims are tracked entries")
+            }
+            Admission::Full => panic!("a terrible incumbent always gives up its slot"),
         }
         book.insert(new);
     }
@@ -68,8 +91,12 @@ fn one_source_group_reaches_at_most_its_span_of_buckets() {
     for first in 1..=40 {
         for second in 0..=255 {
             let new = addr_in(first, second, 1);
-            if let Some(victim) = buckets.admit(new, source(1), |entry| book.contains(&entry)) {
-                assert!(book.remove(&victim), "victims are tracked entries");
+            match buckets.admit(new, source(1), |entry| terrible_if(book.contains(&entry))) {
+                Admission::Admitted => {}
+                Admission::Replaced(victim) => {
+                    assert!(book.remove(&victim), "victims are tracked entries")
+                }
+                Admission::Full => panic!("a terrible incumbent always gives up its slot"),
             }
             book.insert(new);
         }
@@ -98,8 +125,8 @@ fn one_source_group_reaches_at_most_its_span_of_buckets() {
         .find(|other_source| buckets.buckets[buckets.bucket_index(&other, other_source)].is_empty())
         .expect("most buckets are out of the first source group's reach");
     assert_eq!(
-        buckets.admit(other, other_source, |entry| book.contains(&entry)),
-        None
+        buckets.admit(other, other_source, |entry| kept_if(book.contains(&entry))),
+        Admission::Admitted,
     );
 }
 
@@ -113,7 +140,10 @@ fn full_buckets_only_evict_tracked_relayed_entries() {
     // Fill one bucket.
     for host in 0..BUCKET_SIZE {
         let new = addr(1, host);
-        assert_eq!(buckets.admit(new, source(1), |_| true), None);
+        assert_eq!(
+            buckets.admit(new, source(1), |_| Incumbent::Kept),
+            Admission::Admitted,
+        );
         relayed.insert(new);
     }
 
@@ -128,16 +158,76 @@ fn full_buckets_only_evict_tracked_relayed_entries() {
 
     for host in 1000..1100 {
         let new = addr(1, host);
-        let victim = buckets.admit(new, source(1), |entry| relayed.contains(&entry));
-        if let Some(victim) = victim {
-            assert!(!tried.contains(&victim), "tried entries are never victims");
-            assert!(
-                relayed.remove(&victim),
-                "victims are tracked relayed entries"
-            );
+        match buckets.admit(new, source(1), |entry| {
+            terrible_if(relayed.contains(&entry))
+        }) {
+            Admission::Admitted => {}
+            Admission::Replaced(victim) => {
+                assert!(!tried.contains(&victim), "tried entries are never victims");
+                assert!(
+                    relayed.remove(&victim),
+                    "victims are tracked relayed entries"
+                );
+            }
+            Admission::Full => panic!("a terrible incumbent always gives up its slot"),
         }
         relayed.insert(new);
     }
+}
+
+/// A full bucket keeps its entries: new addresses are dropped, however many arrive, until the
+/// incumbent a new address is compared with is terrible.
+#[test]
+fn full_buckets_keep_incumbents_that_are_not_terrible() {
+    let _init_guard = zebra_test::init();
+
+    let mut buckets = GossipBuckets::new();
+    let incumbents: HashSet<PeerSocketAddr> = (0..BUCKET_SIZE).map(|host| addr(1, host)).collect();
+    for incumbent in &incumbents {
+        assert_eq!(
+            buckets.admit(*incumbent, source(1), |_| Incumbent::Kept),
+            Admission::Admitted,
+        );
+    }
+
+    for host in 1000..2000 {
+        assert_eq!(
+            buckets.admit(addr(1, host), source(1), |_| Incumbent::Kept),
+            Admission::Full,
+            "a flood never replaces an incumbent that is worth keeping",
+        );
+    }
+    let index = buckets.bucket_index(&addr(1, 0), &source(1));
+    assert_eq!(
+        buckets.buckets[index]
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>(),
+        incumbents,
+    );
+
+    // One incumbent became terrible. Only the new addresses that are compared with it get in,
+    // and that comparison is fixed by the secret, not by the order of arrival.
+    let terrible = addr(1, 3);
+    let state = |entry| {
+        if entry == terrible {
+            Incumbent::Terrible
+        } else {
+            Incumbent::Kept
+        }
+    };
+    let outcomes: Vec<Admission> = (2000..2100)
+        .map(|host| buckets.admit(addr(1, host), source(1), state))
+        .collect();
+    let replaced: Vec<&Admission> = outcomes
+        .iter()
+        .filter(|outcome| **outcome != Admission::Full)
+        .collect();
+    assert_eq!(
+        replaced,
+        [&Admission::Replaced(terrible)],
+        "only the terrible incumbent is replaced, and only once",
+    );
 }
 
 #[test]
@@ -172,15 +262,16 @@ fn entries_that_leave_the_gossiped_state_free_their_slots() {
 
     // Fill one group's bucket.
     for host in 0..BUCKET_SIZE {
-        let victim = buckets.admit(addr(1, host), source(1), |_| true);
-        assert_eq!(victim, None);
+        let admission = buckets.admit(addr(1, host), source(1), |_| Incumbent::Kept);
+        assert_eq!(admission, Admission::Admitted);
     }
 
     // Every tracked entry left the gossiped state (attempted, responded,
     // or evicted by the book): the next admission needs no victim.
-    let victim = buckets.admit(addr(1, 999), source(1), |_| false);
+    let admission = buckets.admit(addr(1, 999), source(1), |_| Incumbent::Gone);
     assert_eq!(
-        victim, None,
+        admission,
+        Admission::Admitted,
         "healed buckets admit without evicting anything",
     );
 }
@@ -192,10 +283,14 @@ fn readmission_removal_and_bans_are_idempotent() {
     let mut buckets = GossipBuckets::new();
 
     let re_gossiped = addr(1, 1);
-    assert_eq!(buckets.admit(re_gossiped, source(1), |_| true), None);
+    let kept = |_| Incumbent::Kept;
     assert_eq!(
-        buckets.admit(re_gossiped, source(1), |_| true),
-        None,
+        buckets.admit(re_gossiped, source(1), kept),
+        Admission::Admitted
+    );
+    assert_eq!(
+        buckets.admit(re_gossiped, source(1), kept),
+        Admission::Admitted,
         "re-gossiped addresses keep their slot without eviction",
     );
     assert_eq!(buckets.len(), 1);
@@ -203,7 +298,10 @@ fn readmission_removal_and_bans_are_idempotent() {
     // A ban purges the tracked entry; readmission then works.
     buckets.remove_if(|entry| entry == re_gossiped);
     assert_eq!(buckets.len(), 0);
-    assert_eq!(buckets.admit(re_gossiped, source(1), |_| false), None);
+    assert_eq!(
+        buckets.admit(re_gossiped, source(1), |_| Incumbent::Gone),
+        Admission::Admitted,
+    );
 
     // So does a removal once the address is tried.
     buckets.remove(re_gossiped);

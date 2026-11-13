@@ -86,23 +86,29 @@ version 2 peers are recorded in a separate version 2 address book.
   connected to. Relayed addresses are bucketed by their address group and the
   group of the peer that sent them, so one network range cannot fill the book,
   and they never displace the configured, cached, or seeded addresses, or the
-  peers Zebra connected to. Zebra answers version 2 address requests from this
-  book only, with addresses it connected to or recently heard of over version
-  2, and its own version 2 address when it has a specific one
+  peers Zebra connected to. A full bucket keeps the relayed addresses it has: a
+  new one is dropped unless the address it would replace was last reported
+  more than 30 days ago. Zebra answers version 2 address requests from this
+  book only, with addresses it connected to first, then ones it recently heard
+  of over version 2, and its own version 2 address when it has a specific one
   (`v2_listen_addr`, or the IP address of `external_addr` with the
   `v2_listen_addr` port). It keeps the version 2 peers it connected to most
   recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
   cache, and tries them at startup. It never caches an address it only heard
   of. Zebra dials the peers it connected to before first, then picks at random
   among the others, giving seeded and cached addresses even odds against
-  relayed ones, whatever time the relaying peer claimed. When it has no address left to dial and fewer discovered peers than it
+  relayed ones, whatever time the relaying peer claimed. Among relayed
+  addresses, it dials the ones on the network's default port first, and it
+  retries a relayed address it never connected to at most once an hour. When it has no address left to dial and fewer discovered peers than it
   wants, it looks up the DNS seeders in
   `initial_mainnet_peers` or `initial_testnet_peers` and dials the results on
   the network's default port, UDP 8233 on Mainnet and 18233 on Testnet, at most
   every 30 minutes. Configured peers keep the first claim on the outbound
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
-  results fail to connect, which Zebra logs at the `debug` level.
+  results fail to connect, which Zebra logs at the `debug` level. Zebra keeps
+  up to 1,000 DNS seed and cached addresses: past that, a new one replaces the
+  one whose connection failed longest ago and that never answered.
 - Relaying version 2 addresses. Zebra relays each fresh full-node address a
   version 2 peer announces to two of its other version 2 peers, and limits each peer to
   about one announced address every 10 seconds, dropping the rest. It also
@@ -112,10 +118,19 @@ version 2 peers are recorded in a separate version 2 address book.
   `v2_listen_addr` if it is a specific address. An unspecified listener, like
   `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
-  announcements from peers are received and acted on.
+  announcements from peers are received and acted on. Zebra acts on a peer's
+  block announcements at a bounded rate, a burst of 16 and then one every 15
+  seconds, by not reading further announcements until then, and ignores an
+  announced header that fails the proof-of-work difficulty check.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
-  inbound and outbound limits of half the legacy ones. Protocol violations
-  close the connection with the draft's error codes.
+  inbound and outbound limits of half the legacy ones. For inbound version 2
+  connections, `max_connections_per_ip` and the limit of one connection
+  attempt per reconnection delay count an IPv6 address by its `/48` prefix,
+  not its `/64`, so nodes in the same `/48` share them. Protocol violations
+  close the connection with the draft's error codes. Zebra does not let a
+  peer move a connection to another address (QUIC connection migration), so
+  the bans and limits keep applying to the address the peer connected from. A
+  peer whose address changes reconnects.
 - Misbehavior scores as the draft describes them. A misbehaving response, such
   as a header chain that does not follow from the request, adds to the peer's
   score, which lasts across reconnections for about a ban duration. A peer
@@ -143,17 +158,30 @@ Serving is bounded so that it cannot crowd out the node's other work:
 
 - Each peer can have two block-range streams open at once, separate from its
   other requests, and the node serves eight streams at once in total. A
-  request beyond either limit is refused, and the peer asks another node.
+  request beyond either limit is reset at once with the `BUSY` error code:
+  the peer asks another node, and can ask this one again after a short delay.
+- The eight streams are shared between network addresses: all the connections
+  from one IP address (one `/64` for IPv6) get two of them between them, and
+  all the connections from one address group (an IPv4 `/16` or IPv6 `/32`)
+  get four. A request beyond its address's share is also answered with
+  `BUSY`, so one host or network cannot take every stream.
 - Zebra reads at most 2 MiB of blocks at a time for each stream, plus the
   part's first block, and keeps two buffers of up to one block each. With
   2 MB blocks that is at most about 8 MB of block data per stream, so eight
   streams hold at most about 64 MB of blocks in memory.
-- A stream is cancelled if its reader does not take each 2 MiB part within
-  20 seconds, if it is sent at less than 64 KiB/s on average over 20 seconds,
-  or if it lasts longer than 5 minutes.
+- A stream is cancelled if its reader does not start taking the response
+  within 5 seconds of sending its request, if it then takes the response at
+  less than 256 KiB/s (a reader that was faster keeps up to 10 seconds of
+  slack), or if the stream lasts longer than 5 minutes. Only the time Zebra
+  waits for the reader counts, not the time Zebra takes to read the blocks.
+- A peer whose stream was cancelled for reading too slowly is answered with
+  `BUSY` for the next minute, on its connection and on any other connection
+  from the same IP address (the same `/64` for IPv6). The delay doubles each
+  time it happens again, up to 16 minutes, and starts again at one minute
+  once the address has gone 16 minutes without another cancelled stream.
 
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
-request.
+request, with the `REFUSED` error code, which tells the peer not to ask again.
 
 ## Serving known hashes
 
@@ -235,8 +263,24 @@ How it works:
   every peer it can use. The legacy syncer then downloads the rest of the
   chain, including every block above the final checkpoint. If version 2 peers
   come back while the tip is still far behind, the engine takes over again a
-  minute later, without using peers at the IP addresses it blamed for its
-  last hand-back, even over new connections.
+  minute later, without using peers at the IP addresses it blamed for a
+  hand-back in the last 10 minutes, even over new connections.
+- A peer that answers a request with `BUSY` is serving as many ranges as it
+  allows. The engine asks it again after 5 seconds, and waits twice as long
+  after each further `BUSY`, up to a minute, until the peer delivers a block.
+  It never stops using a peer or blames it for being busy. A peer that
+  answers `REFUSED` is left alone for 30 seconds, and for 10 minutes if it
+  refuses again without delivering a block in between; only then is it blamed
+  when the engine hands back for too few peers.
+- A request that is too slow is cancelled and its blocks are asked of another
+  peer; the peer waits 30 seconds before its next request, and is not
+  penalized. The engine judges a request by the bytes it delivered over the
+  last 10 or 15 seconds, so a burst now and then does not keep a trickle
+  alive. A peer may end a response early, but one that ends three in a row
+  with less than a quarter of what was asked also waits 30 seconds after each
+  further one. When the oldest blocks the engine needs hold up everything it
+  has downloaded above them, and one peer has been sending them for 20
+  seconds, the engine asks a second peer for them as well.
 - While the engine downloads, the mempool and block gossip stay off, as they do
   during a legacy initial sync.
 
@@ -287,7 +331,7 @@ Its settings are in the `[sync]` section:
 | --- | --- | --- |
 | `v2_checkpoint_sync` | `false` | Turns the engine on. |
 | `v2_lookahead_bytes` | `536870912` (512 MiB) | The most block data the engine requests ahead of the committed tip. More keeps more peers busy and uses more memory. Values below `2000000`, one maximum-size block, are raised to it. |
-| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this for 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
+| `v2_min_peer_rate` | `262144` (256 KiB/s) | A peer that sends slower than this on average over 10 seconds has its request cancelled and given to another peer. It is not penalized, because a slow peer is not a misbehaving one. Values below `16384` (16 KiB/s) are raised to it. |
 | `v2_target_peers` | `8` | The number of peers the engine downloads from at once. `0` is raised to `1`. |
 | `v2_known_hash_pins` | unset | A known-hash list for Regtest or a custom testnet (see [Known-hash anchors](#known-hash-anchors)). |
 
@@ -300,7 +344,7 @@ go in these metrics, and its progress in the usual `state.*` and
 | `sync.v2.owner` | gauge | `1` while the engine owns block download, `0` while the legacy syncer does |
 | `sync.v2.lookahead.bytes` | gauge | The block data the engine has requested or downloaded and not yet committed, counted against `v2_lookahead_bytes` (downloaded blocks count three times their size, for their size in memory) |
 | `sync.v2.peer.rate` | histogram | Each downloading peer's measured rate, in bytes per second, sampled four times a second |
-| `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (below `v2_min_peer_rate` for 10 seconds) or `slow` (below a quarter of the median rate for 15 seconds) |
+| `sync.v2.stalls` | counter | Requests cancelled for being too slow, by `rule`: `no_bytes` (nothing for 5 seconds), `min_rate` (an average below `v2_min_peer_rate` over 10 seconds) or `slow` (an average below a quarter of the median rate over 15 seconds) |
 | `sync.v2.unit.bytes` | histogram | The bytes of each completed download unit, one or more checkpoint intervals, or a run of blocks between known hashes |
 
 ## Known limitations
@@ -313,7 +357,14 @@ go in these metrics, and its progress in the usual `state.*` and
   at once; Zebra then keeps the first connection and drops the other. An existing
   legacy connection is not replaced with a version 2 one: while Zebra has a
   legacy connection to a version 2 peer, configured or discovered, it dials
-  that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
+  that peer over version 2 only after the legacy connection closes. So that
+  the hosts in `initial_v2_peers` are used over version 2, the legacy peer
+  crawler never dials their IP addresses once they have resolved, on any port:
+  such a host has no legacy fallback while version 2 is enabled, unless it is
+  also in the legacy initial peers, which are dialled at startup, or it
+  connects to Zebra itself. A legacy connection made either of those ways is
+  still kept until it closes. Discovered version 2 peers get no such
+  preference. `max_connections_per_ip`
   still applies across both protocols. Version 2 connections add up to half of
   each legacy connection limit on top of it.
 - **Blocks are not announced to version 2 peers.** A version 2 block

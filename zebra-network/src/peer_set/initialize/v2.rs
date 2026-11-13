@@ -11,6 +11,7 @@
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
+    net::IpAddr,
     pin::pin,
     sync::{Arc, OnceLock},
     time::Duration,
@@ -28,7 +29,10 @@ use tower::Service;
 use tracing::instrument;
 use tracing_futures::Instrument;
 
-use zebra_chain::{chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network};
+use zebra_chain::{
+    chain_tip::ChainTip, diagnostic::task::CheckForPanics, parameters::Network,
+    work::difficulty::ParameterDifficulty,
+};
 
 use crate::{
     connection_metrics::{
@@ -48,6 +52,7 @@ use crate::{
             handshake::{handshake, LocalIdentity, Role},
             misbehavior::MisbehaviorScores,
             nonces::NonceRegistry,
+            rate::TokenBucket,
         },
         ConnectedAddr, ConnectionInfo, MinimumPeerVersion,
     },
@@ -56,7 +61,9 @@ use crate::{
         ActiveConnectionCounter, ConnectedPeers, ConnectionTracker, InventoryChange,
     },
     protocol::{
-        external::{canonical_peer_addr, types::PeerServices, MAX_USER_AGENT_LENGTH},
+        external::{
+            canonical_peer_addr, connection_limit_key, types::PeerServices, MAX_USER_AGENT_LENGTH,
+        },
         v2::types::ErrorCode,
     },
     quic::{self, ConnectError},
@@ -73,6 +80,88 @@ pub(super) const V2_DNS_RESEED_INTERVAL: Duration = Duration::from_secs(30 * 60)
 /// open connections.
 pub(super) type OpenInbound = HashMap<PeerSocketAddr, usize>;
 
+/// How many inbound connections the listener accepts in a row before it accepts one per
+/// inbound connection interval.
+///
+/// The legacy listener accepts one connection per interval by sleeping after each. A few nodes
+/// that dial at the same moment, such as this node's configured peers after it restarts, are
+/// all answered within their connect timeouts instead of one per interval.
+pub(super) const INBOUND_ACCEPT_BURST: u32 = 4;
+
+/// The group the version 2 listener's per-IP limits count an inbound peer's address in: the
+/// address itself for IPv4, and the `/48` prefix for IPv6.
+///
+/// # Security
+///
+/// The legacy limits group IPv6 addresses by `/64` (see [`connection_limit_key`]), but a `/48`
+/// is a common allocation for one site, and holds 65,536 of them: whoever has one could take
+/// every inbound slot, each from its own `/64`. Inbound version 2 connections are only limited
+/// here, so the wider group costs nothing elsewhere; nodes that share a `/48` share its limit.
+pub(super) fn inbound_group(ip: IpAddr) -> IpAddr {
+    match connection_limit_key(ip) {
+        IpAddr::V6(v6) => {
+            let mut octets = v6.octets();
+            octets[6..].fill(0);
+            IpAddr::V6(octets.into())
+        }
+        ipv4 @ IpAddr::V4(_) => ipv4,
+    }
+}
+
+/// The inbound version 2 connections and recent connection attempts of each [`inbound_group`],
+/// which the listener limits to the configured connections per IP.
+pub(super) struct InboundGroups {
+    /// The most connections one group may have open or handshaking at once, and the most
+    /// attempts it may make per reconnection delay.
+    max_per_group: usize,
+    /// The recent attempts of each group.
+    recent: recent_by_ip::RecentByIp,
+    /// The number of connections each group has open or handshaking.
+    open: HashMap<IpAddr, usize>,
+}
+
+impl InboundGroups {
+    /// Returns the limits for `max_per_group` connections per group, counting an attempt as
+    /// recent for `recent_time_limit`, or for the reconnection delay if it is `None`.
+    pub(super) fn new(max_per_group: usize, recent_time_limit: Option<Duration>) -> Self {
+        InboundGroups {
+            max_per_group,
+            recent: recent_by_ip::RecentByIp::new(recent_time_limit, Some(max_per_group)),
+            open: HashMap::new(),
+        }
+    }
+
+    /// Returns `true` if the group of `ip` already has as many connections as it may.
+    pub(super) fn is_full(&self, ip: IpAddr) -> bool {
+        self.open.get(&inbound_group(ip)).copied().unwrap_or(0) >= self.max_per_group
+    }
+
+    /// Returns `true` if the group of `ip` has made as many recent attempts as it may, and
+    /// counts this one if not.
+    pub(super) fn is_past_recent_limit_or_add(&mut self, ip: IpAddr) -> bool {
+        // The group's address is its own `/64` key, so the legacy grouping keeps it as it is.
+        self.recent.is_past_limit_or_add(inbound_group(ip))
+    }
+
+    /// Counts a connection from `ip`, and returns its group, which [`Self::closed`] takes when
+    /// the connection ends.
+    pub(super) fn opened(&mut self, ip: IpAddr) -> IpAddr {
+        let group = inbound_group(ip);
+        *self.open.entry(group).or_default() += 1;
+        group
+    }
+
+    /// Stops counting a connection of `group`.
+    pub(super) fn closed(&mut self, group: IpAddr) {
+        if let Some(count) = self.open.get_mut(&group) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.open.remove(&group);
+            }
+        }
+    }
+}
+
 /// What every version 2 connection attempt shares.
 #[derive(Clone)]
 pub(super) struct Shared<S, C> {
@@ -81,7 +170,7 @@ pub(super) struct Shared<S, C> {
     max_connections_per_ip: usize,
     /// The base delay before redialling a configured peer, before jitter.
     reconnection_delay: Duration,
-    /// The delay between accepted inbound connections.
+    /// The time one inbound connection's worth of the listener's accept rate takes to refill.
     inbound_interval: Duration,
     /// The open inbound connections, which the listener maintains, so the dialer does not dial
     /// a configured peer that is already connected to this node.
@@ -136,6 +225,7 @@ where
             connection_params: ConnectionParams {
                 inbound_service,
                 inv_collector,
+                target_difficulty_limit: config.network.target_difficulty_limit(),
                 genesis_hash: config.network.genesis_hash(),
                 misbehavior: MisbehaviorScores::spawn(
                     misbehavior_tx,
@@ -234,8 +324,9 @@ where
     )
 }
 
-/// [`start`], redialling configured peers after `reconnection_delay` plus jitter, and waiting
-/// `inbound_interval` between accepted inbound connections: tests use short intervals.
+/// [`start`], redialling configured peers after `reconnection_delay` plus jitter, and accepting
+/// one inbound connection per `inbound_interval` after a burst of [`INBOUND_ACCEPT_BURST`]:
+/// tests use short intervals.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn start_with_intervals<S, C>(
     config: Config,
@@ -397,8 +488,20 @@ where
 /// Accepts inbound version 2 connections, handshakes with them, and sends
 /// the resulting clients to the peer set.
 ///
-/// Applies the same ban list and per-IP rate limit as the legacy listener,
-/// and this transport's share of the inbound connection limit.
+/// Applies the same ban list as the legacy listener, this transport's share
+/// of the inbound connection limit, and the per-IP connection and rate
+/// limits, which count an IPv6 address by its `/48` here (see
+/// [`inbound_group`]).
+///
+/// # Security
+///
+/// The loop never waits between connection attempts: an attempt whose
+/// address is not validated yet is sent a Retry at once, and one that is
+/// refused is refused at once. The legacy listener's accept rate, one
+/// connection per `inbound_interval`, is kept by a token bucket instead of a
+/// sleep, and an attempt beyond it is refused. A sleep here would also delay
+/// every Retry, so a trickle of validated attempts could keep honest dialers
+/// from ever having their addresses validated before their connect timeout.
 ///
 /// Keeps `open_inbound` up to date with the open inbound connections, so the
 /// dialer can skip configured peers that are already connected to this node.
@@ -414,19 +517,28 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
-    let mut recent_inbound_connections =
-        recent_by_ip::RecentByIp::new(None, Some(shared.max_connections_per_ip));
+    let mut inbound_groups = InboundGroups::new(shared.max_connections_per_ip, None);
     let mut active_inbound_connections =
         ActiveConnectionCounter::new_counter_with(shared.inbound_limit, "Inbound v2 Connections");
-    let mut handshakes: JoinSet<()> = JoinSet::new();
+    // Each task returns its connection's group when the connection ends.
+    let mut handshakes: JoinSet<IpAddr> = JoinSet::new();
+    let mut accept_rate = TokenBucket::new(
+        shared.inbound_interval,
+        INBOUND_ACCEPT_BURST,
+        Instant::now(),
+    );
 
     loop {
         let incoming = tokio::select! {
             biased;
             finished = handshakes.join_next(), if !handshakes.is_empty() => {
-                let _ = finished
+                // A cancelled task has no group to stop counting, and the listener cancels none.
+                if let Ok(group) = finished
                     .expect("the handshake set is not empty")
-                    .panic_if_task_has_panicked();
+                    .panic_if_task_has_panicked()
+                {
+                    inbound_groups.closed(group);
+                }
                 continue;
             }
             incoming = shared.endpoint.accept() => incoming,
@@ -462,20 +574,29 @@ where
             continue;
         }
 
+        // The accept rate is checked before the per-IP rate limit, which records the attempt,
+        // and only spent on an attempt that passes it: an attempt refused for the accept rate
+        // must not count against its address, and one refused for its address must not use up
+        // the rate for everyone else.
+        let now = Instant::now();
         if active_inbound_connections.update_count() >= shared.inbound_limit
-            || recent_inbound_connections.is_past_limit_or_add(addr.ip())
+            || inbound_groups.is_full(addr.ip())
+            || !accept_rate.is_available(now)
+            || inbound_groups.is_past_recent_limit_or_add(addr.ip())
         {
             record_inbound_connection_rejected(&shared.network, addr, "capacity_or_rate_limited");
             incoming.refuse();
-            tokio::time::sleep(constants::MIN_INBOUND_PEER_FAILED_CONNECTION_INTERVAL).await;
+            tokio::task::yield_now().await;
             continue;
         }
+        let took_token = accept_rate.try_take(now);
+        debug_assert!(took_token, "a token was available at the same instant");
 
+        let group = inbound_groups.opened(addr.ip());
         let connection_tracker = active_inbound_connections.track_connection();
         // The transport handshake has already started; the application deadline runs from here,
         // which is as close to the connection's establishment as this loop can get.
-        let deadline = Instant::now() + constants::HANDSHAKE_TIMEOUT;
-        let inbound_interval = shared.inbound_interval;
+        let deadline = now + constants::HANDSHAKE_TIMEOUT;
         let shared = shared.clone();
         let peerset_tx = peerset_tx.clone();
         let open_inbound = open_inbound.clone();
@@ -530,12 +651,12 @@ where
                         }
                     });
                 }
+                group
             }
             .in_current_span(),
         );
 
-        // Rate-limit inbound connections, like the legacy listener.
-        tokio::time::sleep(inbound_interval).await;
+        tokio::task::yield_now().await;
     }
 }
 
@@ -782,6 +903,10 @@ pub(super) async fn keep_initial_peers_connected<S, C>(
                     round.extend(addrs.iter().copied());
                     newly_resolved.push((host, addrs));
                 }
+                // The legacy crawler leaves these to this dialer: the peer set would keep a
+                // legacy connection it made first, and this dialer would then defer the peer
+                // for as long as that connection lasted.
+                shared.connected_peers.prefer_v2(round.iter().copied());
                 // Kept out of discovered dialling. Sent once per round, even when nothing
                 // resolved, because the discovered peer dialer waits for the end of the first
                 // round: until then, a cached configured peer could be dialled as discovered.

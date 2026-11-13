@@ -6,6 +6,13 @@
 //! are not advertised, and the transport parameters meet the draft's stream
 //! and idle-timeout minimums.
 //!
+//! Connection migration is refused, which the draft allows: bans, the per-IP
+//! connection limits, and misbehavior scores all use the address that was
+//! validated when the connection was established, so a peer that could move
+//! a connection to another address would keep it while escaping them. A peer
+//! whose address changes, for example after a NAT rebinding, has to
+//! reconnect.
+//!
 //! # Known gaps against the draft
 //!
 //! These follow from what rustls and quinn expose, and are noted for spec
@@ -64,16 +71,39 @@ const MAX_CONCURRENT_UNI_STREAMS: u32 = 2 * MIN_UNIDIRECTIONAL_STREAMS;
 /// drop a healthy connection.
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// The per-stream receive window, in bytes: two maximum-size records, so a
-/// block announcement or a `get-blocks` entry never stalls on flow control
-/// alone; the draft's 16 MiB bulk recommendation waits for the bulk stream types.
+/// The per-stream receive window, in bytes: two maximum-size elements, so a
+/// `get-blocks` entry never stalls on flow control alone; the draft's 16 MiB bulk recommendation waits for the bulk stream types.
 // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the product fits in a `u32`; checked below.
 const STREAM_RECEIVE_WINDOW: u32 = (2 * MAX_RECORD_PAYLOAD_LEN) as u32;
 
-/// The per-connection receive window, in bytes: two streams, so at most 8 MiB
-/// buffered per peer, or about 790 MiB if every one of the default 99 version 2
-/// connections filled its window; the draft's 64 MiB bulk recommendation waits
-/// for the bulk stream types.
+/// The per-connection receive window, in bytes: two streams, so the transport
+/// buffers at most 8 MiB that this node has not read yet per peer, or about
+/// 790 MiB if every one of the default 99 version 2 connections filled its
+/// window; the draft's 64 MiB bulk recommendation waits for the bulk stream
+/// types.
+///
+/// # Security
+///
+/// The window bounds what the transport buffers, not what the connection has
+/// read from it and still holds, which the peer also controls:
+///
+/// - On the handshake stream and each of the six announcement streams a peer
+///   may have open, an incomplete record of at most the longest record of the
+///   stream's type, under 1.5 KiB, for at most the incomplete record
+///   timeout, and a read buffer of a few KiB. A longer record is rejected
+///   from its length prefix, or skipped as it arrives.
+/// - The bodies of the two requests served at once, until the request
+///   deadline: the longest is a `get-tx` request of 50,000 references, about
+///   3.1 MiB, and about as much again once it is decoded.
+/// - The response element being read on each of this node's four request
+///   streams, at most 2 MiB each, and the objects already read, at most
+///   `MAX_RESPONSE_BYTES` (8 MiB) for each response. Every object is checked
+///   as it arrives, so those are objects this node asked for.
+///
+/// So a peer can make this node hold about 8 MiB in the transport and about
+/// 12.5 MiB of request bodies without being asked for anything, and another
+/// 8 MiB of response elements while this node has four requests to it in
+/// flight: under 30 MiB per peer, most of it only until a request deadline.
 const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
 
 /// The most bytes this node keeps buffered for sending on one connection,
@@ -93,6 +123,33 @@ const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
 /// the objects of the requests being served.
 // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u64`, and so does the 6 MiB product.
 const SEND_WINDOW: u64 = 3 * MAX_RECORD_PAYLOAD_LEN as u64;
+
+/// The most inbound connection attempts that wait for the listener to answer
+/// them at once: about four times the default inbound version 2 connection
+/// limit, far below quinn's default of 65,536.
+///
+/// # Security
+///
+/// The listener answers every attempt as soon as it reads it, with a Retry,
+/// a refusal, or by accepting it, and never waits between attempts, so this
+/// many only build up when attempts arrive faster than it runs. Each one
+/// holds its first packet, and anyone can send those from spoofed addresses.
+/// Attempts beyond the limit are dropped unanswered, which costs this node
+/// nothing, and a peer that sent one retransmits it.
+const MAX_WAITING_INCOMING: usize = 256;
+
+/// The most bytes buffered for one waiting connection attempt, after its
+/// first packet: a few full-size packets, enough for a TLS ClientHello that
+/// spans more than one, instead of quinn's default of 10 MiB, which is sized
+/// for 0-RTT data that this node never accepts. Packets beyond it are
+/// dropped, and the peer retransmits them.
+const INCOMING_BUFFER_SIZE: u64 = 8 * 1024;
+
+/// The most bytes buffered for all waiting connection attempts together,
+/// after their first packets: [`INCOMING_BUFFER_SIZE`] for each of
+/// [`MAX_WAITING_INCOMING`], 2 MiB, instead of quinn's default of 100 MiB.
+// `MAX_WAITING_INCOMING` is 256, which fits in a `u64`.
+const INCOMING_BUFFER_SIZE_TOTAL: u64 = MAX_WAITING_INCOMING as u64 * INCOMING_BUFFER_SIZE;
 
 // The parameters above meet the draft's minimums; checked at compile time.
 const _: () = {
@@ -178,7 +235,14 @@ fn server_config(
     let crypto = QuicServerConfig::try_from(crypto)?;
 
     let mut config = ServerConfig::with_crypto(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()));
+    config
+        .transport_config(Arc::new(transport_config()))
+        // Every address-keyed limit uses the address validated at establishment: see the module
+        // docs.
+        .migration(false)
+        .max_incoming(MAX_WAITING_INCOMING)
+        .incoming_buffer_size(INCOMING_BUFFER_SIZE)
+        .incoming_buffer_size_total(INCOMING_BUFFER_SIZE_TOTAL);
     Ok(config)
 }
 

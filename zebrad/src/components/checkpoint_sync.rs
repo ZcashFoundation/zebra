@@ -33,7 +33,12 @@
 //! Re-claiming is allowed after a cooldown, when peers reappear and the gap
 //! is large again, so fallback works both ways.
 
-use std::{collections::BTreeSet, net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    net::IpAddr,
+    sync::Arc,
+    time::Duration,
+};
 
 use color_eyre::eyre::eyre;
 use tokio::{
@@ -138,6 +143,18 @@ pub const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// How long the supervisor waits after a hand-back before it may claim
 /// again, so the engine does not flap.
 pub const RECLAIM_COOLDOWN: Duration = Duration::from_secs(60);
+
+/// How long the supervisor keeps the blame of a run. A blamed peer may have
+/// recovered, and blame is by IP address, which several nodes can share, so
+/// it must lapse on its own: otherwise blame that leaves too few peers to
+/// claim with would last until Zebra restarts.
+pub const BLAME_TTL: Duration = Duration::from_secs(10 * 60);
+
+/// The most IP addresses the supervisor keeps blame for. A run blames a
+/// handful of peers, and blame lapses after [`BLAME_TTL`], so only a flood of
+/// failing addresses reaches this; the blame that lapses soonest is then
+/// dropped first.
+pub const MAX_BLAMED: usize = 256;
 
 /// The capacity of the unit-length channel to the legacy syncer.
 const UNIT_LENGTHS_CAPACITY: usize = 64;
@@ -267,13 +284,14 @@ struct Supervisor<P, ZS, ZSTip> {
     known_hashes: Option<Arc<dyn ChunkPins>>,
     charged: Charged,
     generation: u64,
-    /// The IP addresses of the peers the last run blamed for its lack of
-    /// progress: they do not count toward the next claim, and the next run
-    /// does not use them, so that a few peers that keep failing the frontier
-    /// cannot make the engine claim block download, and the legacy syncer
-    /// cancel its downloads, over and over. Keyed by IP address rather than
-    /// connection, so that reconnecting does not clear the blame.
-    blamed: BTreeSet<IpAddr>,
+    /// The IP addresses of the peers that runs blamed for their lack of
+    /// progress, and when each blame lapses: until then they do not count
+    /// toward a claim, and a run does not use them, so that a few peers that
+    /// keep failing the frontier cannot make the engine claim block
+    /// download, and the legacy syncer cancel its downloads, over and over.
+    /// Keyed by IP address rather than connection, so that reconnecting does
+    /// not clear the blame.
+    blamed: BTreeMap<IpAddr, time::Instant>,
 }
 
 impl<P, ZS, ZSTip> Supervisor<P, ZS, ZSTip>
@@ -309,7 +327,37 @@ where
             known_hashes,
             charged: Charged::default(),
             generation: 0,
-            blamed: BTreeSet::new(),
+            blamed: BTreeMap::new(),
+        }
+    }
+
+    /// The IP addresses whose blame has not lapsed at `now`.
+    fn blamed_at(&self, now: time::Instant) -> BTreeSet<IpAddr> {
+        self.blamed
+            .iter()
+            .filter(|(_, until)| now < **until)
+            .map(|(ip, _)| *ip)
+            .collect()
+    }
+
+    /// Records the blame of a run that ended at `now`.
+    fn blame(&mut self, blamed: BTreeSet<IpAddr>, now: time::Instant) {
+        // Blame from earlier runs is kept until it lapses: if only the last
+        // run's counted, two groups of peers could take turns failing the
+        // frontier, each cleared by the other's run, and make the engine
+        // claim and hand back for as long as they liked.
+        self.blamed.retain(|_, until| now < *until);
+        for ip in blamed {
+            self.blamed.insert(ip, now + BLAME_TTL);
+        }
+        while self.blamed.len() > MAX_BLAMED {
+            let soonest = self
+                .blamed
+                .iter()
+                .min_by_key(|(_, until)| **until)
+                .map(|(ip, _)| *ip)
+                .expect("a map above the limit is not empty");
+            self.blamed.remove(&soonest);
         }
     }
 
@@ -394,7 +442,7 @@ where
                     hints_gate: self.hints_gate.clone(),
                     unit_lengths: self.ownership.unit_lengths.clone(),
                     charged: self.charged.clone(),
-                    blamed: self.blamed.clone(),
+                    blamed: self.blamed_at(time::Instant::now()),
                     hashes,
                 }
                 .run()
@@ -446,11 +494,9 @@ where
                 known_hash_units = outcome.known_hash_units,
                 "checkpoint sync engine handed block download back to the legacy syncer"
             );
-            // Only the last run's blame counts: a peer blamed earlier may
-            // have recovered, and the cooldown already limits how often a
-            // run can fail. Blamed peers, including those that refused
-            // ranges, do not count toward the next claim.
-            self.blamed = outcome.blamed;
+            // Blamed peers, including those that do not serve ranges, do
+            // not count toward a claim until their blame lapses.
+            self.blame(outcome.blamed, time::Instant::now());
 
             match outcome.exit {
                 EngineExit::Defect(defect) => {
@@ -517,22 +563,19 @@ where
     /// hold.
     fn claim_target(&self, tip: block::Height) -> Option<block::Height> {
         let peers = self.peers.borrow().clone();
-        let mut tips: Vec<block::Height> = peers
+        let blamed = self.blamed_at(time::Instant::now());
+        let mut tips: Vec<(IpAddr, block::Height)> = peers
             .iter()
             .filter(|peer| peer.services().contains(PeerServices::NODE_NETWORK))
             .filter(|peer| !peer.is_closed())
-            .filter(|peer| !self.blamed.contains(&peer.ip()))
-            .map(|peer| peer.remote_tip_height())
+            .filter(|peer| !blamed.contains(&peer.ip()))
+            .map(|peer| (peer.ip(), peer.remote_tip_height()))
             .collect();
-        tips.sort();
 
         if self.hints_gate.is_some() {
             // Claim right after genesis, whatever the peers and the gap, so
             // nothing commits before hint acquisition finishes.
-            let peer_tip = tips
-                .get(tips.len() / 2)
-                .copied()
-                .unwrap_or(block::Height::MAX);
+            let peer_tip = median_tip(&tips).unwrap_or(block::Height::MAX);
             return self.anchors.target(tip, peer_tip);
         }
 
@@ -544,13 +587,13 @@ where
             .ok()
             .and_then(|start| self.anchors.at_or_above(start))
             .map(|(checkpoint, _)| checkpoint)?;
-        tips.retain(|peer_tip| *peer_tip >= first_interval_end);
+        tips.retain(|(_, peer_tip)| *peer_tip >= first_interval_end);
         if tips.len() < scheduler::MIN_ENGINE_PEERS {
             return None;
         }
-        // The median of those peers: the advertised tips are untrusted and
-        // only lower the target.
-        let target = self.anchors.target(tip, tips[tips.len() / 2])?;
+        // The advertised tips are unauthenticated hints, and only lower the
+        // target from the final checkpoint.
+        let target = self.anchors.target(tip, median_tip(&tips)?)?;
         (self.anchors.intervals_between(tip, target) >= MIN_ENGINE_SPAN_INTERVALS).then_some(target)
     }
 
@@ -565,6 +608,25 @@ where
             _ = time::sleep(IDLE_POLL_INTERVAL) => {}
         }
     }
+}
+
+/// The median of the tips that peers advertise, counting each IP address
+/// once, at its highest tip, or `None` without peers.
+///
+/// An advertised tip is an unauthenticated hint. Any number of connections
+/// from one address moves the median no further than a single peer could, and
+/// with three or more addresses a single one cannot set it.
+fn median_tip(tips: &[(IpAddr, block::Height)]) -> Option<block::Height> {
+    let mut by_ip: BTreeMap<IpAddr, block::Height> = BTreeMap::new();
+    for (ip, tip) in tips {
+        by_ip
+            .entry(*ip)
+            .and_modify(|highest| *highest = (*highest).max(*tip))
+            .or_insert(*tip);
+    }
+    let mut tips: Vec<block::Height> = by_ip.into_values().collect();
+    tips.sort();
+    tips.get(tips.len() / 2).copied()
 }
 
 #[cfg(test)]

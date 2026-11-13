@@ -5,11 +5,16 @@
 //! limit. The dialers check the same rules before they dial, so they open fewer connections
 //! the peer set would drop.
 //!
+//! The legacy crawler also leaves the configured version 2 peers to the version 2 dialer. The
+//! peer set keeps the first connection to an IP at the per-IP limit, so a legacy connection the
+//! crawler made first would keep the version 2 dialer from a peer the operator listed in
+//! `initial_v2_peers` for as long as it lasted.
+//!
 //! The check is best-effort: it only sees admitted connections. Handshakes still in progress,
 //! over either protocol, reserve nothing, so two dials to one address or IP can both pass it.
 //! The peer set's own check stays authoritative, and drops the later of the racing connections.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, net::IpAddr, sync::Arc};
 
 use tokio::sync::watch;
 
@@ -27,6 +32,9 @@ pub(crate) struct ConnectedPeers {
 
     /// The peer set's limit on connections per IPv4 address or IPv6 `/64`.
     max_conns_per_ip: usize,
+
+    /// The connection limit keys of the resolved `initial_v2_peers`, shared by every clone.
+    configured_v2: Arc<watch::Sender<HashSet<IpAddr>>>,
 }
 
 impl ConnectedPeers {
@@ -38,7 +46,34 @@ impl ConnectedPeers {
         Self {
             keys,
             max_conns_per_ip,
+            configured_v2: Arc::new(watch::channel(HashSet::new()).0),
         }
+    }
+
+    /// Leaves the IPs of `addrs`, the resolved addresses of configured version 2 peers, to the
+    /// version 2 dialer: [`ConnectedPeers::blocks_legacy_dial`] blocks them from then on.
+    pub(crate) fn prefer_v2(&self, addrs: impl IntoIterator<Item = PeerSocketAddr>) {
+        self.configured_v2.send_modify(|configured| {
+            configured.extend(
+                addrs
+                    .into_iter()
+                    .map(|addr| connection_limit_key(addr.ip())),
+            )
+        });
+    }
+
+    /// Returns why the legacy crawler does not dial `addr`, if it does not: its IPv4 address or
+    /// IPv6 `/64` is a configured version 2 peer's, or [`ConnectedPeers::blocks_dial`] blocks
+    /// it.
+    pub(crate) fn blocks_legacy_dial(&self, addr: PeerSocketAddr) -> Option<&'static str> {
+        if self
+            .configured_v2
+            .borrow()
+            .contains(&connection_limit_key(addr.ip()))
+        {
+            return Some("configured v2 peer");
+        }
+        self.blocks_dial(addr)
     }
 
     /// Returns connected peers with no keys, which never block a dial.

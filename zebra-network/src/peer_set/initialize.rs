@@ -1175,6 +1175,7 @@ where
                 let mut demand_tx = demand_tx.clone();
                 let network = config.network.clone();
                 let connected_peers = connected_peers.clone();
+                let v2_enabled = config.v2_listen_addr.is_some();
 
                 // Increment the connection count before we spawn the connection.
                 let outbound_connection_tracker = active_outbound_connections.track_connection();
@@ -1201,12 +1202,22 @@ where
                             //
                             // The peer set would drop this connection, because the address is
                             // connected over the other protocol, or its IP is at the per-IP
-                            // limit, so it's skipped. That isn't a failure of the peer, so the
+                            // limit, or its IP is a configured version 2 peer's, which a legacy
+                            // connection would keep the version 2 dialer from, so it's skipped.
+                            // That isn't a failure of the peer, so the
                             // address book isn't told: a failed entry without a recent last-seen
                             // time, like an initial peer, would never be a candidate again. It
                             // stays attempt pending, so the crawler only offers it again after
                             // the reconnection delay, not while it is connected.
-                            if let Some(reason) = connected_peers.blocks_dial(candidate.addr) {
+                            //
+                            // Only a node with a version 2 endpoint skips. Without one, every
+                            // connection is a legacy one, and the handshake of a connection the
+                            // peer set then drops is what verifies the candidate's listener, so
+                            // it can be gossiped and cached.
+                            let blocked = v2_enabled
+                                .then(|| connected_peers.blocks_legacy_dial(candidate.addr))
+                                .flatten();
+                            if let Some(reason) = blocked {
                                 debug!(?candidate.addr, reason, "skipping outbound connection");
                                 metrics::counter!(
                                     "zcash.net.peers.dial.skipped",

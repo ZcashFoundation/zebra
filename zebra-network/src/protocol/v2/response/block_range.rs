@@ -18,7 +18,8 @@ use crate::protocol::v2::{
 };
 
 use super::{
-    ensure_finished, read_byte_or_fin, read_compact_size_from, RESULT_FOUND, RESULT_NOT_FOUND,
+    ensure_finished, read_byte_or_fin, read_compact_size_from, ResponseBytes, RESULT_FOUND,
+    RESULT_NOT_FOUND,
 };
 
 /// The start of a `get-block-range` response.
@@ -173,7 +174,14 @@ pub async fn read_block_range_element<R: AsyncRead + Unpin>(
 
     // The rest of the prefix is read with the byte already taken in front of it, so the
     // serialization layer still checks canonicity.
-    let length = read_compact_size_from(&mut (&[first][..]).chain(&mut *reader), WHAT).await?;
+    // A range is bounded by its request's `count` and `max_bytes`, which `bounds` checks, not
+    // by the response size limit of the other request types, so the prefix is counted alone.
+    let length = read_compact_size_from(
+        &mut (&[first][..]).chain(&mut *reader),
+        WHAT,
+        &mut ResponseBytes::default(),
+    )
+    .await?;
 
     // The limit fits in a `u64`, so the comparison is exact.
     if length > MAX_RECORD_PAYLOAD_LEN as u64 {

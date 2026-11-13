@@ -5,6 +5,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    net::{IpAddr, Ipv4Addr},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -12,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use quinn::{Connection, RecvStream};
+use quinn::{Connection, Endpoint, RecvStream};
 use tokio::{task::JoinHandle, time::Instant};
 use tower::{service_fn, util::BoxCloneService};
 
@@ -28,19 +29,23 @@ use crate::{
         connection::{
             inbound::{
                 block_range::{
-                    RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STREAMS_GLOBAL,
-                    RANGE_STREAMS_PER_PEER,
+                    RANGE_FIRST_WRITE_TIMEOUT, RANGE_MIN_SERVE_RATE, RANGE_PROGRESS_WINDOW,
+                    RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS, RANGE_STALL_ADDRS,
+                    RANGE_STALL_BACKOFF, RANGE_STALL_BACKOFF_MAX, RANGE_STREAMS_GLOBAL,
+                    RANGE_STREAMS_PER_ADDR, RANGE_STREAMS_PER_GROUP, RANGE_STREAMS_PER_PEER,
+                    RANGE_STREAM_TIMEOUT,
                 },
                 global_block_range_permits, global_hashes_permits, serve as serve_request_stream,
                 BlockRangeServing, StreamPermits,
             },
             Events, Overloads,
         },
-        tests::connected_pair,
+        tests::{connected_pair, connected_pair_with},
     },
     protocol::{
         internal::{Request, Response},
         v2::{
+            constants::MAX_GET_BLOCK_RANGE_BYTES,
             request::{GetBlockRange, Request as WireRequest},
             types::ErrorCode,
         },
@@ -574,7 +579,7 @@ async fn wait_for_reads(
 }
 
 /// A peer's range streams beyond [`RANGE_STREAMS_PER_PEER`] are refused at
-/// once, not queued, and its other requests are still served.
+/// once with `BUSY`, not queued, and its other requests are still served.
 #[tokio::test]
 async fn excess_block_range_streams_from_one_peer_are_refused() {
     let _init_guard = zebra_test::init();
@@ -600,7 +605,7 @@ async fn excess_block_range_streams_from_one_peer_are_refused() {
 
         let started = Instant::now();
         let refused = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
         assert!(started.elapsed() < REQUEST_TIMEOUT / 2, "refused at once");
 
         // The range streams hold none of the permits of the other request types, which are
@@ -625,7 +630,8 @@ async fn excess_block_range_streams_from_one_peer_are_refused() {
     .expect("the test completes");
 }
 
-/// Over all peers, range streams beyond [`RANGE_STREAMS_GLOBAL`] are refused.
+/// Over all peers, range streams beyond [`RANGE_STREAMS_GLOBAL`] are refused
+/// with `BUSY`.
 #[tokio::test]
 async fn excess_block_range_streams_over_all_peers_are_refused() {
     let _init_guard = zebra_test::init();
@@ -664,7 +670,7 @@ async fn excess_block_range_streams_over_all_peers_are_refused() {
             BlockRangeServing::new(true, global.clone()),
         );
         let refused = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
         tokio::time::sleep(SHORT_WAIT).await;
         assert!(
             reads(&mut requests).is_empty(),
@@ -747,10 +753,7 @@ async fn block_range_responses_outlive_the_request_deadline() {
         let _server = spawn_server(
             responder,
             service,
-            // A few small blocks every 10 s are below the minimum rate, which is not what this
-            // test is about.
-            BlockRangeServing::new(true, global_block_range_permits())
-                .with_min_progress(0, REQUEST_TIMEOUT),
+            BlockRangeServing::new(true, global_block_range_permits()),
         );
 
         let started = Instant::now();
@@ -850,7 +853,7 @@ async fn block_range_streams_without_a_request_hold_no_node_permits() {
         // Each of those peers has used its own permits.
         let (requester, ..) = &held[0];
         let refused = request_range(requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
 
         // A new peer is served.
         let (requester, responder, _e1, _e2) = connected_pair(&network).await;
@@ -914,12 +917,44 @@ async fn slow_block_range_responses_are_cancelled_at_the_stream_deadline() {
     .expect("the test completes");
 }
 
-/// A range response that writes less than the minimum rate over a progress
-/// window is abandoned before its whole-stream deadline, even if every chunk
-/// is in time: reset with `CANCELLED`, since part of it was written.
+/// A connected pair whose requester grants the responder only `window` bytes
+/// of stream receive window, so the responder's writes wait for the
+/// requester's reads.
+async fn slow_reader_pair(
+    network: &Network,
+    window: u32,
+) -> (Connection, Connection, Endpoint, Endpoint) {
+    let client_config =
+        crate::quic::client_config_with_receive_windows(network, window, 4 * window);
+    connected_pair_with(network, Some(client_config)).await
+}
+
+/// Reads `recv` to its end, `chunk` bytes every `every`, and returns the
+/// bytes read and how the stream ended.
+async fn read_slowly(
+    mut recv: RecvStream,
+    chunk: usize,
+    every: Duration,
+) -> (Vec<u8>, Result<(), quinn::ReadError>) {
+    let mut bytes = Vec::new();
+    let mut buffer = vec![0; chunk];
+    loop {
+        match recv.read(&mut buffer).await {
+            Ok(Some(len)) => bytes.extend_from_slice(&buffer[..len]),
+            Ok(None) => return (bytes, Ok(())),
+            Err(error) => return (bytes, Err(error)),
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
+/// A range response whose reader takes it below the minimum rate is
+/// abandoned while its write waits, long before its stream deadline: reset
+/// with `CANCELLED`, since part of it was written.
 ///
-/// The rate and window are raised and shortened for the test, from
-/// [`RANGE_MIN_SERVE_RATE`] over [`RANGE_PROGRESS_WINDOW`].
+/// The rate, first write deadline and slack are shortened for the test, from
+/// [`RANGE_MIN_SERVE_RATE`], [`RANGE_FIRST_WRITE_TIMEOUT`] and
+/// [`RANGE_PROGRESS_WINDOW`].
 ///
 /// [`RANGE_MIN_SERVE_RATE`]: crate::peer::v2::connection::inbound::block_range::RANGE_MIN_SERVE_RATE
 /// [`RANGE_PROGRESS_WINDOW`]: crate::peer::v2::connection::inbound::block_range::RANGE_PROGRESS_WINDOW
@@ -931,28 +966,449 @@ async fn block_range_responses_below_the_minimum_rate_are_cancelled() {
     let window = Duration::from_secs(1);
 
     tokio::time::timeout(TEST_TIMEOUT, async {
-        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
-        let mut chain_service = ChainService::new(&chain);
-        chain_service.per_call = Some(1);
-        chain_service.delay = Duration::from_millis(300);
-        let (service, _requests) = chain_service.service();
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 1024).await;
+        let (service, _requests) = ChainService::new(&chain).service();
         let _server = spawn_server(
             responder,
             service,
             BlockRangeServing::new(true, global_block_range_permits())
-                .with_min_progress(10 * 1024 * 1024, window),
+                .with_min_progress(4 * 1024, window),
         );
 
-        // One small block every 300 ms is far below 10 MiB/s: the response is abandoned at the
-        // first chunk boundary after the window, long before its stream deadline.
+        // 100 bytes every 100 ms is 1 kB/s, a quarter of the floor: the reader uses up its
+        // slack, and the write that is waiting for it then is abandoned.
         let started = Instant::now();
         let recv = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(recv, ErrorCode::Cancelled).await;
+        let (bytes, end) = read_slowly(recv, 100, Duration::from_millis(100)).await;
         let elapsed = started.elapsed();
+        assert!(
+            matches!(&end, Err(quinn::ReadError::Reset(code))
+                if code.into_inner() == ErrorCode::Cancelled.code()),
+            "expected a CANCELLED reset, got {end:?}"
+        );
+        assert!(!bytes.is_empty(), "part of the response was read");
         assert!(
             elapsed >= window && elapsed < REQUEST_TIMEOUT / 2,
             "the stream was reset by the progress rule, but after {elapsed:?}"
         );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A reader that is slow, but takes the response above the minimum rate, is
+/// served the whole response, however many times the slack it lasts.
+#[tokio::test]
+async fn block_range_responses_above_the_minimum_rate_are_served() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let tip = chain.len() - 1;
+    let window = Duration::from_millis(500);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 1024).await;
+        let (service, _requests) = ChainService::new(&chain).service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global_block_range_permits())
+                .with_min_progress(1024, window),
+        );
+
+        // 256 bytes every 50 ms is about 5 kB/s, several times the floor of 1 KiB/s.
+        let started = Instant::now();
+        let recv = request_range(&requester, tip_range(&chain)).await;
+        let (bytes, end) = read_slowly(recv, 256, Duration::from_millis(50)).await;
+        assert_eq!(end, Ok(()), "the response is finished");
+        assert_eq!(
+            parse(&bytes),
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+        assert!(
+            started.elapsed() > 4 * window,
+            "the response outlived its slack several times"
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A peer that sends a request and never reads the response holds its node
+/// permit for [`RANGE_FIRST_WRITE_TIMEOUT`], not for a request deadline: the
+/// first write waits for flow-control credit that never comes, and is
+/// abandoned while it waits.
+///
+/// This takes `RANGE_FIRST_WRITE_TIMEOUT` of real time.
+#[tokio::test]
+async fn unread_block_range_responses_are_abandoned_within_seconds() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        // Less receive window than the first block needs.
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 256).await;
+        let (service, _requests) = ChainService::new(&chain).service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global.clone()),
+        );
+
+        let started = Instant::now();
+        let mut recv = request_range(&requester, tip_range(&chain)).await;
+        // Wait for the reset without reading: reading would grant the responder credit.
+        let reset = recv.received_reset().await.expect("the stream is open");
+        let elapsed = started.elapsed();
+        assert_eq!(
+            reset.map(quinn::VarInt::into_inner),
+            Some(ErrorCode::Cancelled.code()),
+            "the first write had begun"
+        );
+        assert!(
+            elapsed >= RANGE_FIRST_WRITE_TIMEOUT
+                && elapsed < RANGE_FIRST_WRITE_TIMEOUT + Duration::from_secs(3),
+            "the response was abandoned at the first write deadline, but after {elapsed:?}"
+        );
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert_eq!(
+            global.available_permits(),
+            RANGE_STREAMS_GLOBAL,
+            "the abandoned stream released its node permit"
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A peer whose response was abandoned because it did not read it has its
+/// further range streams answered with `BUSY` for the stall backoff, at once
+/// and without a read, on that connection and on a new connection from the
+/// same address. Other addresses are still served, and so is the peer once
+/// the backoff ends.
+#[tokio::test]
+async fn stalled_block_range_readers_are_answered_busy_for_a_backoff() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let tip = chain.len() - 1;
+    let global = global_block_range_permits();
+    let stalling: IpAddr = "203.0.113.7".parse().expect("an address");
+    let other: IpAddr = "198.51.100.9".parse().expect("an address");
+    let backoff = Duration::from_secs(3);
+    let serving = |remote| {
+        BlockRangeServing::new(true, global.clone())
+            .for_remote(remote)
+            .with_min_progress(4 * 1024, Duration::from_millis(300))
+            .with_stall_backoff(backoff)
+    };
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (service, mut requests) = ChainService::new(&chain).service();
+
+        // The peer never reads its response, which is abandoned.
+        let (requester, responder, _e1, _e2) = slow_reader_pair(&network, 256).await;
+        let _server = spawn_server(responder, service.clone(), serving(stalling));
+        let mut recv = request_range(&requester, tip_range(&chain)).await;
+        let reset = recv.received_reset().await.expect("the stream is open");
+        assert_eq!(
+            reset.map(quinn::VarInt::into_inner),
+            Some(ErrorCode::Cancelled.code())
+        );
+        let stalled_at = Instant::now();
+        assert_eq!(reads(&mut requests).len(), 1, "the response was started");
+
+        // Its next stream is answered with BUSY, on the same connection...
+        let busy = request_range(&requester, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+
+        // ...and on a new one from the same address.
+        let (reconnected, responder, _e3, _e4) = connected_pair(&network).await;
+        let _server = spawn_server(responder, service.clone(), serving(stalling));
+        let busy = request_range(&reconnected, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+        assert!(
+            stalled_at.elapsed() < backoff,
+            "answered within the backoff"
+        );
+
+        // A peer at another address is served.
+        let (bystander, responder, _e5, _e6) = connected_pair(&network).await;
+        let _server = spawn_server(responder, service.clone(), serving(other));
+        let recv = request_range(&bystander, tip_range(&chain)).await;
+        assert_eq!(
+            read_response(recv).await,
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+        assert_eq!(
+            reads(&mut requests).len(),
+            1,
+            "only the bystander's stream made a read"
+        );
+
+        // Once the backoff ends, so is the peer.
+        tokio::time::sleep_until(stalled_at + backoff).await;
+        let recv = request_range(&reconnected, tip_range(&chain)).await;
+        assert_eq!(
+            read_response(recv).await,
+            Parsed::Found(descending(&chain, tip, tip - 9))
+        );
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A response abandoned by this node's own slow read, not by its reader, does
+/// not start a stall backoff: the peer's next stream is served.
+///
+/// This takes `REQUEST_TIMEOUT` of real time.
+#[tokio::test]
+async fn block_range_read_timeouts_start_no_stall_backoff() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+    let remote: IpAddr = "203.0.113.7".parse().expect("an address");
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, _requests) = chain_service.service();
+        let serving = BlockRangeServing::new(true, global.clone()).for_remote(remote);
+        let _server = spawn_server(responder, service, serving);
+
+        let recv = request_range(&requester, tip_range(&chain)).await;
+        // This node ran out of time before it wrote anything, so it is busy, not unwilling.
+        assert_reset(recv, ErrorCode::Busy).await;
+        assert_eq!(global.remembered_stalls(), 0);
+        assert!(!global.backing_off(remote, Instant::now()));
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// The stall backoff doubles each time an address stalls again, up to
+/// [`RANGE_STALL_BACKOFF_MAX`], counts responses that stall together once,
+/// starts again once the address has been clear for long enough, and applies
+/// to an IPv6 address's whole subnet.
+#[test]
+fn block_range_stall_backoff_doubles_up_to_its_cap() {
+    let _init_guard = zebra_test::init();
+    let limits = global_block_range_permits();
+    let addr: IpAddr = "2001:db8:1:2::7".parse().expect("an address");
+    let neighbour: IpAddr = "2001:db8:1:2:ffff::1".parse().expect("an address");
+    let other: IpAddr = "2001:db8:1:3::7".parse().expect("an address");
+    let mut now = Instant::now();
+    let moment = Duration::from_millis(1);
+
+    let mut backoff = RANGE_STALL_BACKOFF;
+    for _ in 0..8 {
+        limits.record_stall(addr, now, RANGE_STALL_BACKOFF);
+        // A second stream that stalls with the first does not add to the backoff.
+        limits.record_stall(neighbour, now + moment, RANGE_STALL_BACKOFF);
+        assert!(limits.backing_off(addr, now + backoff - moment));
+        assert!(limits.backing_off(neighbour, now + backoff - moment));
+        assert!(!limits.backing_off(other, now + moment));
+        assert!(!limits.backing_off(addr, now + backoff));
+        now += backoff;
+        backoff = (backoff * 2).min(RANGE_STALL_BACKOFF_MAX);
+    }
+    assert_eq!(
+        backoff, RANGE_STALL_BACKOFF_MAX,
+        "the backoff reached its cap"
+    );
+
+    // After a clear period, the backoff starts again.
+    now += RANGE_STALL_BACKOFF_MAX;
+    limits.record_stall(addr, now, RANGE_STALL_BACKOFF);
+    assert!(limits.backing_off(addr, now + RANGE_STALL_BACKOFF - moment));
+    assert!(!limits.backing_off(addr, now + RANGE_STALL_BACKOFF));
+}
+
+/// The stalled addresses a node remembers are bounded: more addresses than
+/// [`RANGE_STALL_ADDRS`] replace the ones whose backoff ends first.
+#[test]
+fn block_range_stall_table_is_bounded() {
+    let _init_guard = zebra_test::init();
+    let limits = global_block_range_permits();
+    let start = Instant::now();
+    let addr = |index: usize| -> IpAddr {
+        let index = u32::try_from(index).expect("the test uses few addresses");
+        Ipv4Addr::from(0x0A00_0000 + index).into()
+    };
+
+    for index in 0..RANGE_STALL_ADDRS + 10 {
+        let now = start + Duration::from_millis(u64::try_from(index).expect("small"));
+        limits.record_stall(addr(index), now, RANGE_STALL_BACKOFF);
+    }
+    assert_eq!(limits.remembered_stalls(), RANGE_STALL_ADDRS);
+
+    let now = start + Duration::from_secs(30);
+    assert!(
+        !limits.backing_off(addr(0), now),
+        "the first addresses were dropped"
+    );
+    assert!(
+        limits.backing_off(addr(RANGE_STALL_ADDRS + 9), now),
+        "the last addresses are remembered"
+    );
+}
+
+/// The node's permits are shared between addresses: the connections from one
+/// address hold at most [`RANGE_STREAMS_PER_ADDR`] of them and those from one
+/// address group at most [`RANGE_STREAMS_PER_GROUP`], the rest are answered
+/// with `BUSY`, and a peer in another group is served meanwhile. A share is
+/// returned when its stream ends.
+#[tokio::test]
+async fn node_block_range_permits_are_shared_between_addresses() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+    let in_group = |host: u8| IpAddr::from([203, 0, 113, host]);
+    let elsewhere = IpAddr::from([198, 51, 100, 9]);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, mut requests) = chain_service.service();
+        let connect = |remote: IpAddr| {
+            let (service, global, network) = (service.clone(), global.clone(), &network);
+            async move {
+                let (requester, responder, client_ep, server_ep) = connected_pair(network).await;
+                let serving = BlockRangeServing::new(true, global).for_remote(remote);
+                let server = spawn_server(responder, service, serving);
+                (requester, server, client_ep, server_ep)
+            }
+        };
+
+        // Enough addresses of one group to hold its whole share, each holding its own.
+        let mut held = Vec::new();
+        for host in 0..RANGE_STREAMS_PER_GROUP / RANGE_STREAMS_PER_ADDR {
+            let peer = connect(in_group(u8::try_from(host).expect("few hosts"))).await;
+            let mut streams = Vec::new();
+            for _ in 0..RANGE_STREAMS_PER_ADDR {
+                streams.push(request_range(&peer.0, tip_range(&chain)).await);
+            }
+            held.push((peer, streams));
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_GROUP).await;
+
+        // A second connection from one of those addresses has its own peer permits, but its
+        // address has no share left.
+        let same_addr = connect(in_group(0)).await;
+        let busy = request_range(&same_addr.0, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+
+        // Another address of the group has a share of its own, but the group has none left.
+        let same_group = connect(in_group(200)).await;
+        let busy = request_range(&same_group.0, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+        assert!(
+            global.available_permits() > 0,
+            "the group does not hold every node permit"
+        );
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            reads(&mut requests).is_empty(),
+            "the refused streams made no read"
+        );
+
+        // A peer in another group is served.
+        let bystander = connect(elsewhere).await;
+        let _served = request_range(&bystander.0, tip_range(&chain)).await;
+        wait_for_reads(&mut requests, 1).await;
+
+        // When an address's streams end, its share and its group's are free again.
+        let ((gone, server, ..), streams) = held.remove(0);
+        gone.close(0u32.into(), b"done");
+        server
+            .await
+            .expect("the server task ends with its connection");
+        drop(streams);
+        for _ in 0..RANGE_STREAMS_PER_ADDR {
+            let _served = request_range(&same_group.0, tip_range(&chain)).await;
+            wait_for_reads(&mut requests, 1).await;
+        }
+        drop(held);
+    })
+    .await
+    .expect("the test completes");
+}
+
+/// A reader at the minimum rate takes a whole response of the draft's
+/// largest size within the stream deadline, so holding a node permit for the
+/// deadline costs a full response, and the first write deadline and slack
+/// are a small part of it.
+#[test]
+fn block_range_minimum_rate_serves_the_largest_response_within_the_stream_deadline() {
+    let _init_guard = zebra_test::init();
+    let largest = u64::from(MAX_GET_BLOCK_RANGE_BYTES);
+    let at_floor = Duration::from_secs(largest.div_ceil(RANGE_MIN_SERVE_RATE));
+
+    assert!(at_floor + RANGE_FIRST_WRITE_TIMEOUT <= RANGE_STREAM_TIMEOUT);
+    assert!(RANGE_FIRST_WRITE_TIMEOUT <= RANGE_PROGRESS_WINDOW);
+    assert!(RANGE_PROGRESS_WINDOW < RANGE_STALL_BACKOFF);
+}
+
+/// A range stream the peer stops while this node is reading its blocks is
+/// abandoned at once, releasing its permits, rather than when the read
+/// answers or reaches its deadline.
+#[tokio::test]
+async fn stopped_block_range_streams_abandon_their_read() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let (requester, responder, _e1, _e2) = connected_pair(&network).await;
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, mut requests) = chain_service.service();
+        let _server = spawn_server(
+            responder,
+            service,
+            BlockRangeServing::new(true, global.clone()),
+        );
+
+        let mut streams = Vec::new();
+        for _ in 0..RANGE_STREAMS_PER_PEER {
+            streams.push(request_range(&requester, tip_range(&chain)).await);
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_PEER).await;
+        assert_eq!(
+            global.available_permits(),
+            RANGE_STREAMS_GLOBAL - RANGE_STREAMS_PER_PEER
+        );
+
+        let started = Instant::now();
+        for stream in &mut streams {
+            stream
+                .stop(
+                    ErrorCode::Cancelled
+                        .code()
+                        .try_into()
+                        .expect("a small code"),
+                )
+                .expect("the stream is open");
+        }
+        while global.available_permits() < RANGE_STREAMS_GLOBAL {
+            assert!(
+                started.elapsed() < REQUEST_TIMEOUT / 4,
+                "the stopped streams still hold their node permits"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // The peer's own permits are free too: its next streams are read for.
+        for _ in 0..RANGE_STREAMS_PER_PEER {
+            streams.push(request_range(&requester, tip_range(&chain)).await);
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_PEER).await;
     })
     .await
     .expect("the test completes");

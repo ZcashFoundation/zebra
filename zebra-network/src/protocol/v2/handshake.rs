@@ -25,6 +25,12 @@ use crate::protocol::external::{
 /// The record kind byte of an `init` record (draft, "Connection Handshake").
 pub const INIT_RECORD_KIND: u8 = 0x00;
 
+/// The longest `init` record payload: the kind byte, the version, a 9-byte
+/// services CompactSize, the nonce, a 3-byte length and
+/// [`MAX_USER_AGENT_LENGTH`] bytes of user agent, the start height, and the
+/// three flags.
+pub const MAX_INIT_RECORD_LEN: usize = 1 + 4 + 9 + 8 + 3 + MAX_USER_AGENT_LENGTH + 4 + 3;
+
 /// Decodes a complete handshake stream record payload, as the record codec
 /// yields it: `Some` for an `init` record, `None` for a record kind the
 /// draft says to ignore ("Connection Handshake").
