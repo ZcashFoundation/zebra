@@ -7310,6 +7310,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "criterion",
  "futures",
  "hex",
  "howudoin",
