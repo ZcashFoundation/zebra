@@ -162,8 +162,8 @@ pub enum Request {
     /// Without an eligible source, routing prefers peers that serve historic blocks.
     ///
     /// The wire request is the same single-item `getdata` as [`Request::BlocksByHash`].
-    /// Inbound `getdata` messages decode as [`Request::BlocksByHash`] or, on negotiated connections,
-    /// [`Request::EarlyBlocksByHash`], never this variant.
+    /// Inbound `getdata` messages decode as [`Request::RawBlocksByHash`] or, on negotiated
+    /// connections, [`Request::EarlyRawBlocksByHash`], never this variant.
     ///
     /// # Returns
     ///
@@ -297,8 +297,8 @@ pub enum Request {
     /// This is implemented by sending an `inv` message containing the
     /// block hash, allowing the remote peer to choose whether to download
     /// it. Remote peers who choose to download the block will generate a
-    /// [`Request::BlocksByHash`] or negotiated [`Request::EarlyBlocksByHash`] against the "inbound"
-    /// service passed to [`init`](crate::init).
+    /// [`Request::RawBlocksByHash`] or negotiated [`Request::EarlyRawBlocksByHash`] against the
+    /// "inbound" service passed to [`init`](crate::init).
     ///
     /// Outbound block adverts use [`crate::BlockAdvertiser`], which samples peers and always
     /// includes configured sidecars independently of ordinary request readiness.
