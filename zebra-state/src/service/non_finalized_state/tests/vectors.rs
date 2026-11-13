@@ -1679,6 +1679,87 @@ fn fork_limit_keeps_live_sibling_after_backup_restore() -> Result<()> {
     Ok(())
 }
 
+/// Blocks evicted while restoring the backup were never sent to the block write task, so restoring
+/// must not leave eviction notices for them. A stale notice would remove a later re-delivery of
+/// the evicted block from the state service's sent hashes, so its children would never be
+/// dispatched.
+#[tokio::test]
+async fn backup_restore_discards_eviction_notices() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    let siblings: Vec<_> = (0..=crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS)
+        .map(|i| {
+            block1
+                .make_fake_child()
+                .set_work(10)
+                .set_block_commitment([u8::try_from(i).expect("the fork limit fits in a u8"); 32])
+        })
+        .collect();
+
+    // Back up one more fork than the limit allows, by merging the backups of two states.
+    let (last_sibling, kept_siblings) = siblings.split_last().expect("siblings are not empty");
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for sibling in kept_siblings {
+        state.commit_block(sibling.clone().prepare(), &finalized_state)?;
+    }
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+
+    let mut last_state = NonFinalizedState::new(&network);
+    last_state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    last_state.commit_block(last_sibling.clone().prepare(), &finalized_state)?;
+    let last_backup_dir = tempfile::tempdir()?;
+    last_state.write_to_backup(last_backup_dir.path());
+    for entry in std::fs::read_dir(last_backup_dir.path())? {
+        let entry = entry?;
+        std::fs::copy(entry.path(), backup_dir.path().join(entry.file_name()))?;
+    }
+
+    let (mut restored, _sender, _receiver) = NonFinalizedState::new(&network)
+        .with_backup(
+            Some(backup_dir.path().to_path_buf()),
+            &finalized_state.db,
+            true,
+            true,
+        )
+        .await;
+    assert_eq!(
+        crate::constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+        restored.chain_count()
+    );
+    let restore_evicted = siblings
+        .iter()
+        .find(|sibling| !restored.any_chain_contains(&sibling.hash()))
+        .expect("restoring evicts one fork");
+
+    let mut sent_hashes = crate::service::queued_blocks::SentHashes::new(&restored);
+    assert!(!sent_hashes.contains(&restore_evicted.hash()));
+    assert!(
+        restored.take_evicted_block_hashes().is_empty(),
+        "restoring leaves no eviction notices"
+    );
+
+    // Re-delivering the evicted block keeps it sent, so the state service dispatches its child.
+    let mut redelivered = restore_evicted.clone().prepare();
+    redelivered.received_time = Some(std::time::Instant::now());
+    sent_hashes.add(&redelivered);
+    restored.commit_block(redelivered, &finalized_state)?;
+    sent_hashes.remove_all(restored.take_evicted_block_hashes());
+    assert!(sent_hashes.can_fork_chain_at(&restore_evicted.hash()));
+
+    let child = restore_evicted.make_fake_child().set_work(10);
+    restored.commit_block(child.clone().prepare(), &finalized_state)?;
+    assert_eq!(
+        restored.best_chain().unwrap().non_finalized_tip_hash(),
+        child.hash(),
+    );
+
+    Ok(())
+}
+
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
 ///
 /// Test networks keep more equal-work sibling forks than Mainnet before evicting any.

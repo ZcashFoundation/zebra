@@ -221,7 +221,13 @@ impl NonFinalizedState {
                     .expect("failed to create non-finalized state backup directory");
 
                 if should_restore_backup {
-                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                    let mut restored =
+                        backup::restore_backup(self, &backup_dir_path, &finalized_state);
+                    // The state service's sent hashes are built from the restored chains, so
+                    // blocks evicted while restoring were never sent. A notice for one of them
+                    // would remove a later re-delivery of that block from the sent hashes.
+                    restored.take_evicted_block_hashes();
+                    restored
                 } else {
                     self
                 }
