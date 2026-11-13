@@ -21,7 +21,10 @@ use crate::{
         external::InventoryHash,
         internal::{Request, Response},
         v2::{
-            announcement::{decode_addr_record, decode_block_announcement, decode_tx_record},
+            announcement::{
+                decode_addr_record, decode_block_announcement, decode_tx_record,
+                MAX_ADDR_RECORD_LEN, MAX_BLOCK_ANNOUNCEMENT_LEN, MAX_TX_ANNOUNCEMENT_LEN,
+            },
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::{Violation, WireError},
@@ -31,7 +34,9 @@ use crate::{
     BoxError, PeerSocketAddr,
 };
 
-use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
+use super::{
+    records::RecordReader, refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure,
+};
 
 /// How many announcement batches may wait to be written before new ones are
 /// dropped (draft: announcements are best-effort under backpressure).
@@ -242,8 +247,23 @@ pub(super) async fn serve<S>(
         service: inbound_service,
         overloads: &overloads,
     };
-    let mut records = FramedRead::new(recv, RecordCodec);
+    // # Security
+    //
+    // Each stream is framed with the longest record of its type, so the peer cannot make this
+    // node buffer more of an incomplete record than that, on any of the streams it may open.
+    let max_record_len = match stream_type {
+        StreamType::BlockAnnouncements => MAX_BLOCK_ANNOUNCEMENT_LEN,
+        StreamType::TransactionAnnouncements => MAX_TX_ANNOUNCEMENT_LEN,
+        StreamType::AddressAnnouncements => MAX_ADDR_RECORD_LEN,
+        _ => unreachable!("only announcement types are handed to this task"),
+    };
+    let mut records = RecordReader::new(FramedRead::new(
+        recv,
+        RecordCodec::with_max_payload_len(max_record_len),
+    ));
     loop {
+        // The time spent on the last batch is not the peer's delay.
+        records.pause();
         // One record, waited for; then whatever else has already arrived.
         let Some(first) = records.next().await else {
             break;

@@ -28,6 +28,7 @@ use crate::{
         external::InventoryHash,
         internal::{InventoryResponse, Request, Response},
         v2::{
+            announcement::MAX_ADDR_RECORD_LEN,
             constants::{
                 MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
                 MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS, RESPONSE_MISBEHAVIOR_PENALTY,
@@ -44,10 +45,6 @@ use crate::{
 };
 
 use super::{close_error, Event, Events};
-
-/// The longest `addrv2` record: time, a 9-byte services CompactSize, the
-/// network ID, a 3-byte length, the 512-byte address maximum, and the port.
-const MAX_ADDR_RECORD_LEN: usize = 4 + 9 + 1 + 3 + 512 + 2;
 
 /// The longest `get-addr` response body a conforming peer can send.
 const MAX_ADDR_RESPONSE_LEN: usize = 3 + MAX_ADDRS_PER_RESPONSE * MAX_ADDR_RECORD_LEN;

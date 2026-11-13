@@ -31,13 +31,14 @@ use crate::{
         v2::{
             announcement::{
                 decode_addr_record, decode_block_announcement, decode_tx_record, encode_tx_record,
+                MAX_ADDR_RECORD_LEN, MAX_BLOCK_ANNOUNCEMENT_LEN, MAX_TX_ANNOUNCEMENT_LEN,
             },
             constants::{
                 alpn_protocol_id, MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST,
                 MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
                 MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
             },
-            handshake::{decode_record, InitRecord},
+            handshake::{decode_record, InitRecord, INIT_RECORD_KIND, MAX_INIT_RECORD_LEN},
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request},
             response::{
@@ -249,7 +250,7 @@ fn record_encode_pins_prefix_layout() {
     assert_eq!(&record[4..], payload.as_slice());
 
     assert_eq!(
-        RecordCodec
+        RecordCodec::default()
             .decode(&mut BytesMut::from(&[3u8, 0, 0, 0, 0xAA, 0xBB, 0xCC][..]))
             .expect("well-formed")
             .expect("complete")
@@ -273,7 +274,7 @@ fn record_payload_limit_is_enforced_both_ways() {
         let capacity_before = src.capacity();
 
         assert_err!(
-            RecordCodec.decode(&mut src),
+            RecordCodec::default().decode(&mut src),
             WireError::Flood { field: "record length", count, max }
                 if count == u64::from(length) && max == MAX_RECORD_PAYLOAD_LEN,
             Violation::Close(ErrorCode::Flood)
@@ -287,14 +288,14 @@ fn record_payload_limit_is_enforced_both_ways() {
 
     // Exactly the limit is accepted, and the decoder only reserves on arrival.
     let mut src = BytesMut::from(&limit.to_le_bytes()[..]);
-    assert!(RecordCodec
+    assert!(RecordCodec::default()
         .decode(&mut src)
         .expect("a prefix at the limit is allowed")
         .is_none());
     assert!(src.capacity() < MAX_RECORD_PAYLOAD_LEN);
 
     src.resize(4 + MAX_RECORD_PAYLOAD_LEN, 0);
-    let record = RecordCodec
+    let record = RecordCodec::default()
         .decode(&mut src)
         .expect("a record at the limit is well-formed")
         .expect("the whole payload is in the buffer");
@@ -302,27 +303,27 @@ fn record_payload_limit_is_enforced_both_ways() {
 
     // A flood is still a flood at EOF.
     assert!(matches!(
-        RecordCodec.decode_eof(&mut BytesMut::from(&u32::MAX.to_le_bytes()[..])),
+        RecordCodec::default().decode_eof(&mut BytesMut::from(&u32::MAX.to_le_bytes()[..])),
         Err(WireError::Flood { .. })
     ));
 
     // A stream that ends mid-record is a protocol error; an empty or exactly consumed one is not.
     assert_err!(
-        RecordCodec.decode_eof(&mut BytesMut::from(&[3u8, 0][..])),
+        RecordCodec::default().decode_eof(&mut BytesMut::from(&[3u8, 0][..])),
         WireError::Truncated { what: "record" },
         Violation::Close(ErrorCode::ProtocolError)
     );
-    assert!(RecordCodec
+    assert!(RecordCodec::default()
         .decode_eof(&mut BytesMut::new())
         .expect("an empty finished stream is fine")
         .is_none());
     let mut src = BytesMut::from(&[1u8, 0, 0, 0, 0x11][..]);
-    let last = RecordCodec
+    let last = RecordCodec::default()
         .decode_eof(&mut src)
         .expect("a finished stream ending on a record boundary is fine")
         .expect("the final record is yielded");
     assert_eq!(last.as_ref(), [0x11]);
-    assert!(RecordCodec
+    assert!(RecordCodec::default()
         .decode_eof(&mut src)
         .expect("an exactly consumed stream is fine")
         .is_none());
@@ -371,6 +372,119 @@ fn record_payload_limit_is_enforced_both_ways() {
         }
         .close_code(),
         ErrorCode::Flood
+    );
+}
+
+/// A stream's decoder takes records up to the longest its type allows: a
+/// longer record is a `PROTOCOL_ERROR` from its length prefix alone, so
+/// nothing of it is buffered, and above the record limit it is still a
+/// `FLOOD`.
+#[test]
+fn record_decoder_bounds_records_by_stream_type() {
+    assert_eq!(MAX_TX_ANNOUNCEMENT_LEN, 65);
+    assert_eq!(MAX_ADDR_RECORD_LEN, 531);
+    // The kind byte and the longest header: a Mainnet header has the longest solution.
+    let header = test_block(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+        .header
+        .zcash_serialize_to_vec()
+        .expect("serializes");
+    assert_eq!(MAX_BLOCK_ANNOUNCEMENT_LEN, 1 + header.len());
+
+    let mut codec = RecordCodec::with_max_payload_len(MAX_TX_ANNOUNCEMENT_LEN);
+    let at_limit = RecordCodec::encode_record([0x5A; MAX_TX_ANNOUNCEMENT_LEN]).expect("valid");
+    let record = codec
+        .decode(&mut BytesMut::from(&at_limit[..]))
+        .expect("a record at the stream's limit is well-formed")
+        .expect("complete");
+    assert_eq!(record.len(), MAX_TX_ANNOUNCEMENT_LEN);
+
+    // `MAX_TX_ANNOUNCEMENT_LEN` is 65, which fits in a `u32`.
+    let over_limit = MAX_TX_ANNOUNCEMENT_LEN as u32 + 1;
+    assert_err!(
+        codec.decode(&mut BytesMut::from(&over_limit.to_le_bytes()[..])),
+        WireError::Nonconforming { what: "record", .. },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+    // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, which fits in a `u32`.
+    let flood = MAX_RECORD_PAYLOAD_LEN as u32 + 1;
+    assert_err!(
+        codec.decode(&mut BytesMut::from(&flood.to_le_bytes()[..])),
+        WireError::Flood { .. },
+        Violation::Close(ErrorCode::Flood)
+    );
+}
+
+/// The handshake stream's decoder reads `init` records whole and skips a
+/// longer record of another kind as it arrives, yielding its kind byte, so
+/// records of unknown kinds are ignored without being buffered. A longer
+/// `init` record is a `PROTOCOL_ERROR`.
+#[test]
+fn handshake_decoder_skips_long_records_of_unknown_kinds() {
+    // The longest `init` record: every services bit, and the longest user agent.
+    let longest = InitRecord {
+        services: PeerServices::from_bits_retain(u64::MAX),
+        user_agent: "a".repeat(MAX_USER_AGENT_LENGTH),
+        ..init_vector().0
+    };
+    assert_eq!(longest.encode().len(), MAX_INIT_RECORD_LEN);
+    assert_eq!(MAX_INIT_RECORD_LEN, 288);
+
+    let mut codec = RecordCodec::skipping_unknown_kinds(MAX_INIT_RECORD_LEN, INIT_RECORD_KIND);
+    let mut src = BytesMut::from(
+        &RecordCodec::encode_record(longest.encode()).expect("within the limit")[..],
+    );
+    let record = codec.decode(&mut src).expect("well-formed").expect("whole");
+    assert_eq!(decode_record(&record).expect("decodes"), Some(longest));
+
+    // A maximum-size record of an unknown kind, arriving in pieces: nothing stays buffered.
+    let mut payload = vec![0xEE; MAX_RECORD_PAYLOAD_LEN];
+    payload[0] = 0x07;
+    let wire = RecordCodec::encode_record(&payload).expect("at the limit");
+    let mut src = BytesMut::new();
+    let mut yielded = Vec::new();
+    for chunk in wire.chunks(64 * 1024) {
+        src.extend_from_slice(chunk);
+        if let Some(record) = codec.decode(&mut src).expect("well-formed") {
+            yielded.push(record);
+        }
+        assert!(src.is_empty(), "the skipped bytes are not kept");
+    }
+    assert_eq!(yielded.len(), 1);
+    assert_eq!(yielded[0].as_ref(), [0x07]);
+    assert!(!codec.is_skipping());
+    assert_eq!(decode_record(&yielded[0]).expect("an unknown kind"), None);
+
+    // The record after it is read as usual.
+    src.extend_from_slice(&RecordCodec::encode_record([0x09, 1, 2]).expect("valid"));
+    let next = codec.decode(&mut src).expect("well-formed").expect("whole");
+    assert_eq!(next.as_ref(), [0x09, 1, 2]);
+
+    // A stream that ends part way through a skipped record is truncated.
+    let mut src = BytesMut::from(&wire[..1024]);
+    assert!(codec.decode(&mut src).expect("well-formed").is_none());
+    assert!(codec.is_skipping());
+    assert_err!(
+        codec.decode_eof(&mut src),
+        WireError::Truncated { what: "record" },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+
+    // An `init` record longer than any conforming one is rejected from its kind byte.
+    let mut codec = RecordCodec::skipping_unknown_kinds(MAX_INIT_RECORD_LEN, INIT_RECORD_KIND);
+    // `MAX_INIT_RECORD_LEN` is 288, which fits in a `u32`.
+    let mut src = BytesMut::from(&(MAX_INIT_RECORD_LEN as u32 + 1).to_le_bytes()[..]);
+    assert!(codec.decode(&mut src).expect("no kind byte yet").is_none());
+    src.extend_from_slice(&[INIT_RECORD_KIND]);
+    assert_err!(
+        codec.decode(&mut src),
+        WireError::Nonconforming { what: "record", .. },
+        Violation::Close(ErrorCode::ProtocolError)
+    );
+    // And a flood is a flood whatever its kind.
+    assert_err!(
+        codec.decode(&mut BytesMut::from(&u32::MAX.to_le_bytes()[..])),
+        WireError::Flood { .. },
+        Violation::Close(ErrorCode::Flood)
     );
 }
 

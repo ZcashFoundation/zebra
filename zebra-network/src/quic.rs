@@ -71,16 +71,38 @@ const MAX_CONCURRENT_UNI_STREAMS: u32 = 2 * MIN_UNIDIRECTIONAL_STREAMS;
 /// drop a healthy connection.
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// The per-stream receive window, in bytes: two maximum-size records, so a
-/// block announcement or a `get-blocks` entry never stalls on flow control
-/// alone; the draft's 16 MiB bulk recommendation waits for the bulk stream types.
+/// The per-stream receive window, in bytes: two maximum-size elements, so a
+/// `get-blocks` entry never stalls on flow control alone; the draft's 16 MiB bulk recommendation waits for the bulk stream types.
 // `MAX_RECORD_PAYLOAD_LEN` is 2 MiB, so the product fits in a `u32`; checked below.
 const STREAM_RECEIVE_WINDOW: u32 = (2 * MAX_RECORD_PAYLOAD_LEN) as u32;
 
-/// The per-connection receive window, in bytes: two streams, so at most 8 MiB
-/// buffered per peer, or about 790 MiB if every one of the default 99 version 2
-/// connections filled its window; the draft's 64 MiB bulk recommendation waits
-/// for the bulk stream types.
+/// The per-connection receive window, in bytes: two streams, so the transport
+/// buffers at most 8 MiB that this node has not read yet per peer, or about
+/// 790 MiB if every one of the default 99 version 2 connections filled its
+/// window; the draft's 64 MiB bulk recommendation waits for the bulk stream
+/// types.
+///
+/// # Security
+///
+/// The window bounds what the transport buffers, not what the connection has
+/// read from it and still holds, which the peer also controls:
+///
+/// - On the handshake stream and each of the six announcement streams a peer
+///   may have open, an incomplete record of at most the longest record of the
+///   stream's type, under 1.5 KiB, for at most the incomplete record
+///   timeout, and a read buffer of a few KiB. A longer record is rejected
+///   from its length prefix, or skipped as it arrives.
+/// - The bodies of the two requests served at once, until the request
+///   deadline: the longest is a `get-tx` request of 50,000 references, about
+///   3.1 MiB, and about as much again once it is decoded.
+/// - The response element being read on each of this node's four request
+///   streams, at most 2 MiB each, and the objects already read, which this
+///   node asked for.
+///
+/// So a peer can make this node hold about 8 MiB in the transport and about
+/// 12.5 MiB of request bodies without being asked for anything, and another
+/// 8 MiB of response elements while this node has four requests to it in
+/// flight: under 30 MiB per peer, most of it only until a request deadline.
 const CONNECTION_RECEIVE_WINDOW: u32 = 2 * STREAM_RECEIVE_WINDOW;
 
 /// The most bytes this node keeps buffered for sending on one connection,

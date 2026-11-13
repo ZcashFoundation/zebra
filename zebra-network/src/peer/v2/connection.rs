@@ -31,7 +31,6 @@ use tokio::{
     sync::{mpsc, Semaphore},
     task::JoinSet,
 };
-use tokio_util::codec::FramedRead;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
@@ -65,11 +64,13 @@ use super::{handshake::CompletedHandshake, misbehavior::MisbehaviorScores};
 mod announcements;
 mod inbound;
 mod outbound;
+mod records;
 
 #[cfg(test)]
 mod tests;
 
 use announcements::{AnnouncementPermits, AnnouncementWriter};
+use records::RecordReader;
 
 /// What this node provides to every version 2 connection.
 #[derive(Clone)]
@@ -129,7 +130,8 @@ const EVENT_QUEUE: usize = 64;
 ///
 /// The draft has these records ignored, so that later revisions can define
 /// new kinds (draft, "Connection Handshake": a node MUST ignore them), but
-/// each one still costs a read of up to a maximum-size record. Pausing the
+/// each one still costs a read of up to a maximum-size record, which is
+/// skipped as it arrives rather than buffered. Pausing the
 /// reads applies backpressure instead of closing the connection (draft,
 /// "Misbehavior and Banning": rate limits and backpressure): once the
 /// stream's receive window of unread records fills, the peer's flow control
@@ -241,8 +243,7 @@ impl Overloads {
             prev => Some(self.origin + Duration::from_millis(prev - 1)),
         };
 
-        let interval =
-            u64::try_from(OVERLOAD_PROTECTION_INTERVAL.as_millis()).unwrap_or(u64::MAX);
+        let interval = u64::try_from(OVERLOAD_PROTECTION_INTERVAL.as_millis()).unwrap_or(u64::MAX);
         let last_roll = self.last_roll.load(Ordering::Relaxed);
         // Stream tasks read the clock on their own, so a later failure can carry a slightly
         // earlier time: the subtraction saturates, which counts it as part of the same burst.
@@ -404,7 +405,7 @@ where
         get_addr_allowed: Arc::new(AtomicBool::new(is_inbound)),
         connection_info: connection_info.clone(),
         transient_addr,
-        handshake_recv: recv,
+        handshake_recv: RecordReader::new(recv),
         _handshake_send: send,
         params,
         client_rx: server_rx.into(),
@@ -470,7 +471,8 @@ struct ConnectionTask<S> {
     get_addr_allowed: Arc<AtomicBool>,
     connection_info: Arc<ConnectionInfo>,
     transient_addr: Option<PeerSocketAddr>,
-    handshake_recv: FramedRead<RecvStream, RecordCodec>,
+    /// The peer's side of the handshake stream, read for the connection's life.
+    handshake_recv: RecordReader<RecvStream>,
     /// Kept open for the connection's life; finishing it would signal intent to disconnect.
     _handshake_send: SendStream,
     params: ConnectionParams<S>,
@@ -676,6 +678,8 @@ where
                             "too many handshake records of unknown kinds, \
                              pausing reads of the handshake stream"
                         );
+                        // The pause is this node's, not the peer's delay.
+                        self.handshake_recv.pause();
                         self.handshake_paused_until = Some(
                             self.unknown_handshake_records_since
                                 + UNKNOWN_HANDSHAKE_RECORD_INTERVAL,

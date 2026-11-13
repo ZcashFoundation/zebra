@@ -27,6 +27,23 @@ pub const BLOCK_ANNOUNCEMENT_HEADER: u8 = 0x00;
 /// The `kind` byte of a compact block announcement.
 pub const BLOCK_ANNOUNCEMENT_COMPACT: u8 = 0x01;
 
+/// The longest block announcement record payload this node accepts: the kind
+/// byte and a header, which is 140 bytes of fixed fields and a 1,344-byte
+/// Equihash solution with its 3-byte length. A compact block announcement can
+/// be longer, but this node sets `announce = 0`, so a peer must not send it
+/// one.
+pub const MAX_BLOCK_ANNOUNCEMENT_LEN: usize = 1 + 140 + 3 + 1344;
+
+/// The longest `addrv2` record, which is an address announcement record's
+/// payload and an entry of a `get-addr` response: time, a 9-byte services
+/// CompactSize, the network ID, a 3-byte length, the 512-byte address
+/// maximum, and the port.
+pub const MAX_ADDR_RECORD_LEN: usize = 4 + 9 + 1 + 3 + 512 + 2;
+
+/// The longest transaction announcement record payload: a reference of the
+/// largest type.
+pub const MAX_TX_ANNOUNCEMENT_LEN: usize = TxRef::MAX_ENCODED_LEN;
+
 /// Decodes a block announcement record into its header (draft, "Block Announcements").
 ///
 /// This node sets `announce = 0`, so a compact block (`kind = 0x01`) is a record the peer must not

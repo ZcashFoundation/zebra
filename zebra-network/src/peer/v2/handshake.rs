@@ -21,7 +21,7 @@ use crate::{
     protocol::{
         external::types::{Nonce, PeerServices, Version},
         v2::{
-            handshake::{decode_record, InitRecord},
+            handshake::{decode_record, InitRecord, INIT_RECORD_KIND, MAX_INIT_RECORD_LEN},
             record::RecordCodec,
             types::{ErrorCode, StreamType},
             wire::WireError,
@@ -269,7 +269,13 @@ async fn run<C: ChainTip>(
     // for the initiator's record (draft, "Handshake Sequence").
     send.write_all(&our_record).await?;
 
-    let mut recv = FramedRead::new(recv, RecordCodec);
+    // Only an `init` record is read whole: a longer record of another kind is skipped as it
+    // arrives, so the peer cannot make this node buffer one (draft, "Connection Handshake": a
+    // node MUST ignore record kinds it does not know).
+    let mut recv = FramedRead::new(
+        recv,
+        RecordCodec::skipping_unknown_kinds(MAX_INIT_RECORD_LEN, INIT_RECORD_KIND),
+    );
     let remote = loop {
         let payload = recv.next().await.ok_or(HandshakeError::StreamFinished)??;
         match decode_record(&payload)? {

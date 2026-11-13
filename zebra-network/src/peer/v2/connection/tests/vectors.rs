@@ -56,6 +56,7 @@ use crate::{
             },
             txref::{ShortTxId, TxRef},
             types::{ErrorCode, StreamType},
+            wire::WireError,
         },
     },
     quic::app_error_code,
@@ -367,7 +368,7 @@ async fn raw_peer_node_scored(
     let (completed, hs_recv) = tokio::join!(
         run_handshake(&inbound, Role::Responder, network, &b, &nonces),
         async {
-            let mut framed = tokio_util::codec::FramedRead::new(hs_recv, RecordCodec);
+            let mut framed = tokio_util::codec::FramedRead::new(hs_recv, RecordCodec::default());
             let payload = framed.next().await.expect("init").expect("valid");
             assert_eq!(payload[0], INIT_RECORD_KIND);
             framed.into_inner()
@@ -633,6 +634,9 @@ async fn violations_close_the_connection() {
             "duplicate announcement stream",
             "nonconforming announcement record",
             "oversized announcement prefix",
+            "announcement record longer than its type allows",
+            "oversized record of an unknown kind then second init",
+            "oversized second init",
             "bi stream finished before type byte",
             "uni stream finished before type byte",
             "oversize request",
@@ -726,6 +730,37 @@ async fn violations_close_the_connection() {
                     std::mem::forget(send);
                     Some((ErrorCode::Flood, "ProtocolViolation"))
                 }
+                "announcement record longer than its type allows" => {
+                    // One byte more than a transaction announcement can be: the violation is
+                    // the length prefix, so the payload is never sent.
+                    let mut send = raw.connection.open_uni().await.expect("opens");
+                    send.write_all(&[StreamType::TransactionAnnouncements.code()])
+                        .await
+                        .expect("writes");
+                    send.write_all(&66u32.to_le_bytes()).await.expect("writes");
+                    std::mem::forget(send);
+                    Some((ErrorCode::ProtocolError, "ProtocolViolation"))
+                }
+                "oversized record of an unknown kind then second init" => {
+                    // A maximum-size record of an unknown kind is skipped as it arrives, and
+                    // ignored like a short one.
+                    let mut unknown = vec![0xEE; MAX_RECORD_PAYLOAD_LEN];
+                    unknown[0] = 0x07;
+                    let unknown = RecordCodec::encode_record(&unknown).expect("valid");
+                    raw.hs_send.write_all(&unknown).await.expect("writes");
+                    raw.hs_send
+                        .write_all(&raw.init_record)
+                        .await
+                        .expect("writes");
+                    Some((ErrorCode::ProtocolError, "DuplicateHandshake"))
+                }
+                "oversized second init" => {
+                    // Longer than any `init` record: rejected from its prefix and kind byte.
+                    let mut record = 4096u32.to_le_bytes().to_vec();
+                    record.push(INIT_RECORD_KIND);
+                    raw.hs_send.write_all(&record).await.expect("writes");
+                    Some((ErrorCode::ProtocolError, "ProtocolViolation"))
+                }
                 "bi stream finished before type byte" => {
                     let (mut send, _recv) = raw.connection.open_bi().await.expect("opens");
                     send.finish().expect("finishes");
@@ -802,6 +837,71 @@ async fn violations_close_the_connection() {
     })
     .await
     .expect("the test completes well within the timeout");
+}
+
+/// A record that is still incomplete a while after its first byte arrived
+/// ends its stream with a `FLOOD` error, whether it is being buffered or
+/// skipped, and a stream with no record part way through can stay quiet for
+/// as long as it likes.
+#[tokio::test(start_paused = true)]
+async fn incomplete_records_are_not_held_past_their_timeout() {
+    use tokio::io::AsyncWriteExt;
+
+    use crate::peer::v2::connection::records::{RecordReader, INCOMPLETE_RECORD_TIMEOUT};
+
+    let reader = |recv, codec| RecordReader::new(tokio_util::codec::FramedRead::new(recv, codec));
+
+    // A quiet stream is not timed, before or after a complete record.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(recv, RecordCodec::with_max_payload_len(65));
+    let quiet = tokio::time::timeout(10 * INCOMPLETE_RECORD_TIMEOUT, records.next()).await;
+    assert!(quiet.is_err(), "a stream with no record is not timed");
+    let record = RecordCodec::encode_record([1, 2, 3]).expect("valid");
+    send.write_all(&record).await.expect("writes");
+    let read = records.next().await.expect("open").expect("well-formed");
+    assert_eq!(read.as_ref(), [1, 2, 3]);
+    let quiet = tokio::time::timeout(10 * INCOMPLETE_RECORD_TIMEOUT, records.next()).await;
+    assert!(quiet.is_err(), "a stream between records is not timed");
+
+    // The first bytes of a record start its timeout, and later bytes do not extend it.
+    send.write_all(&record[..2]).await.expect("writes");
+    let started = Instant::now();
+    let waiting = tokio::time::timeout(INCOMPLETE_RECORD_TIMEOUT / 2, records.next()).await;
+    assert!(waiting.is_err(), "the record has time to arrive");
+    send.write_all(&record[2..5]).await.expect("writes");
+    let stalled = records.next().await.expect("the stream is open");
+    assert!(
+        matches!(stalled, Err(WireError::Stalled { what: "record" })),
+        "got {stalled:?}"
+    );
+    assert_eq!(stalled.expect_err("stalled").close_code(), ErrorCode::Flood);
+    assert_eq!(started.elapsed(), INCOMPLETE_RECORD_TIMEOUT);
+
+    // A reader that stops reading does not count that time against the peer.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(recv, RecordCodec::with_max_payload_len(65));
+    send.write_all(&record[..2]).await.expect("writes");
+    assert!(records.next().now_or_never().is_none());
+    tokio::time::sleep(2 * INCOMPLETE_RECORD_TIMEOUT).await;
+    records.pause();
+    send.write_all(&record[2..]).await.expect("writes");
+    let read = records.next().await.expect("open").expect("well-formed");
+    assert_eq!(read.as_ref(), [1, 2, 3]);
+
+    // A record that is being skipped holds nothing, and is timed all the same.
+    let (mut send, recv) = tokio::io::duplex(1024);
+    let mut records = reader(
+        recv,
+        RecordCodec::skipping_unknown_kinds(16, INIT_RECORD_KIND),
+    );
+    let mut long = 1000u32.to_le_bytes().to_vec();
+    long.extend_from_slice(&[0x07; 100]);
+    send.write_all(&long).await.expect("writes");
+    let stalled = records.next().await.expect("the stream is open");
+    assert!(
+        matches!(stalled, Err(WireError::Stalled { what: "record" })),
+        "got {stalled:?}"
+    );
 }
 
 /// Asserts that a read of a request stream's response failed because the
@@ -1252,7 +1352,7 @@ async fn mempool_snapshot_is_capped() {
         let raw = raw_peer_node_with(&network, Some(BoxCloneService::new(service))).await;
 
         let recv = raw_request(&raw.connection, &WireRequest::Mempool).await;
-        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec::default());
         let mut count = 0;
         while let Some(record) = records.next().await {
             record.expect("well-formed record");
@@ -1289,7 +1389,7 @@ async fn mempool_snapshot_and_unserved_requests() {
             .await
             .expect("writes");
         send.finish().expect("finishes");
-        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec);
+        let mut records = tokio_util::codec::FramedRead::new(recv, RecordCodec::default());
         let mut ids = Vec::new();
         while let Some(record) = records.next().await {
             let payload = record.expect("well-formed record");
@@ -3035,8 +3135,7 @@ async fn overloaded_requests_close_the_connection() {
 #[test]
 fn overloads_of_one_burst_roll_once() {
     use crate::constants::{
-        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
-        OVERLOAD_PROTECTION_INTERVAL,
+        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
     };
 
     let overloads = Overloads::new();
