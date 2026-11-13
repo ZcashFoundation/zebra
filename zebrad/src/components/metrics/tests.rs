@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 use super::{catalog, describe_all, HISTOGRAM_BUCKETS};
 
 mod call_sites;
+#[cfg(feature = "prometheus")]
+mod exporter;
 mod queries;
 
 /// The checked-in catalog, relative to the workspace root.

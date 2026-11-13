@@ -75,16 +75,9 @@ impl MetricsEndpoint {
     {
         info!("Trying to open metrics endpoint at {}...", addr);
 
-        let mut builder =
-            metrics_exporter_prometheus::PrometheusBuilder::new().with_http_listener(addr);
-        for (name, buckets) in HISTOGRAM_BUCKETS {
-            builder = builder
-                .set_buckets_for_metric(
-                    metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
-                    buckets,
-                )
-                .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?;
-        }
+        let builder = prometheus_builder()
+            .map_err(|e| FrameworkErrorKind::ComponentError.context(e))?
+            .with_http_listener(addr);
 
         let endpoint_result = match other {
             Some(other) => install_alongside(builder, other),
@@ -131,6 +124,23 @@ impl MetricsEndpoint {
 
         other.map_or(Ok(false), |other| install(other).map(|()| true))
     }
+}
+
+/// Returns a Prometheus exporter builder that exports each histogram in [`HISTOGRAM_BUCKETS`] with
+/// its buckets.
+#[cfg(feature = "prometheus")]
+fn prometheus_builder(
+) -> Result<metrics_exporter_prometheus::PrometheusBuilder, metrics_exporter_prometheus::BuildError>
+{
+    HISTOGRAM_BUCKETS.iter().try_fold(
+        metrics_exporter_prometheus::PrometheusBuilder::new(),
+        |builder, (name, buckets)| {
+            builder.set_buckets_for_metric(
+                metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
+                buckets,
+            )
+        },
+    )
 }
 
 /// Describes every metric Zebra records to the current recorder.
