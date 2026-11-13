@@ -16,6 +16,14 @@ use crate::common::config::default_test_config;
 #[tokio::test]
 #[cfg(feature = "prometheus")]
 async fn metrics_endpoint() -> Result<()> {
+    use std::time::Duration;
+
+    use color_eyre::eyre::eyre;
+
+    /// How long to wait for the first process metrics sample after the endpoint opens.
+    const PROCESS_METRICS_TIMEOUT: Duration = Duration::from_secs(10);
+    const PROCESS_METRICS_TYPE_LINE: &str = "# TYPE process_resident_memory_bytes gauge";
+
     let _init_guard = zebra_test::init();
 
     // TODO: exporter hides its bound address; this handoff can race until it accepts a listener.
@@ -39,14 +47,23 @@ async fn metrics_endpoint() -> Result<()> {
     // Create an http client
     let client = reqwest::Client::builder().timeout(LAUNCH_DELAY).build()?;
 
-    // Test metrics endpoint
-    let res = client.get(url).send().await;
+    // The endpoint opens before the first process sample is recorded, so poll until it appears.
+    let body = tokio::time::timeout(PROCESS_METRICS_TIMEOUT, async {
+        loop {
+            let res = client.get(&url).send().await?.error_for_status()?;
+            let body = res.bytes().await?;
+            if String::from_utf8_lossy(&body).contains(PROCESS_METRICS_TYPE_LINE) {
+                return Ok::<_, reqwest::Error>(body);
+            }
 
-    let (res, child) = child.kill_on_error(res)?;
-    assert!(res.status().is_success());
-
-    // Get the body of the response
-    let body = res.bytes().await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        eyre!("metrics endpoint did not report process metrics within {PROCESS_METRICS_TIMEOUT:?}")
+    })
+    .and_then(|body| body.map_err(Into::into));
     let (body, mut child) = child.kill_on_error(body)?;
     child.kill(false)?;
 
@@ -60,6 +77,13 @@ async fn metrics_endpoint() -> Result<()> {
         "the metrics response header",
     )?;
     std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in metrics exporter response");
+
+    output.any_output_line_contains(
+        PROCESS_METRICS_TYPE_LINE,
+        &body,
+        "metrics exporter response",
+        "the process metrics",
+    )?;
 
     output.assert_was_killed()?;
 

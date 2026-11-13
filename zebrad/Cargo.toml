@@ -198,6 +198,7 @@ tracing-error = { workspace = true }
 tracing = { workspace = true }
 
 metrics = { workspace = true }
+metrics-process = { workspace = true }
 
 dirs = { workspace = true }
 

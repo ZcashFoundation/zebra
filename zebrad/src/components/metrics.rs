@@ -2,11 +2,14 @@
 
 #![allow(non_local_definitions)]
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use abscissa_core::{Component, FrameworkError, FrameworkErrorKind};
 use metrics::Recorder;
 use serde::{Deserialize, Serialize};
+
+/// How often the process metrics are sampled.
+const PROCESS_METRICS_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Abscissa component which runs a metrics endpoint.
 #[derive(Debug, Component)]
@@ -20,18 +23,27 @@ impl MetricsEndpoint {
         #[cfg(not(feature = "sentry"))]
         let sentry = None::<metrics::NoopRecorder>;
 
-        if let Some(addr) = config.endpoint_addr {
-            Self::open_endpoint(addr, sentry)?;
+        let recorder_installed = if let Some(addr) = config.endpoint_addr {
+            Self::open_endpoint(addr, sentry)?
         } else if let Some(sentry) = sentry {
             install(sentry)?;
+            true
+        } else {
+            false
+        };
+
+        if recorder_installed {
+            spawn_process_metrics()?;
         }
 
         Ok(Self {})
     }
 
     /// Opens the Prometheus endpoint, also recording metrics with `other` if it is provided.
+    ///
+    /// Returns whether a global recorder was installed.
     #[cfg(feature = "prometheus")]
-    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<(), FrameworkError>
+    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<bool, FrameworkError>
     where
         R: Recorder + Send + Sync + 'static,
     {
@@ -64,13 +76,15 @@ impl MetricsEndpoint {
             ),
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// Warns that the endpoint can't be opened, and records metrics with `other` if it is
     /// provided.
+    ///
+    /// Returns whether a global recorder was installed.
     #[cfg(not(feature = "prometheus"))]
-    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<(), FrameworkError>
+    fn open_endpoint<R>(addr: SocketAddr, other: Option<R>) -> Result<bool, FrameworkError>
     where
         R: Recorder + Send + Sync + 'static,
     {
@@ -80,8 +94,27 @@ impl MetricsEndpoint {
              enable the 'prometheus' feature when compiling zebrad",
         );
 
-        other.map_or(Ok(()), install)
+        other.map_or(Ok(false), |other| install(other).map(|()| true))
     }
+}
+
+/// Records the process metrics through the global recorder, which must already be installed.
+///
+/// Samples once immediately, then every [`PROCESS_METRICS_INTERVAL`] on a dedicated thread, so
+/// the readings neither depend on a backend nor run on a Tokio worker.
+fn spawn_process_metrics() -> Result<(), FrameworkError> {
+    let collector = metrics_process::Collector::default();
+    collector.describe();
+    collector.collect();
+
+    std::thread::Builder::new()
+        .name("process-metrics".to_owned())
+        .spawn(move || loop {
+            std::thread::sleep(PROCESS_METRICS_INTERVAL);
+            collector.collect();
+        })
+        .map(drop)
+        .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
 }
 
 /// Installs `recorder` as the global metrics recorder.
