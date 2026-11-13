@@ -174,8 +174,9 @@ fn zcash_deserialize_block_transactions<R: io::Read>(
     reader: &mut io::Take<R>,
 ) -> Result<Vec<Arc<Transaction>>, SerializationError> {
     let count: CompactSizeMessage = (&mut *reader).zcash_deserialize_into()?;
-    let count: usize = count.into();
-    if count as u64 > Transaction::max_allocation() {
+    let count = u64::try_from(usize::from(count))
+        .map_err(|_| SerializationError::Parse("transaction count doesn't fit in a u64"))?;
+    if count > Transaction::max_allocation() {
         return Err(SerializationError::Parse(
             "Vector longer than max_allocation",
         ));
@@ -183,7 +184,7 @@ fn zcash_deserialize_block_transactions<R: io::Read>(
 
     let start = reader.limit();
     let mut transactions = Vec::new();
-    for parsed in 1..=count as u64 {
+    for parsed in 1..=count {
         transactions.push((&mut *reader).zcash_deserialize_into()?);
 
         if start - reader.limit() < parsed * MIN_TRANSPARENT_TX_SIZE {
