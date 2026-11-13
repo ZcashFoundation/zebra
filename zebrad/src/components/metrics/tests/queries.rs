@@ -62,14 +62,11 @@ fn queries_use_exported_series() {
         queries.extend(expressions.into_iter().map(|expr| (path.clone(), expr)));
     }
 
-    let rule_expr = Regex::new(r"(?m)^\s*expr:\s*(.+)$").expect("valid regex");
     for path in files_with_extension(&root.join("prometheus/rules"), "yml") {
         let rules = std::fs::read_to_string(&path).expect("rules are readable");
-        queries.extend(
-            rule_expr
-                .captures_iter(&rules)
-                .map(|captures| (path.clone(), captures[1].to_owned())),
-        );
+        let expressions =
+            rule_expressions(&rules).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        queries.extend(expressions.into_iter().map(|expr| (path.clone(), expr)));
     }
 
     let readme_query = Regex::new(r"query\?query=([^'\s]+)").expect("valid regex");
@@ -143,6 +140,45 @@ fn dashboard_queries(value: &Value, queries: &mut Vec<String>) {
     }
 }
 
+/// Returns the `expr` values of the Prometheus rules file `rules`.
+///
+/// The workspace has no YAML parser, so this only reads `expr` values written as plain scalars on
+/// one line. It returns an error for any other form, such as a quoted or block scalar, instead of
+/// skipping an expression it can't check.
+fn rule_expressions(rules: &str) -> Result<Vec<String>, String> {
+    let expr_key = Regex::new(r"^(\s*(?:-\s+)?)expr:(\s.*)?$").expect("valid regex");
+    let lines: Vec<&str> = rules.lines().collect();
+
+    let mut expressions = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(captures) = expr_key.captures(line) else {
+            continue;
+        };
+        let key_column = captures[1].len();
+        let value = captures.get(2).map_or("", |value| value.as_str());
+        let value = value.split(" #").next().unwrap_or_default().trim();
+
+        let continues_on_next_line = lines[index + 1..]
+            .iter()
+            .find(|next| !next.trim().is_empty() && !next.trim_start().starts_with('#'))
+            .is_some_and(|next| next.len() - next.trim_start().len() > key_column);
+        let unreadable = value.is_empty()
+            || value.starts_with(['"', '\'', '|', '>', '&', '*', '!', '{', '['])
+            || continues_on_next_line;
+
+        if unreadable {
+            return Err(format!(
+                "line {}: write the expr value as a plain scalar on one line, so the series it \
+                 queries can be checked",
+                index + 1,
+            ));
+        }
+        expressions.push(value.to_owned());
+    }
+
+    Ok(expressions)
+}
+
 /// Returns the series names that the PromQL expression `query` selects.
 ///
 /// Also accepts Grafana's `label_values(series, label)` template queries.
@@ -200,4 +236,28 @@ fn extracts_series_names_from_promql() {
         names("sum without (le) (increase(x_bucket[1h] offset 1d))"),
         ["x_bucket"]
     );
+}
+
+#[test]
+fn reads_plain_rule_expressions_and_rejects_other_forms() {
+    let _init_guard = zebra_test::init();
+
+    let plain = "rules:\n  - alert: A\n    expr: rate(a_total[5m]) > 0 # comment\n    for: 5m\n  - expr: b\n";
+    assert_eq!(
+        rule_expressions(plain),
+        Ok(vec!["rate(a_total[5m]) > 0".to_owned(), "b".to_owned()]),
+    );
+
+    let quoted = "rules:\n  - alert: A\n    expr: \"not_a_zebra_series > 0\"\n";
+    let single_quoted = "rules:\n  - alert: A\n    expr: 'not_a_zebra_series > 0'\n";
+    let block = "rules:\n  - alert: A\n    expr: |\n      not_a_zebra_series > 0\n";
+    let folded = "rules:\n  - alert: A\n    expr: >-\n      not_a_zebra_series > 0\n";
+    let multi_line =
+        "rules:\n  - alert: A\n    expr: rate(a_total[5m])\n      > not_a_zebra_series\n";
+    let empty = "rules:\n  - alert: A\n    expr:\n      not_a_zebra_series > 0\n";
+
+    for rules in [quoted, single_quoted, block, folded, multi_line, empty] {
+        let error = rule_expressions(rules).expect_err("unreadable expr values are rejected");
+        assert!(error.starts_with("line 3:"), "{error}");
+    }
 }
