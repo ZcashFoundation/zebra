@@ -268,6 +268,88 @@ fn a_relay_flood_never_evicts_tried_or_trusted_entries() {
     assert_eq!(stats.relayed, book.buckets.len());
 }
 
+/// Relaying fresh records from many source groups never replaces the relayed entries the
+/// segment already has: a full bucket only gives up an entry whose own record went stale.
+#[test]
+fn a_relay_flood_never_replaces_fresh_relayed_entries() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let now = DateTime32::now();
+
+    // One bucket's worth of entries in one group, from one source, share a bucket.
+    let incumbents: Vec<PeerSocketAddr> = (1..=V2_GOSSIP_BUCKET_SIZE)
+        .map(|host| addr_in(1, u8::try_from(host).expect("the bucket size is small")))
+        .collect();
+    relay(&mut book, &incumbents);
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+
+    let flood = |first: u8| -> Vec<MetaAddr> {
+        (0..=255)
+            .map(|host| {
+                let ip = Ipv4Addr::new(203, 1, first, host);
+                record(SocketAddr::new(ip.into(), 8233).into(), now)
+            })
+            .collect()
+    };
+    let outcomes = book.intake_at(source(), flood(1), Via::Announcement, now);
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| *outcome == Some(Rejection::BucketFull)),
+        "every record for the full bucket is dropped",
+    );
+    for incumbent in &incumbents {
+        assert!(book.book.get(*incumbent).is_some(), "{incumbent:?} is kept");
+    }
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+    assert_eq!(book.buckets.len(), V2_GOSSIP_BUCKET_SIZE);
+
+    // Once the incumbents' own records are stale, new records take their slots, one for one.
+    let later = now.saturating_add(Duration32::from_days(31));
+    let fresh: Vec<MetaAddr> = flood(2)
+        .into_iter()
+        .map(|entry| record(entry.addr, later))
+        .collect();
+    let outcomes = book.intake_at(source(), fresh, Via::Announcement, later);
+    assert!(outcomes.contains(&None), "stale incumbents are replaced");
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+    assert_eq!(book.buckets.len(), V2_GOSSIP_BUCKET_SIZE);
+    assert!(
+        incumbents
+            .iter()
+            .any(|incumbent| book.book.get(*incumbent).is_none()),
+        "a stale incumbent left the book",
+    );
+}
+
+/// A `get-addr` answer is filled with the entries that answered this node before the ones that
+/// were only relayed.
+#[test]
+fn get_addr_sample_prefers_entries_that_answered() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let tried = relayed_addrs(1, 3);
+    relay(&mut book, &tried);
+    for addr in &tried {
+        make_tried(&mut book, *addr);
+    }
+    relay(&mut book, &relayed_addrs(10, 100));
+
+    let sample = book.get_addr_sample(tokio::time::Instant::now());
+    assert!(
+        sample.len() > 4 * tried.len(),
+        "the sample has many relayed entries",
+    );
+    let head = addrs_of(sample[..=tried.len()].to_vec());
+    assert_eq!(
+        head,
+        tried.iter().copied().chain([addr(OWN_ADDR)]).collect(),
+        "this node's own address and the entries that answered come first",
+    );
+}
+
 #[test]
 fn bans_remove_entries_from_the_book_buckets_and_trusted_entries() {
     let _init_guard = zebra_test::init();

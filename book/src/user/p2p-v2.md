@@ -77,9 +77,11 @@ version 2 peers are recorded in a separate version 2 address book.
   connected to. Relayed addresses are bucketed by their address group and the
   group of the peer that sent them, so one network range cannot fill the book,
   and they never displace the configured, cached, or seeded addresses, or the
-  peers Zebra connected to. Zebra answers version 2 address requests from this
-  book only, with addresses it connected to or recently heard of over version
-  2, and its own version 2 address when it has a specific one
+  peers Zebra connected to. A full bucket keeps the relayed addresses it has: a
+  new one is dropped unless the address it would replace was last reported
+  more than 30 days ago. Zebra answers version 2 address requests from this
+  book only, with addresses it connected to first, then ones it recently heard
+  of over version 2, and its own version 2 address when it has a specific one
   (`v2_listen_addr`, or the IP address of `external_addr` with the
   `v2_listen_addr` port). It keeps the version 2 peers it connected to most
   recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer

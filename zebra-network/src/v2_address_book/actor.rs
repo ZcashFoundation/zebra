@@ -337,6 +337,10 @@ impl V2Book {
     /// otherwise get almost nothing for the interval while the segment fills. Drawing such a
     /// snapshot again reveals nothing more than one request does, because it is smaller than
     /// [`PEER_ADDR_RESPONSE_LIMIT`], so it already has every address the segment would serve.
+    ///
+    /// The snapshot is filled with this node's own address and the entries that answered this
+    /// node first, and only then with entries that were only relayed, so relayed records cannot
+    /// crowd verified addresses out of an answer.
     pub(super) fn get_addr_sample(&mut self, now: tokio::time::Instant) -> Vec<MetaAddr> {
         let local_listener = self.local_listener;
         let stale = self
@@ -351,7 +355,19 @@ impl V2Book {
                         < GET_ADDR_SNAPSHOT_MIN_ADDRS
             });
         if stale {
-            let mut addrs = self.book.sanitized(Utc::now());
+            // The sanitized entries are shuffled, and the partition keeps their order.
+            let (mut addrs, relayed): (Vec<MetaAddr>, Vec<MetaAddr>) = self
+                .book
+                .sanitized(Utc::now())
+                .into_iter()
+                .partition(|addr| {
+                    addr.addr == local_listener
+                        || self
+                            .book
+                            .get(addr.addr)
+                            .is_some_and(|entry| entry.last_response().is_some())
+                });
+            addrs.extend(relayed);
             addrs.truncate(PEER_ADDR_RESPONSE_LIMIT);
             let jitter = GET_ADDR_SNAPSHOT_JITTER.mul_f64(rand::random::<f64>());
             self.get_addr_snapshot = Some((now + GET_ADDR_SNAPSHOT_BASE_INTERVAL + jitter, addrs));
