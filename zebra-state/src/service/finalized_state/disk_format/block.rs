@@ -322,10 +322,10 @@ impl IntoDisk for TransactionLocation {
     type Bytes = [u8; TRANSACTION_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let height_bytes = self.height.as_bytes().to_vec();
-        let index_bytes = self.index.as_bytes().to_vec();
-
-        [height_bytes, index_bytes].concat().try_into().unwrap()
+        let mut bytes = [0; TRANSACTION_LOCATION_DISK_BYTES];
+        bytes[..HEIGHT_DISK_BYTES].copy_from_slice(&self.height.as_bytes());
+        bytes[HEIGHT_DISK_BYTES..].copy_from_slice(&self.index.as_bytes());
+        bytes
     }
 }
 

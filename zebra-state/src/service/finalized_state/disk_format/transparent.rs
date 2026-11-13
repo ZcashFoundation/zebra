@@ -628,10 +628,10 @@ impl IntoDisk for transparent::Address {
     type Bytes = [u8; 21];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let variant_bytes = vec![address_variant(self)];
-        let hash_bytes = self.hash_bytes().to_vec();
-
-        [variant_bytes, hash_bytes].concat().try_into().unwrap()
+        let mut bytes = [0; 21];
+        bytes[0] = address_variant(self);
+        bytes[1..].copy_from_slice(&self.hash_bytes());
+        bytes
     }
 }
 
@@ -727,13 +727,11 @@ impl IntoDisk for OutputLocation {
     type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let transaction_location_bytes = self.transaction_location().as_bytes().to_vec();
-        let output_index_bytes = self.output_index().as_bytes().to_vec();
-
-        [transaction_location_bytes, output_index_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        let mut bytes = [0; OUTPUT_LOCATION_DISK_BYTES];
+        bytes[..TRANSACTION_LOCATION_DISK_BYTES]
+            .copy_from_slice(&self.transaction_location().as_bytes());
+        bytes[TRANSACTION_LOCATION_DISK_BYTES..].copy_from_slice(&self.output_index().as_bytes());
+        bytes
     }
 }
 
@@ -757,14 +755,13 @@ impl<C: Constraint + Copy + std::fmt::Debug> IntoDisk for AddressBalanceLocation
     type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let balance_bytes = self.balance().as_bytes().to_vec();
-        let address_location_bytes = self.address_location().as_bytes().to_vec();
-        let received_bytes = self.received().to_le_bytes().to_vec();
-
-        [balance_bytes, address_location_bytes, received_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        let mut bytes = [0; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+        bytes[..BALANCE_DISK_BYTES].copy_from_slice(&self.balance().as_bytes());
+        bytes[BALANCE_DISK_BYTES..BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES]
+            .copy_from_slice(&self.address_location().as_bytes());
+        bytes[BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES..]
+            .copy_from_slice(&self.received().to_le_bytes());
+        bytes
     }
 }
 
@@ -835,13 +832,11 @@ impl IntoDisk for AddressUnspentOutput {
     type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let address_location_bytes = self.address_location().as_bytes();
-        let unspent_output_location_bytes = self.unspent_output_location().as_bytes();
-
-        [address_location_bytes, unspent_output_location_bytes]
-            .concat()
-            .try_into()
-            .unwrap()
+        let mut bytes = [0; OUTPUT_LOCATION_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
+        bytes[..OUTPUT_LOCATION_DISK_BYTES].copy_from_slice(&self.address_location().as_bytes());
+        bytes[OUTPUT_LOCATION_DISK_BYTES..]
+            .copy_from_slice(&self.unspent_output_location().as_bytes());
+        bytes
     }
 }
 
@@ -861,18 +856,11 @@ impl IntoDisk for AddressTransaction {
     type Bytes = [u8; OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
-        let address_location_bytes: [u8; OUTPUT_LOCATION_DISK_BYTES] =
-            self.address_location().as_bytes();
-        let transaction_location_bytes: [u8; TRANSACTION_LOCATION_DISK_BYTES] =
-            self.transaction_location().as_bytes();
-
-        address_location_bytes
-            .iter()
-            .copied()
-            .chain(transaction_location_bytes.iter().copied())
-            .collect::<Vec<u8>>()
-            .try_into()
-            .expect("concatenation of fixed-sized arrays should have the correct size")
+        let mut bytes = [0; OUTPUT_LOCATION_DISK_BYTES + TRANSACTION_LOCATION_DISK_BYTES];
+        bytes[..OUTPUT_LOCATION_DISK_BYTES].copy_from_slice(&self.address_location().as_bytes());
+        bytes[OUTPUT_LOCATION_DISK_BYTES..]
+            .copy_from_slice(&self.transaction_location().as_bytes());
+        bytes
     }
 }
 
