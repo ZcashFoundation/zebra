@@ -22,7 +22,7 @@ use crate::{
 use super::super::{
     actor::{
         V2Book, GET_ADDR_SNAPSHOT_BASE_INTERVAL, GET_ADDR_SNAPSHOT_JITTER,
-        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_SEEDED, V2_MAX_TRIED,
+        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_SEEDED, V2_MAX_TRIED, V2_RELAYED_RETRY_INTERVAL,
     },
     buckets::{Group, V2_GOSSIP_BUCKET_SIZE, V2_GOSSIP_CAPACITY, V2_SOURCE_GROUP_SPAN},
     cache::v2_peer_cache_updater_with,
@@ -560,6 +560,100 @@ fn next_candidate_prefers_entries_that_answered() {
     for _ in 0..20 {
         assert_eq!(candidate(&book, after_delay), Some(answered));
     }
+}
+
+/// A relayed entry whose attempt failed is not a candidate again for an hour, however recent the
+/// time its relaying peer claimed, while a trusted entry only waits for the reconnection delay.
+#[test]
+fn next_candidate_retries_unanswered_relayed_entries_once_per_hour() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let relayed = addr_in(1, 1);
+    let cached = addr("192.0.2.50:8233");
+    relay(&mut book, &[relayed]);
+    book.seed(vec![cached], Provenance::Cache, Instant::now());
+    for failed in [relayed, cached] {
+        book.change(MetaAddr::new_reconnect(failed), Instant::now());
+    }
+    book.change(MetaAddr::new_errored(relayed, None), Instant::now());
+
+    let candidate = |book: &V2Book, exclude: &[PeerSocketAddr], after: Duration| {
+        book.next_candidate_at(
+            &exclude.iter().copied().collect(),
+            &HashSet::new(),
+            Instant::now() + after,
+            chrono::Utc::now() + after,
+        )
+        .map(|candidate| candidate.addr)
+    };
+    let after_delay = crate::constants::MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1);
+    assert_eq!(
+        candidate(&book, &[], after_delay),
+        Some(cached),
+        "a trusted entry whose attempt never finished is a candidate after the delay",
+    );
+    assert_eq!(
+        candidate(&book, &[cached], after_delay),
+        None,
+        "the relayed entry is not retried after the reconnection delay",
+    );
+    assert_eq!(
+        candidate(
+            &book,
+            &[cached],
+            V2_RELAYED_RETRY_INTERVAL - Duration::from_secs(60)
+        ),
+        None,
+    );
+    assert_eq!(
+        candidate(
+            &book,
+            &[cached],
+            V2_RELAYED_RETRY_INTERVAL + Duration::from_secs(60)
+        ),
+        Some(relayed),
+        "the relayed entry is retried an hour after its attempt",
+    );
+}
+
+/// Among relayed entries that were never attempted, the ones on the network's default port are
+/// dialled first, and the others once none of those is left.
+#[test]
+fn next_candidate_prefers_relayed_entries_on_the_default_port() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let default_port = addr_in(1, 1);
+    let other_ports: Vec<PeerSocketAddr> = (2..=20)
+        .map(|group| SocketAddr::new(Ipv4Addr::new(203, group, 0, 1).into(), 9999).into())
+        .collect();
+    relay(&mut book, &other_ports);
+    relay(&mut book, &[default_port]);
+    assert_eq!(book.stats().relayed, other_ports.len() + 1);
+
+    for _ in 0..50 {
+        let candidate = book
+            .next_candidate(&HashSet::new(), &HashSet::new())
+            .map(|candidate| candidate.addr);
+        assert_eq!(candidate, Some(default_port));
+    }
+
+    let candidate = book
+        .next_candidate(&[default_port].into(), &HashSet::new())
+        .expect("the other relayed entries are candidates")
+        .addr;
+    assert!(other_ports.contains(&candidate));
+
+    // A trusted entry on another port is not passed over for the relayed entries.
+    let mut book = segment(OWN_ADDR);
+    let cached = addr("192.0.2.50:9999");
+    book.seed(vec![cached], Provenance::Cache, Instant::now());
+    assert_eq!(
+        book.next_candidate(&HashSet::new(), &HashSet::new())
+            .map(|candidate| candidate.addr),
+        Some(cached),
+    );
 }
 
 /// Only the entries this node connected to are cached, most recently answered first, so relayed

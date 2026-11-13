@@ -88,7 +88,9 @@ version 2 peers are recorded in a separate version 2 address book.
   cache, and tries them at startup. It never caches an address it only heard
   of. Zebra dials the peers it connected to before first, then picks at random
   among the others, giving seeded and cached addresses even odds against
-  relayed ones, whatever time the relaying peer claimed. When it has no address left to dial and fewer discovered peers than it
+  relayed ones, whatever time the relaying peer claimed. Among relayed
+  addresses, it dials the ones on the network's default port first, and it
+  retries a relayed address it never connected to at most once an hour. When it has no address left to dial and fewer discovered peers than it
   wants, it looks up the DNS seeders in
   `initial_mainnet_peers` or `initial_testnet_peers` and dials the results on
   the network's default port, UDP 8233 on Mainnet and 18233 on Testnet, at most

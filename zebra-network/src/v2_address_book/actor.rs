@@ -48,6 +48,14 @@ pub(super) const GET_ADDR_SNAPSHOT_MIN_ADDRS: usize = PEER_ADDR_RESPONSE_LIMIT /
 /// answered.
 pub(super) const V2_MAX_SEEDED: usize = 1000;
 
+/// The least time between two attempts to connect to an entry that is not trusted and never
+/// answered (draft, "Address Book": a relayed address this node never connected to SHOULD NOT be
+/// retried more often than once per hour).
+///
+/// Relayed addresses are a way to make this node send connection attempts to a third party, so
+/// the reconnection delay alone would let each relayed record cause one every few minutes.
+pub(super) const V2_RELAYED_RETRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
 /// The most tried entries the segment keeps: past this, the entries that failed longest ago are
 /// removed.
 ///
@@ -300,6 +308,12 @@ impl V2Book {
     ///    relay cannot crowd out the DNS seeds and the cache, however many relayed entries
     ///    there are, then
     /// 3. a random entry that was attempted, but never answered.
+    ///
+    /// An entry that never answered and is not trusted is only a candidate again
+    /// [`V2_RELAYED_RETRY_INTERVAL`] after its last attempt. Among the entries of steps 2 and 3
+    /// that are not trusted, the ones on the network's default port are chosen first (draft,
+    /// "Address Book"): a relayed record with another port can point this node at any service
+    /// of a third party.
     pub(super) fn next_candidate(
         &self,
         exclude: &HashSet<PeerSocketAddr>,
@@ -339,12 +353,18 @@ impl V2Book {
                 {
                     answered = Some(peer);
                 }
-            } else if peer.last_connection_state.is_never_attempted() {
-                if self.trusted.contains_key(&peer.addr) {
+            } else if self.trusted.contains_key(&peer.addr) {
+                if peer.last_connection_state.is_never_attempted() {
                     trusted.push(peer);
                 } else {
-                    relayed.push(peer);
+                    unanswered.push(peer);
                 }
+            } else if peer.last_attempt().is_some_and(|attempted_at| {
+                instant_now.saturating_duration_since(attempted_at) < V2_RELAYED_RETRY_INTERVAL
+            }) {
+                continue;
+            } else if peer.last_connection_state.is_never_attempted() {
+                relayed.push(peer);
             } else {
                 unanswered.push(peer);
             }
@@ -354,13 +374,22 @@ impl V2Book {
         }
 
         let mut rng = rand::rng();
-        let pool = match (trusted.is_empty(), relayed.is_empty()) {
+        let mut pool = match (trusted.is_empty(), relayed.is_empty()) {
             (false, false) if rng.random_bool(0.5) => trusted,
             (false, false) => relayed,
             (false, true) => trusted,
             (true, false) => relayed,
             (true, true) => unanswered,
         };
+        // Trusted entries are kept whatever their port: the operator or this node's own
+        // connections chose it.
+        let default_port = self.network.default_port();
+        let is_preferred = |peer: &MetaAddr| {
+            peer.addr.port() == default_port || self.trusted.contains_key(&peer.addr)
+        };
+        if pool.iter().any(is_preferred) {
+            pool.retain(is_preferred);
+        }
         pool.choose(&mut rng).cloned()
     }
 
