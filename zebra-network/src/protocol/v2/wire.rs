@@ -73,6 +73,15 @@ pub enum WireError {
         max: usize,
     },
 
+    /// The peer left a record or element incomplete for longer than this
+    /// node holds one, which this node handles as `FLOOD`, as the draft
+    /// allows (draft, "Announcement Streams").
+    #[error("incomplete {what} held for too long")]
+    Stalled {
+        /// What was incomplete.
+        what: &'static str,
+    },
+
     /// A `result`, type, or kind byte is not a defined value.
     #[error("unknown {what} {value:#04x}")]
     UnknownByte {
@@ -179,7 +188,9 @@ impl WireError {
             | WireError::Nonconforming { .. }
             | WireError::NotARequest { .. }
             | WireError::Malformed { .. } => Violation::Close(ErrorCode::ProtocolError),
-            WireError::Flood { .. } => Violation::Close(ErrorCode::Flood),
+            WireError::Flood { .. } | WireError::Stalled { .. } => {
+                Violation::Close(ErrorCode::Flood)
+            }
             WireError::TooManyResults { .. } => Violation::Misbehavior,
             WireError::LocalCountTooLarge { .. } | WireError::LocalUnencodable { .. } => {
                 Violation::Close(ErrorCode::InternalError)

@@ -20,6 +20,14 @@ use zebra_chain::{
 /// [`FLOOD`](crate::protocol::v2::types::ErrorCode::Flood).
 pub const MAX_RECORD_PAYLOAD_LEN: usize = MAX_PROTOCOL_MESSAGE_LEN;
 
+/// The maximum total serialized size of a response to a `get-headers`,
+/// `get-blocks` or `get-tx` request: 8 MiB (draft, "Request Streams"). A
+/// responder finishes the response early instead of exceeding it, and a
+/// requester treats a longer response as a connection error of type
+/// [`FLOOD`](crate::protocol::v2::types::ErrorCode::Flood), from the bytes it
+/// has received, without waiting for the response to complete.
+pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
 /// The maximum number of block locator hashes in a `get-headers` request
 /// (draft, "`get-headers`").
 pub const MAX_LOCATOR_HASHES: usize = 101;

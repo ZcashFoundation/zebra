@@ -9,19 +9,22 @@
 //! after the stream was accepted: the type byte, the permit, the request
 //! body, the inbound service calls, and every write of the response. A
 //! request that misses its deadline, or whose connection is closing, is
-//! abandoned: its stream is reset with `REFUSED` while no response byte has
-//! been written (draft, "Request Streams": a responder that cannot or will
-//! not serve a request MAY reset with `REFUSED` instead of sending a
-//! response), and with `CANCELLED` once the response has begun. The draft
-//! defines no code for a responder that abandons a response part way: it
-//! gives `CANCELLED` to a requester that no longer wants a response, and has a
-//! responder that stops after a complete entry finish its sending direction.
-//! Finishing is not safe here, since a write cut off at the deadline may have
-//! sent part of an entry, which the requester would read as a truncated
-//! response, and `REFUSED` would tell the requester that a request it has
-//! part of an answer to was not served at all, so the stream is reset with
-//! `CANCELLED`, the code for a request that is no longer wanted, which is the
-//! closest the draft has.
+//! abandoned: its stream is reset with `BUSY` while no response byte has
+//! been written, and with `CANCELLED` once the response has begun (draft,
+//! "Request Streams"). Finishing a response that was abandoned part way is
+//! not safe, since a write cut off at the deadline may have sent part of an
+//! entry, which the requester would read as a truncated response.
+//!
+//! The two codes a request is refused with tell the requester what to do
+//! next (draft, "Request Streams"):
+//! - `BUSY`: this node serves this kind of request but is at a limit, so the
+//!   requester may retry after a short delay. It is sent when the inbound
+//!   service is overloaded or times out, and when a request is abandoned
+//!   before any of its response is written.
+//! - `REFUSED`: this node does not serve this request to this peer, so the
+//!   requester should not repeat it. It is sent for a request type this node
+//!   does not serve, for a `get-addr` request it does not answer, and when
+//!   the inbound service fails for any other reason.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -47,7 +50,11 @@ use crate::{
         internal::{InventoryResponse, Request, Response},
         v2::{
             announcement::encode_tx_record,
-            constants::{MAX_ADDRS_PER_RESPONSE, MAX_HEADERS_PER_RESPONSE},
+            announcement::MAX_BLOCK_ANNOUNCEMENT_LEN,
+            constants::{
+                MAX_ADDRS_PER_RESPONSE, MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN,
+                MAX_RESPONSE_BYTES,
+            },
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request as WireRequest},
             response::{encode_addr_response, write_headers_response, ObjectResult},
@@ -80,6 +87,10 @@ use block_range::{serve_block_range, PendingRange};
 /// buffer only until the buffer's worker takes it, not while it is answered.
 pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 
+/// The longest serialized block header: a block announcement record without
+/// its kind byte.
+const MAX_HEADER_LEN: usize = MAX_BLOCK_ANNOUNCEMENT_LEN - 1;
+
 /// The most bytes of `get-blocks` or `get-tx` response entries one request
 /// stream writes, after which the response is finished early, as the draft
 /// allows (draft, "`get-blocks`", "`get-tx`": the responder SHOULD apply a
@@ -90,6 +101,16 @@ pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 /// so the first entry is always written, and one object larger than the
 /// budget can still be sent, but only on its own.
 pub(super) const RESPONSE_BYTES_LIMIT: usize = 1_000_000;
+
+// The budget is checked before each entry, so a response is at most the budget, less one byte,
+// and one more entry: a result byte, a 5-byte length, and a maximum-size object. That is never
+// more than the draft's response limit, which a requester closes the connection over, and neither
+// is the longest `get-headers` response, a 3-byte count and `MAX_HEADERS_PER_RESPONSE` headers
+// with their 3-byte lengths; checked at compile time.
+const _: () = {
+    assert!(RESPONSE_BYTES_LIMIT + 1 + 5 + MAX_RECORD_PAYLOAD_LEN <= MAX_RESPONSE_BYTES);
+    assert!(3 + MAX_HEADERS_PER_RESPONSE * (3 + MAX_HEADER_LEN) <= MAX_RESPONSE_BYTES);
+};
 
 /// How many inbound service calls one `get-blocks` or `get-tx` response
 /// makes, after which the response is finished early.
@@ -409,16 +430,18 @@ where
 {
     inbound.call(request).await.map_err(|failure| match failure {
         ServiceFailure::Close(event) => Outcome::Close(event),
-        // A refused stream tells the peer to try elsewhere.
         ServiceFailure::Failed(error) => {
             if error.is::<tower::load_shed::error::Overloaded>()
                 || error.is::<tower::timeout::error::Elapsed>()
             {
-                tracing::debug!(%error, "inbound service overloaded, refusing request stream");
+                // This node serves the request, but not just now: the peer may retry.
+                tracing::debug!(%error, "inbound service overloaded, request stream is busy");
+                Outcome::Refuse(ErrorCode::Busy)
             } else {
+                // A refused stream tells the peer to try elsewhere.
                 tracing::info!(%error, "error processing peer request, refusing request stream");
+                Outcome::Refuse(ErrorCode::Refused)
             }
-            Outcome::Refuse(ErrorCode::Refused)
         }
     })
 }
@@ -435,16 +458,15 @@ struct ResponseSend {
 
 impl ResponseSend {
     /// The code the stream is reset with if the request is abandoned now, at
-    /// its deadline or because the connection is closing: `REFUSED` while none
-    /// of the response has been written (draft, "Request Streams": a
-    /// responder that will not serve a request MAY reset with `REFUSED`
-    /// instead of sending a response), and `CANCELLED` once it has begun,
-    /// which `REFUSED` would misreport as never served (see the module docs).
+    /// its deadline or because the connection is closing: `BUSY` while none
+    /// of the response has been written, since this node serves the request
+    /// but could not in time, and `CANCELLED` once it has begun (draft,
+    /// "Request Streams"; see the module docs).
     fn abandon_code(&self) -> ErrorCode {
         if self.written {
             ErrorCode::Cancelled
         } else {
-            ErrorCode::Refused
+            ErrorCode::Busy
         }
     }
 

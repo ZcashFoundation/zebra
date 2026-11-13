@@ -46,8 +46,9 @@ use crate::{
     connect_isolated_tcp_direct_with_inbound, constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
     peer::{
-        self, v2::handshake::LocalIdentity, ClientTestHarness, ConnectedAddr, HandshakeRequest,
-        OutboundConnectorRequest,
+        self,
+        v2::{handshake::LocalIdentity, rate::TokenBucket},
+        ClientTestHarness, ConnectedAddr, HandshakeRequest, OutboundConnectorRequest,
     },
     peer_set::{
         crawler_services,
@@ -3639,6 +3640,64 @@ async fn v2_dialer_stops_with_a_warning_when_it_has_no_outbound_slot() {
     assert!(!logs_contain("wait for a connection to fail or end"));
 }
 
+/// The version 2 dialer tells the legacy crawler to leave the resolved configured version 2
+/// peers to it, so a legacy connection the crawler makes first cannot keep it from them.
+#[tokio::test]
+async fn v2_dialer_keeps_the_legacy_crawler_from_its_configured_peers() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let configured = test_v2_addr(1);
+    let config = v2_test_config(any_udp_addr(), &[*configured]);
+    let endpoint = crate::quic::bind(&config.network, any_udp_addr()).expect("a UDP port is free");
+    let identity = LocalIdentity {
+        user_agent: "v2 test node".to_string(),
+        services: PeerServices::NODE_NETWORK,
+        relay: true,
+    };
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    let connected_peers = ConnectedPeers::unconnected();
+    let legacy_addr: PeerSocketAddr = SocketAddr::new(configured.ip(), 8233).into();
+    assert_eq!(connected_peers.blocks_legacy_dial(legacy_addr), None);
+
+    let (shared, _open_inbound_tx) = v2::Shared::new(
+        &config,
+        endpoint,
+        identity,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        misbehavior_tx,
+        no_bans(),
+        V2_TEST_RECONNECTION_DELAY,
+        MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
+        crate::v2_address_book::V2BookHandle::new(tokio::sync::mpsc::channel(1).0),
+        connected_peers.clone(),
+    );
+    let (peerset_tx, _peerset_rx) = mpsc::channel(1);
+    let dialer_task = tokio::spawn(v2::keep_initial_peers_connected(
+        shared,
+        config.initial_v2_peers,
+        1,
+        no_bans(),
+        peerset_tx,
+        watch::channel(Default::default()).0,
+    ));
+
+    tokio::time::timeout(V2_TEST_CONNECT_TIMEOUT, async {
+        while connected_peers.blocks_legacy_dial(legacy_addr) != Some("configured v2 peer") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the dialer reserves its resolved configured peers");
+
+    dialer_task.abort();
+}
+
 /// The version 2 listener refuses connections over its share of the inbound limit.
 #[tokio::test]
 async fn v2_listener_refuses_connections_over_inbound_limit() {
@@ -3656,6 +3715,152 @@ async fn v2_listener_refuses_connections_over_inbound_limit() {
     assert_eq!(listener_config.v2_inbound_connection_limit(), 1);
 
     assert_v2_listener_accepts_one_of_two_dialers(listener_config).await;
+}
+
+/// The listener's accept rate is a burst, then one token per interval, and taking a token never
+/// waits.
+#[test]
+fn v2_accept_rate_is_a_burst_then_one_per_interval() {
+    let interval = Duration::from_secs(1);
+    let start = tokio::time::Instant::now();
+    let mut rate = TokenBucket::new(interval, 3, start);
+
+    for _ in 0..3 {
+        assert!(rate.try_take(start), "the burst is available at once");
+    }
+    assert!(!rate.is_available(start));
+    assert!(!rate.try_take(start + interval / 2));
+
+    // One token per interval, counted from when the bucket was last full.
+    assert!(rate.try_take(start + interval));
+    assert!(!rate.try_take(start + interval + interval / 2));
+    assert!(rate.try_take(start + 2 * interval));
+
+    // A long quiet time refills no more than the burst.
+    let later = start + 100 * interval;
+    for _ in 0..3 {
+        assert!(rate.try_take(later));
+    }
+    assert!(!rate.try_take(later));
+
+    // An empty bucket's next token is one interval after the last one started to refill.
+    assert_eq!(rate.next_token_at(later), later + interval);
+    assert_eq!(rate.next_token_at(later + interval / 4), later + interval);
+    assert_eq!(rate.next_token_at(later + interval), later + interval);
+    assert!(rate.try_take(later + interval));
+
+    // A zero interval never limits.
+    let mut unlimited = TokenBucket::new(Duration::ZERO, 1, start);
+    assert!(unlimited.try_take(start));
+    assert!(unlimited.try_take(start));
+}
+
+/// The version 2 listener answers every connection attempt at once, whatever its accept rate:
+/// the attempts within the burst are accepted, and the next one is refused rather than left
+/// without a Retry until the dialer's connect timeout.
+#[tokio::test]
+async fn v2_listener_answers_attempts_beyond_its_accept_rate_at_once() {
+    let _init_guard = zebra_test::init();
+    if zebra_test::net::zebra_skip_network_tests() {
+        return;
+    }
+
+    let listener_addr = free_udp_addr();
+    let config = v2_test_config(listener_addr, &[]);
+    let (peerset_tx, _peerset_rx) = mpsc::channel(config.peerset_total_connection_limit());
+    let (inv_collector, _) = broadcast::channel(16);
+    let (misbehavior_tx, _) = tokio::sync::mpsc::channel(1);
+    // An accept interval far longer than the test, so the rate never refills.
+    let listener_task = v2::start_with_intervals(
+        config,
+        service_fn(|_| async { Ok::<Response, BoxError>(Response::Nil) }),
+        inv_collector,
+        NoChainTip,
+        "v2 test node".to_string(),
+        no_bans(),
+        misbehavior_tx,
+        peerset_tx,
+        ConnectedPeers::unconnected(),
+        V2_TEST_RECONNECTION_DELAY,
+        Duration::from_secs(3600),
+    )
+    .expect("version 2 test configs listen");
+
+    let dialer = crate::quic::bind(&Mainnet, any_udp_addr()).expect("a UDP port is free");
+    let mut accepted = Vec::new();
+    for attempt in 0..v2::INBOUND_ACCEPT_BURST {
+        let connection = crate::quic::connect(&dialer, listener_addr)
+            .await
+            .unwrap_or_else(|error| panic!("attempt {attempt} is within the burst: {error:?}"));
+        accepted.push(connection);
+    }
+
+    let started = Instant::now();
+    let error = crate::quic::connect(&dialer, listener_addr)
+        .await
+        .expect_err("an attempt beyond the accept rate is refused");
+    assert!(
+        matches!(
+            error,
+            crate::quic::ConnectError::Handshake(quinn::ConnectionError::ConnectionClosed(_))
+        ),
+        "the attempt is refused, not left to time out, got {error:?}"
+    );
+    assert!(
+        started.elapsed() < constants::HANDSHAKE_TIMEOUT,
+        "the refusal arrives before the connect timeout"
+    );
+
+    listener_task.abort();
+}
+
+/// The version 2 listener's per-IP limits count an IPv6 address by its `/48`, so one site's
+/// allocation cannot take a slot for each of its 65,536 `/64`s, and an IPv4 address by itself.
+#[test]
+fn v2_inbound_limits_group_ipv6_by_48() {
+    let ip = |addr: &str| addr.parse::<IpAddr>().expect("a valid IP address");
+
+    let group = ip("2001:db8:1::");
+    for same_group in [
+        "2001:db8:1::1",
+        "2001:db8:1:1::1",
+        "2001:db8:1:ffff:ffff:ffff:ffff:ffff",
+    ] {
+        assert_eq!(v2::inbound_group(ip(same_group)), group, "{same_group}");
+    }
+    assert_ne!(v2::inbound_group(ip("2001:db8:2::1")), group);
+    // IPv4 addresses are their own groups, whichever way they are written.
+    assert_eq!(v2::inbound_group(ip("192.0.2.1")), ip("192.0.2.1"));
+    assert_eq!(v2::inbound_group(ip("::ffff:192.0.2.1")), ip("192.0.2.1"));
+    assert_ne!(v2::inbound_group(ip("192.0.2.2")), ip("192.0.2.1"));
+
+    // An attempt is only recent for an instant here, so only the open connections limit.
+    let mut groups = v2::InboundGroups::new(1, Some(Duration::ZERO));
+    let first = ip("2001:db8:1:1::1");
+    let other_64 = ip("2001:db8:1:2::1");
+    let other_48 = ip("2001:db8:2:1::1");
+    assert!(!groups.is_full(first));
+    let opened = groups.opened(first);
+    assert_eq!(opened, group);
+    assert!(
+        groups.is_full(other_64),
+        "another /64 of the same /48 shares its connection limit"
+    );
+    assert!(!groups.is_full(other_48));
+    assert!(!groups.is_full(ip("192.0.2.1")));
+    groups.closed(opened);
+    assert!(!groups.is_full(other_64));
+
+    // Recent attempts are counted by the same group.
+    let mut groups = v2::InboundGroups::new(1, None);
+    assert!(!groups.is_past_recent_limit_or_add(first));
+    assert!(
+        groups.is_past_recent_limit_or_add(other_64),
+        "another /64 of the same /48 shares its rate limit"
+    );
+    assert!(!groups.is_past_recent_limit_or_add(other_48));
+    assert!(!groups.is_past_recent_limit_or_add(ip("192.0.2.1")));
+    assert!(groups.is_past_recent_limit_or_add(ip("::ffff:192.0.2.1")));
 }
 
 /// The version 2 listener refuses a second connection from the same IP, like the legacy one.
@@ -4943,14 +5148,39 @@ async fn crawler_skip_does_not_fail_an_initial_peer() {
 }
 
 /// Checks that the crawler skips the candidate `connected_change` adds, which the peer set is
-/// connected to, dials another one, and leaves the skipped one eligible after the reconnection
-/// delay.
+/// connected to.
 async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr::MetaAddrChange) {
+    let connected_addr = connected_change.addr();
+    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
+    crawler_skips_a_blocked_candidate(connected_change, ConnectedPeers::new(keys, 1)).await;
+}
+
+/// The legacy crawler of a node with a version 2 endpoint leaves a configured version 2 peer's
+/// IP to the version 2 dialer, whatever the candidate's port, and does not mark it failed.
+#[tokio::test]
+async fn crawler_skips_candidates_on_a_configured_v2_peer_ip() {
+    let connected_peers = ConnectedPeers::unconnected();
+    connected_peers.prefer_v2(["127.1.2.1:18233".parse().unwrap()]);
+    crawler_skips_a_blocked_candidate(
+        MetaAddr::new_initial_peer("127.1.2.1:8233".parse().unwrap()),
+        connected_peers,
+    )
+    .await;
+}
+
+/// Checks that the crawler skips the candidate `blocked_change` adds, which `connected_peers`
+/// blocks, dials another one, and leaves the skipped one eligible after the reconnection delay.
+async fn crawler_skips_a_blocked_candidate(
+    connected_change: crate::meta_addr::MetaAddrChange,
+    connected_peers: ConnectedPeers,
+) {
     let _init_guard = zebra_test::init();
 
     let connected_addr = connected_change.addr();
     let open_addr: PeerSocketAddr = "127.1.2.2:8233".parse().unwrap();
     let config = Config {
+        // The crawler only skips when the node has a version 2 endpoint.
+        v2_listen_addr: Some("127.0.0.1:0".parse().unwrap()),
         crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
@@ -5001,7 +5231,6 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         demand_tx.try_send(MorePeers).expect("the channel has room");
     }
 
-    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
     let crawl_task_handle = tokio::spawn(crawl_and_dial(
         config,
         demand_tx,
@@ -5013,7 +5242,7 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         peerset_tx,
         ActiveConnectionCounter::new_counter(),
         address_book_updater,
-        ConnectedPeers::new(keys, 1),
+        connected_peers,
     ));
 
     let (dialled, _tracker) = tokio::time::timeout(CRAWLER_TEST_DURATION, dialled_rx.next())
@@ -5067,6 +5296,91 @@ async fn crawler_skips_a_connected_candidate(connected_change: crate::meta_addr:
         ),
         "the skipped candidate is a candidate again after the reconnection delay"
     );
+
+    stop_crawler(crawl_task_handle).await;
+}
+
+/// A node without a version 2 endpoint dials a candidate whose IP is at the per-IP limit, as it
+/// did before the version 2 protocol: the handshake verifies the candidate's listener, and the
+/// peer set drops the connection afterwards.
+#[tokio::test]
+async fn legacy_only_crawler_dials_a_candidate_whose_ip_is_connected() {
+    let _init_guard = zebra_test::init();
+
+    // The peer set has a connection from another port of the candidate's IP.
+    let candidate_addr: PeerSocketAddr = "127.1.2.1:8233".parse().unwrap();
+    let connected_addr: PeerSocketAddr = "127.1.2.1:40000".parse().unwrap();
+    let config = Config {
+        v2_listen_addr: None,
+        crawl_new_peer_interval: CRAWLER_TEST_CRAWL_NEW_PEER_INTERVAL,
+        initial_mainnet_peers: IndexSet::new(),
+        initial_testnet_peers: IndexSet::new(),
+        cache_dir: CacheDir::disabled(),
+        ..Config::default()
+    };
+
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        address_book_service,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    let change = MetaAddr::new_gossiped_meta_addr(
+        candidate_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::now(),
+    )
+    .new_gossiped_change()
+    .expect("a gossiped address can be added to the address book");
+    address_book.lock().unwrap().update(change);
+
+    let (dialled_tx, mut dialled_rx) = mpsc::unbounded();
+    let outbound_connector = service_fn(move |req: OutboundConnectorRequest| {
+        let dialled_tx = dialled_tx.clone();
+        async move {
+            let (fake_client, _harness) = ClientTestHarness::build().finish();
+            dialled_tx
+                .unbounded_send((req.addr, req.connection_tracker))
+                .expect("the test holds the receiver");
+            Ok::<_, BoxError>((req.addr, fake_client))
+        }
+    });
+
+    let empty_peer_set = service_fn(|req| async move {
+        match req {
+            Request::Peers => Ok::<_, BoxError>(Response::Peers(Vec::new())),
+            _ => unreachable!("unexpected request: {req:?}"),
+        }
+    });
+    let (next_peer_service, crawl_service) =
+        crawler_services(address_book_service.clone(), empty_peer_set);
+    let channel_size = config.peerset_outbound_connection_limit() * 2;
+    let (peerset_tx, _peerset_rx) = mpsc::channel::<DiscoveredPeer>(channel_size);
+    let (mut demand_tx, demand_rx) = mpsc::channel::<MorePeers>(channel_size);
+    demand_tx.try_send(MorePeers).expect("the channel has room");
+
+    let (_keys_tx, keys) = watch::channel(Arc::new(HashSet::from([connected_addr])));
+    let crawl_task_handle = tokio::spawn(crawl_and_dial(
+        config,
+        demand_tx,
+        demand_rx,
+        next_peer_service,
+        crawl_service,
+        address_book_service,
+        outbound_connector,
+        peerset_tx,
+        ActiveConnectionCounter::new_counter(),
+        address_book_updater,
+        ConnectedPeers::new(keys, 1),
+    ));
+
+    let (dialled, _tracker) = tokio::time::timeout(CRAWLER_TEST_DURATION, dialled_rx.next())
+        .await
+        .expect("a legacy-only crawler dials a candidate whose IP is at the per-IP limit")
+        .expect("the crawler holds the connector");
+    assert_eq!(dialled, candidate_addr);
 
     stop_crawler(crawl_task_handle).await;
 }

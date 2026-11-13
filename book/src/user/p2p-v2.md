@@ -83,23 +83,29 @@ version 2 peers are recorded in a separate version 2 address book.
   connected to. Relayed addresses are bucketed by their address group and the
   group of the peer that sent them, so one network range cannot fill the book,
   and they never displace the configured, cached, or seeded addresses, or the
-  peers Zebra connected to. Zebra answers version 2 address requests from this
-  book only, with addresses it connected to or recently heard of over version
-  2, and its own version 2 address when it has a specific one
+  peers Zebra connected to. A full bucket keeps the relayed addresses it has: a
+  new one is dropped unless the address it would replace was last reported
+  more than 30 days ago. Zebra answers version 2 address requests from this
+  book only, with addresses it connected to first, then ones it recently heard
+  of over version 2, and its own version 2 address when it has a specific one
   (`v2_listen_addr`, or the IP address of `external_addr` with the
   `v2_listen_addr` port). It keeps the version 2 peers it connected to most
   recently, and that said they serve the chain, in `<cache_dir>/network/<network>.v2-peers`, next to the legacy peer
   cache, and tries them at startup. It never caches an address it only heard
   of. Zebra dials the peers it connected to before first, then picks at random
   among the others, giving seeded and cached addresses even odds against
-  relayed ones, whatever time the relaying peer claimed. When it has no address left to dial and fewer discovered peers than it
+  relayed ones, whatever time the relaying peer claimed. Among relayed
+  addresses, it dials the ones on the network's default port first, and it
+  retries a relayed address it never connected to at most once an hour. When it has no address left to dial and fewer discovered peers than it
   wants, it looks up the DNS seeders in
   `initial_mainnet_peers` or `initial_testnet_peers` and dials the results on
   the network's default port, UDP 8233 on Mainnet and 18233 on Testnet, at most
   every 30 minutes. Configured peers keep the first claim on the outbound
   version 2 slots; discovered peers get up to half of the initial target size,
   at most one per address group. Few nodes accept QUIC yet, so most DNS seed
-  results fail to connect, which Zebra logs at the `debug` level.
+  results fail to connect, which Zebra logs at the `debug` level. Zebra keeps
+  up to 1,000 DNS seed and cached addresses: past that, a new one replaces the
+  one whose connection failed longest ago and that never answered.
 - Relaying version 2 addresses. Zebra relays each fresh full-node address a
   version 2 peer announces to two of its other version 2 peers, and limits each peer to
   about one announced address every 10 seconds, dropping the rest. It also
@@ -109,10 +115,19 @@ version 2 peers are recorded in a separate version 2 address book.
   `v2_listen_addr` if it is a specific address. An unspecified listener, like
   `[::]:8233`, is not advertised.
 - Transaction announcements in both directions. Block and address
-  announcements from peers are received and acted on.
+  announcements from peers are received and acted on. Zebra acts on a peer's
+  block announcements at a bounded rate, a burst of 16 and then one every 15
+  seconds, by not reading further announcements until then, and ignores an
+  announced header that fails the proof-of-work difficulty check.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
-  inbound and outbound limits of half the legacy ones. Protocol violations
-  close the connection with the draft's error codes.
+  inbound and outbound limits of half the legacy ones. For inbound version 2
+  connections, `max_connections_per_ip` and the limit of one connection
+  attempt per reconnection delay count an IPv6 address by its `/48` prefix,
+  not its `/64`, so nodes in the same `/48` share them. Protocol violations
+  close the connection with the draft's error codes. Zebra does not let a
+  peer move a connection to another address (QUIC connection migration), so
+  the bans and limits keep applying to the address the peer connected from. A
+  peer whose address changes reconnects.
 - Misbehavior scores as the draft describes them. A misbehaving response, such
   as a header chain that does not follow from the request, adds to the peer's
   score, which lasts across reconnections for about a ban duration. A peer
@@ -269,7 +284,14 @@ go in these metrics, and its progress in the usual `state.*` and
   at once; Zebra then keeps the first connection and drops the other. An existing
   legacy connection is not replaced with a version 2 one: while Zebra has a
   legacy connection to a version 2 peer, configured or discovered, it dials
-  that peer over version 2 only after the legacy connection closes. `max_connections_per_ip`
+  that peer over version 2 only after the legacy connection closes. So that
+  the hosts in `initial_v2_peers` are used over version 2, the legacy peer
+  crawler never dials their IP addresses once they have resolved, on any port:
+  such a host has no legacy fallback while version 2 is enabled, unless it is
+  also in the legacy initial peers, which are dialled at startup, or it
+  connects to Zebra itself. A legacy connection made either of those ways is
+  still kept until it closes. Discovered version 2 peers get no such
+  preference. `max_connections_per_ip`
   still applies across both protocols. Version 2 connections add up to half of
   each legacy connection limit on top of it.
 - **Blocks are not announced to version 2 peers.** A version 2 block

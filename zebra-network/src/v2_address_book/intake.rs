@@ -9,7 +9,11 @@ use crate::{
     PeerAddrState, PeerSocketAddr,
 };
 
-use super::{actor::V2Book, Via};
+use super::{
+    actor::V2Book,
+    buckets::{Admission, Incumbent},
+    Via,
+};
 
 /// Relayed records whose `time`, after clamping, is older than this are dropped (draft, "Address
 /// Records": SHOULD NOT relay, and SHOULD evict, such records).
@@ -36,7 +40,10 @@ pub(super) enum Rejection {
     /// It does not claim to serve the chain.
     NotANode,
 
-    /// It took the bucket slot of this relayed entry, which was removed.
+    /// Its bucket is full of relayed entries that are not stale, so it was dropped.
+    BucketFull,
+
+    /// It took the bucket slot of a stale relayed entry, which was removed.
     BucketEvicted,
 }
 
@@ -50,6 +57,7 @@ impl Rejection {
             Rejection::Clamped => "clamped",
             Rejection::Stale => "stale",
             Rejection::NotANode => "not_a_node",
+            Rejection::BucketFull => "bucket_full",
             Rejection::BucketEvicted => "bucket_evicted",
         }
     }
@@ -67,6 +75,14 @@ impl Rejection {
                 .increment(1),
         }
     }
+}
+
+/// Returns whether the relayed `time` of `entry`, which was clamped when it was stored, is more
+/// than [`MAX_RELAYED_RECORD_AGE`] before `now`.
+fn is_stale(entry: &MetaAddr, now: DateTime32) -> bool {
+    entry
+        .untrusted_last_seen()
+        .is_none_or(|time| now.saturating_duration_since(time) > MAX_RELAYED_RECORD_AGE)
 }
 
 impl V2Book {
@@ -131,11 +147,11 @@ impl V2Book {
         // Decoded records always have a time.
         let time = record.untrusted_last_seen().unwrap_or(DateTime32::MIN);
         let clamped = clamp_relayed_time(time, now);
-        if now.saturating_duration_since(clamped) > MAX_RELAYED_RECORD_AGE {
-            return Some(Rejection::Stale);
-        }
         let outcome = (clamped != time).then_some(Rejection::Clamped);
         record.set_untrusted_last_seen(clamped);
+        if is_stale(&record, now) {
+            return Some(Rejection::Stale);
+        }
 
         // Never `None`: the services were checked above.
         let Some(change) = record.new_gossiped_change() else {
@@ -154,20 +170,31 @@ impl V2Book {
         //
         // A new relayed address is admitted through the secret-keyed buckets, by its group and
         // the relaying peer's group, so one source group can only fill its share of them.
-        // Trusted and tried entries are never victims.
-        let victim = {
+        // Trusted and tried entries are never victims, and a relayed entry is only a victim
+        // once its own record is stale. An entry with a failed attempt is tried, so it has left
+        // its bucket already.
+        let admission = {
             let book = &mut self.book;
             let trusted = &self.trusted;
             self.buckets.admit(addr, source, |entry| {
-                !trusted.contains_key(&entry)
-                    && book.get(entry).is_some_and(|meta| {
-                        meta.last_connection_state == PeerAddrState::NeverAttemptedGossiped
-                    })
+                let relayed = book.get(entry).filter(|meta| {
+                    meta.last_connection_state == PeerAddrState::NeverAttemptedGossiped
+                        && !trusted.contains_key(&entry)
+                });
+                match relayed {
+                    None => Incumbent::Gone,
+                    Some(meta) if is_stale(&meta, now) => Incumbent::Terrible,
+                    Some(_) => Incumbent::Kept,
+                }
             })
         };
-        if let Some(victim) = victim {
-            self.book.remove(victim);
-            Rejection::BucketEvicted.count();
+        match admission {
+            Admission::Admitted => {}
+            Admission::Replaced(victim) => {
+                self.book.remove(victim);
+                Rejection::BucketEvicted.count();
+            }
+            Admission::Full => return Some(Rejection::BucketFull),
         }
 
         if self.book.update(change).is_none() {

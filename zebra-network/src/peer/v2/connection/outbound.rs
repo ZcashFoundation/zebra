@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use quinn::{Connection, RecvStream, SendStream};
+use quinn::{Connection, RecvStream, SendStream, VarInt};
 use tokio::{io::BufReader, sync::OwnedSemaphorePermit};
 
 use zebra_chain::{
@@ -27,12 +27,13 @@ use crate::{
         external::InventoryHash,
         internal::{InventoryResponse, Request, Response},
         v2::{
+            announcement::MAX_ADDR_RECORD_LEN,
             constants::{
                 MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST, MAX_LOCATOR_HASHES,
                 MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS, RESPONSE_MISBEHAVIOR_PENALTY,
             },
             request::{GetBlocks, GetHeaders, GetTx, Request as WireRequest},
-            response::{decode_addr_response, read_headers, read_objects, ObjectResult},
+            response::{decode_addr_response, HeadersReader, ObjectResult, ObjectsReader},
             txref::TxRef,
             types::ErrorCode,
             wire::{Violation, WireError},
@@ -43,10 +44,6 @@ use crate::{
 };
 
 use super::{close_error, Event, Events};
-
-/// The longest `addrv2` record: time, a 9-byte services CompactSize, the
-/// network ID, a 3-byte length, the 512-byte address maximum, and the port.
-const MAX_ADDR_RECORD_LEN: usize = 4 + 9 + 1 + 3 + 512 + 2;
 
 /// The longest `get-addr` response body a conforming peer can send.
 const MAX_ADDR_RESPONSE_LEN: usize = 3 + MAX_ADDRS_PER_RESPONSE * MAX_ADDR_RECORD_LEN;
@@ -254,6 +251,12 @@ enum Failure {
     #[error("transport error: {0}")]
     Transport(String),
 
+    /// The peer reset the request stream with `BUSY` or `INTERNAL_ERROR`: it
+    /// serves this kind of request but could not just now, and the caller
+    /// may retry after a short delay (draft, "Request Streams").
+    #[error("the peer is busy: {0}")]
+    Busy(String),
+
     /// This node refuses the request without sending it. The connection task refuses these
     /// requests itself, before a stream is opened, so this is only a fallback.
     #[error("refused without sending: {0}")]
@@ -268,7 +271,10 @@ impl From<WireError> for Failure {
                 code,
             },
             Some(Violation::Misbehavior) => Failure::Misbehavior(error.to_string()),
-            None => Failure::Transport(error.to_string()),
+            None => match error {
+                WireError::Io(error) => io_failure(error),
+                error => Failure::Transport(error.to_string()),
+            },
         }
     }
 }
@@ -284,6 +290,7 @@ impl From<Failure> for SharedPeerError {
                 PeerError::RequestStreamFailed(failure.to_string()).into()
             }
             Failure::Transport(reason) => PeerError::RequestStreamFailed(reason).into(),
+            Failure::Busy(reason) => PeerError::RequestStreamBusy(reason).into(),
             Failure::Refused(error) => error.into(),
         }
     }
@@ -292,6 +299,49 @@ impl From<Failure> for SharedPeerError {
 /// Maps a stream error from quinn.
 fn transport(error: impl std::fmt::Display) -> Failure {
     Failure::Transport(error.to_string())
+}
+
+/// The failure of a request whose stream the peer reset or stopped with
+/// `code`, which `error` reports: `BUSY` says the peer could not serve the
+/// request just now, and a requester treats `INTERNAL_ERROR` on a request
+/// stream the same way (draft, "Request Streams"). Any other code, `REFUSED`
+/// included, is a failed stream.
+fn reset_failure(code: VarInt, error: impl std::fmt::Display) -> Failure {
+    if code == app_error_code(ErrorCode::Busy) || code == app_error_code(ErrorCode::InternalError) {
+        Failure::Busy(error.to_string())
+    } else {
+        transport(error)
+    }
+}
+
+/// Maps an error reading a response stream.
+fn read_failure(error: &quinn::ReadError) -> Failure {
+    match error {
+        quinn::ReadError::Reset(code) => reset_failure(*code, error),
+        error => transport(error),
+    }
+}
+
+/// Maps an error writing a request: a peer that refuses a request before it
+/// has read all of it stops the stream with the code it resets its own
+/// direction with.
+fn write_failure(error: quinn::WriteError) -> Failure {
+    match &error {
+        quinn::WriteError::Stopped(code) => reset_failure(*code, &error),
+        error => transport(error),
+    }
+}
+
+/// Maps an I/O error from a response reader, which wraps the stream's own
+/// error if the stream failed.
+fn io_failure(error: std::io::Error) -> Failure {
+    match error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<quinn::ReadError>())
+    {
+        Some(read_error) => read_failure(read_error),
+        None => transport(error),
+    }
 }
 
 /// A response stream that tells the peer to stop sending when it is dropped
@@ -352,8 +402,8 @@ async fn open_request(
         .expect("the guard holds the stream until it is finished");
     send.write_all(&[request.stream_type().code()])
         .await
-        .map_err(transport)?;
-    send.write_all(&body).await.map_err(transport)?;
+        .map_err(write_failure)?;
+    send.write_all(&body).await.map_err(write_failure)?;
     send.finish().map_err(transport)?;
     // Finished: nothing is left for the guard to cancel.
     guard.0 = None;
@@ -380,7 +430,7 @@ async fn drive_inner(
                                 .to_string(),
                             code: ErrorCode::ProtocolError,
                         },
-                        quinn::ReadToEndError::Read(error) => transport(error),
+                        quinn::ReadToEndError::Read(error) => read_failure(&error),
                     })?;
             Response::Peers(decode_addr_response(&body)?)
         }
@@ -454,7 +504,8 @@ async fn drive_inner(
 }
 
 /// Fetches up to one request's worth of blocks, checking each delivered
-/// block against the hash it answers.
+/// block against the hash it answers as it arrives. A response longer than
+/// `MAX_RESPONSE_BYTES` closes the connection with `FLOOD`.
 ///
 /// A responder may finish early; the hashes it did not answer are left out
 /// of the result rather than reported as missing, since the peer may well
@@ -468,10 +519,18 @@ async fn fetch_blocks(
         hashes: hashes.to_vec(),
     });
     let mut recv = open_request(connection, &request).await?;
-    let entries = read_objects::<_, Block>(&mut recv.reader(), hashes.len()).await?;
+    let mut entries = ObjectsReader::<_, Block>::new(recv.reader(), hashes.len());
 
-    let mut results = Vec::with_capacity(entries.len());
-    for (entry, &hash) in entries.into_iter().zip(hashes) {
+    // # Security
+    //
+    // Each block is checked as its entry arrives, so a peer that delivers another block is
+    // closed after that one, not after a whole response of them.
+    let mut results = Vec::new();
+    let mut requested = hashes.iter();
+    while let Some(entry) = entries.next().await? {
+        let &hash = requested
+            .next()
+            .expect("the reader yields at most one entry for each requested hash");
         match entry {
             ObjectResult::Found(block) => {
                 // Draft, "get-blocks": a block that does not hash to its entry's hash is a
@@ -505,10 +564,15 @@ async fn fetch_transactions(
         txrefs: ids.iter().copied().map(TxRef::from).collect(),
     });
     let mut recv = open_request(connection, &request).await?;
-    let entries = read_objects::<_, Transaction>(&mut recv.reader(), ids.len()).await?;
+    let mut entries = ObjectsReader::<_, Transaction>::new(recv.reader(), ids.len());
 
-    let mut results = Vec::with_capacity(entries.len());
-    for (entry, &id) in entries.into_iter().zip(ids) {
+    // Each transaction is checked as its entry arrives, as for blocks.
+    let mut results = Vec::new();
+    let mut requested = ids.iter();
+    while let Some(entry) = entries.next().await? {
+        let &id = requested
+            .next()
+            .expect("the reader yields at most one entry for each requested reference");
         match entry {
             ObjectResult::Found(transaction) => {
                 let unmined = UnminedTx::from(transaction);
@@ -594,7 +658,19 @@ async fn fetch_headers(
     };
     let wire_request = WireRequest::Headers(request.clone());
     let mut recv = open_request(connection, &wire_request).await?;
-    let headers = read_headers(&mut recv.reader()).await?;
+    let mut entries = HeadersReader::new(recv.reader());
+
+    // Each header is checked against the one before it as it arrives, so the rest of a chain
+    // that is not contiguous is not read. `check_headers_response` makes every check below.
+    let mut headers: Vec<Arc<block::Header>> = Vec::new();
+    let mut previous_hash = None;
+    while let Some(header) = entries.next().await? {
+        if previous_hash.is_some_and(|previous_hash| header.previous_block_hash != previous_hash) {
+            return Err(Failure::Misbehavior(NOT_CONTIGUOUS.to_string()));
+        }
+        previous_hash = Some(header.hash());
+        headers.push(header);
+    }
 
     match check_headers_response(&request, &headers, genesis_hash) {
         HeadersCheck::Selectable => Ok(headers),
@@ -609,6 +685,10 @@ async fn fetch_headers(
         HeadersCheck::Unselectable(reason) => Err(Failure::Misbehavior(reason)),
     }
 }
+
+/// Why a `get-headers` response whose headers do not follow each other is
+/// misbehavior.
+const NOT_CONTIGUOUS: &str = "get-headers response is not a contiguous chain";
 
 /// Whether a `get-headers` response is one its request could have selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -679,7 +759,7 @@ fn unselectable_reason(
         .zip(&hashes)
         .any(|(header, previous_hash)| header.previous_block_hash != *previous_hash)
     {
-        return Some("get-headers response is not a contiguous chain".to_string());
+        return Some(NOT_CONTIGUOUS.to_string());
     }
 
     if request.locator_hashes.is_empty() {

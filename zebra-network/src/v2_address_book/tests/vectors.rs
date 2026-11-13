@@ -22,7 +22,7 @@ use crate::{
 use super::super::{
     actor::{
         V2Book, GET_ADDR_SNAPSHOT_BASE_INTERVAL, GET_ADDR_SNAPSHOT_JITTER,
-        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_TRIED,
+        GET_ADDR_SNAPSHOT_MIN_ADDRS, V2_MAX_SEEDED, V2_MAX_TRIED, V2_RELAYED_RETRY_INTERVAL,
     },
     buckets::{Group, V2_GOSSIP_BUCKET_SIZE, V2_GOSSIP_CAPACITY, V2_SOURCE_GROUP_SPAN},
     cache::v2_peer_cache_updater_with,
@@ -268,6 +268,88 @@ fn a_relay_flood_never_evicts_tried_or_trusted_entries() {
     assert_eq!(stats.relayed, book.buckets.len());
 }
 
+/// Relaying fresh records from many source groups never replaces the relayed entries the
+/// segment already has: a full bucket only gives up an entry whose own record went stale.
+#[test]
+fn a_relay_flood_never_replaces_fresh_relayed_entries() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let now = DateTime32::now();
+
+    // One bucket's worth of entries in one group, from one source, share a bucket.
+    let incumbents: Vec<PeerSocketAddr> = (1..=V2_GOSSIP_BUCKET_SIZE)
+        .map(|host| addr_in(1, u8::try_from(host).expect("the bucket size is small")))
+        .collect();
+    relay(&mut book, &incumbents);
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+
+    let flood = |first: u8| -> Vec<MetaAddr> {
+        (0..=255)
+            .map(|host| {
+                let ip = Ipv4Addr::new(203, 1, first, host);
+                record(SocketAddr::new(ip.into(), 8233).into(), now)
+            })
+            .collect()
+    };
+    let outcomes = book.intake_at(source(), flood(1), Via::Announcement, now);
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| *outcome == Some(Rejection::BucketFull)),
+        "every record for the full bucket is dropped",
+    );
+    for incumbent in &incumbents {
+        assert!(book.book.get(*incumbent).is_some(), "{incumbent:?} is kept");
+    }
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+    assert_eq!(book.buckets.len(), V2_GOSSIP_BUCKET_SIZE);
+
+    // Once the incumbents' own records are stale, new records take their slots, one for one.
+    let later = now.saturating_add(Duration32::from_days(31));
+    let fresh: Vec<MetaAddr> = flood(2)
+        .into_iter()
+        .map(|entry| record(entry.addr, later))
+        .collect();
+    let outcomes = book.intake_at(source(), fresh, Via::Announcement, later);
+    assert!(outcomes.contains(&None), "stale incumbents are replaced");
+    assert_eq!(book.stats().relayed, V2_GOSSIP_BUCKET_SIZE);
+    assert_eq!(book.buckets.len(), V2_GOSSIP_BUCKET_SIZE);
+    assert!(
+        incumbents
+            .iter()
+            .any(|incumbent| book.book.get(*incumbent).is_none()),
+        "a stale incumbent left the book",
+    );
+}
+
+/// A `get-addr` answer is filled with the entries that answered this node before the ones that
+/// were only relayed.
+#[test]
+fn get_addr_sample_prefers_entries_that_answered() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let tried = relayed_addrs(1, 3);
+    relay(&mut book, &tried);
+    for addr in &tried {
+        make_tried(&mut book, *addr);
+    }
+    relay(&mut book, &relayed_addrs(10, 100));
+
+    let sample = book.get_addr_sample(tokio::time::Instant::now());
+    assert!(
+        sample.len() > 4 * tried.len(),
+        "the sample has many relayed entries",
+    );
+    let head = addrs_of(sample[..=tried.len()].to_vec());
+    assert_eq!(
+        head,
+        tried.iter().copied().chain([addr(OWN_ADDR)]).collect(),
+        "this node's own address and the entries that answered come first",
+    );
+}
+
 #[test]
 fn bans_remove_entries_from_the_book_buckets_and_trusted_entries() {
     let _init_guard = zebra_test::init();
@@ -478,6 +560,100 @@ fn next_candidate_prefers_entries_that_answered() {
     for _ in 0..20 {
         assert_eq!(candidate(&book, after_delay), Some(answered));
     }
+}
+
+/// A relayed entry whose attempt failed is not a candidate again for an hour, however recent the
+/// time its relaying peer claimed, while a trusted entry only waits for the reconnection delay.
+#[test]
+fn next_candidate_retries_unanswered_relayed_entries_once_per_hour() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let relayed = addr_in(1, 1);
+    let cached = addr("192.0.2.50:8233");
+    relay(&mut book, &[relayed]);
+    book.seed(vec![cached], Provenance::Cache, Instant::now());
+    for failed in [relayed, cached] {
+        book.change(MetaAddr::new_reconnect(failed), Instant::now());
+    }
+    book.change(MetaAddr::new_errored(relayed, None), Instant::now());
+
+    let candidate = |book: &V2Book, exclude: &[PeerSocketAddr], after: Duration| {
+        book.next_candidate_at(
+            &exclude.iter().copied().collect(),
+            &HashSet::new(),
+            Instant::now() + after,
+            chrono::Utc::now() + after,
+        )
+        .map(|candidate| candidate.addr)
+    };
+    let after_delay = crate::constants::MIN_PEER_RECONNECTION_DELAY + Duration::from_secs(1);
+    assert_eq!(
+        candidate(&book, &[], after_delay),
+        Some(cached),
+        "a trusted entry whose attempt never finished is a candidate after the delay",
+    );
+    assert_eq!(
+        candidate(&book, &[cached], after_delay),
+        None,
+        "the relayed entry is not retried after the reconnection delay",
+    );
+    assert_eq!(
+        candidate(
+            &book,
+            &[cached],
+            V2_RELAYED_RETRY_INTERVAL - Duration::from_secs(60)
+        ),
+        None,
+    );
+    assert_eq!(
+        candidate(
+            &book,
+            &[cached],
+            V2_RELAYED_RETRY_INTERVAL + Duration::from_secs(60)
+        ),
+        Some(relayed),
+        "the relayed entry is retried an hour after its attempt",
+    );
+}
+
+/// Among relayed entries that were never attempted, the ones on the network's default port are
+/// dialled first, and the others once none of those is left.
+#[test]
+fn next_candidate_prefers_relayed_entries_on_the_default_port() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let default_port = addr_in(1, 1);
+    let other_ports: Vec<PeerSocketAddr> = (2..=20)
+        .map(|group| SocketAddr::new(Ipv4Addr::new(203, group, 0, 1).into(), 9999).into())
+        .collect();
+    relay(&mut book, &other_ports);
+    relay(&mut book, &[default_port]);
+    assert_eq!(book.stats().relayed, other_ports.len() + 1);
+
+    for _ in 0..50 {
+        let candidate = book
+            .next_candidate(&HashSet::new(), &HashSet::new())
+            .map(|candidate| candidate.addr);
+        assert_eq!(candidate, Some(default_port));
+    }
+
+    let candidate = book
+        .next_candidate(&[default_port].into(), &HashSet::new())
+        .expect("the other relayed entries are candidates")
+        .addr;
+    assert!(other_ports.contains(&candidate));
+
+    // A trusted entry on another port is not passed over for the relayed entries.
+    let mut book = segment(OWN_ADDR);
+    let cached = addr("192.0.2.50:9999");
+    book.seed(vec![cached], Provenance::Cache, Instant::now());
+    assert_eq!(
+        book.next_candidate(&HashSet::new(), &HashSet::new())
+            .map(|candidate| candidate.addr),
+        Some(cached),
+    );
 }
 
 /// Only the entries this node connected to are cached, most recently answered first, so relayed
@@ -700,6 +876,78 @@ fn seeds_skip_known_entries_unless_they_failed_long_ago() {
     book.seed(vec![relayed], Provenance::Configured, Instant::now());
     assert_eq!(book.buckets.len(), 0);
     assert_eq!(book.trusted.get(&relayed), Some(&Provenance::Configured));
+}
+
+/// At the seeded entry limit, a new seed replaces the seeded entry that failed longest ago
+/// without ever answering, and nothing else.
+#[test]
+fn new_seeds_replace_failed_seeds_at_the_limit() {
+    let _init_guard = zebra_test::init();
+
+    let mut book = segment(OWN_ADDR);
+    let fail = |book: &mut V2Book, addr: PeerSocketAddr| {
+        book.change(MetaAddr::new_reconnect(addr), Instant::now());
+        book.change(MetaAddr::new_errored(addr, None), Instant::now());
+        assert_eq!(state(book, addr), Some(PeerAddrState::Failed));
+    };
+    let seed_addr = |index: u16| -> PeerSocketAddr {
+        let [a, b] = index.to_be_bytes();
+        SocketAddr::new(Ipv4Addr::new(100, 1, a, b).into(), 8233).into()
+    };
+
+    let configured = addr("192.0.2.10:8233");
+    book.seed(vec![configured], Provenance::Configured, Instant::now());
+    fail(&mut book, configured);
+
+    let limit = u16::try_from(V2_MAX_SEEDED).expect("the limit is small");
+    let seeds: Vec<PeerSocketAddr> = (0..limit).map(seed_addr).collect();
+    book.seed(seeds.clone(), Provenance::DnsSeed, Instant::now());
+    assert_eq!(book.stats().trusted, V2_MAX_SEEDED + 1);
+
+    // With no failed seed, a new seed has no room.
+    let [first, second, third, fourth] = [0, 1, 2, 3].map(|index| seed_addr(limit + index));
+    book.seed(vec![first], Provenance::DnsSeed, Instant::now());
+    assert_eq!(
+        state(&mut book, first),
+        None,
+        "a full segment drops the seed"
+    );
+
+    // Two seeds failed, in address order, and one answered before it failed.
+    fail(&mut book, seeds[0]);
+    fail(&mut book, seeds[1]);
+    make_tried(&mut book, seeds[2]);
+    book.change(MetaAddr::new_errored(seeds[2], None), Instant::now());
+    assert_eq!(state(&mut book, seeds[2]), Some(PeerAddrState::Failed));
+
+    book.seed(vec![first], Provenance::Cache, Instant::now());
+    assert!(state(&mut book, first).is_some(), "the new seed has room");
+    assert_eq!(book.trusted.get(&first), Some(&Provenance::Cache));
+    assert_eq!(
+        state(&mut book, seeds[0]),
+        None,
+        "the oldest failure is evicted"
+    );
+    assert!(!book.trusted.contains_key(&seeds[0]));
+    assert!(state(&mut book, seeds[1]).is_some());
+
+    // A failed seed that is in the new results is not evicted for them: it would only be
+    // added again.
+    book.seed(vec![second, seeds[1]], Provenance::DnsSeed, Instant::now());
+    assert_eq!(state(&mut book, second), None);
+    assert_eq!(state(&mut book, seeds[1]), Some(PeerAddrState::Failed));
+
+    book.seed(vec![third], Provenance::DnsSeed, Instant::now());
+    assert!(state(&mut book, third).is_some());
+    assert_eq!(state(&mut book, seeds[1]), None);
+
+    // Configured entries, entries that answered, and entries that were never attempted stay.
+    book.seed(vec![fourth], Provenance::DnsSeed, Instant::now());
+    assert_eq!(state(&mut book, fourth), None);
+    assert_eq!(state(&mut book, configured), Some(PeerAddrState::Failed));
+    assert_eq!(state(&mut book, seeds[2]), Some(PeerAddrState::Failed));
+    assert_eq!(book.stats().trusted, V2_MAX_SEEDED + 1);
+    book.publish_stats();
 }
 
 /// The version 2 peer cache round-trips through `<network>.v2-peers`, and leaves the legacy peer

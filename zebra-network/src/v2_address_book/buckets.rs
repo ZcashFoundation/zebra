@@ -12,7 +12,9 @@
 //!   single relaying network range can never occupy more than that share of
 //!   the book, whatever addresses it relays, and
 //! - bucket positions and replacement victims are derived from a local
-//!   secret, so peers cannot predict or force collisions.
+//!   secret, so peers cannot predict or force collisions, and
+//! - a full bucket only gives up an entry that is terrible, so relaying
+//!   fresh records never turns the gossiped population over.
 //!
 //! Addresses that are attempted or respond leave the gossiped state, and
 //! are never evicted by gossip.
@@ -83,6 +85,33 @@ impl Group {
     }
 }
 
+/// What the book knows of an address a bucket tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Incumbent {
+    /// It is no longer a gossiped, never-attempted entry of the book: it was attempted,
+    /// responded, became trusted, or left the book.
+    Gone,
+
+    /// It is still gossiped, but not worth keeping over a new address.
+    Terrible,
+
+    /// It is still gossiped, and keeps its slot.
+    Kept,
+}
+
+/// What [`GossipBuckets::admit`] did with a new address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Admission {
+    /// The address has a slot, and nothing was evicted for it.
+    Admitted,
+
+    /// The address took the slot of this terrible entry, which must leave the book.
+    Replaced(PeerSocketAddr),
+
+    /// The bucket is full of entries worth keeping: the address has no slot.
+    Full,
+}
+
 /// The secret-keyed buckets tracking gossiped, never-attempted addresses.
 #[derive(Debug)]
 pub(crate) struct GossipBuckets {
@@ -111,56 +140,62 @@ impl GossipBuckets {
         }
     }
 
-    /// Admits a gossiped address, relayed by `source`, into its bucket,
-    /// returning an existing entry that must be evicted from the book to
-    /// make room, if the bucket is full.
+    /// Admits a gossiped address, relayed by `source`, into its bucket, if the bucket has room
+    /// or its examined incumbent is terrible.
     ///
-    /// `is_still_gossiped` reports whether a tracked address is still a
-    /// gossiped, never-attempted entry of the book: entries that were
-    /// attempted, responded, or left the book are pruned from the bucket
-    /// before it is considered full, and are never chosen as victims.
+    /// `incumbent` reports what the book knows of a tracked address. Entries that are
+    /// [`Incumbent::Gone`] are pruned from the bucket before it is considered full, and are
+    /// never chosen as victims.
+    ///
+    /// # Security
+    ///
+    /// A full bucket keeps its entries, as the Bitcoin Core address manager's "new" table does:
+    /// the new address is dropped unless the one incumbent it is compared with is
+    /// [`Incumbent::Terrible`]. Otherwise a peer relaying fresh records from enough source
+    /// groups could replace every relayed entry, as often as it liked. The incumbent is chosen
+    /// by a keyed hash of the new address, so a flooder cannot aim at an entry.
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn admit(
         &mut self,
         addr: PeerSocketAddr,
         source: PeerSocketAddr,
-        mut is_still_gossiped: impl FnMut(PeerSocketAddr) -> bool,
-    ) -> Option<PeerSocketAddr> {
+        mut incumbent: impl FnMut(PeerSocketAddr) -> Incumbent,
+    ) -> Admission {
         let index = self.bucket_index(&addr, &source);
         let victim_hash = self.entry_hash(&addr);
         let bucket = &mut self.buckets[index];
 
         if bucket.contains(&addr) {
-            return None;
+            return Admission::Admitted;
         }
         if bucket.len() < V2_GOSSIP_BUCKET_SIZE {
             bucket.insert(addr);
-            return None;
+            return Admission::Admitted;
         }
 
         // The bucket looks full. Heal it first: the book evicts and
         // promotes entries on its own schedule, so drop tracked addresses
         // that are no longer gossiped-only. Staleness only matters here, so
         // admissions into a bucket with room never pay for the scan.
-        bucket.retain(|entry| is_still_gossiped(*entry));
+        bucket.retain(|entry| incumbent(*entry) != Incumbent::Gone);
         if bucket.len() < V2_GOSSIP_BUCKET_SIZE {
             bucket.insert(addr);
-            return None;
+            return Admission::Admitted;
         }
 
-        // The bucket is full: replace a secret-derived victim, so a peer
-        // flooding one group cannot choose which entries survive.
-        //
         // The modulo is unbiased enough: the bucket length is far below
-        // 2^64.
+        // 2^64. The cast is safe: the remainder is below the bucket length.
         let victim_index = (victim_hash % bucket.len() as u64) as usize;
         let victim = *bucket
             .get_index(victim_index)
             .expect("victim index is below the bucket length");
+        if incumbent(victim) != Incumbent::Terrible {
+            return Admission::Full;
+        }
         bucket.swap_remove(&victim);
         bucket.insert(addr);
 
-        Some(victim)
+        Admission::Replaced(victim)
     }
 
     /// Removes every tracked address matching `predicate`, after a ban.

@@ -1181,7 +1181,8 @@ async fn block_range_read_timeouts_start_no_stall_backoff() {
         let _server = spawn_server(responder, service, serving);
 
         let recv = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(recv, ErrorCode::Refused).await;
+        // This node ran out of time before it wrote anything, so it is busy, not unwilling.
+        assert_reset(recv, ErrorCode::Busy).await;
         assert_eq!(global.remembered_stalls(), 0);
         assert!(!global.backing_off(remote, Instant::now()));
     })

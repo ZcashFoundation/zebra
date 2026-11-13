@@ -53,6 +53,30 @@ fn transport_config_caps_the_send_window() {
     );
 }
 
+/// The server refuses connection migration, which quinn allows by default:
+/// the address-keyed limits use the address validated at establishment.
+#[test]
+fn server_config_refuses_migration() {
+    let config = super::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");
+    let config = format!("{config:?}");
+    assert!(config.contains("migration: false,"), "got {config}");
+}
+
+/// The server bounds the connection attempts that wait for the listener, and
+/// what it buffers for them, well below quinn's defaults.
+#[test]
+fn server_config_bounds_waiting_connection_attempts() {
+    let config = super::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");
+    let config = format!("{config:?}");
+    for setting in [
+        "max_incoming: 256,",
+        "incoming_buffer_size: 8192,",
+        "incoming_buffer_size_total: 2097152,",
+    ] {
+        assert!(config.contains(setting), "no {setting} in {config}");
+    }
+}
+
 #[test]
 fn configurations_disable_early_data() {
     let server = tls::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");

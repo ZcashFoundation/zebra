@@ -25,7 +25,7 @@
 //!   accepted, so no stream holds a permit indefinitely.
 //!
 //! A response that misses any of them is abandoned like any other: reset
-//! with `REFUSED` while nothing is written, and `CANCELLED` once it is (see
+//! with `BUSY` while nothing is written, and `CANCELLED` once it is (see
 //! the parent module).
 //!
 //! # Security

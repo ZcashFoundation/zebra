@@ -315,6 +315,81 @@ async fn deregistered_peers_get_nothing() {
     assert_eq!(first.len(), 1, "the newer registration is advertised to");
 }
 
+/// A handle to a hub that has not started, with room for one message, and
+/// the queue that hub would read.
+fn stalled_hub() -> (AddrRelayHandle, mpsc::Receiver<super::Message>) {
+    let (inbox, receiver) = mpsc::channel(1);
+    let handle = AddrRelayHandle {
+        inbox,
+        next_id: Default::default(),
+    };
+    (handle, receiver)
+}
+
+/// A registration that finds the hub's queue full is delivered once the hub
+/// catches up, without the caller waiting, so the connection still gets
+/// addresses.
+#[tokio::test(start_paused = true)]
+async fn registration_survives_a_full_hub_queue() {
+    let _init_guard = zebra_test::init();
+    let (handle, receiver) = stalled_hub();
+    handle.offer(peer(9), Vec::new());
+
+    let (tx, mut rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    handle.register(peer(1), tx);
+
+    // The hub starts late, but well within the wait.
+    tokio::time::sleep(super::REGISTER_TIMEOUT / 2).await;
+    let hub = super::Hub {
+        advertised: Some("203.0.113.200:8233".parse::<SocketAddr>().unwrap().into()),
+        ..bare_hub()
+    };
+    tokio::spawn(hub.run(receiver));
+
+    let first = drain(&mut rx, Duration::from_secs(61)).await;
+    assert_eq!(first.len(), 1, "the late registration is advertised to");
+}
+
+/// A registration that waits for the hub is given up when its connection
+/// ends, or after the registration timeout, so nothing waits forever.
+#[tokio::test(start_paused = true)]
+async fn waiting_registrations_are_given_up() {
+    let _init_guard = zebra_test::init();
+
+    // The connection ends while its registration waits.
+    let (handle, mut receiver) = stalled_hub();
+    handle.offer(peer(9), Vec::new());
+    let (tx, rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    handle.register(peer(1), tx);
+    drop(rx);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(super::Message::Offer { .. })
+    ));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        receiver.try_recv().is_err(),
+        "an ended connection is not registered"
+    );
+
+    // The hub stays behind for longer than the timeout.
+    let (handle, mut receiver) = stalled_hub();
+    handle.offer(peer(9), Vec::new());
+    let (tx, _rx) = mpsc::channel(RELAY_CHANNEL_SIZE);
+    handle.register(peer(1), tx);
+    tokio::time::sleep(super::REGISTER_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(matches!(
+        receiver.try_recv(),
+        Ok(super::Message::Offer { .. })
+    ));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        receiver.try_recv().is_err(),
+        "a registration that timed out is not delivered later"
+    );
+}
+
 /// A hub's state, without its task, for checking what it keeps.
 fn bare_hub() -> super::Hub {
     super::Hub {

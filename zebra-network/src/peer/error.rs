@@ -95,10 +95,16 @@ pub enum PeerError {
     LocalEncodingError(String),
 
     /// A request stream failed or was reset, including by the peer's `REFUSED`
-    /// reset (there is no separate refused error, and no retry policy keys on
-    /// one yet); the connection stays open.
+    /// reset, which says the peer does not serve the request to this node, so
+    /// repeating it to that peer is pointless; the connection stays open.
     #[error("Request stream failed: {0}")]
     RequestStreamFailed(String),
+
+    /// The peer reset a request stream with `BUSY` or `INTERNAL_ERROR`: it
+    /// serves this kind of request but could not just now, so the request
+    /// can be retried after a short delay; the connection stays open.
+    #[error("Peer is busy, request stream reset: {0}")]
+    RequestStreamBusy(String),
 
     /// There are no ready remote peers.
     #[error("No ready peers available")]
@@ -189,6 +195,7 @@ impl PeerError {
             PeerError::ProtocolViolation(_) => "ProtocolViolation".into(),
             PeerError::LocalEncodingError(_) => "LocalEncodingError".into(),
             PeerError::RequestStreamFailed(_) => "RequestStreamFailed".into(),
+            PeerError::RequestStreamBusy(_) => "RequestStreamBusy".into(),
             PeerError::NoReadyPeers => "NoReadyPeers".into(),
             PeerError::AdvertRequiresDedicatedService => "AdvertRequiresDedicatedService".into(),
             PeerError::InboundOnlyRequest => "InboundOnlyRequest".into(),

@@ -96,6 +96,10 @@ async fn fixture() -> Fixture {
             addr_relay: None,
             serve_block_ranges: true,
             block_range_permits: crate::peer::v2::connection::global_block_range_permits(),
+            target_difficulty_limit:
+                zebra_chain::work::difficulty::ParameterDifficulty::target_difficulty_limit(
+                    &network,
+                ),
         },
         None,
     );
