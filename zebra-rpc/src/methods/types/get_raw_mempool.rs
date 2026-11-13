@@ -78,7 +78,7 @@ impl MempoolObject {
         let (deps_size, deps_fees) = deps
             .iter()
             .filter_map(|id| transactions_by_id.get(id))
-            .map(|unmined_tx| (unmined_tx.transaction.size, unmined_tx.miner_fee))
+            .map(|unmined_tx| (unmined_tx.transaction.size(), unmined_tx.miner_fee))
             .reduce(|(size1, fee1), (size2, fee2)| {
                 (size1 + size2, (fee1 + fee2).unwrap_or_default())
             })
@@ -86,7 +86,7 @@ impl MempoolObject {
 
         // Create the MempoolObject from the information we have gathered
         let mempool_object = MempoolObject {
-            size: unmined_tx.transaction.size as u64,
+            size: unmined_tx.transaction.size() as u64,
             fee: unmined_tx.miner_fee.into(),
             // Change this if we ever support fee deltas (prioritisetransaction call)
             modified_fee: unmined_tx.miner_fee.into(),
@@ -97,7 +97,7 @@ impl MempoolObject {
             height: unmined_tx.height.unwrap_or(Height(0)),
             // Note that the following three count this transaction itself
             descendantcount: deps_len as u64 + 1,
-            descendantsize: (deps_size + unmined_tx.transaction.size) as u64,
+            descendantsize: (deps_size + unmined_tx.transaction.size()) as u64,
             descendantfees: (deps_fees + unmined_tx.miner_fee)
                 .unwrap_or_default()
                 .into(),

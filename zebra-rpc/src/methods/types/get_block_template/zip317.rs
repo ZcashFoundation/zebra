@@ -398,7 +398,7 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         // count (legacy + P2SH) so template selection cannot produce blocks that the block verifier
         // would reject for exceeding `MAX_BLOCK_SIGOPS`.
         let tx_block_sigops = self.block_sigop_count();
-        if self.transaction.size <= *remaining_block_bytes
+        if self.transaction.size() <= *remaining_block_bytes
             && tx_block_sigops <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
             // Checked last, and only committed once the other limits pass, so the shielded
@@ -407,7 +407,7 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
                 &self.transaction.transaction,
             ))
         {
-            *remaining_block_bytes -= self.transaction.size;
+            *remaining_block_bytes -= self.transaction.size();
             *remaining_block_sigops -= tx_block_sigops;
 
             // Unpaid actions are always zero for transactions that pay the conventional fee,

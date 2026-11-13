@@ -333,7 +333,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .storage()
         .transactions()
         .values()
-        .map(|tx| tx.transaction.size)
+        .map(|tx| tx.transaction.size())
         .sum();
 
     // TODO: Derive memory usage when available

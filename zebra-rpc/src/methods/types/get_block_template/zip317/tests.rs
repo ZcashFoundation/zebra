@@ -13,6 +13,7 @@ use zebra_chain::{
     amount::Amount,
     block::{Header, Height, MAX_BLOCK_BYTES},
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
     transaction::{self, LockTime, Transaction, VerifiedUnminedTx},
     transparent::{Input, OutPoint, Output, Script},
 };
@@ -252,12 +253,30 @@ fn reserves_space_for_block_header_and_transaction_count() {
         - max_transaction_count_size()
         - coinbase_tx_size;
 
-    let mut unmined_tx = network
-        .unmined_transactions_in_blocks(..)
-        .next()
-        .expect("should not be empty");
-
-    unmined_tx.transaction.size = safe_budget;
+    let template = transparent_candidates(1).pop().unwrap();
+    let transaction_with_script = |script_size| {
+        Arc::new(
+            template
+                .transaction
+                .transaction
+                .as_ref()
+                .clone()
+                .with_transparent_inputs(vec![Input::PrevOut {
+                    outpoint: OutPoint::from_usize(transaction::Hash([1; 32]), 0),
+                    unlock_script: Script::new(&vec![0; script_size]),
+                    sequence: u32::MAX,
+                }]),
+        )
+    };
+    // Both boundary cases use a five-byte CompactSize for the script length.
+    let transaction_overhead = transaction_with_script(65_536).zcash_serialized_size() - 65_536;
+    let transaction_with_size = |size| {
+        let transaction: transaction::UnminedTx =
+            transaction_with_script(size - transaction_overhead).into();
+        let miner_fee = transaction.conventional_fee;
+        VerifiedUnminedTx::new(transaction, miner_fee, 0, 0, Default::default()).unwrap()
+    };
+    let unmined_tx = transaction_with_size(safe_budget);
 
     assert_eq!(
         select_mempool_transactions(
@@ -273,7 +292,7 @@ fn reserves_space_for_block_header_and_transaction_count() {
         "should select a transaction exactly filling the safe block budget"
     );
 
-    unmined_tx.transaction.size = safe_budget + 1;
+    let unmined_tx = transaction_with_size(safe_budget + 1);
 
     assert_eq!(
         select_mempool_transactions(

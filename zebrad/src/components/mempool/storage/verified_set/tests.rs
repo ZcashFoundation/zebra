@@ -51,19 +51,19 @@ fn assert_metrics_match_rescan(set: &VerifiedSet) {
     let mut size = 0;
     let mut cost = 0;
     for entry in set.transactions().values() {
-        size += entry.transaction.size;
+        size += entry.transaction.size();
         cost += entry.cost();
         expected.paid_actions += entry.conventional_actions - entry.unpaid_actions;
         if entry.fee_weight_ratio > 3.0 {
-            expected.size_by_weight[4] += entry.transaction.size;
+            expected.size_by_weight[4] += entry.transaction.size();
         } else if entry.fee_weight_ratio > 2.0 {
-            expected.size_by_weight[3] += entry.transaction.size;
+            expected.size_by_weight[3] += entry.transaction.size();
         } else if entry.fee_weight_ratio > 1.0 {
-            expected.size_by_weight[2] += entry.transaction.size;
+            expected.size_by_weight[2] += entry.transaction.size();
         } else if entry.fee_weight_ratio == 1.0 {
-            expected.size_by_weight[1] += entry.transaction.size;
+            expected.size_by_weight[1] += entry.transaction.size();
         } else {
-            expected.size_by_weight[0] += entry.transaction.size;
+            expected.size_by_weight[0] += entry.transaction.size();
             if entry.fee_weight_ratio < 0.2 {
                 expected.unpaid_actions[0] += entry.unpaid_actions;
             } else if entry.fee_weight_ratio < 0.4 {
@@ -109,7 +109,7 @@ fn verified_set_metrics_bucket_boundaries() {
             tx.fee_weight_ratio = f32::from_bits(bits);
             tx.conventional_actions = 9;
             tx.unpaid_actions = if unpaid_bucket.is_some() { 4 } else { 0 };
-            let size = tx.transaction.size;
+            let size = tx.transaction.size();
             let id = tx.transaction.id.mined_id();
             set.insert(tx, Vec::new(), &mut pending, None)
                 .expect("a fresh set has no spend conflicts");
@@ -161,7 +161,11 @@ fn verified_set_metrics_randomized_mutations() {
                 tx.fee_weight_ratio = weights[weight_index.sample(&mut rng)];
                 tx.conventional_actions = 9;
                 tx.unpaid_actions = if tx.fee_weight_ratio < 1.0 { 4 } else { 0 };
-                tx.transaction.size = sizes.sample(&mut rng);
+                let mut transaction = tx.transaction.transaction.as_ref().clone();
+                let mut outputs = transaction.outputs();
+                outputs[0].lock_script = transparent::Script::new(&vec![0; sizes.sample(&mut rng)]);
+                transaction.set_outputs(outputs);
+                tx.transaction = Arc::new(transaction).into();
                 let spent = parent
                     .map(|hash| transparent::OutPoint { hash, index: 0 })
                     .into_iter()

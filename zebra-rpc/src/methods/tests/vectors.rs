@@ -29,7 +29,7 @@ use zebra_chain::{
         NetworkKind,
     },
     serialization::{DateTime32, Duration32, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
+    transaction::{zip317, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -1462,12 +1462,7 @@ async fn rpc_getrawtransaction() {
                     }
                 })
                 .map(|responder| {
-                    responder.respond(mempool::Response::Transactions(vec![UnminedTx {
-                        id: UnminedTxId::Legacy(tx.hash()),
-                        transaction: tx.clone(),
-                        size: 0,
-                        conventional_fee: Amount::zero(),
-                    }]));
+                    responder.respond(mempool::Response::Transactions(vec![UnminedTx::from(tx)]));
                 });
 
             let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8), None);
@@ -3422,12 +3417,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         transaction::LockTime::unlocked(),
     ));
 
-    let unmined_tx = UnminedTx {
-        transaction: tx.clone(),
-        id: tx.unmined_id(),
-        size: tx.zcash_serialized_size(),
-        conventional_fee: 0.try_into().unwrap(),
-    };
+    let unmined_tx = UnminedTx::from(tx);
 
     let conventional_actions = zip317::conventional_actions(&unmined_tx.transaction);
 
@@ -3861,12 +3851,7 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
         vec![],
         transaction::LockTime::unlocked(),
     ));
-    let unmined_tx = UnminedTx {
-        transaction: tx.clone(),
-        id: tx.unmined_id(),
-        size: tx.zcash_serialized_size(),
-        conventional_fee: 0.try_into().unwrap(),
-    };
+    let unmined_tx = UnminedTx::from(tx);
     let mempool_tx = VerifiedUnminedTx {
         conventional_actions: zip317::conventional_actions(&unmined_tx.transaction),
         transaction: unmined_tx,

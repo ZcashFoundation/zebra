@@ -606,7 +606,7 @@ impl Service<zn::Request> for Inbound {
                         // (but only one at a time)
                         let within_limit = total_size < GETDATA_SENT_BYTES_LIMIT;
 
-                        total_size += tx.size;
+                        total_size += tx.size();
 
                         within_limit
                     }).map(|tx| Available((tx, None)));

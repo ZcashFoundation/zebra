@@ -2286,7 +2286,7 @@ where
                         // support prioritizing transactions
                         cmp::Reverse((
                             i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                                / tx.transaction.size as u128,
+                                / tx.transaction.size() as u128,
                             // transaction hashes are compared in their serialized byte-order.
                             tx.transaction.id.mined_id(),
                         ))
