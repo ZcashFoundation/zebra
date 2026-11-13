@@ -152,6 +152,15 @@ fn rule_expressions(rules: &str) -> Result<Vec<String>, String> {
     let mut expressions = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let Some(captures) = expr_key.captures(line) else {
+            // An `expr` key the pattern doesn't match, such as a quoted key or a flow mapping,
+            // would otherwise skip the check without failing it.
+            if line.split('#').next().unwrap_or_default().contains("expr") {
+                return Err(format!(
+                    "line {}: write each expr as a plain `expr:` key on its own line, so the \
+                     series it queries can be checked",
+                    index + 1,
+                ));
+            }
             continue;
         };
         let key_column = captures[1].len();
@@ -255,6 +264,13 @@ fn reads_plain_rule_expressions_and_rejects_other_forms() {
     let multi_line =
         "rules:\n  - alert: A\n    expr: rate(a_total[5m])\n      > not_a_zebra_series\n";
     let empty = "rules:\n  - alert: A\n    expr:\n      not_a_zebra_series > 0\n";
+
+    let quoted_key = "rules:\n  - alert: A\n    \"expr\": not_a_zebra_series > 0\n";
+    let flow_mapping = "rules:\n  - alert: A\n  - {alert: B, expr: not_a_zebra_series > 0}\n";
+    for rules in [quoted_key, flow_mapping] {
+        let error = rule_expressions(rules).expect_err("unmatched expr keys are rejected");
+        assert!(error.starts_with("line 3:"), "{error}");
+    }
 
     for rules in [quoted, single_quoted, block, folded, multi_line, empty] {
         let error = rule_expressions(rules).expect_err("unreadable expr values are rejected");
