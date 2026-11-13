@@ -574,7 +574,7 @@ async fn wait_for_reads(
 }
 
 /// A peer's range streams beyond [`RANGE_STREAMS_PER_PEER`] are refused at
-/// once, not queued, and its other requests are still served.
+/// once with `BUSY`, not queued, and its other requests are still served.
 #[tokio::test]
 async fn excess_block_range_streams_from_one_peer_are_refused() {
     let _init_guard = zebra_test::init();
@@ -600,7 +600,7 @@ async fn excess_block_range_streams_from_one_peer_are_refused() {
 
         let started = Instant::now();
         let refused = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
         assert!(started.elapsed() < REQUEST_TIMEOUT / 2, "refused at once");
 
         // The range streams hold none of the permits of the other request types, which are
@@ -625,7 +625,8 @@ async fn excess_block_range_streams_from_one_peer_are_refused() {
     .expect("the test completes");
 }
 
-/// Over all peers, range streams beyond [`RANGE_STREAMS_GLOBAL`] are refused.
+/// Over all peers, range streams beyond [`RANGE_STREAMS_GLOBAL`] are refused
+/// with `BUSY`.
 #[tokio::test]
 async fn excess_block_range_streams_over_all_peers_are_refused() {
     let _init_guard = zebra_test::init();
@@ -664,7 +665,7 @@ async fn excess_block_range_streams_over_all_peers_are_refused() {
             BlockRangeServing::new(true, global.clone()),
         );
         let refused = request_range(&requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
         tokio::time::sleep(SHORT_WAIT).await;
         assert!(
             reads(&mut requests).is_empty(),
@@ -850,7 +851,7 @@ async fn block_range_streams_without_a_request_hold_no_node_permits() {
         // Each of those peers has used its own permits.
         let (requester, ..) = &held[0];
         let refused = request_range(requester, tip_range(&chain)).await;
-        assert_reset(refused, ErrorCode::Refused).await;
+        assert_reset(refused, ErrorCode::Busy).await;
 
         // A new peer is served.
         let (requester, responder, _e1, _e2) = connected_pair(&network).await;

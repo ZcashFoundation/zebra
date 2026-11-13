@@ -140,7 +140,8 @@ Serving is bounded so that it cannot crowd out the node's other work:
 
 - Each peer can have two block-range streams open at once, separate from its
   other requests, and the node serves eight streams at once in total. A
-  request beyond either limit is refused, and the peer asks another node.
+  request beyond either limit is reset at once with the `BUSY` error code:
+  the peer asks another node, and can ask this one again after a short delay.
 - Zebra reads at most 2 MiB of blocks at a time for each stream, plus the
   part's first block, and keeps two buffers of up to one block each. With
   2 MB blocks that is at most about 8 MB of block data per stream, so eight
@@ -150,7 +151,7 @@ Serving is bounded so that it cannot crowd out the node's other work:
   or if it lasts longer than 5 minutes.
 
 Set `network.v2_serve_block_ranges = false` to refuse every block-range
-request.
+request, with the `REFUSED` error code, which tells the peer not to ask again.
 
 ## Checkpoint sync over version 2
 

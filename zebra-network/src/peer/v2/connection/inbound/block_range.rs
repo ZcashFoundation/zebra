@@ -32,7 +32,8 @@
 //! permits of the other request types, which range streams would otherwise
 //! starve: at most [`RANGE_STREAMS_PER_PEER`] per peer and
 //! [`RANGE_STREAMS_GLOBAL`] per node. Excess streams are refused at once with
-//! `REFUSED`, never queued, so the requester asks another peer. A stream
+//! `BUSY`, never queued, so the requester asks another peer and may ask this
+//! node again later. `REFUSED` is kept for a node that does not serve ranges. A stream
 //! takes its peer permit when its type byte is read, and its node permit
 //! only once its request is decoded, so streams that never send a request
 //! hold only their own peer's permits. Each stream
@@ -215,22 +216,24 @@ impl BlockRangeServing {
     }
 
     /// Claims a peer permit for one `get-block-range` stream, before its
-    /// request is read, or refuses the stream with `REFUSED` if serving is
-    /// disabled or the peer's permits are exhausted. Never waits.
+    /// request is read, or refuses the stream: with `REFUSED` if serving is
+    /// disabled, and with `BUSY` if the peer's permits are exhausted. Never
+    /// waits.
     pub(super) fn claim_peer(&self) -> Result<PeerRangePermit, Outcome> {
         if !self.enabled {
-            return Err(refused("disabled"));
+            tracing::debug!("refusing get-block-range stream: serving is disabled");
+            return Err(Outcome::Refuse(ErrorCode::Refused));
         }
         let peer = self
             .peer_permits
             .clone()
             .try_acquire_owned()
-            .map_err(|_| refused("peer limit"))?;
+            .map_err(|_| busy("peer limit"))?;
         Ok(PeerRangePermit(peer))
     }
 
     /// Adds a node permit to the `peer` permit of a stream whose request was
-    /// read and decoded, or refuses the stream with `REFUSED` if the node's
+    /// read and decoded, or refuses the stream with `BUSY` if the node's
     /// permits are exhausted. Never waits.
     ///
     /// # Security
@@ -243,7 +246,7 @@ impl BlockRangeServing {
             .global_permits
             .clone()
             .try_acquire_owned()
-            .map_err(|_| refused("node limit"))?;
+            .map_err(|_| busy("node limit"))?;
         Ok(RangePermits {
             _peer: peer.0,
             _node: node,
@@ -251,10 +254,12 @@ impl BlockRangeServing {
     }
 }
 
-/// Refuses a `get-block-range` stream for `reason`.
-fn refused(reason: &'static str) -> Outcome {
-    tracing::debug!(reason, "refusing get-block-range stream");
-    Outcome::Refuse(ErrorCode::Refused)
+/// Refuses a `get-block-range` stream this node would serve if it were not at
+/// a limit, for `reason`: `BUSY` asks the requester to retry after a delay,
+/// where `REFUSED` would ask it not to repeat the request.
+fn busy(reason: &'static str) -> Outcome {
+    tracing::debug!(reason, "refusing get-block-range stream as busy");
+    Outcome::Refuse(ErrorCode::Busy)
 }
 
 /// The peer permit a `get-block-range` stream holds while its request is
