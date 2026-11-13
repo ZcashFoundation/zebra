@@ -3,7 +3,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::{
-    sync::{mpsc, watch},
+    sync::{broadcast, mpsc, watch},
     task::JoinHandle,
     time::Instant,
 };
@@ -21,7 +21,10 @@ use zebra_chain::{
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
-use zebra_node_services::{mempool, BoxError};
+use zebra_node_services::{
+    mempool::{self, MempoolChange, MempoolTxSubscriber},
+    BoxError,
+};
 use zebra_state::{GetBlockTemplateChainInfo, MiningCandidateChanges, ReadRequest, ReadResponse};
 use zebra_test::mock_service::MockService;
 
@@ -29,7 +32,10 @@ use crate::{
     config::mining,
     methods::{
         tests::utils::fake_history_tree,
-        types::get_block_template::{precompute::TemplateCache, BlockTemplateResponse},
+        types::get_block_template::{
+            precompute::{TemplateCache, MEMPOOL_REBUILD_PAUSE},
+            BlockTemplateResponse,
+        },
         RpcImpl,
     },
 };
@@ -53,6 +59,9 @@ struct Updater {
 
     /// Publishes or withdraws early mining work on the updater's subscription.
     publish_candidate: Box<dyn Fn(Option<(Hash, GetBlockTemplateChainInfo)>) + Send + Sync>,
+
+    /// The mempool's change channel.
+    mempool_changes: broadcast::Sender<MempoolChange>,
 
     /// The start of each template build that read the mempool.
     builds: mpsc::UnboundedReceiver<Instant>,
@@ -220,6 +229,7 @@ impl Updater {
             })
         };
 
+        let (mempool_changes, _) = broadcast::channel(16);
         let cache = rpc
             .gbt
             .template_cache()
@@ -233,6 +243,7 @@ impl Updater {
             mock_tip_sender,
             candidate,
             publish_candidate: Box::new(publish_candidate),
+            mempool_changes: mempool_changes.clone(),
             builds,
             mempool_answers,
             tasks: vec![read_state_responder, mempool_responder],
@@ -240,7 +251,7 @@ impl Updater {
         updater.set_tip(tip_height, tip_hash);
 
         let task = rpc
-            .spawn_block_template_updater()
+            .spawn_block_template_updater(&MempoolTxSubscriber::new(mempool_changes))
             .expect("mining is configured");
         let mut updater = updater;
         updater.tasks.push(task);
@@ -454,4 +465,67 @@ async fn updater_restores_the_templates_that_a_withdrawal_replaces() {
     updater
         .template_after(candidate.1, &candidate_template)
         .await;
+}
+
+/// The updater rebuilds its template when the mempool verifies a transaction, before the
+/// periodic refresh, and at most once per pause however many transactions arrive. A tip change
+/// during the pause still gets a template right away.
+#[tokio::test(flavor = "multi_thread")]
+async fn updater_rebuilds_on_mempool_additions() {
+    let _init_guard = zebra_test::init();
+
+    // The periodic refresh is 5 seconds after a build, so a rebuild this soon after one is the
+    // mempool's.
+    let before_refresh = Duration::from_secs(3);
+    // A pause is measured from the end of a build, and the builds here take a few milliseconds.
+    let pause = MEMPOOL_REBUILD_PAUSE - Duration::from_millis(100);
+    let add_transaction = |updater: &Updater| {
+        updater
+            .mempool_changes
+            .send(MempoolChange::added(Default::default()))
+            .expect("the updater is subscribed");
+    };
+
+    let mut updater = Updater::start(0).await;
+    let (tip_height, tip_hash) = updater.best_tip();
+    updater.template_on(tip_hash).await;
+    let first = updater.build().await;
+
+    // A new transaction rebuilds the template after the pause.
+    add_transaction(&updater);
+    let second = updater.build().await;
+    assert!(
+        (pause..before_refresh).contains(&(second - first)),
+        "the template was rebuilt after {:?}",
+        second - first
+    );
+
+    // A burst of transactions rebuilds it once.
+    for _ in 0..5 {
+        add_transaction(&updater);
+    }
+    let third = updater.build().await;
+    assert!(
+        (pause..before_refresh).contains(&(third - second)),
+        "the template was rebuilt after {:?}",
+        third - second
+    );
+    tokio::time::sleep(pause).await;
+    assert!(!updater.has_built(), "a burst is one rebuild");
+
+    // A transaction and then a tip change, both during a pause: the new tip doesn't wait.
+    add_transaction(&updater);
+    let fourth = updater.build().await;
+    let next_tip = (
+        tip_height.next().expect("the height is valid"),
+        Hash([0x33; 32]),
+    );
+    updater.set_tip(next_tip.0, next_tip.1);
+    updater.template_on(next_tip.1).await;
+    let on_next_tip = updater.build().await;
+    assert!(
+        on_next_tip - fourth < pause,
+        "the template on the new tip was built after {:?}",
+        on_next_tip - fourth
+    );
 }

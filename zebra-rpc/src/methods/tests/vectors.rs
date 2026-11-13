@@ -3866,7 +3866,9 @@ async fn getblocktemplate_precomputed() {
     let (read_state_responder, mempool_responder) = spawn_responders(tip_height, tip_hash);
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&zebra_node_services::mempool::MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     // Wait for the updater task to precompute a template for the mock chain tip.
@@ -4115,7 +4117,9 @@ async fn getblocktemplate_long_poll_waits_for_a_new_template() {
     });
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&zebra_node_services::mempool::MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     let template_cache = rpc
@@ -4534,7 +4538,9 @@ async fn getblocktemplate_ignores_precomputed_template_when_tip_channel_lags_sta
     let (read_state_responder, mempool_responder) = spawn_responders(tip_height, tip_hash);
 
     let updater = rpc
-        .spawn_block_template_updater()
+        .spawn_block_template_updater(&zebra_node_services::mempool::MempoolTxSubscriber::new(
+            tokio::sync::broadcast::channel(1).0,
+        ))
         .expect("mining is configured");
 
     let template_cache = rpc
