@@ -58,7 +58,7 @@ The document reproduces these konlet behaviours, each of which a workflow step d
 Two choices avoid silent failures:
 
 - The host mount point, `/mnt/disks/zebracache`, has no hyphen. A hyphen needs a `\x2d` escape in the mount unit's name, and that backslash does not survive cloud-init's `runcmd`. The mount then fails to enable while the container still starts on the boot disk. The container unit also `Requires=` the mount, so a failed mount stops the container instead.
-- The node template's identity hash includes a digest of the generator script. Without it, redeploying unchanged configuration would reuse the existing konlet template, and a later change to the generator would never reach running nodes.
+- The node template's identity hash includes a digest of the generator script, and the node and integration-test workflows list the script in their `paths` filters. Without the digest, redeploying unchanged configuration would reuse the existing konlet template. Without the filters, a change to the generator alone would neither redeploy the nodes nor run the tests on `main`.
 
 ### Expected Consequences
 

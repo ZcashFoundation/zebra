@@ -93,6 +93,7 @@ on:
       - .dockerignore
       - .github/workflows/zfnd-deploy-nodes-gcp.yml
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
+      - .github/workflows/scripts/gcp-container-cloud-init.sh
       - .github/workflows/zfnd-build-docker-image.yml
 
   # Only runs the Docker image tests, doesn't deploy any instances
@@ -117,6 +118,7 @@ on:
       - .dockerignore
       - .github/workflows/zfnd-deploy-nodes-gcp.yml
       - .github/workflows/zfnd-deploy-prebuilt-nodes-gcp.yml
+      - .github/workflows/scripts/gcp-container-cloud-init.sh
       - .github/workflows/zfnd-build-docker-image.yml
 
   release:
