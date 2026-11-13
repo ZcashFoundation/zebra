@@ -127,23 +127,6 @@ impl MetricsEndpoint {
     }
 }
 
-/// Returns a Prometheus exporter builder that exports each histogram in [`HISTOGRAM_BUCKETS`] with
-/// its buckets.
-#[cfg(feature = "prometheus")]
-fn prometheus_builder(
-) -> Result<metrics_exporter_prometheus::PrometheusBuilder, metrics_exporter_prometheus::BuildError>
-{
-    HISTOGRAM_BUCKETS.iter().try_fold(
-        metrics_exporter_prometheus::PrometheusBuilder::new(),
-        |builder, (name, buckets)| {
-            builder.set_buckets_for_metric(
-                metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
-                buckets,
-            )
-        },
-    )
-}
-
 /// Describes every metric Zebra records to the current recorder.
 ///
 /// Call this right after installing the global recorder: descriptions sent while no recorder is
@@ -182,6 +165,22 @@ where
 {
     metrics::set_global_recorder(recorder)
         .map_err(|e| FrameworkErrorKind::ComponentError.context(e).into())
+}
+
+/// Returns the Prometheus exporter's configuration, before its endpoint is added.
+#[cfg(feature = "prometheus")]
+fn prometheus_builder(
+) -> Result<metrics_exporter_prometheus::PrometheusBuilder, metrics_exporter_prometheus::BuildError>
+{
+    HISTOGRAM_BUCKETS.iter().try_fold(
+        metrics_exporter_prometheus::PrometheusBuilder::new(),
+        |builder, (name, buckets)| {
+            builder.set_buckets_for_metric(
+                metrics_exporter_prometheus::Matcher::Full((*name).to_owned()),
+                buckets,
+            )
+        },
+    )
 }
 
 /// Installs the Prometheus recorder from `builder` and `other` as one recorder.
