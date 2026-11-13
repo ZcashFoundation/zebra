@@ -67,7 +67,12 @@ where
 
 /// Returns the tip block of `chain`.
 /// If there is no chain, returns the tip of `db`.
-pub fn tip_block<C>(chain: Option<C>, db: &ZebraDb) -> Option<Arc<Block>>
+///
+/// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+pub fn tip_block<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+) -> Result<Option<Arc<Block>>, crate::BlockReadError>
 where
     C: AsRef<Chain>,
 {
@@ -79,7 +84,7 @@ where
     // so it is acceptable to return either tip.
     chain
         .and_then(|chain| chain.as_ref().tip_block().map(|b| b.block.clone()))
-        .or_else(|| db.tip_block())
+        .map_or_else(|| db.tip_block(), |block| Ok(Some(block)))
 }
 
 /// Returns the tip [`Height`] of `chain`.

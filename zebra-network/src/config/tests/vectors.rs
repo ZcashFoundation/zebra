@@ -1,6 +1,5 @@
 //! Fixed test vectors for zebra-network configuration.
 
-use static_assertions::const_assert;
 use zebra_chain::{
     block::Height,
     parameters::{
@@ -54,7 +53,9 @@ fn ensure_peer_connection_limits_consistent() {
     let _init_guard = zebra_test::init();
 
     // Zebra should allow more inbound connections, to avoid connection exhaustion
-    const_assert!(INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER);
+    const {
+        assert!(INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER);
+    };
 
     let config = Config::default();
 

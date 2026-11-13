@@ -439,16 +439,16 @@ scripts use age and name filters, not `keep_until` or `delete_protection`:
 | Resource | Selection and retention |
 | --- | --- |
 | Instances | Names ending in `-[0-9a-f]{7,}`; three-day age cutoff, or six days with `long-test=true` |
-| Instance templates | The same name suffix; two-day age cutoff |
+| Instance templates | Names starting with `zebrad-`; two-day age cutoff. GCP refuses to delete a template that a managed instance group still uses, so each group keeps its current template |
 | Disks | Unattached, older than the two-day cutoff, and either the suffix above or a `zebrad-` prefix excluding `zebrad-cache` |
 | Cache images | Preserve all newer than the two-day cutoff and the newest two older images per network/state-kind category |
 
 Cutoffs are dates, not exact elapsed-hour deadlines. Decimal GitHub run IDs
 match the hexadecimal-looking suffix filter. Current stable cache disk
 names end in a zone letter and begin with `zebrad-cache-`, so neither disk
-selector matches them, even when detached. Current CD template names also
-end in a zone letter and are outside the template selector. Do not assume
-the cleanup workflow reaps branch MIGs or their templates.
+selector matches them, even when detached. The cleanup workflow never
+deletes MIGs, so a template that a branch MIG still uses stays until the MIG
+is removed.
 
 Image retention is not partitioned by branch or database major. Preserve
 required rollback snapshots independently of CI cache-image retention.

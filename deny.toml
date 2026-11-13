@@ -39,7 +39,8 @@ allow = [
     "CDLA-Permissive-2.0",
     "CDDL-1.0",
 ]
-exceptions = []
+# The fuzz-only libFuzzer runtime includes LLVM's NCSA-licensed sources.
+exceptions = [{ name = "libfuzzer-sys", allow = ["NCSA"] }]
 
 # rustls-webpki uses a custom ISC-style license
 [[licenses.clarify]]
@@ -131,8 +132,6 @@ skip-tree = [
 
     { name = "windows-sys", version = "=0.52.0" },
 
-    # hashbrown 0.14.x pulled by ordered-multimap, via rust-ini and config
-    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps, incl. hashlink/petgraph/metrics-util;
     # 0.16.x by indexmap 2.x. remove once they update hashbrown and foldhash.
     { name = "hashbrown", version = "0.15" },
@@ -152,9 +151,6 @@ skip-tree = [
 
     # wait for derive_builder to update
     { name = "darling", version = "0.20.11" },
-
-    # wait until `config` updates `convert_case`
-    { name = "convert_case", version = "0.6.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

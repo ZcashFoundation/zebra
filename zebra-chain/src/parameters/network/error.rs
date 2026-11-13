@@ -59,6 +59,14 @@ pub enum ParametersBuilderError {
     #[non_exhaustive]
     OutOfOrderUpgrades,
 
+    /// A configured network upgrade has no consensus branch ID in this build.
+    #[error("network upgrade {upgrade} has no consensus branch ID in this build, so it can't be given an activation height")]
+    #[non_exhaustive]
+    MissingBranchId {
+        /// The configured upgrade with no consensus branch ID.
+        upgrade: crate::parameters::NetworkUpgrade,
+    },
+
     #[error("difficulty limits are valid expanded values")]
     #[non_exhaustive]
     InvaildDifficultyLimits,

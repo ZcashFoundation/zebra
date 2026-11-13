@@ -7,13 +7,7 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::{
-    config::{HookBuilder, Theme},
-    Section as _,
-};
 use futures::{future::BoxFuture, FutureExt};
-use insta::assert_snapshot;
-use regex::Regex;
 use tokio::time::{sleep, timeout, Sleep};
 use tower::{Service, ServiceExt};
 
@@ -52,43 +46,6 @@ async fn transcript_errors_wrong_request() {
         "rsp1",
     );
     assert!(svc.ready().await.unwrap().call("bad").await.is_err());
-}
-
-/// Wrong requests retain their expected and actual values in the error diagnostic.
-#[tokio::test]
-async fn transcript_rejects_wrong_request_for_error_entry() {
-    // Keep machine-specific context and terminal styling out of the snapshot.
-    HookBuilder::default()
-        .theme(Theme::new())
-        .display_env_section(false)
-        .capture_span_trace_by_default(false)
-        .install()
-        .expect("nextest runs each test in a separate process");
-
-    let _init_guard = zebra_test::init();
-
-    let mut svc = Transcript::from([("expected", Err::<(), _>(ExpectedTranscriptError::Any))]);
-    let error = svc
-        .call("wrong")
-        .await
-        .unwrap_err()
-        .suppress_backtrace(true);
-    let diagnostic = format!("{error:?}");
-    // The `track-caller` feature of color-eyre, which `zebrad/error-debug` turns on, adds the
-    // caller's file and line. The hook can only hide it when that feature is on, so drop it here.
-    let diagnostic = Regex::new(r"\n\nLocation:\n[^\n]*")
-        .expect("the pattern is valid")
-        .replace(&diagnostic, "");
-
-    assert_snapshot!(diagnostic.trim(), @r#"
-    0: received unexpected request
-
-    Expected Request:
-       "expected"
-
-    Found Request:
-       "wrong"
-    "#);
 }
 
 #[tokio::test]

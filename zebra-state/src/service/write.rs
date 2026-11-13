@@ -115,6 +115,7 @@ fn update_latest_chain_channels(
     } else {
         let finalized_tip = finalized_state
             .tip_block()
+            .expect("the finalized tip must have a complete stored body")
             .map(crate::CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
         chain_tip_sender.clear_best_non_finalized_tip(finalized_tip);
@@ -348,9 +349,8 @@ impl WriteBlockWorkerTask {
                 checkpoint_verified,
                 prev_finalized_note_commitment_trees.take(),
             ) {
-                Ok((finalized, note_commitment_trees)) => {
-                    let hash = finalized.hash;
-                    let tip_block = ChainTipBlock::from(finalized);
+                Ok((tip_block, note_commitment_trees)) => {
+                    let hash = tip_block.hash;
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
                     Ok(hash)

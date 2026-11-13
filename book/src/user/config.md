@@ -50,11 +50,10 @@ Every top-level section listed below rejects unknown keys, and the root rejects
 unknown sections. The nested network-parameter, activation-height,
 funding-stream, recipient, and lockbox-disbursement structs also reject unknown
 keys. The Regtest selector wrapper described below is an exception: it does not
-reject unknown sibling keys beside `params` and `regtest`. A field compiled out
-of the schema, such as an Elasticsearch state field without the `elasticsearch`
-feature, is an unknown field. Fields whose _implementation_ is feature-gated can
-still be accepted; their behavior is specified below. Unknown fields and invalid
-types fail configuration loading rather than silently using defaults.
+reject unknown sibling keys beside `params` and `regtest`. Fields whose
+_implementation_ is feature-gated are still accepted; their behavior is
+specified below. Unknown fields and invalid types fail configuration loading
+rather than silently using defaults.
 
 In the tables, **absent** means `None`: omit the key to leave it unset. TOML has
 no `null`; an empty string, `false`, or empty array is a value, not an unset
@@ -104,7 +103,7 @@ from modification by other users.
   [`[zcashd_compat]`](#zcashd_compat) accept arrays through environment values.
 - Zebra rejects leaf keys ending in `password`, `secret`, `token`, `cookie`,
   or `private_key`, ignoring case, even for unknown fields. Store these values
-  in the file. This rejects `ZEBRA_STATE__ELASTICSEARCH_PASSWORD`, but not path
+  in the file. This rejects `ZEBRA_RPC__PASSWORD`, but not path
   fields such as `cookie_dir`.
 - For `copy-state`, use `ZEBRA_TARGET_` variables with `--target-config-path`
   to override target settings, for example
@@ -349,21 +348,12 @@ Rust API: [`zebra_state::Config`](https://docs.rs/zebra-state/latest/zebra_state
 | `debug_stop_at_height` | Optional `u32` | Absent | Commit blocks to finalized state up to the selected height, then exit. Developer option; omission keeps syncing. |
 | `debug_validity_check_interval` | Optional duration string | Absent | Run additional periodic state-validity checks. Without it, normal format checks still run at startup and shutdown. |
 | `debug_skip_non_finalized_state_backup_task` | Boolean | `false` | Developer option: replace the periodic backup task with synchronous writes before non-finalized-state and chain-tip updates. Does not disable restoring backups or override `ephemeral`/backup disabling. |
-| `elasticsearch_url` | String; `elasticsearch` feature only | `"https://localhost:9200"` | Elasticsearch service URL for experimental indexing. |
-| `elasticsearch_username` | String; `elasticsearch` feature only | `"elastic"` | Elasticsearch HTTP Basic authentication username. |
-| `elasticsearch_password` | String; `elasticsearch` feature only | `""` | Elasticsearch HTTP Basic authentication password. Redacted from debug output, but stored in plaintext in the configuration file. Environment overrides are rejected. |
-| `elasticsearch_skip_cert_validation` | Boolean; `elasticsearch` feature only | `false` | Disable HTTPS certificate validation. Use only for trusted local clusters with self-signed certificates; credentials and indexed data can be intercepted. |
 
 Persistent state uses `<cache_dir>/state/v29/<network-directory>` in Zebra
 7.0.0. Non-finalized backups use
 `<cache_dir>/non_finalized_state/<network-directory>`. Do not share a live state
 directory between node processes. Deleting state forces the node to download
 and verify the chain again; it is not a configuration-reset procedure.
-
-The Elasticsearch client validates HTTPS certificates by default. Configure a
-trusted server certificate, or explicitly opt out for a trusted local cluster
-with `elasticsearch_skip_cert_validation = true`. HTTP never protects credentials.
-See [Elasticsearch indexing](elasticsearch.md).
 
 ## `[sync]`
 

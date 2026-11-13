@@ -13,7 +13,7 @@ requires these status contexts:
 | Required context | Producer | Purpose |
 | --- | --- | --- |
 | `lint` | [`lint.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/lint.yml), job `lint` | Rust, dependency, Dockerfile, and shell checks |
-| `unit-tests` | [`tests-unit.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml), job `unit-tests` | Linux tests, Windows `zebra-test` tests, and release-only dependency checks |
+| `unit-tests` | [`tests-unit.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/tests-unit.yml), job `unit-tests` | Linux tests and release-only dependency checks |
 | `test-crates` | [`test-crates.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml), job `test-crates` | Per-crate builds with different features and minimum supported Rust versions |
 | `pr-gate-result` | [`pr-gate.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/pr-gate.yml), job `pr-gate-result` | Pull-request declarations, change fragments, and release readiness |
 | `merge-policy` | [`merge-policy.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/merge-policy.yml), job `merge-policy` | Rejects the `do-not-merge` label |
@@ -77,10 +77,12 @@ release.
 
 ### Runners and build caches
 
-Linux unit tests use Rust 1.97.0, `ubuntu-26.04`, `cargo nextest` with the
-`ci` profile, release mode without link-time optimization, and
-`default-release-binaries`. Windows tests cover only `zebra-test` on
-`windows-latest`.
+Linux unit tests use Rust 1.97.0, `cargo nextest` with the `ci` profile,
+release mode without link-time optimization, and `default-release-binaries`.
+Pull requests run them on `ubuntu-26.04`, while the merge queue and pushes to
+`main` use the larger `ubuntu-latest-xl` runner. Pull requests against `main`
+build the workspace crates at `opt-level=0`; dependency profiles are
+unchanged.
 
 The `run-loom-tests` job in the same workflow runs the
 [loom models](loom-testing.md) of the crates with a `src/loom.rs` shim:

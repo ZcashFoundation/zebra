@@ -22,7 +22,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::IntervalStream;
 use tower::{discover::Change, layer::Layer, Service, ServiceExt};
-use tracing_futures::Instrument;
+use tracing::Instrument;
 
 use zebra_chain::{
     chain_tip::ChainTip,

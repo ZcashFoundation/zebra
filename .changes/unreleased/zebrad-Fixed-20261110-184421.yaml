@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Prevent compact block relay downloads and compact block negotiation from starting wire writes to peers banned, or made obsolete by a network upgrade, after readiness checking.
+time: 2026-11-10T18:44:21.798837899Z

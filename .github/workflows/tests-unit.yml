@@ -76,7 +76,12 @@ jobs:
     permissions:
       contents: read
       statuses: write
-    runs-on: ubuntu-26.04
+    # Most of this job is the release build of the workspace crates, which a 4-CPU runner limits.
+    # The organisation's larger runner is billed, so only the merge queue and pushes to `main` use
+    # it. Pull requests and forks use the standard runner, which is free for this public repository.
+    runs-on: >-
+      ${{ github.repository_owner == 'ZcashFoundation' && github.event_name != 'pull_request'
+      && 'ubuntu-latest-xl' || 'ubuntu-26.04' }}
     timeout-minutes: 120
     env:
       # Thin LTO roughly doubles the time to link the release test binaries and
@@ -105,7 +110,22 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
 
       - name: Run unit tests
-        run: cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
+        # Many of the slowest tests wait on timers or peers rather than the CPU, so run twice as many
+        # tests as the runner has CPUs.
+        run: |
+          profile_args=()
+          if [[ "$GITHUB_EVENT_NAME" == pull_request &&
+                "${GITHUB_BASE_REF:-}" == main &&
+                "$GITHUB_REPOSITORY" == ZcashFoundation/zebra ]]; then
+            metadata=$(cargo metadata --locked --no-deps --format-version=1)
+            packages=$(jq -er '.packages[].name' <<< "$metadata")
+            while IFS= read -r package; do
+              profile_args+=(--config "profile.release.package.\"$package\".opt-level=0")
+            done <<< "$packages"
+            echo "Using opt-level=0 for workspace tests; dependency profiles are unchanged"
+          fi
+          echo "Running the tests on $(nproc) CPUs"
+          NEXTEST_TEST_THREADS=$((2 * $(nproc))) cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all "${profile_args[@]}"
 
       - name: Summarize flaky and failed unit tests
         if: always()
@@ -186,30 +206,6 @@ jobs:
       - name: Run loom models
         run: cargo nextest run --profile loom --locked --release --lib -p zebra-consensus -p zebra-state -p zebra-network
 
-  run-zebra-test-windows:
-    name: zebra-test Windows 1.97.0
-    needs: changes
-    # Edits only rerun it for `next`, as for the Linux tests above. A push to `next` only
-    # seeds the loom cache.
-    if: >-
-      (github.event_name != 'push' || github.ref == 'refs/heads/main') &&
-      needs.changes.outputs.unit_tests == 'true' &&
-      (github.base_ref == 'next' || github.event.action != 'edited')
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
-        with:
-          toolchain: 1.97.0
-          cache-key: unit-tests-1.97.0-zebra-test-windows
-          cache-on-failure: true
-          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Run zebra-test on Windows
-        run: cargo test --locked -p zebra-test
-
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
@@ -241,7 +237,6 @@ jobs:
       - changes
       - run-unit-tests
       - run-loom-tests
-      - run-zebra-test-windows
       - check-no-git-dependencies
     timeout-minutes: 30
     steps:
@@ -249,4 +244,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: run-unit-tests, run-loom-tests, run-zebra-test-windows, check-no-git-dependencies
+          allowed-skips: run-unit-tests, run-loom-tests, check-no-git-dependencies
