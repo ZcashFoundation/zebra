@@ -175,7 +175,8 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         ),
     };
 
-    // Outbound downloads use getdata on the wire, decoded as BlocksByHash by the inbound service.
+    // Outbound downloads use getdata on the wire, which the inbound connection decodes as
+    // RawBlocksByHash, or EarlyRawBlocksByHash on negotiated early-relay connections.
     let response = timeout(
         2 * zebra_network::constants::REQUEST_TIMEOUT,
         connected_peer_service

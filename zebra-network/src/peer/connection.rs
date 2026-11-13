@@ -1529,7 +1529,7 @@ where
             (AwaitingRequest, AdvertiseBlockToAll(_) | AdvertiseBlock(_, _) | AdvertiseEarlyBlock(_, _)) => {
                 Ok(Handler::Finished(Err(PeerError::AdvertRequiresDedicatedService)))
             }
-            (AwaitingRequest, EarlyBlocksByHash(_) | RawBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
+            (AwaitingRequest, EarlyBlocksByHash(_) | RawBlocksByHash(_) | EarlyRawBlocksByHash(_) | AdvertiseCompactBlock(..) | CheckCompactHeader(_) | CompactBlockTransactions(_) | CheckCompactBlock(..)) => {
                 Ok(Handler::Finished(Err(PeerError::InboundOnlyRequest)))
             }
             // The peer set handles this request itself, so there is nothing to send to the peer.
@@ -1759,10 +1759,10 @@ where
                             break;
                         }
                     }
+                    // Serve stored block bytes, rather than deserializing and reserializing them.
                     if self.connection_info.early_block_relay {
-                        Request::EarlyBlocksByHash(hashes)
+                        Request::EarlyRawBlocksByHash(hashes)
                     } else {
-                        // Serve stored block bytes, rather than deserializing and reserializing them.
                         Request::RawBlocksByHash(hashes)
                     }
                     .into()

@@ -87,9 +87,25 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks).
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks), or
+    /// [`Response::Blocks`](super::Response::Blocks) when a requested body is still a validated
+    /// submission that hasn't been committed.
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RawBlocksByHash(HashSet<block::Hash>),
+
+    /// Serve stored blocks by hash as their serialized bytes, on a connection that negotiated
+    /// experimental early relay.
+    ///
+    /// This inbound-only request is what a negotiated connection decodes a block `getdata` into.
+    /// It is never sent to peers or routed by the peer set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::RawBlocks`](super::Response::RawBlocks), or answers like
+    /// [`Request::EarlyBlocksByHash`] when a requested body is still a validated submission or in
+    /// the early-relay cache, so uncommitted bodies keep their revocable authorization.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    EarlyRawBlocksByHash(HashSet<block::Hash>),
 
     /// Request blocks from this node on a connection that negotiated experimental early relay.
     ///
@@ -100,7 +116,8 @@ pub enum Request {
     ///
     /// # Returns
     ///
-    /// The inbound service returns [`Response::Blocks`](super::Response::Blocks).
+    /// The inbound service returns [`Response::Blocks`](super::Response::Blocks) or
+    /// [`Response::AuthorizedBlocks`](super::Response::AuthorizedBlocks).
     EarlyBlocksByHash(HashSet<block::Hash>),
 
     /// Admits a screened compact advertisement to the ordinary bounded gossip downloader.
@@ -399,6 +416,9 @@ impl fmt::Display for Request {
             Request::RawBlocksByHash(hashes) => {
                 format!("RawBlocksByHash({})", hashes.len())
             }
+            Request::EarlyRawBlocksByHash(hashes) => {
+                format!("EarlyRawBlocksByHash({})", hashes.len())
+            }
             Request::BlockDownload { .. } => "BlockDownload".to_string(),
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock".to_string(),
             Request::CheckCompactHeader(_) => "CheckCompactHeader".to_string(),
@@ -449,6 +469,7 @@ impl Request {
             Request::BlocksByHash(_) => "BlocksByHash",
             Request::EarlyBlocksByHash(_) => "EarlyBlocksByHash",
             Request::RawBlocksByHash(_) => "RawBlocksByHash",
+            Request::EarlyRawBlocksByHash(_) => "EarlyRawBlocksByHash",
             Request::BlockDownload { .. } => "BlockDownload",
             Request::AdvertiseCompactBlock(..) => "AdvertiseCompactBlock",
             Request::CheckCompactHeader(_) => "CheckCompactHeader",
