@@ -81,6 +81,7 @@ pub(crate) mod early_relay;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod precomputed_trees;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -247,6 +248,9 @@ pub struct ReadStateService {
 
     /// At most one early mining parent, separate from committed state.
     mining_candidate: watch::Sender<Option<MiningCandidate>>,
+
+    /// Note commitment trees a mining candidate computed, which the block's commit can reuse.
+    precomputed_trees: watch::Sender<precomputed_trees::TreeSlot>,
 
     /// Independently enabled, authenticated early block retention.
     early_relay: Arc<early_relay::EarlyRelayState>,
@@ -454,6 +458,7 @@ impl StateService {
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
+        let precomputed_trees_sender = watch::Sender::new(precomputed_trees::TreeSlot::default());
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -466,13 +471,15 @@ impl StateService {
             non_finalized_state_sender,
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
+            precomputed_trees_sender.clone(),
         );
 
         let read_service = ReadStateService::new(
             &finalized_state,
             block_write_task,
             non_finalized_state_receiver,
-        );
+        )
+        .with_precomputed_trees(precomputed_trees_sender);
 
         let full_verifier_utxo_lookahead = max_checkpoint_height
             - HeightDiff::try_from(checkpoint_verify_concurrency_limit)
@@ -1180,12 +1187,22 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            precomputed_trees: watch::Sender::new(Default::default()),
             proposal_check: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
 
         read_service
+    }
+
+    /// Shares mining candidates' note commitment trees with the block write thread.
+    fn with_precomputed_trees(
+        mut self,
+        precomputed_trees: watch::Sender<precomputed_trees::TreeSlot>,
+    ) -> Self {
+        self.precomputed_trees = precomputed_trees;
+        self
     }
 
     /// Return the tip of the current best chain.
@@ -1352,6 +1369,12 @@ impl Service<Request> for StateService {
                 };
                 let state = self.read_service.clone();
                 let mut tip_change = self.latest_chain_tip.clone();
+                // Mark the trees as computing before the commit request can arrive, so the commit
+                // waits for them instead of computing them at the same time.
+                let trees = precomputed_trees::TreeSlotGuard::start(
+                    self.read_service.precomputed_trees.clone(),
+                    block.clone(),
+                );
                 // Keep the slot reserved until verification ends, even after early work expires.
                 let (guard, mut cancelled) = watch::channel(Arc::new(permit));
                 let (body_bound, mut is_body_bound) = watch::channel(false);
@@ -1366,11 +1389,12 @@ impl Service<Request> for StateService {
                         if !compute_state.mining_candidate_is_allowed(hash) {
                             return None;
                         }
-                        read::difficulty::mining_candidate_chain_info(
+                        read::difficulty::mining_candidate_chain_info_and_trees(
                             &compute_state.latest_non_finalized_state(),
                             &compute_state.db,
                             &compute_state.network,
                             block,
+                            Some(trees),
                         )
                     });
                     let info = tokio::select! {
