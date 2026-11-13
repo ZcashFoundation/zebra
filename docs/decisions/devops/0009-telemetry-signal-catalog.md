@@ -123,7 +123,7 @@ Label values follow these rules, because a label value reaches every backend and
 
 - **No peer-controlled values.** A value taken from peer input is mapped to a fixed set first. For example, `zcash.net.peers.missing_services` labels a rejected peer with `missing_service="NODE_NETWORK"`, the required service it lacks, instead of the service bits it sent.
 - **No local paths or details of the node's own host.** The peer cache file path is not a label.
-- **Operator configuration is allowed when it is bounded.** The `seed` label on `zcash.net.peers.initial` names a DNS seeder host from the node's configuration. It takes as many values as there are configured seeders, and the crate's `LABELS` documentation says so.
+- **No operator-configured endpoints or other values that can identify private infrastructure.** A configured value is mapped to a fixed set before it becomes a label. For example, the `seed` label on `zcash.net.peers.initial` carries the name of one of Zebra's default DNS seeders, or `custom` for any other configured entry, because operators can configure private peer addresses. The crate's `LABELS` documentation lists these values.
 
 An event attribute travels as an ordinary label in the `metrics::Key` from the call site. Each backend splits it off before the key reaches a registry (`zebrad/src/components/metrics/event_labels.rs`):
 
