@@ -101,18 +101,14 @@ internal RPC port 18232, P2P port 18233, Stratum port 3333, and pool web port
 8080. Stratum is the protocol between the pool and its mining workers.
 The stack does not publish Zebra's RPC or Redis ports to the host.
 
-The Compose file shipped with Zebra 7.0.0 does **not** start successfully
-without corrections:
+Copy `docker/mining/.env.example` to `docker/mining/.env` and set
+`MINER_ADDRESS` to a reward address for the selected network. Optional
+`EXTRA_COINBASE_DATA` supplies literal UTF-8 data, at most 86 bytes, through
+`ZEBRA_MINING__EXTRA_COINBASE_DATA`.
 
-- It always supplies `ZEBRA_MINING__MINER_DATA`, which Zebra rejects as an
-  unknown configuration field. Remove that entry or replace it with
-  `ZEBRA_MINING__EXTRA_COINBASE_DATA`. The `.env.example` description of
-  94-byte, hex-or-UTF-8 data is obsolete; use at most 86 UTF-8 bytes.
-- Its Zebra health check calls `http://127.0.0.1:8080/healthy`, but the service
-  does not enable a health listener. Add
-  `ZEBRA_HEALTH__LISTEN_ADDR=127.0.0.1:8080` to the Zebra service. Otherwise
-  the pool's `service_healthy` dependency never becomes ready. A successful
-  health check does not replace the mining sync check.
+The Zebra service enables its health listener at `127.0.0.1:8080` without
+publishing it. S-NOMP waits for `/healthy` to succeed before starting.
+A successful health check does not replace the mining sync check.
 
 The stack disables RPC authentication inside its Docker network. Do not
 publish that unauthenticated RPC port. The pool and miner build contexts use
