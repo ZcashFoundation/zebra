@@ -6,7 +6,7 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
     amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
-    block::merkle::AuthDataRoot,
+    block::merkle::{auth_digest_or_placeholder, AuthDataRoot},
     fmt::DisplayToDebug,
     ironwood, orchard,
     parameters::{subsidy, Network, NetworkUpgrade},
@@ -397,12 +397,29 @@ impl Block {
             })
     }
 
+    // Portions copyright (c) 2026 Zakura Contributors, licensed under the MIT license or the
+    // Apache License, Version 2.0, at your option.
+    // Adapted from zakura-core/zakura
+    // (https://github.com/zakura-core/zakura/commit/f9ccea5f0d2c610ff44d3f3eaa6f8f7ca8b47279).
     /// Compute the root of the authorizing data Merkle tree,
     /// as defined in [ZIP-244].
+    /// Digests are computed in parallel for blocks with at least 16 transactions.
     ///
     /// [ZIP-244]: https://zips.z.cash/zip-0244
     pub fn auth_data_root(&self) -> AuthDataRoot {
-        self.transactions.iter().collect::<AuthDataRoot>()
+        use rayon::prelude::*;
+
+        if self.transactions.len() < 16 {
+            return self.transactions.iter().collect();
+        }
+
+        // Indexed parallel collection preserves transaction order for the Merkle tree.
+        self.transactions
+            .par_iter()
+            .map(|tx| auth_digest_or_placeholder(tx))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect()
     }
 }
 
