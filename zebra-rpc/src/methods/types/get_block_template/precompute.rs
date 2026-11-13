@@ -114,7 +114,8 @@ const BUILD_STARTED: u8 = 2;
 /// Served work is coinbase-only, a build that passed proposal validation, or the first
 /// transaction-bearing build for a parent while its check runs, so a solved block that changes
 /// only the nonce and Equihash solution almost always reuses a verdict in `submitblock`. If that
-/// first build fails its check, the last valid work for its parent is served again.
+/// first build fails its check, the last valid work for its parent is served again, or the work is
+/// withdrawn until the updater builds more if there is none.
 /// `None` means no publication yet. Later publications can contain work, a withdrawal, or a
 /// build error; an error does not discard work that is still usable.
 #[derive(Clone)]
@@ -379,29 +380,41 @@ impl TemplateCache {
         served
     }
 
-    /// Serves the last valid work again if `failed`, which failed its check, is served.
+    /// Serves the last valid work again if `failed`, which failed its check, is served, or is
+    /// the served work with its time range narrowed by [`Self::template_for_tip()`], unless the
+    /// served work passed its own check. Without valid work for its parent, withdraws the served
+    /// work instead.
     ///
     /// Only the first transaction-bearing build for a parent is served ahead of its check, so the
-    /// last valid work is usually that parent's coinbase-only work. Returns whether the served
-    /// work changed.
+    /// last valid work is usually that parent's coinbase-only work. A newer build waiting for its
+    /// check stays queued. Returns whether the served work changed.
     fn reject(&self, failed: &Arc<BlockTemplateResponse>) -> bool {
         self.served.send_if_modified(|state| {
             let Some(state) = state.as_mut() else {
                 return false;
             };
-            if !state
-                .template
-                .as_ref()
-                .is_some_and(|served| Arc::ptr_eq(served, failed))
-            {
+            if !state.template.as_ref().is_some_and(|served| {
+                Arc::ptr_eq(served, failed) || is_narrowed_copy(failed, served)
+            }) {
                 return false;
             }
-            let Some(valid) = state.last_valid.clone() else {
-                return false;
+            let failed_work = |work: &Arc<BlockTemplateResponse>| {
+                Arc::ptr_eq(work, failed) || is_narrowed_copy(work, failed)
             };
+            let valid = state.last_valid.clone();
+            if valid
+                .as_ref()
+                .zip(state.template.as_ref())
+                .is_some_and(|(valid, served)| Arc::ptr_eq(valid, served))
+            {
+                // The served work passed its own check, so only its narrowed copy failed.
+                return false;
+            }
             *state = TemplateState {
-                last_valid: Some(Arc::clone(&valid)),
-                ..TemplateState::new(Some(valid))
+                next: state.next.take().filter(|next| !failed_work(next)),
+                last_valid: valid.clone(),
+                error: state.error.take(),
+                ..TemplateState::new(valid)
             };
             true
         })
@@ -499,7 +512,8 @@ impl TemplateCache {
                     .as_ref()
                     .is_some_and(|served| Arc::ptr_eq(served, &source))
                     && state.next.as_ref().is_none_or(|next| {
-                        next.long_poll_id == template.long_poll_id && next.cur_time != cur_time
+                        next.cur_time != cur_time
+                            && (Arc::ptr_eq(next, &source) || is_narrowed_copy(next, &source))
                     });
                 if restage {
                     state.next = Some(Arc::clone(&template));
@@ -512,6 +526,17 @@ impl TemplateCache {
         }
         Some(template)
     }
+}
+
+/// Returns `true` if `narrowed` is `work` with its time range narrowed after a clock rollback.
+///
+/// Builds from the same mempool snapshot share a long poll ID, but ZIP-317 selection is
+/// randomized, so the Merkle root tells their bodies apart.
+fn is_narrowed_copy(narrowed: &BlockTemplateResponse, work: &BlockTemplateResponse) -> bool {
+    narrowed.previous_block_hash == work.previous_block_hash
+        && narrowed.long_poll_id == work.long_poll_id
+        && narrowed.default_roots.merkle_root == work.default_roots.merkle_root
+        && narrowed.max_time < work.max_time
 }
 
 /// Returns the long poll timestamp `previous` work keeps when `template` replaces it.
@@ -959,8 +984,8 @@ async fn wait_for_mempool_change<Mempool: MempoolService>(
 ///
 /// Coalesces builds staged while the verifier is busy, and abandons outdated parents immediately,
 /// including queued conversion and verification work. A build staged before the tip watch
-/// reports its parent waits for that notification. A failure keeps the previously served work, so
-/// miners hold coinbase-only or validated work throughout.
+/// reports its parent waits for that notification. A failure serves the last valid work again, so
+/// miners hold coinbase-only or validated work, or withdraws the failed work if there is none.
 async fn validate_templates(
     cache: TemplateCache,
     network: Network,

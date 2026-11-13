@@ -1207,6 +1207,95 @@ fn failed_served_work_falls_back_to_the_last_valid_work() {
     assert!(!cache.reject(&newer));
 }
 
+/// A failed check keeps a newer build that was queued while it ran, withdraws served work that
+/// has no valid work to fall back to, and also fails the served work when its narrowed copy
+/// fails.
+#[test]
+fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
+    let network = Network::Mainnet;
+
+    // A newer build queued while the served work was checked is still checked afterwards.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    cache.update(full_template(0));
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    cache.update(full_template(1));
+    let newer = next_work(&cache).expect("a later build waits for validation");
+    assert!(cache.reject(&first));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(
+        next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &newer)),
+        "a newer build queued during the failed check stays queued"
+    );
+    assert!(cache.promote(&newer, Some(&coinbase_only)));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
+
+    // Failed work without valid work for its parent is withdrawn, so a later build is served
+    // instead of waiting behind it.
+    let cache = TemplateCache::default();
+    cache.update(full_template(0));
+    let unbacked = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.reject(&unbacked));
+    assert!(served_work(&cache).is_none());
+    assert!(next_work(&cache).is_none());
+    cache.update(full_template(1));
+    assert_eq!(
+        *served_work(&cache).expect("a later build is served at once"),
+        full_template(1)
+    );
+
+    // When a narrowed copy of the served work fails, the served work is withdrawn too.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    let full = full_template(0);
+    let tip = full.previous_block_hash;
+    cache.update(full.clone());
+    let now = full
+        .cur_time
+        .saturating_sub(Duration32::from_seconds(1))
+        .saturating_sub(Duration32::from_hours(2));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &narrowed)));
+    assert!(cache.reject(&narrowed));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(next_work(&cache).is_none());
+
+    // Served work that passed its own check stays served when only its narrowed copy fails.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    cache.update(full.clone());
+    let validated = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.promote(&validated, Some(&validated)));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    let mut changes = cache.subscribe();
+    assert!(!cache.reject(&narrowed));
+    assert!(
+        !changes.take_changed(),
+        "nothing changed, so long polls stay asleep"
+    );
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &validated)));
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &narrowed)));
+
+    // A newer build from the same mempool snapshot has the same long poll ID but another body,
+    // so narrowed older work doesn't displace it.
+    let cache = TemplateCache::default();
+    cache.update(full.clone());
+    let served = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut other_body = full_template(1);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x11; 32]);
+    cache.update(other_body);
+    let waiting = next_work(&cache).expect("a later build waits for validation");
+    assert_eq!(waiting.long_poll_id, served.long_poll_id);
+    cache.template_for_tip(tip, &network, now);
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &waiting)));
+}
+
 /// The validation worker withdraws a served build that fails its check.
 #[tokio::test]
 async fn served_work_that_fails_its_check_is_withdrawn() {
