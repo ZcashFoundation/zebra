@@ -1,5 +1,20 @@
 # Treestate
 
+Status (Zebra 7.0.0): **Implemented**.
+
+Code: [shielded storage](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/zebra_db/shielded.rs), [contextual checks](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/check.rs), and [block commitments](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/block/commitment.rs).
+
+- Ironwood adds trees, anchors, and nullifiers in separate column families.
+- Ironwood reuses Orchard tree types.
+- Finalized Sapling/Orchard/Ironwood trees are stored by height on change.
+- Sprout keeps its latest tree and an anchor-to-tree index.
+- Heartwood's activation block has an all-zero reserved commitment.
+- Later Heartwood and Canopy blocks commit to [chain history](https://zips.z.cash/zip-0221), not the Sapling root.
+- From NU5, the commitment combines [chain history and transaction authorization data](https://zips.z.cash/zip-0244).
+- [Database writes](https://github.com/ZcashFoundation/zebra/blob/main/zebra-state/src/service/finalized_state/disk_db.rs) insert or overwrite; no deletion-event tracker forbids re-insertion.
+
+---
+
 - Feature Name: treestate
 - Start Date: 2020-08-31
 - Design PR: [ZcashFoundation/zebra#983](https://github.com/ZcashFoundation/zebra/issues/983)
