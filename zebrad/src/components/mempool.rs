@@ -421,11 +421,18 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.state.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.state.clone(),
+            )
+            .with_max_datacarrier_bytes(
+                self.config
+                    .max_datacarrier_bytes
+                    .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
+            ),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,

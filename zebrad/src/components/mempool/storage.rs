@@ -156,6 +156,62 @@ pub enum NonStandardTransactionError {
     NonStandardInputs,
 }
 
+/// Checks that a transaction's outputs are standard, like the output checks in zcashd's
+/// `IsStandardTx()`:
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L108-L132>
+///
+/// The mempool runs this before verification, and again when it stores a transaction.
+pub(crate) fn check_standard_outputs(
+    transaction: &Transaction,
+    max_datacarrier_bytes: u32,
+) -> Result<(), NonStandardTransactionError> {
+    // Rule: outputs must be standard script kinds, with special handling for OP_RETURN.
+    let mut data_out_count = 0u32;
+
+    for output in transaction.outputs() {
+        let lock_script = &output.lock_script;
+        let script_len = lock_script.as_raw_bytes().len();
+
+        match policy::standard_script_kind(lock_script) {
+            // Rule: output script must be standard (P2PKH/P2SH/P2PK/multisig/OP_RETURN).
+            None => return Err(NonStandardTransactionError::ScriptPubKeyNonStandard),
+            Some(solver::ScriptKind::NullData { .. }) => {
+                // Rule: OP_RETURN script size is limited.
+                // Cast is safe: u32 always fits in usize on 32-bit and 64-bit platforms.
+                if script_len > max_datacarrier_bytes as usize {
+                    return Err(NonStandardTransactionError::DataCarrierTooLarge);
+                }
+                // Rule: count OP_RETURN outputs to enforce the one-output limit.
+                data_out_count += 1;
+            }
+            Some(solver::ScriptKind::MultiSig { pubkeys, .. }) => {
+                // Rule: multisig must be at most 3-of-3 for standardness.
+                // Note: This check is technically subsumed by the unconditional BareMultiSig
+                // rejection below, but we keep it to distinguish the two error reasons
+                // (ScriptPubKeyNonStandard for >3 keys vs BareMultiSig for valid multisig).
+                if pubkeys.len() > policy::MAX_STANDARD_MULTISIG_PUBKEYS {
+                    return Err(NonStandardTransactionError::ScriptPubKeyNonStandard);
+                }
+                // Rule: bare multisig outputs are non-standard (fIsBareMultisigStd = false).
+                return Err(NonStandardTransactionError::BareMultiSig);
+            }
+            Some(_) => {
+                // Rule: non-OP_RETURN outputs must not be dust.
+                if output.is_dust() {
+                    return Err(NonStandardTransactionError::IsDust);
+                }
+            }
+        }
+    }
+
+    // Rule: only one OP_RETURN output is permitted.
+    if data_out_count > 1 {
+        return Err(NonStandardTransactionError::MultiOpReturn);
+    }
+
+    Ok(())
+}
+
 /// Represents a set of transactions that have been removed from the mempool, either because
 /// they were mined, or because they were invalidated by another transaction that was mined.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,60 +371,10 @@ impl Storage {
             }
         }
 
-        // Rule: outputs must be standard script kinds, with special handling for OP_RETURN.
-        let mut data_out_count = 0u32;
-
-        for output in transaction.outputs() {
-            let lock_script = &output.lock_script;
-            let script_len = lock_script.as_raw_bytes().len();
-            let script_kind = policy::standard_script_kind(lock_script);
-
-            match script_kind {
-                None => {
-                    // Rule: output script must be standard (P2PKH/P2SH/P2PK/multisig/OP_RETURN).
-                    return self.reject_non_standard(
-                        tx,
-                        NonStandardTransactionError::ScriptPubKeyNonStandard,
-                    );
-                }
-                Some(solver::ScriptKind::NullData { .. }) => {
-                    // Rule: OP_RETURN script size is limited.
-                    // Cast is safe: u32 always fits in usize on 32-bit and 64-bit platforms.
-                    if script_len > self.max_datacarrier_bytes as usize {
-                        return self.reject_non_standard(
-                            tx,
-                            NonStandardTransactionError::DataCarrierTooLarge,
-                        );
-                    }
-                    // Rule: count OP_RETURN outputs to enforce the one-output limit.
-                    data_out_count += 1;
-                }
-                Some(solver::ScriptKind::MultiSig { pubkeys, .. }) => {
-                    // Rule: multisig must be at most 3-of-3 for standardness.
-                    // Note: This check is technically subsumed by the unconditional BareMultiSig
-                    // rejection below, but we keep it to distinguish the two error reasons
-                    // (ScriptPubKeyNonStandard for >3 keys vs BareMultiSig for valid multisig).
-                    if pubkeys.len() > policy::MAX_STANDARD_MULTISIG_PUBKEYS {
-                        return self.reject_non_standard(
-                            tx,
-                            NonStandardTransactionError::ScriptPubKeyNonStandard,
-                        );
-                    }
-                    // Rule: bare multisig outputs are non-standard (fIsBareMultisigStd = false).
-                    return self.reject_non_standard(tx, NonStandardTransactionError::BareMultiSig);
-                }
-                Some(_) => {
-                    // Rule: non-OP_RETURN outputs must not be dust.
-                    if output.is_dust() {
-                        return self.reject_non_standard(tx, NonStandardTransactionError::IsDust);
-                    }
-                }
-            }
-        }
-
-        // Rule: only one OP_RETURN output is permitted.
-        if data_out_count > 1 {
-            return self.reject_non_standard(tx, NonStandardTransactionError::MultiOpReturn);
+        if let Err(rejection_error) =
+            check_standard_outputs(transaction, self.max_datacarrier_bytes)
+        {
+            return self.reject_non_standard(tx, rejection_error);
         }
 
         Ok(())
@@ -877,6 +883,9 @@ impl Storage {
             TransactionDownloadVerifyError::Invalid { error, .. }  => {
                 self.reject(tx_id, ExactTipRejectionError::FailedVerification(error).into())
             }
+
+            // Rejected as non-standard before verification, cached like the storage-time check.
+            TransactionDownloadVerifyError::NonStandard(error) => self.reject(tx_id, error.into()),
         }
     }
 
