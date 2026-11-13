@@ -76,6 +76,36 @@ fn template() -> BlockTemplateResponse {
     template_with_max_time(&Network::Mainnet, DateTime32::from(1654008719))
 }
 
+/// Returns a transaction-bearing template whose header time is `seconds` after [`template()`]'s.
+///
+/// The transaction is a copy of the coinbase: only the proposal's identity matters to these tests.
+fn full_template(seconds: u32) -> BlockTemplateResponse {
+    let mut template = template();
+    template.transactions.push(TransactionTemplate::new(
+        template.coinbase_txn.data.clone(),
+        template.coinbase_txn.hash,
+        template.coinbase_txn.auth_digest,
+        vec![],
+        Amount::zero(),
+        0,
+        false,
+    ));
+    template.cur_time = template
+        .cur_time
+        .saturating_add(Duration32::from_seconds(seconds));
+    template
+}
+
+/// Returns the work `getblocktemplate` serves.
+fn served_work(cache: &TemplateCache) -> Option<Arc<BlockTemplateResponse>> {
+    cache.served.borrow().as_ref()?.template.clone()
+}
+
+/// Returns the work waiting to replace the served template.
+fn next_work(cache: &TemplateCache) -> Option<Arc<BlockTemplateResponse>> {
+    cache.served.borrow().as_ref()?.next.clone()
+}
+
 /// Testnet difficulty changes strictly after max_time; other networks and minimum difficulty
 /// remain usable even when wall time is beyond the template's timestamp range.
 #[test]
@@ -774,6 +804,75 @@ async fn tip_changes_interrupt_template_retry_backoff() {
     );
 }
 
+/// A tip change drops an in-flight proposal even before a replacement template is published.
+#[tokio::test]
+async fn background_proposals_abandon_outdated_parents() {
+    use tokio::sync::{mpsc, oneshot};
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let mut full = template();
+        // Only dispatch and cancellation matter here; the service holds every proposal pending.
+        full.transactions.push(TransactionTemplate::new(
+            full.coinbase_txn.data.clone(),
+            full.coinbase_txn.hash,
+            full.coinbase_txn.auth_digest,
+            vec![],
+            Amount::zero(),
+            0,
+            false,
+        ));
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
+        let (entered, mut requests) = mpsc::unbounded_channel();
+        let verifier = tower::buffer::Buffer::new(
+            tower::service_fn(move |request: VerifyRequest| {
+                let entered = entered.clone();
+                async move {
+                    let (release, held) = oneshot::channel::<()>();
+                    entered.send((request.block(), release)).unwrap();
+                    held.await?;
+                    Ok::<_, zebra_consensus::BoxError>(request.block().hash())
+                }
+            }),
+            1,
+        );
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.clone(),
+            Network::Mainnet,
+            verifier,
+            tip,
+        ));
+        cache.stage(full.clone());
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(
+            proposal.header.previous_block_hash,
+            full.previous_block_hash
+        );
+        assert!(
+            cache.is_empty(),
+            "staged work must not be served before validation"
+        );
+        let next_tip = block::Hash([0xcd; 32]);
+        tip_sender.send_best_tip_hash(next_tip);
+        release.closed().await;
+
+        // A stale build must not restart obsolete work. A subsequent current-tip proposal
+        // must still be dispatched, so cancellation cannot stop the validation worker.
+        cache.stage(full.clone());
+        full.previous_block_hash = next_tip;
+        cache.stage(full);
+        let (proposal, mut release) = requests.recv().await.unwrap();
+        assert_eq!(proposal.header.previous_block_hash, next_tip);
+        tip_sender.send_best_tip_hash(None);
+        release.closed().await;
+    })
+    .await
+    .expect("tip changes cancel validation without waiting for a new template");
+}
+
 #[tokio::test]
 async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     use futures::FutureExt;
@@ -889,14 +988,17 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .with_max_request_delay(Duration::MAX)
                 .for_unit_tests();
         let mut verifier_requests = verifier.clone();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(full.previous_block_hash);
         let mut tasks = tokio::task::JoinSet::new();
         tasks.spawn(validate_templates(
-            cache.subscribe(),
+            cache.clone(),
             network.clone(),
             verifier.clone(),
+            tip,
         ));
-        cache.publish(empty);
-        // The empty template must not reach the verifier.
+        cache.publish(empty.clone());
+        // Coinbase-only work is served directly and never reaches the verifier.
         // Paused sleeps advance only after runnable work and blocking conversions are idle.
         tokio::time::pause();
         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -912,21 +1014,6 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
                 .is_none(),
             "coinbase-only templates must not reach the verifier"
         );
-        cache.clear();
-        tokio::time::pause();
-        tokio::time::sleep(Duration::from_millis(1)).await;
-        tokio::time::resume();
-        assert!(
-            tasks.try_join_next().is_none(),
-            "withdrawal must leave the validator running"
-        );
-        assert!(
-            verifier_requests
-                .try_next_request()
-                .now_or_never()
-                .is_none(),
-            "withdrawn templates must not reach the verifier"
-        );
         let expected =
             proposal_block_from_template(&full, BlockTemplateTimeSource::CurTime, &network)
                 .unwrap();
@@ -937,14 +1024,22 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
             expected,
             proposal_block_from_template(&round_trip, None, &network).unwrap()
         );
-        cache.publish(full.clone());
+        cache.stage(full.clone());
         let first = verifier
             .expect_request(VerifyRequest::CheckProposal(Arc::new(expected.clone())))
             .await;
+        let served = cache
+            .template_for_tip(full.previous_block_hash, &network, full.cur_time)
+            .expect("coinbase-only work remains served during validation");
+        assert_eq!(
+            *served, empty,
+            "staged work must not be served before validation"
+        );
+        let validated = full.clone();
         full.cur_time = full.cur_time.saturating_add(Duration32::from_seconds(1));
-        cache.publish(full.clone());
+        cache.stage(full.clone());
         full.cur_time = full.cur_time.saturating_add(Duration32::from_seconds(1));
-        cache.publish(full.clone());
+        cache.stage(full.clone());
         tokio::time::pause();
         tokio::time::sleep(Duration::from_millis(1)).await;
         tokio::time::resume();
@@ -962,6 +1057,21 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
         // Forward the worker's request through the real router, populating its consensus cache.
         let request = first.request().clone();
         first.respond(router.clone().oneshot(request).await.unwrap());
+        let mut publications = cache.subscribe();
+        let served = loop {
+            if let Some(template) =
+                cache.template_for_tip(full.previous_block_hash, &network, full.cur_time)
+            {
+                if !template.transactions.is_empty() {
+                    break template;
+                }
+            }
+            publications.changed().await;
+        };
+        assert_eq!(
+            *served, validated,
+            "the validated build is served once the verifier accepts it"
+        );
         let cached = prepared
             .deserialize(&expected.zcash_serialize_to_vec().unwrap())
             .unwrap();
@@ -989,6 +1099,575 @@ async fn background_proposals_populate_reuse_cache_and_coalesce_while_busy() {
     })
     .await
     .expect("background validation must not stall publication");
+}
+
+/// A validated build replaces only the work it was checked against, so newer work served while
+/// its check ran stays served, and long polls never move back to older work.
+#[test]
+fn validated_work_replaces_only_the_work_it_was_checked_against() {
+    let cache = TemplateCache::default();
+    let mut changes = cache.subscribe();
+
+    cache.update(full_template(0));
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(
+        next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &first)),
+        "transaction-bearing work is validated while it is served"
+    );
+    changes.take_changed();
+    assert!(cache.promote(&first, Some(&first)));
+    assert!(
+        !changes.take_changed(),
+        "validating work that is already served must not wake long polls"
+    );
+
+    // A later build for the same parent waits for its check, without waking long polls.
+    cache.update(full_template(1));
+    assert!(
+        !changes.take_changed(),
+        "queueing work for validation must not wake long polls"
+    );
+    let later = next_work(&cache).expect("a later build waits for validation");
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &first)));
+
+    // Newer work served while that check runs stays served. A withdrawn mining candidate clears
+    // the cache, so the updater serves its next build for the tip at once.
+    cache.clear();
+    cache.update(full_template(2));
+    let newer = served_work(&cache).expect("newer work is served");
+    assert_eq!(*newer, full_template(2));
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &newer)));
+    assert!(!cache.promote(&later, Some(&first)));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
+
+    // A build checked against the work that is still served replaces it.
+    assert!(cache.promote(&newer, Some(&newer)));
+    cache.update(full_template(3));
+    let replacement = next_work(&cache).expect("a later build waits for validation");
+    changes.take_changed();
+    assert!(cache.promote(&replacement, Some(&newer)));
+    assert!(
+        changes.take_changed(),
+        "replacing the served work wakes long polls"
+    );
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &replacement)));
+
+    // Work for another parent, such as coinbase-only work after a tip change, drops the waiting
+    // build, so its verdict cannot replace the new parent's work either.
+    cache.update(full_template(4));
+    let stale = next_work(&cache).expect("a later build waits for validation");
+    let mut other = template();
+    other.previous_block_hash = block::Hash([0xcd; 32]);
+    cache.update(other.clone());
+    assert!(next_work(&cache).is_none());
+    assert!(!cache.promote(&stale, Some(&replacement)));
+    assert_eq!(
+        *served_work(&cache).expect("the new parent's work is served"),
+        other
+    );
+}
+
+/// A served build that fails its check is replaced by the last valid work for its parent: the
+/// parent's coinbase-only work, or a build that passed its check after newer work was served.
+#[test]
+fn failed_served_work_falls_back_to_the_last_valid_work() {
+    let cache = TemplateCache::default();
+    let mut changes = cache.subscribe();
+
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    cache.update(full_template(0));
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    changes.take_changed();
+    assert!(cache.reject(&first));
+    assert!(
+        changes.take_changed(),
+        "withdrawing failed work wakes long polls"
+    );
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(next_work(&cache).is_none());
+
+    // A build that passes its check after newer work was served is not served, but it is the
+    // work served again if the newer work fails.
+    cache.update(full_template(1));
+    let checked = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.promote(&checked, Some(&checked)));
+    // Another body, so it is still a fallback when the newer work fails.
+    let mut other_body = full_template(2);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x33; 32]);
+    cache.update(other_body);
+    let later = next_work(&cache).expect("a later build waits for validation");
+    cache.clear();
+    cache.update(template());
+    cache.update(full_template(3));
+    let newer = served_work(&cache).expect("newer work is served");
+    assert!(!cache.promote(&later, Some(&checked)));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
+    assert!(cache.reject(&newer));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &later)));
+
+    // Rejecting work that is not served changes nothing.
+    assert!(!cache.reject(&newer));
+}
+
+/// A failed check keeps a newer build that was queued while it ran, withdraws served work that
+/// has no valid work to fall back to, and also fails the served work when its narrowed copy
+/// fails.
+#[test]
+fn failed_checks_keep_newer_work_and_withdraw_unbacked_work() {
+    use futures::FutureExt;
+
+    let network = Network::Mainnet;
+
+    // A newer build queued while the served work was checked is still checked afterwards.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    cache.update(full_template(0));
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut other_body = full_template(1);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x44; 32]);
+    cache.update(other_body);
+    let newer = next_work(&cache).expect("a later build waits for validation");
+    assert!(cache.reject(&first));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(
+        next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &newer)),
+        "a newer build queued during the failed check stays queued"
+    );
+    assert!(cache.promote(&newer, Some(&coinbase_only)));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &newer)));
+
+    // Failed work without valid work for its parent is withdrawn, so a later build is served
+    // instead of waiting behind it.
+    let cache = TemplateCache::default();
+    cache.update(full_template(0));
+    let unbacked = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.reject(&unbacked));
+    assert!(served_work(&cache).is_none());
+    assert!(next_work(&cache).is_none());
+    cache.update(full_template(1));
+    assert_eq!(
+        *served_work(&cache).expect("a later build is served at once"),
+        full_template(1)
+    );
+
+    // When a narrowed copy of the served work fails, the served work is withdrawn too.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+    let full = full_template(0);
+    let tip = full.previous_block_hash;
+    cache.update(full.clone());
+    let now = full
+        .cur_time
+        .saturating_sub(Duration32::from_seconds(1))
+        .saturating_sub(Duration32::from_hours(2));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &narrowed)));
+    assert!(cache.reject(&narrowed));
+    assert!(served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)));
+    assert!(next_work(&cache).is_none());
+
+    // Served work that passed its own check isn't a fallback when its narrowed copy fails,
+    // since miners would only get narrowed copies of it. Without other valid work, it is
+    // withdrawn, and the updater is woken to build coinbase-only work.
+    let cache = TemplateCache::default();
+    cache.update(template());
+    cache.update(full.clone());
+    let validated = served_work(&cache).expect("the first build for a parent is served at once");
+    assert!(cache.promote(&validated, Some(&validated)));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert!(cache.rebuild.notified().now_or_never().is_none());
+    assert!(cache.reject(&narrowed));
+    assert!(served_work(&cache).is_none());
+    assert!(next_work(&cache).is_none());
+    assert!(
+        cache.rebuild.notified().now_or_never().is_some(),
+        "withdrawing work without a fallback wakes the updater"
+    );
+
+    // A narrowed copy of promoted work, which keeps the served long poll ID in a copy, is still
+    // queued for validation.
+    let cache = TemplateCache::default();
+    cache.update(full.clone());
+    let first = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut wider = full.clone();
+    wider.max_time = wider.max_time.saturating_add(Duration32::from_seconds(60));
+    wider.long_poll_id.max_timestamp = wider.long_poll_id.max_timestamp.saturating_add(60);
+    cache.update(wider);
+    let staged = next_work(&cache).expect("a later build waits for validation");
+    assert!(cache.promote(&staged, Some(&first)));
+    let promoted = served_work(&cache).expect("validated work is served");
+    assert!(
+        !Arc::ptr_eq(&promoted, &staged),
+        "promotion keeps the served long poll ID"
+    );
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &narrowed)));
+
+    // A newer build from the same mempool snapshot has the same long poll ID but another body,
+    // so narrowed older work doesn't displace it.
+    let cache = TemplateCache::default();
+    cache.update(full.clone());
+    let served = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut other_body = full_template(1);
+    other_body.default_roots.merkle_root = block::merkle::Root([0x11; 32]);
+    cache.update(other_body);
+    let waiting = next_work(&cache).expect("a later build waits for validation");
+    assert_eq!(waiting.long_poll_id, served.long_poll_id);
+    cache.template_for_tip(tip, &network, now);
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &waiting)));
+}
+
+/// The validation worker withdraws a served build that fails its check.
+#[tokio::test]
+async fn served_work_that_fails_its_check_is_withdrawn() {
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let cache = TemplateCache::default();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(template().previous_block_hash);
+        let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build()
+                .with_max_request_delay(Duration::from_secs(10))
+                .for_unit_tests();
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.clone(),
+            Network::Mainnet,
+            verifier.clone(),
+            tip,
+        ));
+
+        cache.update(template());
+        let coinbase_only = served_work(&cache).expect("coinbase-only work is served at once");
+        cache.update(full_template(0));
+        let mut changes = cache.subscribe();
+        verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await
+            .respond_error("rejected".into());
+        changes.changed().await;
+        assert!(
+            served_work(&cache).is_some_and(|served| Arc::ptr_eq(&served, &coinbase_only)),
+            "the parent's coinbase-only work is served again"
+        );
+        tasks.abort_all();
+    })
+    .await
+    .expect("withdrawing failed work must not wait for a backstop");
+}
+
+/// After a clock rollback narrows the served work's header time, the narrowed work is queued for
+/// validation once, so its verdict can replace the served work, unless the served work changed or
+/// a newer build is already waiting.
+#[test]
+fn narrowed_work_is_queued_once_unless_newer_work_waits() {
+    let network = Network::Mainnet;
+    let cache = TemplateCache::default();
+    let full = full_template(0);
+    let tip = full.previous_block_hash;
+    cache.update(full.clone());
+    let served = served_work(&cache).expect("the first build for a parent is served at once");
+    let mut changes = cache.subscribe();
+
+    // Only a header time change needs a new verdict: narrowing `max_time` alone keeps the
+    // proposal's identity.
+    let now = full
+        .cur_time
+        .saturating_sub(Duration32::from_seconds(1))
+        .saturating_sub(Duration32::from_hours(2));
+    let narrowed = cache
+        .template_for_tip(tip, &network, now)
+        .expect("a usable range survives clock rollback");
+    assert_ne!(narrowed.cur_time, full.cur_time);
+    let queued = next_work(&cache).expect("narrowed work is queued for validation");
+    assert_eq!(queued, narrowed);
+    assert!(
+        !changes.take_changed(),
+        "queueing work for validation must not wake long polls"
+    );
+    cache.template_for_tip(tip, &network, now);
+    assert!(
+        next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &queued)),
+        "the same narrowed work is queued once"
+    );
+
+    // A newer build waiting to replace the served work is not displaced by narrowed older work.
+    let mut newer = full_template(1);
+    newer.long_poll_id.mempool_transaction_count += 1;
+    newer.default_roots.merkle_root = block::merkle::Root([0x22; 32]);
+    cache.update(newer);
+    let waiting = next_work(&cache).expect("a later build waits for validation");
+    let earlier = now.saturating_sub(Duration32::from_seconds(1));
+    cache.template_for_tip(tip, &network, earlier);
+    assert!(next_work(&cache).is_some_and(|next| Arc::ptr_eq(&next, &waiting)));
+    assert!(served_work(&cache).is_some_and(|current| Arc::ptr_eq(&current, &served)));
+}
+
+/// A build whose check finishes after newer work for the same parent was served, as when a
+/// withdrawn mining candidate makes the updater republish work for the tip, is dropped, and the
+/// newer work is checked next.
+#[tokio::test]
+async fn late_verdicts_do_not_replace_newer_work() {
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let network = Network::Mainnet;
+        let cache = TemplateCache::default();
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_hash(template().previous_block_hash);
+        let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build()
+                .with_max_request_delay(Duration::from_secs(10))
+                .for_unit_tests();
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(validate_templates(
+            cache.clone(),
+            network.clone(),
+            verifier.clone(),
+            tip,
+        ));
+        let proposal = |template: &BlockTemplateResponse| {
+            Arc::new(
+                proposal_block_from_template(template, BlockTemplateTimeSource::CurTime, &network)
+                    .expect("test templates convert to proposals"),
+            )
+        };
+
+        // The first build is served while its check runs.
+        cache.update(full_template(0));
+        let check = verifier
+            .expect_request(VerifyRequest::CheckProposal(proposal(&full_template(0))))
+            .await;
+        let hash = check.request().block().hash();
+        check.respond(hash);
+
+        // A later build waits for its check, and newer work is served meanwhile.
+        cache.update(full_template(1));
+        let check = verifier
+            .expect_request(VerifyRequest::CheckProposal(proposal(&full_template(1))))
+            .await;
+        cache.clear();
+        cache.update(full_template(2));
+        let hash = check.request().block().hash();
+        check.respond(hash);
+
+        // The newer work is checked next, so the late verdict has been handled by now.
+        let check = verifier
+            .expect_request(VerifyRequest::CheckProposal(proposal(&full_template(2))))
+            .await;
+        assert_eq!(
+            *served_work(&cache).expect("the newer work stays served"),
+            full_template(2),
+            "a late verdict must not replace newer work"
+        );
+        let hash = check.request().block().hash();
+        check.respond(hash);
+        tasks.abort_all();
+    })
+    .await
+    .expect("validation must not wait for a backstop");
+}
+
+/// The first transaction-bearing build for a tip is served at once and validated in the
+/// background. A later build for the same tip replaces it only once validated: a rejected build
+/// keeps the served work, and an accepted one is served unchanged.
+#[tokio::test]
+async fn later_builds_are_served_only_after_validation() {
+    use zebra_test::mock_service::MockService;
+
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let network = Network::Mainnet;
+        let height = NetworkUpgrade::Nu5.activation_height(&network).unwrap();
+        let hash = block::Hash([1; 32]);
+        let now = DateTime32::now();
+        let chain_info = GetBlockTemplateChainInfo {
+            expected_difficulty: CompactDifficulty::from(ExpandedDifficulty::from(U256::one())),
+            tip_height: height,
+            tip_hash: hash,
+            cur_time: now,
+            min_time: now,
+            max_time: now.saturating_add(Duration32::from_minutes(90)),
+            chain_history_root: fake_history_tree(&network).hash(),
+            chain_value_pools: Default::default(),
+        };
+        let read_state = tower::service_fn(move |request| {
+            let chain_info = chain_info.clone();
+            std::future::ready(Ok::<_, zebra_node_services::BoxError>(match request {
+                ReadRequest::Tip => ReadResponse::Tip(Some((height, hash))),
+                ReadRequest::ChainInfo => ReadResponse::ChainInfo(chain_info),
+                ReadRequest::MiningCandidate => ReadResponse::MiningCandidate(None),
+                ReadRequest::MiningCandidateChanges => {
+                    ReadResponse::MiningCandidateChanges(Default::default())
+                }
+                other => panic!("unexpected state request: {other:?}"),
+            }))
+        });
+        let transaction = |lock_height| {
+            VerifiedUnminedTx::new(
+                Arc::new(Transaction::test_v1(
+                    vec![],
+                    vec![],
+                    zebra_chain::transaction::LockTime::Height(Height(lock_height)),
+                ))
+                .into(),
+                10_000.try_into().unwrap(),
+                0,
+                0,
+                Arc::new(vec![]),
+            )
+            .unwrap()
+        };
+        let (pool, pool_rx) = watch::channel(vec![transaction(1)]);
+        let mempool = tower::service_fn(move |request| {
+            std::future::ready(Ok::<_, zebra_node_services::BoxError>(match request {
+                mempool::Request::FullTransactions => mempool::Response::FullTransactions {
+                    transactions: pool_rx.borrow().clone(),
+                    transaction_dependencies: Default::default(),
+                    last_seen_tip_hash: hash,
+                },
+                mempool::Request::TransactionIds => mempool::Response::TransactionIds(
+                    pool_rx
+                        .borrow()
+                        .iter()
+                        .map(|tx| tx.transaction.id)
+                        .collect(),
+                ),
+                other => panic!("unexpected mempool request: {other:?}"),
+            }))
+        });
+        let (tip, tip_sender) = MockChainTip::new();
+        tip_sender.send_best_tip_height(height);
+        tip_sender.send_best_tip_hash(hash);
+        tip_sender.send_best_tip_block_time(chrono::Utc::now());
+        let mut sync = MockSyncStatus::default();
+        sync.set_is_close_to_tip(true);
+        let miner_params = MinerParams::from(
+            Address::decode(
+                &network,
+                default_miner_address(network.kind(), &MinerAddressType::Transparent),
+            )
+            .unwrap(),
+        );
+        let cache = TemplateCache::default();
+        let mut publications = cache.subscribe();
+        let mut verifier: MockService<VerifyRequest, block::Hash, _, zebra_consensus::BoxError> =
+            MockService::build()
+                .with_max_request_delay(Duration::from_secs(10))
+                .for_unit_tests();
+        let (events, receiver) = broadcast::channel(1);
+        let updater = tokio::spawn(run(
+            network.clone(),
+            miner_params,
+            CoinbaseCache::default(),
+            cache.clone(),
+            mempool,
+            receiver,
+            read_state,
+            tip,
+            sync,
+            verifier.clone(),
+        ));
+
+        // The first transaction-bearing build is served at once, and validated meanwhile.
+        let first = loop {
+            if let Some(template) = cache.template_for_tip(hash, &network, DateTime32::now()) {
+                if !template.transactions.is_empty() {
+                    break template;
+                }
+            }
+            publications.changed().await;
+        };
+        assert_eq!(first.transactions.len(), 1);
+        let request = verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await;
+        assert_eq!(
+            *request.request().block(),
+            proposal_block_from_template(&first, BlockTemplateTimeSource::CurTime, &network)
+                .unwrap(),
+            "the served build is the one validated"
+        );
+        let proposal = request.request().block();
+        request.respond(proposal.hash());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), publications.changed())
+                .await
+                .is_err(),
+            "validating work that is already served must not wake long polls"
+        );
+
+        // A rebuild for the same tip is staged, and a rejected one keeps the served work.
+        let added = transaction(2);
+        let added_id = added.transaction.id;
+        pool.send_replace(vec![transaction(1), added]);
+        events
+            .send(MempoolChange::added([added_id].into_iter().collect()))
+            .unwrap();
+        let request = verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await;
+        let second = next_work(&cache).expect("the rebuilt work waits for validation");
+        assert_eq!(second.transactions.len(), 2);
+        assert_eq!(
+            cache
+                .template_for_tip(hash, &network, DateTime32::now())
+                .expect("the first build remains served during validation"),
+            first
+        );
+        request.respond_error("rejected".into());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), publications.changed())
+                .await
+                .is_err(),
+            "a rejected build must not be served"
+        );
+        assert_eq!(
+            cache
+                .template_for_tip(hash, &network, DateTime32::now())
+                .expect("the first build remains served after a rejection"),
+            first
+        );
+
+        // The next rebuild is accepted and served unchanged.
+        let third_transaction = transaction(3);
+        let third_id = third_transaction.transaction.id;
+        pool.send_replace(vec![transaction(1), transaction(2), third_transaction]);
+        events
+            .send(MempoolChange::added([third_id].into_iter().collect()))
+            .unwrap();
+        let request = verifier
+            .expect_request_that(|request| matches!(request, VerifyRequest::CheckProposal(_)))
+            .await;
+        let third = next_work(&cache).expect("the rebuilt work waits for validation");
+        assert_eq!(third.transactions.len(), 3);
+        let proposal = request.request().block();
+        request.respond(proposal.hash());
+        let validated = loop {
+            if let Some(template) = cache.template_for_tip(hash, &network, DateTime32::now()) {
+                if template.transactions.len() == 3 {
+                    break template;
+                }
+            }
+            publications.changed().await;
+        };
+        assert_eq!(validated, third, "the accepted build is served unchanged");
+        updater.abort();
+    })
+    .await
+    .expect("validation gating must complete without waiting for a backstop");
 }
 
 /// A retained full build must not reserve the mutex ahead of its candidate replacement.
@@ -1514,6 +2193,22 @@ async fn candidate_fee_coinbase_is_reused_after_commit_and_rebuilt_for_changed_f
                 .unwrap();
             drop(candidate_guard);
             release_snapshot.send_replace(true);
+            // Validation of the committed parent's transaction-bearing build waits for the tip
+            // watch, so let it catch up once that build waits for validation. The retained
+            // snapshot's eviction check has run by then.
+            cache
+                .served
+                .subscribe()
+                .wait_for(|state| {
+                    state
+                        .as_ref()
+                        .and_then(|state| state.next.as_ref())
+                        .is_some_and(|template| template.previous_block_hash == candidate_hash)
+                })
+                .await
+                .expect("the updater keeps the template channel open");
+            lagged_tip_sender.send_best_tip_height(Height(1));
+            lagged_tip_sender.send_best_tip_hash(candidate_hash);
             loop {
                 if let Some(full) =
                     cache.template_for_tip(candidate_hash, &network, DateTime32::now())

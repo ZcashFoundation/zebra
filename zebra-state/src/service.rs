@@ -214,6 +214,10 @@ pub(crate) struct StateService {
     max_finalized_queue_height: f64,
 }
 
+/// How long a proposal check waits for the writer or another check to release the prepared chain,
+/// before cloning the published best chain instead.
+const PROPOSAL_PREPARED_WAIT: Duration = Duration::from_millis(20);
+
 /// A read-only service for accessing Zebra's cached blockchain state.
 ///
 /// This service provides read-only access to:
@@ -261,6 +265,10 @@ pub struct ReadStateService {
     ///
     /// Used to check for panics when writing blocks.
     block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
+
+    /// Serializes block proposal checks, so they take turns with the prepared chain instead of
+    /// each cloning the published best chain.
+    proposal_check: Arc<std::sync::Mutex<()>>,
 }
 
 impl Drop for StateService {
@@ -1172,6 +1180,7 @@ impl ReadStateService {
             non_finalized_state_receiver,
             block_write_task,
             mining_candidate: watch::Sender::new(None),
+            proposal_check: Default::default(),
         };
 
         tracing::debug!("created new read-only state service");
@@ -1328,6 +1337,14 @@ impl Service<Request> for StateService {
                 }
                 let hash = block.hash();
                 if !self.read_service.mining_candidate_is_allowed(hash) {
+                    return async { Ok(Response::MiningCandidate(None)) }.boxed();
+                }
+                // Only a child of the committed tip can be published, and the slot is held until
+                // verification ends. A block with a missing parent can wait in the queue for a long
+                // time, so it must not reserve the slot.
+                if self.read_service.best_tip().map(|(_, tip)| tip)
+                    != Some(block.header.previous_block_hash)
+                {
                     return async { Ok(Response::MiningCandidate(None)) }.boxed();
                 }
                 let Ok(permit) = self.mining_candidate_slot.clone().try_acquire_owned() else {
@@ -2269,6 +2286,10 @@ impl Service<ReadRequest> for ReadStateService {
                     "attempting to validate and commit block proposal \
                          onto a cloned non-finalized state"
                 );
+                let _one_check_at_a_time = state
+                    .proposal_check
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
                 // The previous block of a valid proposal must be on the best chain tip.
@@ -2294,19 +2315,32 @@ impl Service<ReadRequest> for ReadStateService {
                 // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
                 latest_non_finalized_state.disable_metrics();
 
+                // Push onto the prepared chain, replayed to the current tip, instead of cloning
+                // the published best chain. The pushed chain is then prepared for a commit of
+                // this proposal, or for the next proposal.
+                latest_non_finalized_state
+                    .take_prepared_as_spare(Instant::now() + PROPOSAL_PREPARED_WAIT);
                 let hash = semantically_verified.hash;
-                write::validate_and_commit_non_finalized(
+                if let Err(error) = write::validate_and_commit_non_finalized(
                     &state.db,
                     &mut latest_non_finalized_state,
                     semantically_verified,
-                )?;
+                ) {
+                    // A spare that the failed validation did not use stays available.
+                    if let Some(spare) = latest_non_finalized_state.remove_spare() {
+                        latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(spare));
+                    }
+                    return Err(error.into());
+                }
 
-                let contextual = latest_non_finalized_state
-                    .find_chain(|chain| chain.contains_block_hash(hash))
-                    .expect("successful proposal validation inserted its block")
+                let chain = latest_non_finalized_state
+                    .remove_chain_with_tip(hash)
+                    .expect("successful proposal validation inserted its block");
+                let contextual = chain
                     .block(hash.into())
                     .expect("the selected chain contains the proposal")
                     .clone();
+                latest_non_finalized_state.store_prepared(Arc::unwrap_or_clone(chain));
                 Ok(ReadResponse::ValidBlockProposal(Box::new(contextual)))
             }
 

@@ -126,6 +126,8 @@ struct PreparedProposal {
     transaction_bytes: usize,
     block: Arc<block::Block>,
     contextual: Arc<zs::ContextuallyVerifiedBlock>,
+    /// The proposal's wire bytes, so a submission is compared without serializing again.
+    wire: Arc<[u8]>,
     retained_bytes: usize,
 }
 
@@ -138,22 +140,44 @@ struct PreparedProposal {
 /// entries. Eviction only loses cache hits, never validation, as for large spent-output scripts.
 const MAX_PROPOSAL_BYTES: usize = 8 * 72 * 1024 * 1024;
 
-/// Charge once on a blocking worker, before taking the shared cache lock.
-fn cache_proposal(
+/// Charge once on a cancellable CPU worker, then publish only while the caller is still waiting.
+async fn cache_proposal(
     proposals: &watch::Sender<ProposalCache>,
     key: [u8; 32],
     block: Arc<block::Block>,
     transaction_bytes: usize,
     contextual: Box<zs::ContextuallyVerifiedBlock>,
 ) {
-    let retained_bytes = contextual.retained_bytes();
+    let (contextual, wire, retained_bytes) = AbortOnDropHandle::new({
+        let block = block.clone();
+        tokio::task::spawn_blocking(move || {
+            // A proposal from the template updater is built as a decoded block, so it has no
+            // wire bytes yet. Encode it once here, off the submission path, so that
+            // `PreparedBlockCache::reuse` can match a submission by decoding only its header
+            // and comparing the rest of its bytes, without decoding or encoding transactions.
+            let wire: Arc<[u8]> = block
+                .zcash_serialize_to_vec()
+                .expect("verified blocks serialize")
+                .into();
+            let retained_bytes = contextual.retained_bytes().saturating_add(wire.len());
+            (contextual, wire, retained_bytes)
+        })
+    })
+    .await
+    .expect("proposal retention accounting uses saturating content-size arithmetic");
     proposals.send_modify(|proposals| {
-        proposals.retain(|proposal| proposal.key != key);
+        // Proposals are validated against the best tip, so entries for other parents can only
+        // match a submission that forks the chain, and full verification covers those.
+        let parent = block.header.previous_block_hash;
+        proposals.retain(|proposal| {
+            proposal.key != key && proposal.block.header.previous_block_hash == parent
+        });
         proposals.push_front(PreparedProposal {
             key,
             transaction_bytes,
             block,
             contextual: Arc::from(contextual),
+            wire,
             retained_bytes,
         });
         let mut retained_bytes = 0usize;
@@ -268,7 +292,12 @@ impl PreparedBlockCache {
             .unwrap_or_else(|| DecodedBlock::deserialize(bytes))
     }
 
-    fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
+    /// Decodes a block only if its complete wire bytes match a validated proposal, as
+    /// [`Self::deserialize()`] does on a hit.
+    ///
+    /// A hit parses the header and compares the transaction bytes, which is cheap enough to run
+    /// inline; a miss returns `None` without decoding, so the caller can decode off the executor.
+    pub fn reuse(&self, bytes: &[u8]) -> Option<DecodedBlock> {
         if bytes.len() > usize::try_from(block::MAX_BLOCK_BYTES).expect("block limit fits usize")
             || self.0.borrow().is_empty()
         {
@@ -277,33 +306,22 @@ impl PreparedBlockCache {
         let mut transactions = bytes;
         let header = block::Header::zcash_deserialize(&mut transactions).ok()?;
         let normalized_header = normalized_proposal_header(&header);
-        let (block, matched) = {
+        let (block, matched, wire) = {
             let proposals = self.0.borrow();
             let proposal = proposals.iter().find(|proposal| {
                 proposal.transaction_bytes == transactions.len()
                     && normalized_proposal_header(&proposal.block.header) == normalized_header
             })?;
-            (proposal.block.clone(), Arc::downgrade(&proposal.contextual))
+            (
+                proposal.block.clone(),
+                Arc::downgrade(&proposal.contextual),
+                proposal.wire.clone(),
+            )
         };
 
         // Candidate selection is not authority to substitute different transaction bytes.
-        struct Compare<'a>(&'a [u8]);
-        impl Write for Compare<'_> {
-            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-                self.0 = self
-                    .0
-                    .strip_prefix(bytes)
-                    .ok_or(io::ErrorKind::InvalidData)?;
-                Ok(bytes.len())
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let mut comparison = Compare(transactions);
-        block.transactions.zcash_serialize(&mut comparison).ok()?;
-        if !comparison.0.is_empty() {
+        let header_bytes = wire.len().checked_sub(transactions.len())?;
+        if wire.get(header_bytes..)? != transactions {
             return None;
         }
         let block = if *block.header == header {
@@ -649,7 +667,7 @@ where
             mempool: None,
             mempool_setup_rx: None,
             proposals: Arc::new(watch::channel(VecDeque::new()).0),
-            blocking_checks: Arc::new(Semaphore::new(4)),
+            blocking_checks: Arc::new(Semaphore::new(8)),
             #[cfg(test)]
             proposal_key_computations: Default::default(),
             #[cfg(test)]
@@ -737,21 +755,40 @@ where
             let result = async {
             let phase_start = Instant::now();
             let hash = block.hash();
-            // Check that this block is actually a new block.
-            tracing::trace!("checking that block is not already in state");
-            match state_service
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(zs::Request::KnownBlock(hash))
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
-                zs::Response::KnownBlock(Some(location)) => {
-                    return Err(BlockError::AlreadyInChain(hash, location).into())
+
+            // Exact decoder matches avoid hashing the body again, but only while the matched
+            // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
+            let decoded_match = match &request {
+                Request::CommitDecoded(decoded, _) => {
+                    decoded.matched.as_ref().and_then(|(entry, size)| {
+                        proposals
+                            .borrow()
+                            .iter()
+                            .find(|proposal| Arc::as_ptr(&proposal.contextual) == entry.as_ptr())
+                            .map(|proposal| (proposal.contextual.clone(), *size))
+                    })
                 }
-                zs::Response::KnownBlock(None) => {}
-                _ => unreachable!("wrong response to Request::KnownBlock"),
+                _ => None,
+            };
+
+            // Check that this block is actually a new block. A solved proposal skips this state
+            // round trip: its commit reports a duplicate hash or height itself.
+            if decoded_match.is_none() {
+                tracing::trace!("checking that block is not already in state");
+                match state_service
+                    .ready()
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                    .call(zs::Request::KnownBlock(hash))
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                {
+                    zs::Response::KnownBlock(Some(location)) => {
+                        return Err(BlockError::AlreadyInChain(hash, location).into())
+                    }
+                    zs::Response::KnownBlock(None) => {}
+                    _ => unreachable!("wrong response to Request::KnownBlock"),
+                }
             }
 
             tracing::trace!("performing block checks");
@@ -782,20 +819,6 @@ where
                 .await?;
             }
 
-            // Exact decoder matches avoid hashing the body again, but only while the matched
-            // entry belongs to this verifier's cache. Evictions and foreign handles fall back.
-            let decoded_match = match &request {
-                Request::CommitDecoded(decoded, _) => {
-                    decoded.matched.as_ref().and_then(|(entry, size)| {
-                        proposals
-                            .borrow()
-                            .iter()
-                            .find(|proposal| Arc::as_ptr(&proposal.contextual) == entry.as_ptr())
-                            .map(|proposal| (proposal.contextual.clone(), *size))
-                    })
-                }
-                _ => None,
-            };
             // Hash only when populating the cache or when an unmatched block could reuse it.
             let proposal_key = if decoded_match.is_none()
                 && (request.is_proposal() || {
@@ -807,11 +830,11 @@ where
             {
                 let block = block.clone();
                 Some(
-                    tokio::task::spawn_blocking(move || {
+                    AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
                         #[cfg(test)]
                         proposal_key_computations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         proposal_key_and_size(&block)
-                    })
+                    }))
                     .await
                     .expect("proposal hashing serializes an already-decoded block into an infallible writer"),
                 )
@@ -946,7 +969,11 @@ where
             check::shielded_action_limits_are_valid(&block, &network, height, hash)?;
             let require_authentication = matches!(&request, Request::CommitEarlyRelay(_))
                 && NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu5;
+            // A solved proposal is advertised through its validated-commit notification and
+            // commits within milliseconds, so early relay is not worth its state round trip.
+            let solved_proposal = cached.is_some() && !require_authentication;
             early_relay = if request.is_proposal()
+                || solved_proposal
                 || NetworkUpgrade::current(&network, height) < NetworkUpgrade::Nu5
             {
                 None
@@ -978,15 +1005,26 @@ where
                 return Err(VerifyBlockError::EarlyRelayRejected);
             }
 
-            // Keep early work alive while the remaining checks and state commit run.
-            let _mining_candidate = if request.is_proposal() {
+            // Announce early work on this block. The announcement runs as its own task, so the
+            // work is admitted while the remaining checks run and doesn't delay the commit.
+            let mining_candidate = if request.is_proposal() {
                 None
             } else {
-                state_service
-                    .clone()
-                    .oneshot(zs::Request::MiningCandidate(block.clone()))
-                    .await
-                    .ok()
+                let mut state_service = state_service.clone();
+                match state_service.ready().await {
+                    Ok(state_service) => Some(tokio::spawn(
+                        state_service.call(zs::Request::MiningCandidate(block.clone())),
+                    )),
+                    Err(_) => None,
+                }
+            };
+            // Dropping the guard withdraws the work, so it is held until the commit finishes. An
+            // early return drops the task's handle, and the guard with the task's output.
+            let hold_mining_candidate = async {
+                match mining_candidate {
+                    Some(announcement) => announcement.await.ok().and_then(Result::ok),
+                    None => None,
+                }
             };
 
             if let Some(cached) = cached {
@@ -1010,7 +1048,10 @@ where
                     }
                     Request::CheckProposal(_) => unreachable!("proposals never reuse the cache"),
                 };
-                let result = state_service.clone().oneshot(commit).await;
+                let (result, _mining_candidate) = tokio::join!(
+                    state_service.clone().oneshot(commit),
+                    hold_mining_candidate
+                );
                 metrics::histogram!(
                     "zebra.consensus.block.phase.duration_seconds",
                     "phase" => "state_commit"
@@ -1246,11 +1287,7 @@ where
                     zs::Response::ValidBlockProposal(contextual) => {
                         let (key, size) = proposal_key.expect("proposals always have a cache key");
                         let transaction_bytes = size - block.header.zcash_serialized_size();
-                        tokio::task::spawn_blocking(move || {
-                            cache_proposal(&proposals, key, block, transaction_bytes, contextual);
-                        })
-                        .await
-                        .expect("proposal retention accounting uses saturating content-size arithmetic");
+                        cache_proposal(&proposals, key, block, transaction_bytes, contextual).await;
                         Ok(hash)
                     }
                     _ => unreachable!("wrong response for CheckBlockProposalValidity"),
@@ -1270,12 +1307,18 @@ where
             };
 
             let phase_start = Instant::now();
-            let result = state_service
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::StateService { source, hash })?
-                .call(commit)
-                .await;
+            let (result, _mining_candidate) = tokio::join!(
+                async {
+                    state_service
+                        .ready()
+                        .await
+                        .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                        .call(commit)
+                        .await
+                        .map_err(|source| map_commit_error(source, hash))
+                },
+                hold_mining_candidate
+            );
             metrics::histogram!(
                 "zebra.consensus.block.phase.duration_seconds",
                 "phase" => "state_commit"
@@ -1288,7 +1331,7 @@ where
                     Ok(hash)
                 }
 
-                Err(source) => Err(map_commit_error(source, hash)),
+                Err(error) => Err(error),
 
                 _ => unreachable!("wrong response for semantic block commit"),
             }
