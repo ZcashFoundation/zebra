@@ -198,7 +198,7 @@ where
     // we expect to have at most 1 new transaction per connected peer,
     // and 1-2 new blocks across the entire network.
     // (The block syncer and mempool crawler handle bulk fetches of blocks and transactions.)
-    let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
+    let (inv_sender, inv_receiver) = broadcast::channel(inventory_channel_capacity(&config));
 
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
@@ -357,6 +357,13 @@ where
         .unwrap();
 
     (peer_set, address_book, misbehavior_tx, block_advertiser)
+}
+
+/// Return the bounded inventory channel capacity for this configuration.
+fn inventory_channel_capacity(config: &Config) -> usize {
+    config
+        .peerset_total_connection_limit()
+        .min(crate::peer_set::inventory_registry::INVENTORY_CHANNEL_CAPACITY)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and

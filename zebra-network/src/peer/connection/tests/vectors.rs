@@ -1962,7 +1962,12 @@ fn find_blocks_response_hash_limit() {
             .map(InventoryHash::Block)
             .collect();
 
-        let ignored = handler.process_message(Message::Inv(items), &mut Vec::new(), None);
+        let ignored = handler.process_message(
+            Message::Inv(items),
+            &mut Vec::new(),
+            None,
+            crate::constants::PEER_ADDR_RESPONSE_LIMIT,
+        );
         assert!(
             ignored.is_none(),
             "response must not be handled as a request"
@@ -2179,4 +2184,106 @@ async fn early_relay_response_after_withdrawal(committed: bool) {
     })
     .await
     .expect("withdrawal must fall back to committed state without closing the connection");
+}
+
+#[test]
+fn addr_cache_retained_allocation_is_bounded() {
+    let _init_guard = zebra_test::init();
+    let addr = crate::meta_addr::MetaAddr::new_gossiped_meta_addr(
+        "1.1.1.1:8233"
+            .parse()
+            .expect("the test peer address is valid"),
+        crate::protocol::types::PeerServices::NODE_NETWORK,
+        zebra_chain::serialization::DateTime32::now(),
+    );
+    let mut cached_addrs = vec![addr.clone(); crate::constants::MAX_ADDRS_IN_MESSAGE];
+    let new_addrs = vec![addr; crate::constants::MAX_ADDRS_IN_MESSAGE];
+
+    let response = Handler::update_addr_cache(&mut cached_addrs, &new_addrs, None);
+
+    assert!(response.is_empty());
+    assert_eq!(
+        cached_addrs.len(),
+        crate::constants::MAX_CACHED_ADDRS_PER_PEER,
+    );
+    assert_eq!(
+        cached_addrs.capacity(),
+        cached_addrs.len(),
+        "the cache must not retain the larger combined allocation",
+    );
+}
+
+#[test]
+fn peer_response_uses_connection_address_limit() {
+    let _init_guard = zebra_test::init();
+    let addr = crate::meta_addr::MetaAddr::new_gossiped_meta_addr(
+        "1.1.1.1:8233"
+            .parse()
+            .expect("the test peer address is valid"),
+        crate::protocol::types::PeerServices::NODE_NETWORK,
+        zebra_chain::serialization::DateTime32::now(),
+    );
+    let mut cached_addrs = Vec::new();
+    let mut handler = Handler::Peers;
+
+    let ignored = handler.process_message(
+        Message::Addr(vec![addr; crate::constants::MAX_ADDRS_IN_MESSAGE]),
+        &mut cached_addrs,
+        None,
+        37,
+    );
+
+    assert!(ignored.is_none());
+    match handler {
+        Handler::Finished(Ok(Response::Peers(addrs))) => assert_eq!(addrs.len(), 37),
+        other => panic!("unexpected peer response handler: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn cached_peer_response_uses_connection_address_limit() {
+    let addr = crate::meta_addr::MetaAddr::new_gossiped_meta_addr(
+        "1.1.1.1:8233"
+            .parse()
+            .expect("the test peer address is valid"),
+        crate::protocol::types::PeerServices::NODE_NETWORK,
+        zebra_chain::serialization::DateTime32::now(),
+    );
+    let (mut connection, mut client_tx, _service, mut outbound_messages, _error_slot) =
+        new_test_connection();
+    connection.cached_addrs = vec![addr; crate::constants::MAX_CACHED_ADDRS_PER_PEER];
+    connection.peer_addr_response_limit = 37;
+
+    let (peer_tx, peer_rx) = mpsc::channel(1);
+    let connection_task = tokio::spawn(connection.run(peer_rx));
+    let (response_tx, response_rx) = oneshot::channel();
+    client_tx
+        .send(ClientRequest {
+            request: Request::Peers,
+            tx: response_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::none(),
+        })
+        .await
+        .expect("the connection is listening for client requests");
+
+    let response = response_rx
+        .await
+        .expect("the response channel is open")
+        .expect("the cached addresses are a valid response");
+    match response {
+        Response::Peers(addrs) => assert_eq!(addrs.len(), 37),
+        other => panic!("unexpected cached peer response: {other:?}"),
+    }
+    assert!(
+        outbound_messages.try_recv().is_err(),
+        "a cached response must not send another getaddr request",
+    );
+
+    drop(client_tx);
+    drop(peer_tx);
+    connection_task
+        .await
+        .expect("the connection task did not panic");
 }

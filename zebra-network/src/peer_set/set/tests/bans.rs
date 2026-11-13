@@ -80,7 +80,7 @@ async fn reject_revoked_request(request: Request, upgrade: bool, delayed_sink: b
             }),
             ActiveConnectionCounter::new_counter().track_connection(),
             client.connection_info.clone(),
-            Vec::new(),
+            (Vec::new(), crate::constants::PEER_ADDR_RESPONSE_LIMIT),
         );
         let connection = connection.run(stream::pending());
         tokio::pin!(connection);

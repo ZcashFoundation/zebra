@@ -11,7 +11,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
+    constants::{
+        DEFAULT_PEERSET_INITIAL_TARGET_SIZE, INBOUND_PEER_LIMIT_MULTIPLIER,
+        OUTBOUND_PEER_LIMIT_MULTIPLIER, PEER_ADDR_RESPONSE_LIMIT,
+    },
     Config,
 };
 
@@ -64,6 +67,40 @@ fn ensure_peer_connection_limits_consistent() {
             >= 50,
         "default config should allow more inbound connections, to avoid connection exhaustion",
     );
+}
+
+/// Pin the default peer set target size, and the limits derived from it.
+///
+/// The default decides how many file descriptors, how much memory, and how much bandwidth a
+/// node can use, so changing it also needs changes to the stored `zebrad` configs and the
+/// operator documentation in the book.
+#[test]
+fn default_peer_connection_limits() {
+    let _init_guard = zebra_test::init();
+
+    const {
+        assert!(DEFAULT_PEERSET_INITIAL_TARGET_SIZE == 250);
+        assert!(PEER_ADDR_RESPONSE_LIMIT == 375);
+    };
+
+    let config = Config::default();
+    assert_eq!(config.peerset_initial_target_size, 250);
+    assert_eq!(config.peerset_outbound_connection_limit(), 750);
+    assert_eq!(config.peerset_inbound_connection_limit(), 1_250);
+    assert_eq!(config.peerset_total_connection_limit(), 2_000);
+    assert_eq!(config.peer_addr_response_limit(), PEER_ADDR_RESPONSE_LIMIT);
+
+    let reduced_config = Config {
+        peerset_initial_target_size: 25,
+        ..config
+    };
+    assert_eq!(reduced_config.peerset_outbound_connection_limit(), 75);
+    assert_eq!(reduced_config.peer_addr_response_limit(), 37);
+
+    // A zero target size is invalid, so it is replaced by the default.
+    let zero_config: Config = toml::from_str("peerset_initial_target_size = 0").unwrap();
+    assert_eq!(zero_config.peerset_initial_target_size, 250);
+    assert_eq!(zero_config.peerset_total_connection_limit(), 2_000);
 }
 
 #[test]

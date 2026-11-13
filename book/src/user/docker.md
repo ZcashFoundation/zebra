@@ -245,6 +245,12 @@ the public IP and mapped port. For example, add
 address with your node's actual address. Open the corresponding P2P port in
 the firewall. Publishing a port does not enable its listener.
 
+Containers inherit the Docker daemon's default open file limit. The default
+peer limits allow up to 2,000 connections, so when that limit is below 4,096,
+pass `--ulimit nofile=8192:8192` to `docker run`, or add
+`ulimits: { nofile: { soft: 8192, hard: 8192 } }` to the Compose service; see
+[open file limit](requirements.md#open-file-limit).
+
 ## Custom images
 
 Build from the repository root using the

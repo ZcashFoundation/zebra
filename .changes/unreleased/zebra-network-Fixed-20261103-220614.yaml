@@ -1,0 +1,8 @@
+project: zebra-network
+kind: Fixed
+body: >-
+  Bounded memory and peer-set work when processing peer inventory, message bodies, and
+  address caches. Inventory construction consumes only the hashes it retains, message
+  buffers grow incrementally instead of using the peer-declared body length, and each
+  connection retains at most 375 unused peer addresses in a right-sized allocation.
+time: 2026-11-03T22:06:14Z

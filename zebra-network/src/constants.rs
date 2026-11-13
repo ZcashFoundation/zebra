@@ -34,11 +34,15 @@ use zebra_chain::{
 ///
 /// The inbound limit is:
 /// `crate::Config::peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
-/// (This is similar to `zcashd`'s default inbound limit.)
+/// (With the default target size, this is 1,250 connections, ten times `zcashd`'s
+/// default total connection limit, `DEFAULT_MAX_PEER_CONNECTIONS = 125` in
+/// [`src/net.h`](https://github.com/zcash/zcash/blob/master/src/net.h).)
 ///
 /// The outbound limit is:
 /// `crate::Config::peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
-/// (This is a bit larger than `zcashd`'s default outbound limit.)
+/// (With the default target size, this is 750 connections, far more than `zcashd`'s
+/// default outbound limit, `MAX_OUTBOUND_CONNECTIONS = 8` in
+/// [`src/net.cpp`](https://github.com/zcash/zcash/blob/master/src/net.cpp).)
 ///
 /// # Security
 ///
@@ -83,11 +87,33 @@ pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 /// The default peerset target size.
 ///
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
-pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
+///
+/// With [`OUTBOUND_PEER_LIMIT_MULTIPLIER`] and [`INBOUND_PEER_LIMIT_MULTIPLIER`], this default
+/// allows 750 outbound and 1,250 inbound connections, 2,000 connections in total. Each connection
+/// uses a file descriptor and some memory and bandwidth, so a node using the default needs a
+/// process open file limit of at least 4,096.
+pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 250;
 
-/// The maximum number of peers we will add to the address book after each `getaddr` request.
+/// The default maximum number of peers we will add to the address book after each `getaddr`
+/// request.
+///
+/// This is half the default outbound connection limit, so a node with the default
+/// [`DEFAULT_PEERSET_INITIAL_TARGET_SIZE`] can fill its outbound slots from a few responses.
+/// Connections use [`Config::peer_addr_response_limit`](crate::Config::peer_addr_response_limit),
+/// which applies the same ratio to the configured peer target.
+///
+/// # Security
+///
+/// This bounds how much of the address book a single peer can fill with one `getaddr`
+/// response: 375 of the [`MAX_ADDRS_IN_ADDRESS_BOOK`] addresses, 7.5% per response.
 pub const PEER_ADDR_RESPONSE_LIMIT: usize =
     DEFAULT_PEERSET_INITIAL_TARGET_SIZE * OUTBOUND_PEER_LIMIT_MULTIPLIER / 2;
+
+/// The maximum number of unused addresses retained by each peer connection.
+///
+/// This is enough to satisfy a default-sized `getaddr` response entirely from the cache, while
+/// bounding the aggregate cache memory used by the default connection limit.
+pub const MAX_CACHED_ADDRS_PER_PEER: usize = PEER_ADDR_RESPONSE_LIMIT;
 
 /// The buffer size for the peer set.
 ///
