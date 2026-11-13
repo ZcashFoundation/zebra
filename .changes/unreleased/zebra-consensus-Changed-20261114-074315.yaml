@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Use the table-based scalar square roots in bls12_381 0.9.1.
+time: 2026-11-14T07:43:15.557853215+01:00
