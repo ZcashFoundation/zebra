@@ -16,7 +16,7 @@
 //! `next_expected` hash ([`Anchor::Resumed`]).
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::atomic::Ordering,
     time::Duration,
 };
@@ -93,14 +93,46 @@ pub const PULL_BUDGET: Duration = Duration::from_millis(2_500);
 /// Stall rule 1: no bytes for this long.
 pub const STALL_NO_BYTES: Duration = Duration::from_secs(5);
 
-/// Stall rule 2: a rate below `min_peer_rate` for this long.
+/// Stall rule 2: an average rate below `min_peer_rate` over this long.
+///
+/// Rules 2 and 3 judge the bytes a stream delivered over the whole window,
+/// from its start to the stream's last byte, and apply once the stream is as
+/// old as the window. A burst raises the average only by what it delivers,
+/// so a stream cannot stay alive on a trickle and a burst now and then.
 pub const STALL_MIN_RATE_FOR: Duration = Duration::from_secs(10);
 
-/// Stall rule 3: a rate below a quarter of the median for this long.
+/// Stall rule 3: an average rate below a quarter of the median over this
+/// long.
 pub const STALL_SLOW_FOR: Duration = Duration::from_secs(15);
 
 /// Stall rule 3 applies once this many peers are active.
 pub const STALL_SLOW_MIN_PEERS: usize = 3;
+
+/// The youngest stream whose average rate counts toward rule 3's median: a
+/// younger one has mostly waited for its request to be answered.
+pub const MEDIAN_MIN_STREAM_AGE: Duration = Duration::from_secs(1);
+
+/// A stream that ends early with less than one part in this many of its
+/// unit's estimate is a short response.
+pub const SHORT_END_DIVISOR: u64 = 4;
+
+/// The consecutive short responses from a peer after which each further one
+/// makes it wait [`STALL_BACKOFF`].
+///
+/// A response MAY finish early, so a short one is not a failure, and is not
+/// blamed. But a peer that hands over a block or two per request holds its
+/// unit for as long as it likes, so after a few of them other peers get to
+/// pull first.
+pub const SHORT_END_LIMIT: u32 = 3;
+
+/// How long a unit in the frontier interval may be streamed by one peer,
+/// with the lookahead full behind it, before a second peer streams it too.
+///
+/// Longer than rules 2 and 3 take, so that a stream they would cancel is
+/// cancelled rather than duplicated. A peer just above their thresholds can
+/// still take minutes over an interval, which nothing else can make up for
+/// while the lookahead is full.
+pub const FRONTIER_DUPLICATE_AFTER: Duration = Duration::from_secs(20);
 
 /// How long a stalled or failed peer waits before its next pull.
 pub const STALL_BACKOFF: Duration = Duration::from_secs(30);
@@ -141,7 +173,8 @@ pub struct Assignment {
     pub peer: ConnectionId,
     /// The unit to request.
     pub unit: Unit,
-    /// Whether this is an end-game duplicate of a unit another peer streams.
+    /// Whether this is a duplicate of a unit another peer streams: in the
+    /// end-game, or of a frontier unit that holds up a full lookahead.
     pub duplicate: bool,
 }
 
@@ -159,6 +192,15 @@ pub enum StreamFailure {
     Transport,
     /// The peer violated the protocol, and the connection is closed.
     Violation,
+}
+
+/// Why a peer is given a duplicate of a unit another peer streams.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Duplicate {
+    /// Nothing is left to assign.
+    EndGame,
+    /// The lookahead is full behind a unit in the frontier interval.
+    Frontier,
 }
 
 /// Why the scheduler released a stream.
@@ -191,7 +233,7 @@ pub struct WindowChange {
 #[derive(Clone, Debug)]
 struct UnitState {
     unit: Unit,
-    /// The live streams of this unit: one, or two in the end-game.
+    /// The live streams of this unit: one, or two with a duplicate.
     streams: Vec<StreamId>,
     /// The lowest delivered height and its `previous_block_hash`, across
     /// every stream of the unit. Streams deliver descending prefixes from
@@ -203,7 +245,7 @@ struct UnitState {
     charge: u64,
     /// When the unit's first live stream was assigned.
     assigned_at: Option<Instant>,
-    /// Whether an end-game duplicate was ever given for this unit.
+    /// Whether a duplicate was ever given for this unit.
     duplicated: bool,
 }
 
@@ -224,9 +266,13 @@ struct StreamState {
     counted_bytes: u64,
     /// The serialized bytes of the blocks the stream delivered.
     block_bytes: u64,
-    rate: f64,
-    below_min_since: Option<Instant>,
-    slow_since: Option<Instant>,
+    /// When the stream was assigned.
+    started_at: Instant,
+    /// `counted_bytes` at each rate sample of the last [`STALL_SLOW_FOR`],
+    /// oldest first, and at one sample before them.
+    history: VecDeque<(Instant, u64)>,
+    /// Whether the stream is a duplicate of another peer's.
+    duplicate: bool,
 }
 
 impl StreamState {
@@ -238,6 +284,74 @@ impl StreamState {
             self.counted_bytes = bytes;
             self.last_bytes_at = now;
         }
+    }
+
+    /// Records a rate sample at `now`.
+    fn sample(&mut self, now: Instant) {
+        self.history.push_back((now, self.counted_bytes));
+        // Keep one sample at or before the start of the longest window.
+        while self
+            .history
+            .get(1)
+            .is_some_and(|(at, _)| now.saturating_duration_since(*at) >= STALL_SLOW_FOR)
+        {
+            self.history.pop_front();
+        }
+    }
+
+    /// The bytes counted in the `window` before `now`, and the start of that
+    /// part of the window the stream existed in.
+    fn bytes_in(&self, window: Duration, now: Instant) -> (u64, Instant) {
+        let age = now.saturating_duration_since(self.started_at);
+        if age <= window {
+            return (self.counted_bytes, self.started_at);
+        }
+        // The latest sample at or before the window's start. Without one
+        // the samples are sparser than the window, and the oldest is the
+        // closest.
+        let (from, before) = self
+            .history
+            .iter()
+            .rev()
+            .find(|(at, _)| now.saturating_duration_since(*at) >= window)
+            .or(self.history.front())
+            .copied()
+            .unwrap_or((self.started_at, 0));
+        (self.counted_bytes.saturating_sub(before), from)
+    }
+
+    /// The stream's average rate over the `window` before `now`, in bytes
+    /// per second.
+    fn average_rate(&self, window: Duration, now: Instant) -> f64 {
+        let (bytes, from) = self.bytes_in(window, now);
+        let seconds = now.saturating_duration_since(from).as_secs_f64();
+        // A lossy cast is fine: it is a rate.
+        if seconds > 0.0 {
+            bytes as f64 / seconds
+        } else {
+            0.0
+        }
+    }
+
+    /// Whether the stream is at least `window` old, and delivered at less
+    /// than `rate` bytes per second over the `window` before `now`.
+    ///
+    /// The window ends at the stream's last byte: the silence since then is
+    /// rule 1's to judge, and a large block that arrives slowly, but fast
+    /// enough, must not stall the stream once it is complete. Rule 1 keeps
+    /// that silence short, and the next byte ends it, so the whole window
+    /// is judged whenever bytes arrive.
+    fn slower_than(&self, rate: f64, window: Duration, now: Instant) -> bool {
+        if now.saturating_duration_since(self.started_at) < window {
+            return false;
+        }
+        let (bytes, from) = self.bytes_in(window, now);
+        let seconds = self
+            .last_bytes_at
+            .saturating_duration_since(from)
+            .as_secs_f64();
+        // A lossy cast is fine: it is a rate.
+        (bytes as f64) < rate * seconds || seconds == 0.0
     }
 }
 
@@ -261,6 +375,9 @@ struct PeerState {
     not_serving: bool,
     /// The `BUSY` answers since the peer last delivered a block.
     busy_streak: u32,
+    /// The short responses since the peer last completed a unit, or ended a
+    /// stream that was not short.
+    short_ends: u32,
 }
 
 impl PeerState {
@@ -526,6 +643,7 @@ impl Scheduler {
                     refused: false,
                     not_serving: false,
                     busy_streak: 0,
+                    short_ends: 0,
                 });
         }
 
@@ -707,8 +825,9 @@ impl Scheduler {
                     return Some(self.start_stream(peer, unit.id, false, now));
                 }
                 // The lowest unit this peer can serve does not fit: neither
-                // does anything above it.
-                Some(_) => return None,
+                // does anything above it. The lookahead is full, so only the
+                // frontier's progress frees it.
+                Some(_) => return self.duplicate(peer, now, Duplicate::Frontier),
                 None => {
                     if self
                         .planned_through
@@ -726,7 +845,7 @@ impl Scheduler {
             }
         }
 
-        self.end_game(peer, now)
+        self.duplicate(peer, now, Duplicate::EndGame)
     }
 
     /// Whether `unit` fits the lookahead, `charged + est ≤ lookahead_bytes`:
@@ -739,15 +858,39 @@ impl Scheduler {
             || self.charged().saturating_add(unit.est_bytes) <= self.lookahead_bytes
     }
 
-    /// End-game: with nothing left to assign, a peer is given a
-    /// duplicate of the unit with the oldest assignment. At most one
-    /// duplicate exists per unit, and each peer gets at most one.
-    fn end_game(&mut self, peer: ConnectionId, now: Instant) -> Option<Assignment> {
-        let planned_all = self
-            .planned_through
-            .is_some_and(|planned| planned >= self.target);
-        if !planned_all || !self.queue.is_empty() || self.peers[&peer].duplicates > 0 {
-            return None;
+    /// Gives `peer` a duplicate of a unit that another peer streams. At most
+    /// one duplicate is ever given per unit.
+    ///
+    /// - [`Duplicate::EndGame`]: with nothing left to assign, the unit with
+    ///   the oldest assignment. Each peer gets at most one.
+    /// - [`Duplicate::Frontier`]: with the lookahead full, the unit in the
+    ///   frontier interval with the oldest assignment, once one peer has
+    ///   streamed it for [`FRONTIER_DUPLICATE_AFTER`]. Each peer streams at
+    ///   most one duplicate at a time.
+    fn duplicate(
+        &mut self,
+        peer: ConnectionId,
+        now: Instant,
+        kind: Duplicate,
+    ) -> Option<Assignment> {
+        match kind {
+            Duplicate::EndGame => {
+                let planned_all = self
+                    .planned_through
+                    .is_some_and(|planned| planned >= self.target);
+                if !planned_all || !self.queue.is_empty() || self.peers[&peer].duplicates > 0 {
+                    return None;
+                }
+            }
+            Duplicate::Frontier => {
+                let streams_duplicate = self
+                    .streams
+                    .values()
+                    .any(|stream| stream.peer == peer && stream.duplicate);
+                if streams_duplicate {
+                    return None;
+                }
+            }
         }
 
         let remote_tip = self.peers[&peer].remote_tip;
@@ -760,11 +903,22 @@ impl Scheduler {
                     && state.unit.end <= remote_tip
                     && self.streams[&state.streams[0]].peer != peer
             })
+            .filter(|state| match kind {
+                Duplicate::EndGame => true,
+                Duplicate::Frontier => {
+                    self.is_frontier(&state.unit)
+                        && state.assigned_at.is_some_and(|at| {
+                            now.saturating_duration_since(at) >= FRONTIER_DUPLICATE_AFTER
+                        })
+                }
+            })
             .min_by_key(|state| (state.assigned_at, state.unit.start))
             .map(|state| state.unit.id)?;
 
-        if let Some(puller) = self.peers.get_mut(&peer) {
-            puller.duplicates += 1;
+        if kind == Duplicate::EndGame {
+            if let Some(puller) = self.peers.get_mut(&peer) {
+                puller.duplicates += 1;
+            }
         }
         if let Some(state) = self.units.get_mut(&oldest) {
             state.duplicated = true;
@@ -799,9 +953,9 @@ impl Scheduler {
                 sample_bytes: 0,
                 counted_bytes: 0,
                 block_bytes: 0,
-                rate: INITIAL_RATE,
-                below_min_since: None,
-                slow_since: None,
+                started_at: now,
+                history: VecDeque::new(),
+                duplicate,
             },
         );
         self.peers
@@ -1007,7 +1161,8 @@ impl Scheduler {
         let block_bytes = state.block_bytes;
         state.count_bytes(block_bytes, now);
         let unit_id = state.unit;
-        if let Some(peer) = self.peers.get_mut(&state.peer) {
+        let peer_id = state.peer;
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.refused = false;
             peer.busy_streak = 0;
         }
@@ -1040,6 +1195,9 @@ impl Scheduler {
         }
 
         // Complete: every height of the unit is delivered.
+        if let Some(peer) = self.peers.get_mut(&peer_id) {
+            peer.short_ends = 0;
+        }
         let unit = self.units.remove(&unit_id).expect("just found");
         // A lossy cast is fine: it is a metric.
         metrics::histogram!("sync.v2.unit.bytes").record(unit.delivered as f64);
@@ -1081,14 +1239,13 @@ impl Scheduler {
         if elapsed > 0.0 {
             let mut peer_samples: HashMap<ConnectionId, u64> = HashMap::new();
             for stream in self.streams.values_mut() {
-                // Lossy casts are fine: these are rates.
-                let sample = stream.sample_bytes as f64 / elapsed;
-                stream.rate = stream.rate * (1.0 - RATE_ALPHA) + sample * RATE_ALPHA;
                 *peer_samples.entry(stream.peer).or_default() += stream.sample_bytes;
                 stream.sample_bytes = 0;
+                stream.sample(now);
             }
             for (id, bytes) in peer_samples {
                 if let Some(peer) = self.peers.get_mut(&id) {
+                    // Lossy casts are fine: these are rates.
                     let sample = bytes as f64 / elapsed;
                     peer.rate = peer.rate * (1.0 - RATE_ALPHA) + sample * RATE_ALPHA;
                     peer.measured |= bytes > 0;
@@ -1097,28 +1254,13 @@ impl Scheduler {
             }
         }
 
-        let median = self.median_stream_rate();
+        let median = self.median_stream_rate(now);
         let mut stalled = Vec::new();
-        for (id, stream) in self.streams.iter_mut() {
-            if stream.rate < self.min_peer_rate {
-                stream.below_min_since.get_or_insert(now);
-            } else {
-                stream.below_min_since = None;
-            }
-            match median {
-                Some(median) if stream.rate < median / 4.0 => {
-                    stream.slow_since.get_or_insert(now);
-                }
-                _ => stream.slow_since = None,
-            }
-
+        for (id, stream) in self.streams.iter() {
             let silent = now.saturating_duration_since(stream.last_bytes_at) >= STALL_NO_BYTES;
-            let below_min = stream
-                .below_min_since
-                .is_some_and(|since| now.saturating_duration_since(since) >= STALL_MIN_RATE_FOR);
-            let slow = stream
-                .slow_since
-                .is_some_and(|since| now.saturating_duration_since(since) >= STALL_SLOW_FOR);
+            let below_min = stream.slower_than(self.min_peer_rate, STALL_MIN_RATE_FOR, now);
+            let slow =
+                median.is_some_and(|median| stream.slower_than(median / 4.0, STALL_SLOW_FOR, now));
 
             let rule = if silent {
                 "no_bytes"
@@ -1142,17 +1284,24 @@ impl Scheduler {
         stalled
     }
 
-    /// The median stream rate, once [`STALL_SLOW_MIN_PEERS`] peers are
-    /// active.
-    fn median_stream_rate(&self) -> Option<f64> {
+    /// The median of the streams' average rates over [`STALL_SLOW_FOR`],
+    /// once [`STALL_SLOW_MIN_PEERS`] peers are active.
+    fn median_stream_rate(&self, now: Instant) -> Option<f64> {
         let active: BTreeSet<ConnectionId> = self.streams.values().map(|s| s.peer).collect();
         if active.len() < STALL_SLOW_MIN_PEERS {
             return None;
         }
 
-        let mut rates: Vec<f64> = self.streams.values().map(|s| s.rate).collect();
+        let mut rates: Vec<f64> = self
+            .streams
+            .values()
+            .filter(|stream| {
+                now.saturating_duration_since(stream.started_at) >= MEDIAN_MIN_STREAM_AGE
+            })
+            .map(|stream| stream.average_rate(STALL_SLOW_FOR, now))
+            .collect();
         rates.sort_by(f64::total_cmp);
-        Some(rates[rates.len() / 2])
+        rates.get(rates.len() / 2).copied()
     }
 
     fn release(&mut self, stream: StreamId, reason: Release, now: Instant) {
@@ -1168,7 +1317,22 @@ impl Scheduler {
         let unit = self.units.get(&state.unit).map(|unit| unit.unit);
         if let Some(peer) = self.peers.get_mut(&state.peer) {
             match reason {
-                Release::End | Release::Gone => {}
+                Release::Gone => {}
+                // The stream ended before its unit was complete. That is
+                // allowed, but a peer that keeps ending with a small part
+                // of what was asked waits, so that other peers pull first.
+                Release::End => {
+                    let short = unit
+                        .is_some_and(|unit| state.block_bytes < unit.est_bytes / SHORT_END_DIVISOR);
+                    if short {
+                        peer.short_ends = peer.short_ends.saturating_add(1);
+                        if peer.short_ends >= SHORT_END_LIMIT {
+                            peer.backoff_until = Some(now + STALL_BACKOFF);
+                        }
+                    } else {
+                        peer.short_ends = 0;
+                    }
+                }
                 Release::Failure(StreamFailure::Refused) => {
                     let exclusion = if peer.refused {
                         REFUSED_EXCLUSION
