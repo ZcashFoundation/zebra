@@ -454,8 +454,8 @@ jobs:
           # each `gcloud compute ssh` round trip costs a few seconds, so an
           # attempt count is not a meaningful time budget.
           #
-          # What we are really waiting for is konlet pulling the ~2GB test image
-          # onto a fresh VM, which routinely takes over 2 minutes. Give that a
+          # What we are really waiting for is the container's systemd unit pulling
+          # the ~2GB test image onto a fresh VM, which can take over 2 minutes. Give that a
           # wide margin so a slow registry pull does not fail the whole test.
           WAIT_SECONDS=600
           DEADLINE=$(( SECONDS + WAIT_SECONDS ))
