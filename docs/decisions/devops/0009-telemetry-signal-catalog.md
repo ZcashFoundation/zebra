@@ -183,16 +183,27 @@ The policy records this counter through the facade, so every backend receives it
 
 **Build info.** `zebrad.build.info` is recorded whenever any backend is installed, including Sentry alone. It is recorded right after the descriptions, before Zebra logs that the metrics endpoint is open.
 
-**Evidence.** The parity and volume tests run the Sentry policy over the whole catalog (part 5). Two Regtest runs with both backends on gave these results:
+**Evidence.** The parity and volume tests run the Sentry policy over the whole catalog (part 5). The build at `25d92faed` was also run with both backends on, in four settings:
 
-- Prometheus and Sentry carried the same recorded metrics.
-- For all 94 counter label sets, the sum of the increases sent to Sentry equalled the Prometheus total.
-- The largest flush sent 309 metrics in 4 envelopes, and nothing was dropped.
-- The removed labels were absent.
-- A Sentry-only node sent its build info.
-- No telemetry threads ran with both backends off.
+| Run | What it covered |
+|---|---|
+| Regtest, four nodes, 10 minutes, plus a Sentry-only node | Build info in Sentry-only mode, removed labels, and no telemetry threads with both backends off |
+| Testnet from genesis, 35 minutes, local Sentry receiver | Checkpoint sync at about 15,000 blocks a minute, through Sapling |
+| Testnet from the 2026-11-04 state snapshot to the tip, 66 minutes | Catch-up, 30 minutes at the tip, Nu7, and real peer handshakes |
+| Testnet from genesis, 35 minutes, hosted Sentry project | Real ingestion, at about 24,000 blocks a minute |
 
-These runs didn't exercise the tip block delay (Regtest block timestamps don't produce it), `missing_service`, real Sentry ingestion and rate limits, a long initial sync, or network upgrades after Canopy.
+Results:
+
+- **Counters:** in every run, the sum of the increases Sentry received equalled the Prometheus total for every counter label set, shutdown flush included. In the hosted run, the block counters stored in Sentry summed to 850,801, the blocks from genesis to the final height.
+- **Gauges:** compared with scrapes taken just before and after each flush, gauges were sent when they changed and resent exactly 5 flushes after their last send when they didn't. Gauges that were NaN, such as an empty queue's height, were not sent.
+- **Histograms:** no label set sent more than 20 values in a flush. Per-block histograms recorded about 16,500 values a minute during checkpoint sync and sent 20.
+- **Tip delay:** at the tip, Sentry and Prometheus received the same 64 values, with matching count and sum. Sentry received the height as an integer `chain.height` attribute, and Prometheus received only the `chain_network_upgrade` label.
+- **`chain.near_tip`:** false through the catch-up, then true from the flush after the node reached the tip, and never flipped back.
+- **Volume:** the largest flush sent 393 metrics in 4 envelopes, at most 26% of the budget, so the budget never bound and nothing was dropped. The hosted project accepted every metric and log item, with nothing rate limited, filtered, rejected, or discarded on the client.
+- **Labels:** `missing_service` arrived only as `NODE_NETWORK`, from real peers. No `cache` label or peer service bits appeared. The most label sets for one name was 103, for `zebra.net.connection.state` at the tip, and it was still growing by about two a minute.
+- **Panics:** a run stopped by a full disk delivered the fatal event, the crashed session, and the final metrics within the same second.
+
+These runs didn't exercise the budget binding, any drop reason, a slow or rate-limited Sentry, a label set count reaching 256, Mainnet, or runs longer than about an hour. With Sentry on, resident memory started about 80 MiB higher and then grew at the same rate as without it; the cause of the offset is not confirmed. Sync rates varied by more than 2 times between runs with identical settings, so these runs don't measure what the backends cost in throughput.
 
 **Exclusion.** Zebra has no setting to exclude names. If operators need less volume in one backend, the setting is one backend-neutral list that applies to every enabled backend, with per-backend overrides only where a backend's cost model needs them. Exclusion is the operator's choice, not a Zebra default. It is open in the migration plan.
 
@@ -429,4 +440,4 @@ Not verified: Sentry's metric quotas, cardinality limits, and retention, which d
 ## Revision History
 
 - 2026-11-12: Proposed.
-- 2026-11-13: Updated to the design as built in phases 0 to 3, at commit `25d92faed`: call-site names and the gaps in their check, the Sentry policy's shaping and volume limits, drop accounting, label rules, measured costs, and the requirement 8 decision. Limited the parity rule to Prometheus and Sentry until phase 6, made the rename period apply in every backend, and made the performance thresholds targets rather than release gates. Marked unfinished work, including most of parts 4 and 6, as open.
+- 2026-11-13: Updated to the design as built in phases 0 to 3, at commit `25d92faed`: call-site names and the gaps in their check, the Sentry policy's shaping and volume limits, drop accounting, label rules, measured costs, and the requirement 8 decision. Limited the parity rule to Prometheus and Sentry until phase 6, made the rename period apply in every backend, and made the performance thresholds targets rather than release gates. Marked unfinished work, including most of parts 4 and 6, as open. Added the Testnet and hosted Sentry validation results.
