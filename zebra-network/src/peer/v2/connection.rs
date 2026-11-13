@@ -38,6 +38,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{block, diagnostic::task::CheckForPanics, transaction::UnminedTxId};
 
 use crate::{
+    constants::OVERLOAD_PROTECTION_INTERVAL,
     meta_addr::MetaAddr,
     peer::{
         connection::{overload_drop_connection_probability, Handler},
@@ -193,6 +194,16 @@ impl Events {
 /// more recently the connection last overloaded the inbound service (see
 /// [`overload_drop_connection_probability`]).
 ///
+/// A legacy connection has one request in the inbound service at a time, so
+/// one load-shed burst fails one of its requests and rolls once. A version 2
+/// connection can have several calls outstanding, which the same burst fails
+/// together, so the connection rolls at most once per
+/// [`OVERLOAD_PROTECTION_INTERVAL`]: the failures of one burst count once,
+/// and a version 2 peer is no more likely to be dropped for it than a legacy
+/// one. A failure that does not roll still counts as the connection's last
+/// overload, so a peer that keeps overloading the inbound service is more
+/// likely to be dropped at its next roll, as on the legacy connection.
+///
 /// # Security
 ///
 /// Without it, a peer whose requests are shed or time out keeps its
@@ -204,6 +215,9 @@ struct Overloads {
     /// The time of the last overload, in milliseconds after `origin`, plus
     /// one; zero before the first overload.
     last: AtomicU64,
+    /// The time of the last overload that rolled, in milliseconds after
+    /// `origin`, plus one; zero before the first roll.
+    last_roll: AtomicU64,
 }
 
 impl Overloads {
@@ -211,7 +225,41 @@ impl Overloads {
         Overloads {
             origin: Instant::now(),
             last: AtomicU64::new(0),
+            last_roll: AtomicU64::new(0),
         }
+    }
+
+    /// Counts an overload at `now`, and returns the probability of dropping
+    /// the connection for it if this overload rolls: `None` for an overload
+    /// within [`OVERLOAD_PROTECTION_INTERVAL`] of the last one that rolled.
+    fn drop_probability(&self, now: Instant) -> Option<f32> {
+        let since_origin = u64::try_from(now.duration_since(self.origin).as_millis())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        let prev = match self.last.swap(since_origin, Ordering::Relaxed) {
+            0 => None,
+            prev => Some(self.origin + Duration::from_millis(prev - 1)),
+        };
+
+        let interval =
+            u64::try_from(OVERLOAD_PROTECTION_INTERVAL.as_millis()).unwrap_or(u64::MAX);
+        let last_roll = self.last_roll.load(Ordering::Relaxed);
+        // Stream tasks read the clock on their own, so a later failure can carry a slightly
+        // earlier time: the subtraction saturates, which counts it as part of the same burst.
+        if last_roll != 0 && since_origin.saturating_sub(last_roll) < interval {
+            return None;
+        }
+        // Only one of the failures that see the same last roll takes this one.
+        self.last_roll
+            .compare_exchange(
+                last_roll,
+                since_origin,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .ok()?;
+
+        Some(overload_drop_connection_probability(now, prev))
     }
 
     /// Records an inbound service failure `error` of a request from the peer
@@ -227,35 +275,31 @@ impl Overloads {
             return None;
         };
 
-        let now = Instant::now();
-        let since_origin = u64::try_from(now.duration_since(self.origin).as_millis())
-            .unwrap_or(u64::MAX)
-            .saturating_add(1);
-        let prev = match self.last.swap(since_origin, Ordering::Relaxed) {
-            0 => None,
-            prev => Some(self.origin + Duration::from_millis(prev - 1)),
-        };
-        let drop_connection_probability = overload_drop_connection_probability(now, prev);
-
         let overloaded = matches!(error, PeerError::Overloaded);
-        if rand::rng().random::<f32>() < drop_connection_probability {
-            if overloaded {
-                metrics::counter!("pool.closed.loadshed").increment(1);
-            } else {
-                metrics::counter!("pool.closed.inbound.timeout").increment(1);
+        let drop_connection_probability = self.drop_probability(Instant::now());
+        match drop_connection_probability {
+            Some(drop_connection_probability)
+                if rand::rng().random::<f32>() < drop_connection_probability =>
+            {
+                if overloaded {
+                    metrics::counter!("pool.closed.loadshed").increment(1);
+                } else {
+                    metrics::counter!("pool.closed.inbound.timeout").increment(1);
+                }
+                tracing::info!(
+                    drop_connection_probability = format!("{drop_connection_probability:.3}"),
+                    "inbound service {error} error, closing version 2 connection",
+                );
+                Some(Event::Overloaded(error))
             }
-            tracing::info!(
-                drop_connection_probability = format!("{drop_connection_probability:.3}"),
-                "inbound service {error} error, closing version 2 connection",
-            );
-            Some(Event::Overloaded(error))
-        } else {
-            if overloaded {
-                metrics::counter!("pool.ignored.loadshed").increment(1);
-            } else {
-                metrics::counter!("pool.ignored.inbound.timeout").increment(1);
+            _ => {
+                if overloaded {
+                    metrics::counter!("pool.ignored.loadshed").increment(1);
+                } else {
+                    metrics::counter!("pool.ignored.inbound.timeout").increment(1);
+                }
+                None
             }
-            None
         }
     }
 }

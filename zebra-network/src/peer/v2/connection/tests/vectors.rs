@@ -2992,10 +2992,13 @@ async fn overloaded_requests_close_the_connection() {
         .encode()
         .expect("encodes");
 
-        // Each retry after an overload a moment ago is dropped with probability near one half,
-        // so 100 retries leave the connection open with negligible probability.
+        // The connection rolls once per overload protection interval, and a roll after an
+        // overload a moment ago drops it with probability near one half, so retrying for half
+        // the test timeout leaves the connection open with negligible probability.
         let mut refused = 0;
-        for _ in 0..100 {
+        let retry_until = Instant::now() + TEST_TIMEOUT / 2;
+        while Instant::now() < retry_until {
+            tokio::time::sleep(Duration::from_millis(20)).await;
             let Ok((mut send, mut recv)) = raw.connection.open_bi().await else {
                 break;
             };
@@ -3024,6 +3027,56 @@ async fn overloaded_requests_close_the_connection() {
     .expect("the test completes well within the timeout");
 }
 
+/// The failures of one load-shed burst roll once: a version 2 connection can
+/// have several inbound service calls outstanding, and a burst that fails
+/// them all must not drop it more often than a legacy connection, which
+/// has one. Later bursts follow the legacy probability curve, measured from
+/// the connection's last overload.
+#[test]
+fn overloads_of_one_burst_roll_once() {
+    use crate::constants::{
+        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        OVERLOAD_PROTECTION_INTERVAL,
+    };
+
+    let overloads = Overloads::new();
+    let start = std::time::Instant::now();
+
+    // A burst that fails six outstanding calls: only the first failure rolls, as a first
+    // overload does on a legacy connection.
+    assert_eq!(
+        overloads.drop_probability(start),
+        Some(MIN_OVERLOAD_DROP_PROBABILITY)
+    );
+    for call in 1..6 {
+        let failed_at = start + Duration::from_millis(call);
+        assert_eq!(overloads.drop_probability(failed_at), None);
+    }
+    // Still the same interval, however late in it.
+    let late = start + OVERLOAD_PROTECTION_INTERVAL - Duration::from_millis(2);
+    assert_eq!(overloads.drop_probability(late), None);
+
+    // The next interval rolls again, and the overload just before it counts: the probability
+    // is close to the maximum.
+    let next = start + OVERLOAD_PROTECTION_INTERVAL;
+    let probability = overloads
+        .drop_probability(next)
+        .expect("a failure in the next interval rolls");
+    assert!(
+        probability > 0.9 * MAX_OVERLOAD_DROP_PROBABILITY,
+        "got {probability}"
+    );
+    assert_eq!(overloads.drop_probability(next), None);
+
+    // A burst a full interval after the last overload is as unlikely to drop the connection
+    // as the first one.
+    let quiet = next + OVERLOAD_PROTECTION_INTERVAL;
+    assert_eq!(
+        overloads.drop_probability(quiet),
+        Some(MIN_OVERLOAD_DROP_PROBABILITY)
+    );
+}
+
 /// Announcements that time out in the inbound service count as overloads
 /// too: a peer that keeps announcing is soon closed with `NO_ERROR`, and
 /// the client's error is `InboundTimeout`.
@@ -3040,8 +3093,13 @@ async fn timed_out_announcements_close_the_connection() {
         send.write_all(&[StreamType::TransactionAnnouncements.code()])
             .await
             .expect("writes");
-        // One announcement at a time, so each is its own inbound service call.
-        for index in 0..100u8 {
+        // One announcement at a time, so each is its own inbound service call. The connection
+        // rolls once per overload protection interval, so the peer keeps announcing for up to
+        // half the test timeout.
+        let announce_until = Instant::now() + TEST_TIMEOUT / 2;
+        let mut index = 0u8;
+        while Instant::now() < announce_until {
+            index = index.wrapping_add(1);
             let id = UnminedTxId::Legacy(transaction::Hash([index; 32]));
             let record = RecordCodec::encode_record(encode_tx_record(id)).expect("valid");
             if send.write_all(&record).await.is_err() {
