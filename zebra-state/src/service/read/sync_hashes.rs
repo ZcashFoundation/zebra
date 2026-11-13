@@ -52,7 +52,14 @@ pub fn sync_hashes<C: AsRef<Chain>>(
             cumulative_txouts: meta.cumulative_transparent_outputs,
         });
 
-    entries(range, below.is_some(), counts, |height| db.hash(height))
+    // One scan of the height index, not a lookup per height: a request can
+    // name `MAX_GET_HASHES_COUNT` heights.
+    let first = *range.start();
+    let hashes = db.hash_range(range.clone());
+    entries(range, below.is_some(), counts, |height| {
+        let index = usize::try_from(height.0.checked_sub(first.0)?).ok()?;
+        hashes.get(index).copied()
+    })
 }
 
 /// The heights a `get-hashes` request for `count` heights from `start` is

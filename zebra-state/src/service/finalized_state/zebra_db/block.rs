@@ -11,7 +11,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    ops::RangeBounds,
+    ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -87,6 +87,28 @@ impl ZebraDb {
     pub fn hash(&self, height: block::Height) -> Option<block::Hash> {
         let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
         self.db.zs_get(&hash_by_height, &height)
+    }
+
+    /// Returns the finalized hashes of the heights in `range`, in height
+    /// order, stopping at the first height without one.
+    ///
+    /// This is one scan of the height index, where calling [`Self::hash`] for
+    /// each height would be one lookup each.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn hash_range(&self, range: RangeInclusive<block::Height>) -> Vec<block::Hash> {
+        let hash_by_height = self.db.cf_handle("hash_by_height").unwrap();
+        let mut expected_height = Some(*range.start());
+
+        self.db
+            .zs_forward_range_iter::<_, block::Height, block::Hash, _>(hash_by_height, range)
+            .map_while(|(height, hash)| {
+                if Some(height) != expected_height {
+                    return None;
+                }
+                expected_height = height.next().ok();
+                Some(hash)
+            })
+            .collect()
     }
 
     /// Returns `true` if `hash` is present in the finalized state.
