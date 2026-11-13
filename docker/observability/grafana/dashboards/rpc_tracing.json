@@ -91,7 +91,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum by (rpc_method) (rate(traces_spanmetrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))",
+          "expr": "sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -184,7 +184,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum by (rpc_method) (rate(traces_spanmetrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", otel_status_code=\"ERROR\"}[1m])) / sum by (rpc_method) (rate(traces_spanmetrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))",
+          "expr": "sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1m])) / sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -242,7 +242,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -273,7 +273,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.50, sum by (rpc_method, le) (rate(traces_spanmetrics_latency_bucket{service=\"zebra\", span_name=\"rpc_request\"}[1m])))",
+          "expr": "histogram_quantile(0.50, sum by (rpc_method, le) (rate(traces_span_metrics_duration_milliseconds_bucket{service=\"zebra\", span_name=\"rpc_request\"}[1m])))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -331,7 +331,7 @@
               }
             ]
           },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -362,7 +362,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (rpc_method, le) (rate(traces_spanmetrics_latency_bucket{service=\"zebra\", span_name=\"rpc_request\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum by (rpc_method, le) (rate(traces_span_metrics_duration_milliseconds_bucket{service=\"zebra\", span_name=\"rpc_request\"}[1m])))",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -420,7 +420,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum(increase(traces_spanmetrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1h]))",
+          "expr": "sum(increase(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1h]))",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -482,7 +482,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum(increase(traces_spanmetrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", otel_status_code=\"ERROR\"}[1h]))",
+          "expr": "sum(increase(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1h]))",
           "legendFormat": "Errors",
           "refId": "A"
         }
@@ -508,15 +508,15 @@
               },
               {
                 "color": "yellow",
-                "value": 0.1
+                "value": 100
               },
               {
                 "color": "red",
-                "value": 0.5
+                "value": 500
               }
             ]
           },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -548,7 +548,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum(rate(traces_spanmetrics_latency_sum{service=\"zebra\", span_name=\"rpc_request\"}[5m])) / sum(rate(traces_spanmetrics_latency_count{service=\"zebra\", span_name=\"rpc_request\"}[5m]))",
+          "expr": "sum(rate(traces_span_metrics_duration_milliseconds_sum{service=\"zebra\", span_name=\"rpc_request\"}[5m])) / sum(rate(traces_span_metrics_duration_milliseconds_count{service=\"zebra\", span_name=\"rpc_request\"}[5m]))",
           "legendFormat": "Avg",
           "refId": "A"
         }
@@ -574,15 +574,15 @@
               },
               {
                 "color": "yellow",
-                "value": 0.5
+                "value": 500
               },
               {
                 "color": "red",
-                "value": 1
+                "value": 1000
               }
             ]
           },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -614,7 +614,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{service=\"zebra\", span_name=\"rpc_request\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service=\"zebra\", span_name=\"rpc_request\"}[5m])) by (le))",
           "legendFormat": "P99",
           "refId": "A"
         }

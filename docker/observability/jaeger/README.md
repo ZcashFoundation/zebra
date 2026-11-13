@@ -281,11 +281,12 @@ processors:
 
 connectors:
   spanmetrics:  # Generates Prometheus metrics from spans
-    namespace: traces.spanmetrics
+    namespace: span_metrics
 
 exporters:
   prometheus:
     endpoint: 0.0.0.0:8889  # Spanmetrics for Prometheus
+    namespace: traces
 ```text
 
 ### Spanmetrics
@@ -294,7 +295,7 @@ Jaeger automatically generates Prometheus metrics from spans:
 
 ```bash
 # View spanmetrics
-curl -s http://localhost:8889/metrics | grep traces_spanmetrics
+curl -s http://localhost:8889/metrics | grep traces_span_metrics
 ```text
 
 These power the Monitor tab and can be scraped by Prometheus for Grafana dashboards.
