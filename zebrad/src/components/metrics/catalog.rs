@@ -329,8 +329,8 @@ fn describe_mempool() {
     );
     describe_gauge!(
         "zcash.mempool.size.weighted",
-        Unit::Count,
-        "Mempool transactions in each fee weight ratio bucket."
+        Unit::Bytes,
+        "Serialized size of the mempool transactions in each fee weight ratio bucket."
     );
     describe_gauge!(
         "zcash.mempool.actions.unpaid",
