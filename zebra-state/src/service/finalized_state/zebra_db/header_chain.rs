@@ -90,31 +90,42 @@ impl ZebraDb {
 
     /// The header at `height` on the header chain: the finalized block's header
     /// at or below the finalized tip, or the stored header above it.
+    ///
+    /// The block writer can finalize `height` during this call, so this checks
+    /// the finalized tip before and after reading the stored row, and otherwise
+    /// reads the finalized block, whose rows are never deleted.
     pub fn any_header(&self, height: Height) -> Option<Arc<block::Header>> {
-        if let Some(header) = self.block_header(height.into()) {
-            return Some(header);
+        if let Some(header) = self.stored_header(height) {
+            return Some(Arc::new(header));
         }
 
-        if !self.is_authoritative_header_height(height) {
-            return None;
-        }
-
-        self.header_by_height_cf().zs_get(&height).map(Arc::new)
+        self.block_header(height.into())
     }
 
     /// The hash at `height` on the header chain.
+    ///
+    /// Reads in the same order as [`Self::any_header`].
     pub fn header_chain_hash(&self, height: Height) -> Option<block::Hash> {
-        if let Some(hash) = self.hash(height) {
-            return Some(hash);
+        if let Some(header) = self.stored_header(height) {
+            return Some(header.hash());
         }
 
+        self.hash(height)
+    }
+
+    /// The stored header row at `height`, if `height` is above the finalized
+    /// tip both before and after the row is read.
+    fn stored_header(&self, height: Height) -> Option<block::Header> {
         if !self.is_authoritative_header_height(height) {
             return None;
         }
 
-        self.header_by_height_cf()
-            .zs_get(&height)
-            .map(|header| header.hash())
+        let header = self.header_by_height_cf().zs_get(&height)?;
+
+        // The block writer finalized `height` after the first check, so the
+        // finalized block is the header chain there.
+        self.is_authoritative_header_height(height)
+            .then_some(header)
     }
 
     /// The height of `hash` on the header chain: a finalized block, or a
