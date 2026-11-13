@@ -423,24 +423,37 @@ impl SentHashes {
         self.sent.contains_key(hash)
     }
 
-    /// Removes a `hash` from `SentHashes`, dropping its outpoints from `known_utxos`
-    /// and its entry from whichever batch buffer holds it.
+    /// Removes `hashes` from `SentHashes`, dropping their outpoints from `known_utxos`
+    /// and their entries from whichever batch buffers hold them.
     ///
-    /// Called when the block write task rejects a block, so that a subsequent
+    /// Called when the block write task rejects or evicts blocks, so that a subsequent
     /// re-delivery of a block with the same hash is not short-circuited as a
-    /// "duplicate" against a rejected variant that never reached any chain.
-    pub fn remove(&mut self, hash: &block::Hash) {
-        let Some(outpoints) = self.sent.remove(hash) else {
-            return;
-        };
+    /// "duplicate" against a block that is no longer in any chain.
+    ///
+    /// Each batch buffer is scanned once for the whole set, because evicting a long
+    /// fork can remove many hashes at a time.
+    pub fn remove_all(&mut self, hashes: impl IntoIterator<Item = block::Hash>) {
+        let mut removed = HashSet::new();
 
-        for outpoint in &outpoints {
-            self.known_utxos.remove(outpoint);
+        for hash in hashes {
+            let Some(outpoints) = self.sent.remove(&hash) else {
+                continue;
+            };
+
+            for outpoint in &outpoints {
+                self.known_utxos.remove(outpoint);
+            }
+
+            removed.insert(hash);
         }
 
-        self.curr_buf.retain(|(h, _)| h != hash);
+        if removed.is_empty() {
+            return;
+        }
+
+        self.curr_buf.retain(|(h, _)| !removed.contains(h));
         for buf in &mut self.bufs {
-            buf.retain(|(h, _)| h != hash);
+            buf.retain(|(h, _)| !removed.contains(h));
         }
     }
 

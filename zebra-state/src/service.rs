@@ -725,11 +725,11 @@ impl StateService {
     fn drain_non_finalized_rejected_hashes(&mut self) {
         use tokio::sync::mpsc::error::TryRecvError;
 
+        let mut rejected_hashes = Vec::new();
+
         loop {
             match self.non_finalized_rejected_receiver.try_recv() {
-                Ok(hash) => {
-                    self.non_finalized_block_write_sent_hashes.remove(&hash);
-                }
+                Ok(hash) => rejected_hashes.push(hash),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     info!(
@@ -740,6 +740,9 @@ impl StateService {
                 }
             }
         }
+
+        self.non_finalized_block_write_sent_hashes
+            .remove_all(rejected_hashes);
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
