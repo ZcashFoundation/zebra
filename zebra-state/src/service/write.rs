@@ -233,6 +233,9 @@ impl BlockWriteSender {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(rayon::current_num_threads() + 1)
                 .thread_name(|index| format!("state writer {index}"))
+                .start_handler(|_| {
+                    rocksdb::perf::set_perf_stats(rocksdb::perf::PerfStatsLevel::Disable);
+                })
                 .build()
                 .expect("startup thread creation only fails when the OS is out of resources");
 
