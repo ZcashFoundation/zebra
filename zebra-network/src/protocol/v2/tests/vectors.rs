@@ -35,15 +35,16 @@ use crate::{
             },
             constants::{
                 alpn_protocol_id, MAX_ADDRS_PER_RESPONSE, MAX_BLOCKS_PER_REQUEST,
-                MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN, MAX_TXS_PER_REQUEST,
-                MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT, MIN_UNIDIRECTIONAL_STREAMS,
+                MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN, MAX_RESPONSE_BYTES,
+                MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS, MIN_IDLE_TIMEOUT,
+                MIN_UNIDIRECTIONAL_STREAMS,
             },
             handshake::{decode_record, InitRecord, INIT_RECORD_KIND, MAX_INIT_RECORD_LEN},
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request},
             response::{
                 decode_addr_response, encode_addr_response, read_headers, read_objects,
-                write_headers_response, ObjectResult,
+                write_headers_response, ObjectResult, ObjectsReader,
             },
             txref::{ShortTxId, TxRef},
             types::{ErrorCode, StreamType},
@@ -228,6 +229,7 @@ fn alpn_identifiers_match_the_draft_table() {
 #[test]
 fn record_and_stream_limits_match_the_draft() {
     assert_eq!(MAX_RECORD_PAYLOAD_LEN, 2_097_152, "2 MiB");
+    assert_eq!(MAX_RESPONSE_BYTES, 8_388_608, "8 MiB");
     assert_eq!(MAX_USER_AGENT_LENGTH, 256);
     assert_eq!(MIN_BIDIRECTIONAL_STREAMS, 32);
     assert_eq!(MIN_UNIDIRECTIONAL_STREAMS, 8);
@@ -1062,6 +1064,57 @@ async fn blocks_response_pins_entries_and_early_finish() {
             what: "object",
             count: 1
         }
+    );
+}
+
+/// A response is at most `MAX_RESPONSE_BYTES` long: the entry whose length
+/// prefix takes it over the limit is a `FLOOD` error from the prefix alone,
+/// before any of the entry is read, and every entry before it is handed over
+/// as it arrives.
+#[tokio::test]
+async fn responses_over_the_byte_limit_are_a_flood() {
+    let block = test_block(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..]);
+    let mut entry = Vec::new();
+    ObjectResult::Found(block.clone())
+        .write(&mut entry)
+        .expect("writes to a Vec");
+
+    // As many whole entries as the limit allows, then only the result byte and length prefix
+    // of the next one.
+    let within_limit = MAX_RESPONSE_BYTES / entry.len();
+    let prefix_len = entry.len() - block.zcash_serialize_to_vec().expect("serializes").len();
+    let mut wire = entry.repeat(within_limit);
+    wire.extend_from_slice(&entry[..prefix_len]);
+
+    let mut reader = ObjectsReader::<_, Block>::new(&wire[..], within_limit + 1);
+    for _ in 0..within_limit {
+        let read = reader.next().await.expect("within the limit");
+        assert_eq!(read, Some(ObjectResult::Found(block.clone())));
+    }
+    assert_err!(
+        reader.next().await,
+        WireError::Flood { field: "response length", count, max }
+            if count > MAX_RESPONSE_BYTES as u64 && max == MAX_RESPONSE_BYTES,
+        Violation::Close(ErrorCode::Flood)
+    );
+
+    // A response of exactly the limit is not a flood: the last entry is padded to it with
+    // not-found entries, which are one byte each.
+    let mut wire = entry.repeat(within_limit);
+    let padding = MAX_RESPONSE_BYTES - wire.len();
+    wire.resize(MAX_RESPONSE_BYTES, 0x02);
+    let entries = read_objects::<_, Block>(&mut &wire[..], within_limit + padding)
+        .await
+        .expect("a response at the limit is allowed");
+    assert_eq!(entries.len(), within_limit + padding);
+    wire.push(0x02);
+    assert_err!(
+        read_objects::<_, Block>(&mut &wire[..], within_limit + padding + 1).await,
+        WireError::Flood {
+            field: "response length",
+            ..
+        },
+        Violation::Close(ErrorCode::Flood)
     );
 }
 

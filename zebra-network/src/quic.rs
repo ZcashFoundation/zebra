@@ -96,8 +96,9 @@ const STREAM_RECEIVE_WINDOW: u32 = (2 * MAX_RECORD_PAYLOAD_LEN) as u32;
 ///   deadline: the longest is a `get-tx` request of 50,000 references, about
 ///   3.1 MiB, and about as much again once it is decoded.
 /// - The response element being read on each of this node's four request
-///   streams, at most 2 MiB each, and the objects already read, which this
-///   node asked for.
+///   streams, at most 2 MiB each, and the objects already read, at most
+///   `MAX_RESPONSE_BYTES` (8 MiB) for each response. Every object is checked
+///   as it arrives, so those are objects this node asked for.
 ///
 /// So a peer can make this node hold about 8 MiB in the transport and about
 /// 12.5 MiB of request bodies without being asked for anything, and another

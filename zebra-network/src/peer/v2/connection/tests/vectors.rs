@@ -1453,6 +1453,71 @@ fn not_found() -> Vec<u8> {
     bytes
 }
 
+/// The node checks each object when its entry arrives, not when the response
+/// ends: a peer that delivers the wrong block or transaction and then keeps
+/// the response open is closed with `PROTOCOL_ERROR` at once, well before
+/// the request would time out, and without the rest of the response.
+#[tokio::test]
+async fn outbound_responses_are_verified_as_entries_arrive() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let fixture = Fixture::new();
+        let block_1 = fixture.blocks[1].clone();
+        let block_2 = fixture.blocks[2].clone();
+        let coinbase_1 = UnminedTxId::from(block_1.transactions[0].as_ref().clone());
+        let coinbase_2 = UnminedTxId::from(block_2.transactions[0].as_ref().clone());
+
+        for case in ["wrong first block", "wrong first transaction"] {
+            let mut raw = raw_peer_node(&network).await;
+
+            // Two objects are requested, so a first entry does not complete the response. Both
+            // of the peer's objects are wrong for either order of the request.
+            let genesis = &fixture.blocks[0];
+            let (request, first_entry) = match case {
+                "wrong first block" => (
+                    Request::BlocksByHash([block_1.hash(), block_2.hash()].into_iter().collect()),
+                    found(genesis),
+                ),
+                "wrong first transaction" => (
+                    Request::TransactionsById([coinbase_1, coinbase_2].into_iter().collect()),
+                    found(&genesis.transactions[0]),
+                ),
+                _ => unreachable!(),
+            };
+
+            let started = Instant::now();
+            let (result, _response_stream) =
+                tokio::join!(call(&mut raw.node.client, request), async {
+                    let (_, mut send, recv) = accept_request(&raw.connection).await;
+                    send.write_all(&first_entry).await.expect("writes");
+                    // The response stays open: the peer neither sends the next entry nor
+                    // finishes.
+                    (send, recv)
+                });
+            let error = result.expect_err(case);
+            assert!(
+                error.inner_debug().contains("ProtocolViolation"),
+                "{case}: got {}",
+                error.inner_debug()
+            );
+            let close = raw.connection.closed().await;
+            assert!(
+                matches!(&close, quinn::ConnectionError::ApplicationClosed(close)
+                    if close.error_code.into_inner() == ErrorCode::ProtocolError.code()),
+                "{case}: got {close:?}"
+            );
+            assert!(
+                started.elapsed() < REQUEST_TIMEOUT / 2,
+                "{case}: the entry is checked when it arrives, not at the request timeout"
+            );
+        }
+    })
+    .await
+    .expect("the test completes well within the timeout");
+}
+
 /// How the raw peer answers one of the node's requests.
 enum Reply {
     /// Writes these bytes, then finishes the stream.

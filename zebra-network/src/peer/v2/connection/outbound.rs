@@ -34,7 +34,7 @@ use crate::{
                 MAX_TXS_PER_REQUEST, MIN_BIDIRECTIONAL_STREAMS, RESPONSE_MISBEHAVIOR_PENALTY,
             },
             request::{GetBlocks, GetHeaders, GetTx, Request as WireRequest},
-            response::{decode_addr_response, read_headers, read_objects, ObjectResult},
+            response::{decode_addr_response, HeadersReader, ObjectResult, ObjectsReader},
             txref::TxRef,
             types::ErrorCode,
             wire::{Violation, WireError},
@@ -463,7 +463,8 @@ async fn drive_inner(
 }
 
 /// Fetches up to one request's worth of blocks, checking each delivered
-/// block against the hash it answers.
+/// block against the hash it answers as it arrives. A response longer than
+/// `MAX_RESPONSE_BYTES` closes the connection with `FLOOD`.
 ///
 /// A responder may finish early; the hashes it did not answer are left out
 /// of the result rather than reported as missing, since the peer may well
@@ -477,10 +478,18 @@ async fn fetch_blocks(
         hashes: hashes.to_vec(),
     });
     let mut recv = open_request(connection, &request).await?;
-    let entries = read_objects::<_, Block>(&mut recv.reader(), hashes.len()).await?;
+    let mut entries = ObjectsReader::<_, Block>::new(recv.reader(), hashes.len());
 
-    let mut results = Vec::with_capacity(entries.len());
-    for (entry, &hash) in entries.into_iter().zip(hashes) {
+    // # Security
+    //
+    // Each block is checked as its entry arrives, so a peer that delivers another block is
+    // closed after that one, not after a whole response of them.
+    let mut results = Vec::new();
+    let mut requested = hashes.iter();
+    while let Some(entry) = entries.next().await? {
+        let &hash = requested
+            .next()
+            .expect("the reader yields at most one entry for each requested hash");
         match entry {
             ObjectResult::Found(block) => {
                 // Draft, "get-blocks": a block that does not hash to its entry's hash is a
@@ -514,10 +523,15 @@ async fn fetch_transactions(
         txrefs: ids.iter().copied().map(TxRef::from).collect(),
     });
     let mut recv = open_request(connection, &request).await?;
-    let entries = read_objects::<_, Transaction>(&mut recv.reader(), ids.len()).await?;
+    let mut entries = ObjectsReader::<_, Transaction>::new(recv.reader(), ids.len());
 
-    let mut results = Vec::with_capacity(entries.len());
-    for (entry, &id) in entries.into_iter().zip(ids) {
+    // Each transaction is checked as its entry arrives, as for blocks.
+    let mut results = Vec::new();
+    let mut requested = ids.iter();
+    while let Some(entry) = entries.next().await? {
+        let &id = requested
+            .next()
+            .expect("the reader yields at most one entry for each requested reference");
         match entry {
             ObjectResult::Found(transaction) => {
                 let unmined = UnminedTx::from(transaction);
@@ -603,7 +617,19 @@ async fn fetch_headers(
     };
     let wire_request = WireRequest::Headers(request.clone());
     let mut recv = open_request(connection, &wire_request).await?;
-    let headers = read_headers(&mut recv.reader()).await?;
+    let mut entries = HeadersReader::new(recv.reader());
+
+    // Each header is checked against the one before it as it arrives, so the rest of a chain
+    // that is not contiguous is not read. `check_headers_response` makes every check below.
+    let mut headers: Vec<Arc<block::Header>> = Vec::new();
+    let mut previous_hash = None;
+    while let Some(header) = entries.next().await? {
+        if previous_hash.is_some_and(|previous_hash| header.previous_block_hash != previous_hash) {
+            return Err(Failure::Misbehavior(NOT_CONTIGUOUS.to_string()));
+        }
+        previous_hash = Some(header.hash());
+        headers.push(header);
+    }
 
     match check_headers_response(&request, &headers, genesis_hash) {
         HeadersCheck::Selectable => Ok(headers),
@@ -618,6 +644,10 @@ async fn fetch_headers(
         HeadersCheck::Unselectable(reason) => Err(Failure::Misbehavior(reason)),
     }
 }
+
+/// Why a `get-headers` response whose headers do not follow each other is
+/// misbehavior.
+const NOT_CONTIGUOUS: &str = "get-headers response is not a contiguous chain";
 
 /// Whether a `get-headers` response is one its request could have selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -688,7 +718,7 @@ fn unselectable_reason(
         .zip(&hashes)
         .any(|(header, previous_hash)| header.previous_block_hash != *previous_hash)
     {
-        return Some("get-headers response is not a contiguous chain".to_string());
+        return Some(NOT_CONTIGUOUS.to_string());
     }
 
     if request.locator_hashes.is_empty() {

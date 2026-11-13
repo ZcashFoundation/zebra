@@ -47,7 +47,11 @@ use crate::{
         internal::{InventoryResponse, Request, Response},
         v2::{
             announcement::encode_tx_record,
-            constants::{MAX_ADDRS_PER_RESPONSE, MAX_HEADERS_PER_RESPONSE},
+            announcement::MAX_BLOCK_ANNOUNCEMENT_LEN,
+            constants::{
+                MAX_ADDRS_PER_RESPONSE, MAX_HEADERS_PER_RESPONSE, MAX_RECORD_PAYLOAD_LEN,
+                MAX_RESPONSE_BYTES,
+            },
             record::RecordCodec,
             request::{max_body_len, GetBlocks, GetHeaders, GetTx, Request as WireRequest},
             response::{encode_addr_response, write_headers_response, ObjectResult},
@@ -73,6 +77,10 @@ use super::{refuse_stream, Event, Events, Inbound, Overloads, ServiceFailure};
 /// buffer only until the buffer's worker takes it, not while it is answered.
 pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 
+/// The longest serialized block header: a block announcement record without
+/// its kind byte.
+const MAX_HEADER_LEN: usize = MAX_BLOCK_ANNOUNCEMENT_LEN - 1;
+
 /// The most bytes of `get-blocks` or `get-tx` response entries one request
 /// stream writes, after which the response is finished early, as the draft
 /// allows (draft, "`get-blocks`", "`get-tx`": the responder SHOULD apply a
@@ -83,6 +91,16 @@ pub(super) const INBOUND_REQUEST_CONCURRENCY: usize = 2;
 /// so the first entry is always written, and one object larger than the
 /// budget can still be sent, but only on its own.
 pub(super) const RESPONSE_BYTES_LIMIT: usize = 1_000_000;
+
+// The budget is checked before each entry, so a response is at most the budget, less one byte,
+// and one more entry: a result byte, a 5-byte length, and a maximum-size object. That is never
+// more than the draft's response limit, which a requester closes the connection over, and neither
+// is the longest `get-headers` response, a 3-byte count and `MAX_HEADERS_PER_RESPONSE` headers
+// with their 3-byte lengths; checked at compile time.
+const _: () = {
+    assert!(RESPONSE_BYTES_LIMIT + 1 + 5 + MAX_RECORD_PAYLOAD_LEN <= MAX_RESPONSE_BYTES);
+    assert!(3 + MAX_HEADERS_PER_RESPONSE * (3 + MAX_HEADER_LEN) <= MAX_RESPONSE_BYTES);
+};
 
 /// How many inbound service calls one `get-blocks` or `get-tx` response
 /// makes, after which the response is finished early.
