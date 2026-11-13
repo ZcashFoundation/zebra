@@ -156,6 +156,10 @@ pub enum ErrorCode {
     Refused,
     /// The sender encountered an internal error.
     InternalError,
+    /// Stream reset: the responder serves requests of this kind, but is at a
+    /// limit on the work it does at once. Unlike [`ErrorCode::Refused`], it
+    /// says the request is worth retrying after a short delay.
+    Busy,
 }
 
 impl ErrorCode {
@@ -173,6 +177,7 @@ impl ErrorCode {
             ErrorCode::Cancelled => 0x07,
             ErrorCode::Refused => 0x08,
             ErrorCode::InternalError => 0x09,
+            ErrorCode::Busy => 0x0A,
         }
     }
 
@@ -189,6 +194,7 @@ impl ErrorCode {
             ErrorCode::Cancelled => "CANCELLED",
             ErrorCode::Refused => "REFUSED",
             ErrorCode::InternalError => "INTERNAL_ERROR",
+            ErrorCode::Busy => "BUSY",
         }
     }
 }

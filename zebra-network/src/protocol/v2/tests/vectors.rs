@@ -81,7 +81,7 @@ const STREAM_TYPE_TABLE: [(u8, &str, StreamType); 13] = [
 ];
 
 /// The "Application Error Codes" table: code, constant name.
-const ERROR_CODE_TABLE: [(u64, &str, ErrorCode); 10] = [
+const ERROR_CODE_TABLE: [(u64, &str, ErrorCode); 11] = [
     (0x00, "NO_ERROR", ErrorCode::NoError),
     (0x01, "PROTOCOL_ERROR", ErrorCode::ProtocolError),
     (
@@ -96,6 +96,7 @@ const ERROR_CODE_TABLE: [(u64, &str, ErrorCode); 10] = [
     (0x07, "CANCELLED", ErrorCode::Cancelled),
     (0x08, "REFUSED", ErrorCode::Refused),
     (0x09, "INTERNAL_ERROR", ErrorCode::InternalError),
+    (0x0A, "BUSY", ErrorCode::Busy),
 ];
 
 /// A well-formed `addrv2` record for a TORV2 address, which Zebra does not
@@ -191,9 +192,10 @@ fn error_codes_match_the_draft_table() {
             ErrorCode::Cancelled => 7,
             ErrorCode::Refused => 8,
             ErrorCode::InternalError => 9,
+            ErrorCode::Busy => 10,
         })
         .collect();
-    assert_eq!(variants.len(), 10, "every variant has one row");
+    assert_eq!(variants.len(), 11, "every variant has one row");
 }
 
 /// The "Network Identification" table, and the gap for custom testnets.
