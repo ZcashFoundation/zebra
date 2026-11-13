@@ -27,3 +27,5 @@
 !zebrad
 !docker/entrypoint.sh
 !docker/default-zebra-config.toml
+# The zebrad tests check the metric catalog, dashboards, and alert rules in this folder.
+!docker/observability
