@@ -294,7 +294,7 @@ built-in solver, not the mining API.
 | `proptest-impl` | No | Tests: enables property-test data generators in Zebra crates. | Used by test code; no node configuration switch. |
 | `zebra-checkpoints` | No | Tests: enables checkpoint-generation test support and the `zebra-utils/zebra-checkpoints` feature. | Checkpoint tests need a synced cached state and the `zebra-checkpoints` executable; see [checkpoint generation](../dev/zebra-checkpoints.md). |
 | `lightwalletd-grpc-tests` | No | Tests: generates the lightwalletd gRPC test client. | Requires `protoc` while building and an installed `lightwalletd` binary for the tests. It is not required to serve normal wallet traffic. |
-| `tokio-console` | No | Debugging: enables Tokio task instrumentation through `console-subscriber`. | Build with `RUSTFLAGS="--cfg tokio_unstable"`, disable default log ceilings, and use the `tokio-console` client. |
+| `tokio-console` | No | Debugging: enables Tokio task instrumentation through `console-subscriber`. | Build with `RUSTFLAGS="--cfg tokio_unstable"`, disable default log ceilings, and use the `tokio-console` client; see [setup](../dev/tokio-console.md#setup). |
 | `comparison-interpreter` | No | Tests: runs the Rust and C++ script interpreters and reports disagreements. | No runtime activation flag; do not use for production. |
 
 Cargo also exposes implicit features for optional dependencies. The default
