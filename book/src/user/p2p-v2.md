@@ -142,6 +142,11 @@ Serving is bounded so that it cannot crowd out the node's other work:
   other requests, and the node serves eight streams at once in total. A
   request beyond either limit is reset at once with the `BUSY` error code:
   the peer asks another node, and can ask this one again after a short delay.
+- The eight streams are shared between network addresses: all the connections
+  from one IP address (one `/64` for IPv6) get two of them between them, and
+  all the connections from one address group (an IPv4 `/16` or IPv6 `/32`)
+  get four. A request beyond its address's share is also answered with
+  `BUSY`, so one host or network cannot take every stream.
 - Zebra reads at most 2 MiB of blocks at a time for each stream, plus the
   part's first block, and keeps two buffers of up to one block each. With
   2 MB blocks that is at most about 8 MB of block data per stream, so eight

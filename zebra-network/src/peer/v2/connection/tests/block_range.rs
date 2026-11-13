@@ -31,7 +31,8 @@ use crate::{
                 block_range::{
                     RANGE_FIRST_WRITE_TIMEOUT, RANGE_READ_CHUNK, RANGE_READ_CHUNK_BLOCKS,
                     RANGE_STALL_ADDRS, RANGE_STALL_BACKOFF, RANGE_STALL_BACKOFF_MAX,
-                    RANGE_STREAMS_GLOBAL, RANGE_STREAMS_PER_PEER,
+                    RANGE_STREAMS_GLOBAL, RANGE_STREAMS_PER_ADDR, RANGE_STREAMS_PER_GROUP,
+                    RANGE_STREAMS_PER_PEER,
                 },
                 global_block_range_permits, serve as serve_request_stream, BlockRangeServing,
                 INBOUND_REQUEST_CONCURRENCY,
@@ -1251,6 +1252,88 @@ fn block_range_stall_table_is_bounded() {
         limits.backing_off(addr(RANGE_STALL_ADDRS + 9), now),
         "the last addresses are remembered"
     );
+}
+
+/// The node's permits are shared between addresses: the connections from one
+/// address hold at most [`RANGE_STREAMS_PER_ADDR`] of them and those from one
+/// address group at most [`RANGE_STREAMS_PER_GROUP`], the rest are answered
+/// with `BUSY`, and a peer in another group is served meanwhile. A share is
+/// returned when its stream ends.
+#[tokio::test]
+async fn node_block_range_permits_are_shared_between_addresses() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+    let chain = chain();
+    let global = global_block_range_permits();
+    let in_group = |host: u8| IpAddr::from([203, 0, 113, host]);
+    let elsewhere = IpAddr::from([198, 51, 100, 9]);
+
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        let mut chain_service = ChainService::new(&chain);
+        chain_service.answered_calls = Some(0);
+        let (service, mut requests) = chain_service.service();
+        let connect = |remote: IpAddr| {
+            let (service, global, network) = (service.clone(), global.clone(), &network);
+            async move {
+                let (requester, responder, client_ep, server_ep) = connected_pair(network).await;
+                let serving = BlockRangeServing::new(true, global).for_remote(remote);
+                let server = spawn_server(responder, service, serving);
+                (requester, server, client_ep, server_ep)
+            }
+        };
+
+        // Enough addresses of one group to hold its whole share, each holding its own.
+        let mut held = Vec::new();
+        for host in 0..RANGE_STREAMS_PER_GROUP / RANGE_STREAMS_PER_ADDR {
+            let peer = connect(in_group(u8::try_from(host).expect("few hosts"))).await;
+            let mut streams = Vec::new();
+            for _ in 0..RANGE_STREAMS_PER_ADDR {
+                streams.push(request_range(&peer.0, tip_range(&chain)).await);
+            }
+            held.push((peer, streams));
+        }
+        wait_for_reads(&mut requests, RANGE_STREAMS_PER_GROUP).await;
+
+        // A second connection from one of those addresses has its own peer permits, but its
+        // address has no share left.
+        let same_addr = connect(in_group(0)).await;
+        let busy = request_range(&same_addr.0, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+
+        // Another address of the group has a share of its own, but the group has none left.
+        let same_group = connect(in_group(200)).await;
+        let busy = request_range(&same_group.0, tip_range(&chain)).await;
+        assert_reset(busy, ErrorCode::Busy).await;
+        assert!(
+            global.available_permits() > 0,
+            "the group does not hold every node permit"
+        );
+        tokio::time::sleep(SHORT_WAIT).await;
+        assert!(
+            reads(&mut requests).is_empty(),
+            "the refused streams made no read"
+        );
+
+        // A peer in another group is served.
+        let bystander = connect(elsewhere).await;
+        let _served = request_range(&bystander.0, tip_range(&chain)).await;
+        wait_for_reads(&mut requests, 1).await;
+
+        // When an address's streams end, its share and its group's are free again.
+        let ((gone, server, ..), streams) = held.remove(0);
+        gone.close(0u32.into(), b"done");
+        server
+            .await
+            .expect("the server task ends with its connection");
+        drop(streams);
+        for _ in 0..RANGE_STREAMS_PER_ADDR {
+            let _served = request_range(&same_group.0, tip_range(&chain)).await;
+            wait_for_reads(&mut requests, 1).await;
+        }
+        drop(held);
+    })
+    .await
+    .expect("the test completes");
 }
 
 /// Requests the tip range of `chain` from a server whose reads answer wrongly

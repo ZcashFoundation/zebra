@@ -43,6 +43,12 @@
 //! holds at most one chunk of blocks, so the memory and disk reads of range
 //! serving are bounded whatever the number of peers.
 //!
+//! The node's permits are shared between network addresses: the connections
+//! from one address hold at most [`RANGE_STREAMS_PER_ADDR`] of them, and
+//! those from one address group at most [`RANGE_STREAMS_PER_GROUP`], so one
+//! host or network cannot hold them all while other peers are answered with
+//! `BUSY`.
+//!
 //! A response abandoned because its reader fell behind has held a node permit
 //! for almost nothing, and without a cost the peer could open the next stream
 //! at once and hold the permit again. So that peer's further range streams
@@ -79,6 +85,7 @@ use crate::{
             wire::WireError,
         },
     },
+    v2_address_book::Group,
     BoxError,
 };
 
@@ -105,6 +112,22 @@ pub(crate) const RANGE_STREAMS_PER_PEER: usize = 2;
 /// as they are written. So this bounds the memory and the state reads of
 /// range serving, whatever the number of peers.
 pub(crate) const RANGE_STREAMS_GLOBAL: usize = 8;
+
+/// How many of the node's `get-block-range` streams the connections from one
+/// remote address may hold at once, keyed like connection limits
+/// ([`connection_limit_key`]): as many as one peer, so that more connections
+/// from an address get it no more of the node's permits.
+pub(crate) const RANGE_STREAMS_PER_ADDR: usize = RANGE_STREAMS_PER_PEER;
+
+/// How many of the node's `get-block-range` streams the connections from one
+/// address group (an IPv4 /16 or IPv6 /32, see [`Group`]) may hold at once.
+///
+/// # Security
+///
+/// Half of [`RANGE_STREAMS_GLOBAL`], so that filling the node's permits
+/// takes addresses in at least two groups, and peers in other groups are
+/// still served while one group holds its whole share.
+pub(crate) const RANGE_STREAMS_PER_GROUP: usize = RANGE_STREAMS_GLOBAL / 2;
 
 /// The most serialized bytes of blocks one inbound service call reads for a
 /// `get-block-range` response, the call's first block exempt.
@@ -205,6 +228,12 @@ pub(crate) struct NodeRangeLimits {
 /// What a node remembers about the remote addresses it serves ranges to.
 #[derive(Debug, Default)]
 struct AddrState {
+    /// How many node permits the connections from each address hold.
+    streams_by_addr: HashMap<IpAddr, usize>,
+
+    /// How many node permits the connections from each address group hold.
+    streams_by_group: HashMap<Group, usize>,
+
     /// The addresses whose responses were abandoned because they fell
     /// behind, at most [`RANGE_STALL_ADDRS`] of them.
     stalls: HashMap<IpAddr, Stall>,
@@ -227,6 +256,28 @@ impl NodeRangeLimits {
         self.addrs
             .lock()
             .expect("the lock is only held for map operations, which do not panic")
+    }
+
+    /// Claims a share of the node's permits for one stream of a peer at
+    /// `remote`, or refuses the stream with `BUSY` if the address or its
+    /// group already holds its whole share. Never waits.
+    fn claim_addr(self: &Arc<Self>, remote: IpAddr) -> Result<AddrShare, Outcome> {
+        let addr = connection_limit_key(remote);
+        let group = Group::of(addr);
+        let mut state = self.lock();
+        if state.streams_by_addr.get(&addr).copied().unwrap_or(0) >= RANGE_STREAMS_PER_ADDR {
+            return Err(busy("address limit"));
+        }
+        if state.streams_by_group.get(&group).copied().unwrap_or(0) >= RANGE_STREAMS_PER_GROUP {
+            return Err(busy("address group limit"));
+        }
+        *state.streams_by_addr.entry(addr).or_default() += 1;
+        *state.streams_by_group.entry(group).or_default() += 1;
+        Ok(AddrShare {
+            node: self.clone(),
+            addr,
+            group,
+        })
     }
 
     /// Whether `addr`'s range streams are answered with `BUSY` at `now`.
@@ -255,6 +306,33 @@ impl NodeRangeLimits {
             stalls.remove(&first_to_end);
         }
         stalls.insert(addr, stall);
+    }
+}
+
+/// One stream's share of the node's permits for its address and address
+/// group, returned when it is dropped.
+#[derive(Debug)]
+struct AddrShare {
+    node: Arc<NodeRangeLimits>,
+    addr: IpAddr,
+    group: Group,
+}
+
+impl Drop for AddrShare {
+    fn drop(&mut self) {
+        /// Returns one share of `key`, forgetting keys that hold none.
+        fn release<K: std::hash::Hash + Eq>(streams: &mut HashMap<K, usize>, key: &K) {
+            if let Some(held) = streams.get_mut(key) {
+                *held = held.saturating_sub(1);
+                if *held == 0 {
+                    streams.remove(key);
+                }
+            }
+        }
+
+        let mut state = self.node.lock();
+        release(&mut state.streams_by_addr, &self.addr);
+        release(&mut state.streams_by_group, &self.group);
     }
 }
 
@@ -395,8 +473,8 @@ impl BlockRangeServing {
     /// Returns the serving state of a new connection: `enabled` from the
     /// config, fresh permits for the peer, and the `node`'s shared state.
     ///
-    /// The node's per-address state is only used once the peer's address is
-    /// set with [`BlockRangeServing::for_remote`].
+    /// The node's per-address state and limits are only used once the peer's
+    /// address is set with [`BlockRangeServing::for_remote`].
     pub(crate) fn new(enabled: bool, node: Arc<NodeRangeLimits>) -> Self {
         Self {
             enabled,
@@ -505,7 +583,8 @@ impl BlockRangeServing {
 
     /// Adds a node permit to the `peer` permit of a stream whose request was
     /// read and decoded, or refuses the stream with `BUSY` if the node's
-    /// permits are exhausted. Never waits.
+    /// permits are exhausted, or the peer's address or address group already
+    /// holds its share of them. Never waits.
     ///
     /// # Security
     ///
@@ -513,6 +592,10 @@ impl BlockRangeServing {
     /// that opens range streams and never sends their requests holds only its
     /// own permits, and cannot deny range serving to every other peer.
     pub(super) fn claim_node(&self, peer: PeerRangePermit) -> Result<RangePermits, Outcome> {
+        let addr = self
+            .remote
+            .map(|remote| self.node.claim_addr(remote))
+            .transpose()?;
         let node = self
             .node
             .permits
@@ -522,6 +605,7 @@ impl BlockRangeServing {
         Ok(RangePermits {
             _peer: peer.0,
             _node: node,
+            _addr: addr,
         })
     }
 }
@@ -544,6 +628,7 @@ pub(super) struct PeerRangePermit(OwnedSemaphorePermit);
 pub(super) struct RangePermits {
     _peer: OwnedSemaphorePermit,
     _node: OwnedSemaphorePermit,
+    _addr: Option<AddrShare>,
 }
 
 /// A decoded `get-block-range` request waiting to be served, with the
