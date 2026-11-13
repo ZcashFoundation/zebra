@@ -1722,16 +1722,17 @@ impl Chain {
         self.orchard_nullifiers = orchard_nullifiers;
         self.ironwood_nullifiers = ironwood_nullifiers;
 
-        // Removing `other`'s blocks copied the paths to their entries, and this chain's own
-        // entries above the common tip are now only in its maps. Other chains that contain those
-        // blocks may hold their own copies, so they are counted for each chain.
+        // The installed maps keep the copies `other` detached even if `other` is evicted, so this
+        // chain counts them too. Removing `other`'s blocks also copied the paths to their
+        // entries, and this chain's own entries above the common tip are now only in its maps.
+        // Other chains that contain those blocks may hold their own copies, so they are counted
+        // for each chain.
         let tip_height = self
             .non_finalized_tip_height()
             .max(other.non_finalized_tip_height());
-        self.detached_index_entries = BTreeMap::from([(
-            tip_height,
-            other.index_entries_above(common_tip) + self.index_entries_above(common_tip),
-        )]);
+        self.detached_index_entries = other.detached_index_entries.clone();
+        *self.detached_index_entries.entry(tip_height).or_default() +=
+            other.index_entries_above(common_tip) + self.index_entries_above(common_tip);
         self.index_removals_since_rebuild = 0;
     }
 

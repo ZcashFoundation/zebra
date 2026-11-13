@@ -2206,6 +2206,68 @@ fn detached_index_entries_retire_after_finalization() -> Result<()> {
     Ok(())
 }
 
+/// A side chain that rebuilt its maps from a fork keeps counting the entries that fork detached,
+/// after a third fork wins and evicts it.
+#[test]
+fn rebuilt_chains_keep_their_source_detached_entries() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let busy_root = with_transactions(&block1.make_fake_child(), &network, 2_000, 0);
+    let old3 = busy_root.make_fake_child();
+    let dense_old4 = with_transactions(&old3.make_fake_child(), &network, 500, 1);
+    let new3 = busy_root.make_fake_child().set_block_commitment([1; 32]);
+    let new4 = new3.make_fake_child();
+    let new5 = new4.make_fake_child();
+    let new6 = new5.make_fake_child();
+    let side4 = new3.make_fake_child().set_work(10);
+
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    for block in [
+        &busy_root,
+        &old3,
+        &dense_old4,
+        &new3,
+        &new4,
+        &new5,
+        &new6,
+        &side4,
+    ] {
+        state.commit_block(block.clone().prepare(), &finalized_state)?;
+    }
+    assert_eq!(state.best_tip().unwrap().1, new6.hash());
+    // The best chain forked from the dense old chain.
+    assert!(state.best_chain().unwrap().detached_index_entry_count() > 500);
+
+    state.finalize();
+    let side_chain = |state: &NonFinalizedState, tip: block::Hash| {
+        state
+            .chain_iter()
+            .find(|chain| chain.non_finalized_tip_hash() == tip)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        side_chain(&state, side4.hash()).index_removals_since_rebuild,
+        0
+    );
+
+    // A heavier block on the side chain makes it the best chain, and evicts every other fork.
+    state.max_index_entries = Some(1);
+    let winner = side4.make_fake_child().set_work(1 << 80);
+    state.commit_block(winner.clone().prepare(), &finalized_state)?;
+    assert_eq!(1, state.chain_count());
+    assert_eq!(state.best_tip().unwrap().1, winner.hash());
+
+    let winner_chain = side_chain(&state, winner.hash());
+    assert!(winner_chain.detached_index_entry_count() > 500);
+    assert!(state.index_entry_count() > 2_000 + 500);
+
+    Ok(())
+}
+
 /// Forks over a busy block share its transactions and created outputs, so the state counts them
 /// once.
 #[test]
