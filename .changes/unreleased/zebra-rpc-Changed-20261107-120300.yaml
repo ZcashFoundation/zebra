@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: '`z_gettreestate` reads the block header instead of the whole block.'
+time: 2026-11-07T12:03:00.000000+00:00
