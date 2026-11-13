@@ -124,7 +124,7 @@ impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             // TEX addresses are Bech32m-encoded (ZIP 320), the inverse of the
-            // Bech32 branch of `FromStr`.
+            // Bech32m branch of `FromStr`.
             Address::Tex { .. } => f.write_str(&ZcashAddress::from(*self).encode()),
 
             Address::PayToScriptHash { .. } | Address::PayToPublicKeyHash { .. } => {
@@ -146,25 +146,20 @@ impl std::str::FromStr for Address {
             return Address::zcash_deserialize(&data[..]);
         }
 
-        // Try Bech32 (prefixes: tex, textest)
-        let (hrp, payload) =
-            bech32::decode(s).map_err(|_| SerializationError::Parse("invalid Bech32 encoding"))?;
-
-        // We can’t meaningfully call `Address::zcash_deserialize` for Bech32 addresses, because
-        // that method is explicitly reading two binary prefix bytes (the Base58Check version) + 20 hash bytes.
-        // Bech32 textual addresses carry no such binary "version" on the wire, so there’s nothing in the
-        // reader for zcash_deserialize to match.
-
-        // Instead, we deserialize the Bech32 address here:
-
+        // TEX addresses require Bech32m checksums.
+        let decoded = bech32::primitives::decode::CheckedHrpstring::new::<bech32::Bech32m>(s)
+            .map_err(|_| SerializationError::Parse("invalid Bech32m encoding"))?;
+        let payload = decoded.byte_iter();
         if payload.len() != 20 {
             return Err(SerializationError::Parse("unexpected payload length"));
         }
 
         let mut hash_bytes = [0u8; 20];
-        hash_bytes.copy_from_slice(&payload);
+        for (byte, value) in hash_bytes.iter_mut().zip(payload) {
+            *byte = value;
+        }
 
-        match hrp.as_str() {
+        match decoded.hrp().as_str() {
             zcash_address::constants::mainnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
                 network_kind: NetworkKind::Mainnet,
                 validating_key_hash: hash_bytes,

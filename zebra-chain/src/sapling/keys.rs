@@ -216,7 +216,9 @@ impl TryFrom<[u8; 32]> for TransmissionKey {
     /// <https://github.com/zkcrypto/jubjub/blob/master/src/lib.rs#L411>
     /// <https://zips.z.cash/zip-0216>
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let affine_point = jubjub::AffinePoint::from_bytes(bytes).unwrap();
+        let affine_point =
+            Option::<jubjub::AffinePoint>::from(jubjub::AffinePoint::from_bytes(bytes))
+                .ok_or("Invalid jubjub::AffinePoint value for Sapling TransmissionKey")?;
         // Check if it's identity or has prime order (i.e. is in the prime-order subgroup).
         if affine_point.is_torsion_free().into() {
             Ok(Self(affine_point))

@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Changed
+body: Method `TransmissionKey::try_from` now returns an error for malformed or non-canonical Sapling transmission keys instead of panicking.
+time: 2026-11-04T06:14:02.089936097+01:00
