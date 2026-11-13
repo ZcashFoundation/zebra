@@ -114,6 +114,11 @@ ${ENV_FILE_BODY}
     [Service]
     Type=exec
     Restart=${RESTART_POLICY}
+    # systemd stops restarting a unit that starts more than 5 times in 10s, and
+    # waits only 100ms between restarts by default, so a container that exits at
+    # once would stay down for good. Waiting 10s keeps a crash loop retrying, as
+    # docker's restart policy did under konlet.
+    RestartSec=10
     # konlet inherited docker's 10s SIGKILL, which can truncate zebrad's
     # RocksDB flush. A unit can wait for it.
     TimeoutStopSec=180

@@ -113,8 +113,9 @@ jobs:
             echo "::error::zones must be a non-empty, unique array containing only supported us-east1 zones"
             exit 1
           fi
-          # log_file is concatenated into a comma-separated --container-env list, so a
-          # comma would inject additional container environment variables.
+          # log_file is concatenated into the comma-separated CONTAINER_ENV list that
+          # becomes the container's env file, so a comma would inject additional
+          # container environment variables.
           if [[ "${LOG_FILE}" == *,* ]]; then
             echo "::error::log_file must not contain a comma"
             exit 1
@@ -376,7 +377,7 @@ jobs:
             P2P=18233; RPC=18232
           fi
 
-          # log_file is spliced into the comma-separated --container-env list below, so
+          # log_file is spliced into the comma-separated CONTAINER_ENV list below, so
           # a comma would inject extra container environment variables. The validate
           # job checks the input; check the effective value, which may instead have
           # come from the environment-scoped vars.CD_LOG_FILE fallback.
@@ -394,12 +395,20 @@ jobs:
           # type, subnet, service account or reserved address from being silently
           # dropped on redeploy. Redeploying identical configuration still reuses the
           # template, so the rolling update stays a no-op.
+          #
+          # The cloud-init generator is part of the identity. Without it, a redeploy of
+          # unchanged configuration would find and reuse a template built by the
+          # previous launcher (konlet), and a change to the generator would never reach
+          # running nodes.
           IMAGE_DIGEST="${DEPLOY_IMAGE##*@sha256:}"
+          CLOUD_INIT_GENERATOR=.github/workflows/scripts/gcp-container-cloud-init.sh
+          LAUNCHER_DIGEST=$(sha256sum "${CLOUD_INIT_GENERATOR}" | cut -d' ' -f1)
           TEMPLATE_IDENTITY=$(printf '%s\0' \
             "${DEPLOY_IMAGE}" "${ENVIRONMENT}" "${MIG_NAME}" "${DISK_NAME}" \
             "${MATRIX_NETWORK}" "${P2P}" "${RPC}" "${LOG_FILE}" "${SENTRY_DSN}" \
             "${GCP_MACHINE}" "${GCP_SUBNETWORK}" "${GCP_DEPLOYMENTS_SA}" \
             "${IP_ADDRESS:-}" "${CREATED_BY}" "${SOURCE_SHA}" "${GITHUB_REF_SLUG_URL}" \
+            "${LAUNCHER_DIGEST}" \
             | sha256sum | cut -c1-12)
           TEMPLATE_NAME="zebrad-${ENVIRONMENT}-${SOURCE_SHA_SHORT}-${IMAGE_DIGEST:0:12}-${TEMPLATE_IDENTITY}-${NETWORK}-${ZONE_LETTER}"
           echo "TEMPLATE_NAME=${TEMPLATE_NAME}" >> "$GITHUB_ENV"
@@ -422,19 +431,28 @@ jobs:
             EXTERNAL_ADDR_ENV=",ZEBRA_NETWORK__EXTERNAL_ADDR=${IP_ADDRESS}:${P2P}"
           fi
 
-          gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
+          # The container runs from a cloud-init systemd unit, not konlet, which Google
+          # deprecated (see scripts/gcp-container-cloud-init.sh). Nodes run until
+          # replaced, so the unit restarts the container like konlet's default
+          # restart policy did.
+          CONTAINER_IMAGE="${DEPLOY_IMAGE}" \
+          CONTAINER_NAME=zebrad \
+          CONTAINER_ENV="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
+          DISK_DEVICE_NAME="${DISK_NAME}" \
+          MOUNT_PATHS=/home/zebra/.cache/zebra \
+          RESTART_POLICY=always \
+            "${CLOUD_INIT_GENERATOR}" > "${RUNNER_TEMP}/cloud-init.yaml"
+
+          gcloud compute instance-templates create "${TEMPLATE_NAME}" \
             --machine-type="${GCP_MACHINE}" \
             --provisioning-model=SPOT \
             --boot-disk-size=10GB --boot-disk-type=pd-standard \
             --image-project=cos-cloud --image-family=cos-stable \
             --subnet="${GCP_SUBNETWORK}" --no-address \
             --disk="name=${DISK_NAME},device-name=${DISK_NAME},mode=rw,auto-delete=no,boot=no" \
-            --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
-            --container-stdin --container-tty \
-            --container-image="${DEPLOY_IMAGE}" \
-            --container-env="ZEBRA_NETWORK__NETWORK=${MATRIX_NETWORK},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${SENTRY_DSN},SENTRY_ENVIRONMENT=${ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${SOURCE_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${PR_NUMBER},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
             --service-account="${GCP_DEPLOYMENTS_SA}" --scopes=cloud-platform \
             --metadata="google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true,zebra-container-image=${DEPLOY_IMAGE}" \
+            --metadata-from-file=user-data="${RUNNER_TEMP}/cloud-init.yaml" \
             --labels="app=zebrad,environment=${ENVIRONMENT},network=${NETWORK},zone=${ZONE_LETTER},created_by=${CREATED_BY},github_ref=${GITHUB_REF_SLUG_URL},github_sha=${SOURCE_SHA_SHORT}" \
             --tags=zebrad
 
