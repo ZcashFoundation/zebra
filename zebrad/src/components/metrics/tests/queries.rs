@@ -146,7 +146,7 @@ fn dashboard_queries(value: &Value, queries: &mut Vec<String>) {
 /// one line. It returns an error for any other form, such as a quoted or block scalar, instead of
 /// skipping an expression it can't check.
 fn rule_expressions(rules: &str) -> Result<Vec<String>, String> {
-    let expr_key = Regex::new(r"^(\s*(?:-\s+)?)expr:(\s.*)?$").expect("valid regex");
+    let expr_key = Regex::new(r"^(\s*(?:-\s+)?)expr:(\s.*)?$").map_err(|e| e.to_string())?;
     let lines: Vec<&str> = rules.lines().collect();
 
     let mut expressions = Vec::new();
