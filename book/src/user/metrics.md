@@ -228,8 +228,9 @@ Metric labels use bounded values:
 label with the peer cache file path. The `zcash.net.peers.initial` series without
 a `seed` label counts the addresses from the peer cache.
 
-`zcash.net.peers.initial` keeps its `seed` label, the DNS seeder host name from
-`network.initial_mainnet_peers` or `network.initial_testnet_peers`. Each node has
-one value per configured seeder, and
-[Sentry](tracing.md#sentry-production-monitoring) metrics carry it as an
-attribute.
+The `seed` label of `zcash.net.peers.initial` names an entry from
+`network.initial_mainnet_peers` or `network.initial_testnet_peers` only when it
+is one of the default DNS seeders that Zebra ships, such as
+`dnsseed.z.cash:8233`. Every other entry, including a custom host name or an IP
+address and port, has the value `custom`, so private peer addresses don't reach
+Prometheus or [Sentry](tracing.md#sentry-production-monitoring).

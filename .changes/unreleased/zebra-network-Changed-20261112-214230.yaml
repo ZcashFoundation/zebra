@@ -1,4 +1,4 @@
 project: zebra-network
 kind: Changed
-body: Changed the `zcash.net.peers.missing_services` label from `remote_services`, the service bits the rejected peer sent, to `missing_service`, the required service it lacks, such as `NODE_NETWORK`. Removed the `cache` label, the peer cache file path, from `zcash.net.peers.initial` and `zcash.net.peers.cache`. Update dashboards and alerts that select on these labels.
+body: Changed the `zcash.net.peers.missing_services` label from `remote_services`, the service bits the rejected peer sent, to `missing_service`, the required service it lacks, such as `NODE_NETWORK`. Removed the `cache` label, the peer cache file path, from `zcash.net.peers.initial` and `zcash.net.peers.cache`. The `seed` label of `zcash.net.peers.initial` now names only Zebra's default DNS seeders, and labels every other configured initial peer `custom`. Update dashboards and alerts that select on these labels.
 time: 2026-11-12T21:42:30.70982086Z

@@ -708,3 +708,19 @@ async fn failing_dns_returns_cached_peers() {
 
     assert_eq!(peers, cached_peers);
 }
+
+#[test]
+fn initial_peer_metric_labels_only_name_default_seeders() {
+    use super::super::seed_metric_label;
+
+    assert_eq!(
+        seed_metric_label("dnsseed.z.cash:8233"),
+        "dnsseed.z.cash:8233"
+    );
+    assert_eq!(
+        seed_metric_label("testnet.seeder.zfnd.org:18233"),
+        "testnet.seeder.zfnd.org:18233"
+    );
+    assert_eq!(seed_metric_label("seed.example.internal:18233"), "custom");
+    assert_eq!(seed_metric_label("100.64.0.1:18233"), "custom");
+}

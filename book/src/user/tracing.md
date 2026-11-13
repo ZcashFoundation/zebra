@@ -116,10 +116,10 @@ keep being left out, it repeats the warning at most once an hour.
 If Zebra can't start the thread that sends metrics, it logs an error and sends
 no metrics to Sentry, while the Prometheus endpoint keeps working.
 
-Sentry metrics carry each metric's labels as attributes, including the DNS
-seeder host names from your network configuration in the `seed` label of
-`zcash.net.peers.initial`. Histograms also carry their event attributes, without
-the `event.` prefix, such as `chain.height` on
+Sentry metrics carry each metric's labels as attributes. The `seed` label of
+`zcash.net.peers.initial` names only Zebra's default DNS seeders, and has the
+value `custom` for any other configured initial peer. Histograms also carry their
+event attributes, without the `event.` prefix, such as `chain.height` on
 `zcash.chain.tip.block_delay_seconds`.
 
 Events, logs, and metrics carry the `chain.network` tag. Once the node has a

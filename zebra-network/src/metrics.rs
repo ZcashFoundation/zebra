@@ -29,8 +29,9 @@ use metrics::{describe_counter, describe_gauge, describe_histogram, Unit};
 /// - `remote_version` and `negotiated_version`: a protocol version Zebra knows, or `other`.
 /// - `min_version`: the minimum protocol version Zebra accepts for the current network upgrade.
 /// - `missing_service`: the required service a rejected peer doesn't advertise: `NODE_NETWORK`.
-/// - `seed`: a configured DNS seeder host name, on the `zcash.net.peers.initial` series that count
-///   the peers from DNS seeders. The series without it counts the peers from the peer cache file.
+/// - `seed`: on the `zcash.net.peers.initial` series that count the peers from configured initial
+///   peers, the configured entry when it is one of Zebra's default DNS seeders, or `custom` for any
+///   other entry. The series without it counts the peers from the peer cache file.
 pub const LABELS: &[(&str, &[&str])] = &[
     (
         "zcash.net.connection.attempts.total",
