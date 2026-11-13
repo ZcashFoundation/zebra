@@ -53,6 +53,15 @@ fn transport_config_caps_the_send_window() {
     );
 }
 
+/// The server refuses connection migration, which quinn allows by default:
+/// the address-keyed limits use the address validated at establishment.
+#[test]
+fn server_config_refuses_migration() {
+    let config = super::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");
+    let config = format!("{config:?}");
+    assert!(config.contains("migration: false,"), "got {config}");
+}
+
 #[test]
 fn configurations_disable_early_data() {
     let server = tls::server_config(b"zcash/main", &rcgen::PKCS_ED25519).expect("valid");

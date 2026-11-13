@@ -71,7 +71,10 @@ peers are not recorded there (see below).
   announcements from peers are received and acted on.
 - The same IP bans and per-IP limits as the legacy protocol, with separate
   inbound and outbound limits of half the legacy ones. Protocol violations
-  close the connection with the draft's error codes.
+  close the connection with the draft's error codes. Zebra does not let a
+  peer move a connection to another address (QUIC connection migration), so
+  the bans and limits keep applying to the address the peer connected from. A
+  peer whose address changes reconnects.
 - Misbehavior scores as the draft describes them. A misbehaving response, such
   as a header chain that does not follow from the request, adds to the peer's
   score, which lasts across reconnections for about a ban duration. A peer

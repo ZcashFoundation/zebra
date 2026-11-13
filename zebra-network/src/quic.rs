@@ -6,6 +6,13 @@
 //! are not advertised, and the transport parameters meet the draft's stream
 //! and idle-timeout minimums.
 //!
+//! Connection migration is refused, which the draft allows: bans, the per-IP
+//! connection limits, and misbehavior scores all use the address that was
+//! validated when the connection was established, so a peer that could move
+//! a connection to another address would keep it while escaping them. A peer
+//! whose address changes, for example after a NAT rebinding, has to
+//! reconnect.
+//!
 //! # Known gaps against the draft
 //!
 //! These follow from what rustls and quinn expose, and are noted for spec
@@ -178,7 +185,11 @@ fn server_config(
     let crypto = QuicServerConfig::try_from(crypto)?;
 
     let mut config = ServerConfig::with_crypto(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()));
+    config
+        .transport_config(Arc::new(transport_config()))
+        // Every address-keyed limit uses the address validated at establishment: see the module
+        // docs.
+        .migration(false);
     Ok(config)
 }
 
