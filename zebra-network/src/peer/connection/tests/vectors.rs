@@ -432,9 +432,9 @@ async fn early_block_getdata_preserves_negotiated_provenance() {
                 .insert(crate::types::PeerServices::NODE_COMPACT_BLOCKS);
             let hashes = HashSet::from([block.hash()]);
             let request = if negotiated {
-                Request::EarlyBlocksByHash(hashes)
+                Request::EarlyRawBlocksByHash(hashes)
             } else {
-                Request::BlocksByHash(hashes)
+                Request::RawBlocksByHash(hashes)
             };
             let (unhandled, (), message) = tokio::join!(
                 connection.handle_message_as_request(Message::GetData(vec![block.hash().into()])),
@@ -547,6 +547,8 @@ async fn early_block_outbound_requests_require_the_correct_service() {
     tokio::time::timeout(Duration::from_secs(2), async {
         for request in [
             Request::EarlyBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::RawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
+            Request::EarlyRawBlocksByHash(HashSet::from([block::Hash([0; 32])])),
             Request::AdvertiseEarlyBlock(block::Hash([0; 32]), None),
         ] {
             let (tx, rx) = oneshot::channel();

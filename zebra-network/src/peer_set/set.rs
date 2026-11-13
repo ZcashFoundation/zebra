@@ -2431,6 +2431,8 @@ where
                 future::ready(Err(PeerError::AdvertRequiresDedicatedService.into())).boxed()
             }
             Request::EarlyBlocksByHash(_)
+            | Request::RawBlocksByHash(_)
+            | Request::EarlyRawBlocksByHash(_)
             | Request::AdvertiseCompactBlock(..)
             | Request::CheckCompactHeader(_)
             | Request::CompactBlockTransactions(_)
@@ -2444,11 +2446,6 @@ where
             // Queued requests were already routed by `poll_ready()`.
             Request::PollPeerSet => async { Ok(Response::Nil) }.boxed(),
             Request::TreeRoots { .. } => self.route_tree_roots(req),
-
-            // Only the inbound service answers this request: it is never routed to a peer.
-            Request::RawBlocksByHash(_) => {
-                future::ready(Err(PeerError::InboundOnlyRequest("RawBlocksByHash").into())).boxed()
-            }
 
             // Find requests rotate across serving peers with a bounded wait; others use P2C.
             _ => self.route_request(req),

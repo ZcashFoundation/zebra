@@ -209,9 +209,9 @@ async fn compact_block_service_bit_controls_early_adverts_and_serving() {
                 .unwrap();
             let hashes = HashSet::from([hash]);
             let request = if early_relay {
-                Request::EarlyBlocksByHash(hashes)
+                Request::EarlyRawBlocksByHash(hashes)
             } else {
-                Request::BlocksByHash(hashes)
+                Request::RawBlocksByHash(hashes)
             };
             let (response, expected_message) = if early_relay {
                 (

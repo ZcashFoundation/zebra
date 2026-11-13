@@ -144,8 +144,9 @@ pub enum Response {
 
     /// A list of found serialized blocks, and missing block hashes.
     ///
-    /// The response to [`Request::RawBlocksByHash`](super::Request::RawBlocksByHash). Each
-    /// available block is sent to the peer as its stored bytes.
+    /// The response to [`Request::RawBlocksByHash`](super::Request::RawBlocksByHash) and
+    /// [`Request::EarlyRawBlocksByHash`](super::Request::EarlyRawBlocksByHash) when no requested
+    /// body is uncommitted. Each available block is sent to the peer as its stored bytes.
     ///
     /// The bytes are shared, like the blocks in [`Response::Blocks`], so cloning a response
     /// doesn't copy them.

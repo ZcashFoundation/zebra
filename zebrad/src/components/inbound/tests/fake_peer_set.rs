@@ -204,6 +204,263 @@ async fn inbound_raw_blocks_match_serialized_blocks() {
     tx_gossip_task_handle.abort();
 }
 
+/// Negotiated block requests serve committed blocks as stored bytes, but keep an uncommitted
+/// early-relay body on the authorized path, so it stays revocable until its local write, and
+/// ordinary connections never receive it.
+#[tokio::test(flavor = "multi_thread")]
+async fn early_raw_block_requests_keep_early_bodies_revocable() -> Result<(), BoxError> {
+    use zebra_chain::{
+        block::{self, ChainHistoryBlockTxAuthCommitmentHash, SerializedBlock},
+        chain_tip::ChainTip,
+        parameters::{
+            subsidy::block_subsidy, testnet::ConfiguredActivationHeights, NetworkUpgrade,
+        },
+        transaction::{LockTime, Transaction},
+        transparent,
+        work::equihash::Solution,
+    };
+    use zebra_state::{ReadRequest, ReadResponse};
+
+    let _init_guard = zebra_test::init();
+    timeout(Duration::from_secs(30), async {
+        let network = Network::new_regtest(
+            ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: Some(1),
+                ..Default::default()
+            }
+            .into(),
+        );
+        let (state, read, mut latest_chain_tip, _tip_changes) =
+            zebra_state::init(StateConfig::ephemeral(), &network, Height(0), 0).await;
+        let state = Buffer::new(state, 10);
+        let genesis = block::genesis::regtest_genesis_block();
+        state
+            .clone()
+            .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                genesis.clone().into(),
+            ))
+            .await?;
+        while latest_chain_tip.best_tip_height() != Some(Height(0)) {
+            latest_chain_tip.best_tip_changed().await?;
+        }
+
+        // Commit a mined child of genesis, then mine an uncommitted child of that block.
+        let mut blocks = Vec::new();
+        for height in [Height(1), Height(2)] {
+            let ReadResponse::ChainInfo(info) =
+                read.clone().oneshot(ReadRequest::ChainInfo).await?
+            else {
+                panic!("chain-info request must return chain info");
+            };
+            let transactions = vec![Arc::new(Transaction::test_v5(
+                NetworkUpgrade::Nu5,
+                vec![transparent::Input::Coinbase {
+                    height,
+                    data: vec![0],
+                    sequence: u32::MAX,
+                }],
+                vec![transparent::Output::new(
+                    block_subsidy(height, &network).expect("regtest subsidies are valid"),
+                    transparent::Script::new(&[0x51]),
+                )],
+                LockTime::unlocked(),
+                height,
+            ))];
+            let mut block = Block {
+                header: Arc::new(block::Header {
+                    version: 4,
+                    previous_block_hash: info.tip_hash,
+                    merkle_root: transactions.iter().map(|tx| tx.hash()).collect(),
+                    commitment_bytes: [0; 32].into(),
+                    time: info.cur_time.into(),
+                    difficulty_threshold: info.expected_difficulty,
+                    nonce: [0; 32].into(),
+                    solution: Solution::Regtest([0; 36]),
+                }),
+                transactions,
+            };
+            Arc::make_mut(&mut block.header).commitment_bytes =
+                <[u8; 32]>::from(ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    &info
+                        .chain_history_root
+                        .unwrap_or(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()),
+                    &block.auth_data_root(),
+                ))
+                .into();
+            (0u32..100_000)
+                .find(|nonce| {
+                    let mut bytes = [0; 32];
+                    bytes[..4].copy_from_slice(&nonce.to_le_bytes());
+                    Arc::make_mut(&mut block.header).nonce = bytes.into();
+                    zebra_consensus::difficulty_is_valid(
+                        &block.header,
+                        &network,
+                        &height,
+                        &block.hash(),
+                    )
+                    .is_ok()
+                })
+                .expect("the regtest target is reached within the bounded nonce search");
+            let block = Arc::new(block);
+            if height == Height(1) {
+                state
+                    .clone()
+                    .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                        CheckpointVerifiedBlock::from(block.clone()).into(),
+                    ))
+                    .await?;
+                while latest_chain_tip.best_tip_height() != Some(height) {
+                    latest_chain_tip.best_tip_changed().await?;
+                }
+            }
+            blocks.push(block);
+        }
+        let (committed, early) = (blocks[0].clone(), blocks[1].clone());
+
+        let ReadResponse::EarlyRelayCache(cache) =
+            read.clone().oneshot(ReadRequest::EarlyRelayCache).await?
+        else {
+            panic!("cache request must return the early-relay cache");
+        };
+        let zebra_state::Response::EarlyRelay(Some(guard)) = state
+            .clone()
+            .oneshot(zebra_state::Request::EarlyRelay {
+                block: early.clone(),
+                require_authentication: true,
+                origin: zebra_state::EarlyRelayOrigin::Peer,
+            })
+            .await?
+        else {
+            panic!("the authenticated next-tip candidate must receive a guard");
+        };
+        assert!(
+            cache
+                .get(&early.hash())
+                .is_some_and(|cached| Arc::ptr_eq(&cached, &early)),
+            "the authenticated body is published to the early-relay cache"
+        );
+
+        let (setup_tx, setup_rx) = oneshot::channel();
+        let mut inbound = Inbound::new(1, setup_rx).with_early_blocks(Some(cache.clone()));
+        let mut mempool = MockService::build().for_unit_tests();
+        let mut peer_set = MockService::build().for_unit_tests();
+        let (block_verifier, _verifier_called) = recording_block_verifier();
+        let (misbehavior_sender, _misbehavior) = tokio::sync::mpsc::channel(1);
+        assert!(setup_tx
+            .send(InboundSetupData {
+                network: network.clone(),
+                sync_downloads: Default::default(),
+                address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
+                    SocketAddr::from(([0, 0, 0, 0], 0)),
+                    &network,
+                    DEFAULT_MAX_CONNS_PER_IP,
+                    Span::none(),
+                ))),
+                block_download_peer_set: Buffer::new(BoxService::new(peer_set.clone()), 1),
+                block_verifier,
+                mempool: Buffer::new(BoxService::new(mempool.clone()), 1),
+                state: state.clone(),
+                latest_chain_tip,
+                misbehavior_sender,
+            })
+            .is_ok());
+
+        // Without cached bodies, finalized and non-finalized blocks are served as their exact
+        // serialized bytes, and unknown blocks are missing.
+        let missing = block::Hash([0x11; 32]);
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::EarlyRawBlocksByHash(HashSet::from([
+                genesis.hash(),
+                committed.hash(),
+                missing,
+            ])))
+            .await?;
+        let Response::RawBlocks(items) = response else {
+            panic!("committed blocks are served as stored bytes: {response:?}");
+        };
+        let available: HashSet<SerializedBlock> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|bytes| SerializedBlock::clone(&bytes))
+            .collect();
+        assert_eq!(
+            available,
+            HashSet::from([
+                SerializedBlock::from(genesis.clone()),
+                SerializedBlock::from(committed.clone()),
+            ]),
+        );
+        let missing_items: Vec<block::Hash> =
+            items.iter().filter_map(|item| item.missing()).collect();
+        assert_eq!(missing_items, vec![missing]);
+
+        // Ordinary connections can't read the early-relay cache.
+        assert_eq!(
+            inbound
+                .ready()
+                .await?
+                .call(Request::RawBlocksByHash(HashSet::from([early.hash()])))
+                .await?,
+            Response::RawBlocks(vec![Missing(early.hash())]),
+        );
+
+        // A batch with an early body uses the authorized path, for every body in the batch.
+        let response = inbound
+            .ready()
+            .await?
+            .call(Request::EarlyRawBlocksByHash(HashSet::from([
+                early.hash(),
+                committed.hash(),
+            ])))
+            .await?;
+        let Response::AuthorizedBlocks {
+            blocks: items,
+            authorization,
+        } = response
+        else {
+            panic!("early bodies keep revocable authorization: {response:?}");
+        };
+        let served: Vec<Arc<Block>> = items
+            .iter()
+            .filter_map(|item| item.available())
+            .map(|(block, _)| block)
+            .collect();
+        assert_eq!(served.len(), 2);
+        let served_early = served
+            .iter()
+            .find(|block| Arc::ptr_eq(block, &early))
+            .expect("the exact cached early body is served");
+        let served_committed = served
+            .iter()
+            .find(|block| block.hash() == committed.hash())
+            .expect("the committed body is served");
+        assert!(authorization.is_authorized(served_early));
+        assert!(authorization.is_authorized(served_committed));
+
+        // Dropping the verifier's guard withdraws the body before any later local write.
+        drop(guard);
+        assert!(!authorization.is_authorized(served_early));
+        assert!(authorization.is_authorized(served_committed));
+        assert_eq!(
+            inbound
+                .ready()
+                .await?
+                .call(Request::EarlyRawBlocksByHash(HashSet::from([early.hash()])))
+                .await?,
+            Response::RawBlocks(vec![Missing(early.hash())]),
+            "withdrawn early bodies are never served",
+        );
+
+        mempool.expect_no_requests().await;
+        peer_set.expect_no_requests().await;
+        Ok::<_, BoxError>(())
+    })
+    .await?
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn empty_mempool_requests_return_empty_inventory() {
     let (

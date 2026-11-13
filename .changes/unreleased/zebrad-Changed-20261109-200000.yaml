@@ -1,4 +1,9 @@
 project: zebrad
 kind: Changed
-body: Zebra now serves blocks to legacy peers from their stored bytes, instead of deserializing, sizing and reserializing each one. On full-size blocks from the 2022 spam period this cuts the CPU time to serve a block about 15–20 times, from roughly 150 ms to 8 ms per 2 MB block.
+body: >-
+  Serve ordinary block downloads from stored bytes on legacy and negotiated connections,
+  avoiding transaction decoding on the serving node. Cached early bodies retain revocable
+  serving authorization. The request/response metric command labels now include
+  `RawBlocksByHash`, `EarlyRawBlocksByHash` and `RawBlocks`; finalized state reads use
+  `raw_block`.
 time: 2026-11-09T20:00:00.000000000Z

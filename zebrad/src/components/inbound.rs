@@ -504,6 +504,21 @@ impl Service<zn::Request> for Inbound {
             }
         };
 
+        // Batches with an uncommitted cached body use the decoded paths, which serve submitted
+        // bodies before commit and keep early bodies revocable.
+        let req = match req {
+            zn::Request::RawBlocksByHash(hashes)
+                if has_cached_body(&hashes, &self.submitted_blocks, None) =>
+            {
+                zn::Request::BlocksByHash(hashes)
+            }
+            zn::Request::EarlyRawBlocksByHash(hashes)
+                if has_cached_body(&hashes, &self.submitted_blocks, self.early_blocks.as_ref()) =>
+            {
+                zn::Request::EarlyBlocksByHash(hashes)
+            }
+            req => req,
+        };
         let early_relay = matches!(req, zn::Request::EarlyBlocksByHash(_));
         match req {
             req @ (zn::Request::CheckCompactHeader(_) | zn::Request::CompactBlockTransactions(_) | zn::Request::CheckCompactBlock(..)) => {
@@ -612,9 +627,9 @@ impl Service<zn::Request> for Inbound {
                     })
                 }.boxed()
             }
-            zn::Request::RawBlocksByHash(hashes) => {
-                // The same limits as `BlocksByHash`, but each block is read and sent as its
-                // stored bytes, so serving it doesn't deserialize, size and reserialize it.
+            zn::Request::RawBlocksByHash(hashes) | zn::Request::EarlyRawBlocksByHash(hashes) => {
+                // The same limits as `BlocksByHash`, but each committed block is read and sent as
+                // its stored bytes, so serving it doesn't deserialize, size and reserialize it.
                 if hashes.is_empty() {
                     return async { Ok(zn::Response::Nil) }.boxed();
                 }
@@ -815,6 +830,19 @@ impl Service<zn::Request> for Inbound {
             zn::Request::PollPeerSet => unreachable!("peers never send peer set poll requests"),
         }
     }
+}
+
+/// Returns true if a block request would serve any uncommitted body from the submitted cache, or
+/// from the early-relay cache if it is supplied.
+fn has_cached_body(
+    hashes: &HashSet<block::Hash>,
+    submitted_blocks: &zebra_rpc::SubmittedBlockCache,
+    early_blocks: Option<&zs::EarlyRelayCache>,
+) -> bool {
+    hashes.iter().take(GETDATA_MAX_BLOCK_COUNT).any(|hash| {
+        submitted_blocks.get(hash).is_some()
+            || early_blocks.is_some_and(|cache| cache.get(hash).is_some())
+    })
 }
 
 /// Screens compact requests without publishing bodies or caching probabilistic failure verdicts.

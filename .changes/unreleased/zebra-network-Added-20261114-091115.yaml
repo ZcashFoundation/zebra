@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: Add stored-byte block responses and inbound raw block requests for legacy and negotiated downloads.
+time: 2026-11-14T09:11:15.418227567+01:00

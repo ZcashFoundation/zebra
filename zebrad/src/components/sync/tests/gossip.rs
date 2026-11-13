@@ -1121,19 +1121,19 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             assert!(!call.is_finished(), "the real verifier reply is still held");
             let event = committed.recv().await.unwrap();
             assert_eq!(event, (hash, Height(u32::from(nonce))));
-            assert_eq!(
-                inbound
-                    .ready()
-                    .await
-                    .unwrap()
-                    .call(zn::Request::BlocksByHash([hash].into()))
-                    .await
-                    .unwrap(),
-                zn::Response::Blocks(vec![zn::InventoryResponse::Available((
-                    candidate.clone(),
-                    None
-                ))]),
-            );
+            // Both wire block requests serve the cached submission as a parsed body.
+            for request in [
+                zn::Request::RawBlocksByHash([hash].into()),
+                zn::Request::EarlyRawBlocksByHash([hash].into()),
+            ] {
+                assert_eq!(
+                    inbound.ready().await.unwrap().call(request).await.unwrap(),
+                    zn::Response::Blocks(vec![zn::InventoryResponse::Available((
+                        candidate.clone(),
+                        None
+                    ))]),
+                );
+            }
             if nonce == 1 {
                 peer_set.set_readiness(Readiness::Ready);
                 assert_eq!(
@@ -1194,16 +1194,16 @@ async fn gossip_and_inbound_relay_only_validated_submissions() {
             .ready()
             .await
             .unwrap()
-            .call(zn::Request::BlocksByHash([hash].into()));
+            .call(zn::Request::RawBlocksByHash([hash].into()));
         tokio::pin!(missing);
         assert!(futures::poll!(&mut missing).is_pending());
         fallback_state
-            .expect_request(zebra_state::Request::Block(hash.into()))
+            .expect_request(zebra_state::Request::RawBlock(hash.into()))
             .await
-            .respond(zebra_state::Response::Block(None));
+            .respond(zebra_state::Response::RawBlock(None));
         assert_eq!(
             missing.await.unwrap(),
-            zn::Response::Blocks(vec![zn::InventoryResponse::Missing(hash)])
+            zn::Response::RawBlocks(vec![zn::InventoryResponse::Missing(hash)])
         );
         assert!(
             committed.try_recv().is_err(),
