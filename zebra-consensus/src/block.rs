@@ -506,8 +506,14 @@ where
             }
 
             // Finally, submit the block for contextual verification.
-            let new_outputs = Arc::into_inner(known_utxos)
-                .expect("all verification tasks using known_utxos are complete");
+            // Transaction services can retain requests after returning their responses.
+            let new_outputs = Arc::try_unwrap(known_utxos).unwrap_or_else(|shared| {
+                tracing::warn!(
+                    ?hash,
+                    "transaction verifier retained outputs after verification"
+                );
+                (*shared).clone()
+            });
 
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
