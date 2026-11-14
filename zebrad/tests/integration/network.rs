@@ -34,23 +34,23 @@ use crate::common::{
 
 use crate::integration::database::check_config_conflict_with_running_node;
 
-/// The maximum time for `zebrad` to finish its initial connections to live Mainnet peers.
+/// The maximum startup observation time for a completed live Mainnet peer handshake.
 const LIVE_PEER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Check that `zebrad` resolves the default DNS seeders and completes a handshake with at least
-/// one live Mainnet peer at startup.
+/// one live Mainnet peer before the startup deadline.
 ///
 /// This is the only zebrad test that checks the default seeders and real peer handshakes on every
 /// PR: other zebrad tests don't use live peers unless they call `use_live_peers()`.
-#[test]
-fn live_mainnet_peer_handshake() -> Result<()> {
+#[tokio::test]
+async fn live_mainnet_peer_handshake() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     if zebra_test::net::zebra_skip_network_tests() {
         return Ok(());
     }
 
-    let mut config = default_test_config(&Mainnet);
+    let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
     use_live_peers(&mut config);
 
     let mut child = testdir()?
@@ -58,21 +58,22 @@ fn live_mainnet_peer_handshake() -> Result<()> {
         .spawn_child(args!["start"])?
         .with_timeout(LIVE_PEER_HANDSHAKE_TIMEOUT)?;
 
-    let initial_peers_line = child
-        .expect_stdout_line_matches("finished connecting to initial seed and disk cache peers")?;
+    let deadline = child
+        .deadline()
+        .expect("the child observation timeout was configured");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let peer_result =
+        tokio::time::timeout_at(deadline.into(), wait_for_outbound_peer(&rpc_client)).await;
 
     child.kill(false)?;
     let output = child.wait_with_output()?;
     output.assert_was_killed()?;
 
-    let handshake_succeeded = regex::Regex::new(r"handshake_success_total=[1-9]")
-        .expect("hard-coded regex is valid")
-        .is_match(&initial_peers_line);
-
     assert_with_context!(
-        handshake_succeeded,
+        matches!(&peer_result, Ok(Ok(_))),
         &output,
-        "no initial handshake with a live Mainnet peer succeeded: {initial_peers_line}"
+        "no live Mainnet handshake was observed before the startup deadline: {peer_result:?}"
     );
 
     Ok(())
