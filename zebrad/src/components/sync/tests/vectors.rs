@@ -3271,6 +3271,9 @@ async fn singleton_discovery_downloads_once(gossip: SingletonGossip) {
         let parent = block.header.previous_block_hash;
         let downloads = Arc::new(AtomicUsize::new(0));
         let download_count = downloads.clone();
+        let raw_block = Arc::new(block::SerializedBlock::from(
+            zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec(),
+        ));
         let remote = tower::service_fn(move |request| {
             let response = match request {
                 zn::Request::FindBlocks { known_blocks, stop } => {
@@ -3278,10 +3281,10 @@ async fn singleton_discovery_downloads_once(gossip: SingletonGossip) {
                     assert_eq!(stop, None);
                     zn::Response::BlockHashes(vec![hash])
                 }
-                zn::Request::BlocksByHash(hashes) => {
+                zn::Request::RawBlocksByHash(hashes) => {
                     assert_eq!(hashes, [hash].into_iter().collect());
                     download_count.fetch_add(1, Ordering::SeqCst);
-                    zn::Response::Blocks(vec![Available((block.clone(), None))])
+                    zn::Response::RawBlocks(vec![Available(raw_block.clone())])
                 }
                 request => panic!("unexpected remote request: {request:?}"),
             };
