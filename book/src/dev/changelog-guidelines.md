@@ -31,9 +31,9 @@ Kinds are `breaking` (rendered as `Breaking Changes`), `Added`, `Changed`,
 is `zebrad` or a crate directory name. A release that activates a network upgrade
 also takes one `zebrad` fragment of kind `network-upgrade` (rendered as `Network
 Upgrade`). It is the only kind that gives `zebrad` a new major version, only
-`zebrad` may use it, and like `breaking` it needs a `!` in the PR title. Running `changie new` with no flags
-prompts for all of them. Fragments land in `.changes/unreleased/` and are
-committed with the PR.
+`zebrad` may use it. A new `network-upgrade` or `breaking` declaration needs a
+`!` in the PR title. Running `changie new` with no flags prompts for all of
+them. Fragments land in `.changes/unreleased/` and are committed with the PR.
 
 The PR Gate dry-runs the release batching over every pending fragment on pull
 requests, in the merge queue and on `main`, and fails if changie cannot batch
@@ -54,6 +54,58 @@ for zebrad the `zebrad-` prefix has to be stripped, since its tags are `v6.3.0`.
 Because the version files under `.changes/` are the source of truth, fixing a
 typo in an already released entry means editing the version file and re-running
 `changie merge`.
+
+### Audited project scopes
+
+The PR changelog validator normally asks for fragments for directly changed
+publishable packages on `feat`, `fix`, `perf`, `refactor` and `build` PRs. When
+other changed packages only contain internal caller migrations, declare the
+projects with audience-visible changes in a native Git commit trailer, in the
+final paragraph of the commit message:
+
+```text
+feat(network,chain)!: update the transaction API
+
+Changelog: zebra-chain,zebra-network - Only these public APIs change; other crates just migrate internal callers.
+```
+
+Every non-merge commit between the PR base and head must have exactly one
+`Changelog` trailer with a nonempty reason. Project lists use comma-separated
+keys from `.changie.yaml`, without spaces or duplicates. Missing trailers,
+duplicate trailers (including empty duplicates), unknown projects, malformed
+lists or empty reasons leave normal fragment requirements in place for the
+whole PR. Merge commits do not supply or require declarations.
+
+The validator takes the union of all declared projects. Every named project
+needs an added or edited valid fragment, even if the package has no directly
+changed production files. Unnamed packages are explicitly being audited as
+internal-only changes. An explicit scope requires a root operator fragment
+only when it names `zebrad`, including for root manifest and dependency updates.
+A `feat` or `!` PR may use a nonempty scope; `!` still requires a changed breaking
+fragment for at least one named project. Any new breaking declaration anywhere
+in the PR still requires `!`.
+
+For a wholly internal, test-only or unreleased-only commit, use
+`Changelog: none - <reason>`. It contributes no projects to the union. A PR whose
+commits all declare `none` may omit fragments only when it is not a `feat`, has
+no `!` title and introduces no breaking fragment.
+
+No declaration excuses malformed or unknown fragments. The validator logs
+requests and commit IDs; reviewers must check each reason and every excluded
+package against actual audience impact. Trailers do not prove API compatibility
+or the absence of operator-visible behavior changes.
+
+### Refining unreleased entries
+
+Update an existing feature entry to describe its final unreleased API instead of
+adding entries for intermediate internal fixes or caller migrations. An edit
+that keeps a fragment's path, project and breaking kind does not itself need a
+new `!` title. A newly added breaking fragment, a new breaking kind, or a change
+to the project of a breaking fragment still does.
+
+These are changelog declaration checks, not API compatibility analysis. The
+separate API diff uses the title's `!` to select its policy, remains advisory in
+the PR workflow, and does not read these trailers.
 
 ## CHANGELOG.md vs GitHub Release
 
@@ -87,10 +139,11 @@ These apply to all Zebra changelogs regardless of audience.
 
 Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, except a breaking crate addition (see [Section priority](#section-priority)), and do not group multiple PRs in one entry.
 
-Verification-only files and documentation do not need fragments. A lockfile-only
-change needs an operator entry only when it changes the node's production
-dependency graph, including supported non-default features and target-specific
-dependencies. Test-only features and development dependencies are excluded.
+Verification-only files and documentation do not need fragments. Without
+explicit audience metadata, a lockfile-only change needs an operator entry
+when it changes the node's production dependency graph, including supported
+non-default features and target-specific dependencies. Test-only features and
+development dependencies are excluded.
 
 Good:
 
