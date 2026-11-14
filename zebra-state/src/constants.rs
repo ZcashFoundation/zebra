@@ -21,6 +21,9 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
+/// The directory name isolating potentially pruned state from archive-only readers.
+pub const PRUNED_STATE_DATABASE_KIND: &str = "state-pruned";
+
 /// The database format major version, incremented each time the on-disk database format has a
 /// breaking data format change.
 ///
@@ -64,10 +67,9 @@ const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 /// significant format compatibility fix.
 const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 
-/// Returns the full semantic version of the currently running state database format code.
+/// Returns the full semantic version of the state database format code, shared by both kinds.
 ///
-/// This is the version implemented by the Zebra code that's currently running,
-/// the version on disk can be different.
+/// Use [`Config::state_database_kind()`] to resolve the directory kind. The version on disk can differ.
 pub fn state_database_format_version_in_code() -> Version {
     Version {
         major: DATABASE_FORMAT_VERSION,

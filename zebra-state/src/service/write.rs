@@ -146,6 +146,8 @@ struct WriteBlockWorkerTask {
     /// If `Some`, the non-finalized state is written to this backup directory
     /// synchronously before each channel update, instead of via the async backup task.
     backup_dir_path: Option<PathBuf>,
+    /// Coalesces durable finalized-tip notifications for the pruning worker.
+    pruning_wake: Option<crossbeam_channel::Sender<()>>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -192,6 +194,7 @@ pub(super) struct BlockWriteSender {
 
 impl BlockWriteSender {
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
+    #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         skip_all,
@@ -206,6 +209,7 @@ impl BlockWriteSender {
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
+        pruning_wake: Option<crossbeam_channel::Sender<()>>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<(Option<block::Height>, block::Hash)>,
@@ -236,6 +240,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    pruning_wake,
                 }
                 .run()
             })
@@ -276,6 +281,7 @@ impl WriteBlockWorkerTask {
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
+            pruning_wake,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -323,6 +329,9 @@ impl WriteBlockWorkerTask {
                 Ok((tip_block, note_commitment_trees)) => {
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+                    if let Some(wake) = pruning_wake {
+                        let _ = wake.try_send(());
+                    }
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -479,6 +488,9 @@ impl WriteBlockWorkerTask {
                             .expect(
                                 "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                             ).1.into();
+                if let Some(wake) = pruning_wake {
+                    let _ = wake.try_send(());
+                }
             }
 
             // Update the metrics if semantic and contextual validation passes

@@ -262,16 +262,16 @@ impl StartCmd {
         false
     }
 
-    /// Selects truthful local services and rejects sidecars that require unavailable history.
+    /// Disables archive service and sidecars as soon as pruning is enabled or history is missing.
     pub(super) fn network_services(
         config: &ZebradConfig,
         history: zebra_state::HistoryCapabilities,
     ) -> Result<zebra_network::types::PeerServices, Report> {
         let mut services = config.network.local_services;
-        if history.is_pruned() {
+        if config.state.prune_blocks_older_than.is_some() || history.is_pruned() {
             if config.zcashd_compat.enabled {
                 return Err(eyre!(
-                    "zcashd-compat requires an archive node; pruned block history is unavailable"
+                    "zcashd-compat requires an archive node; pruning is enabled or history is missing"
                 ));
             }
             services.remove(zebra_network::types::PeerServices::NODE_NETWORK);
@@ -279,10 +279,13 @@ impl StartCmd {
         Ok(services)
     }
 
-    async fn start(&self) -> Result<(), Report> {
+    /// Starts the node, rejecting incompatible pruning settings before opening writable state.
+    pub(super) async fn start(&self, config: Arc<ZebradConfig>) -> Result<(), Report> {
         check_tcp_slow_start_after_idle();
 
-        let config = APPLICATION.config();
+        // State initialization can prune immediately. Check the pruning config before starting
+        // services; check persisted history separately once the state is open.
+        Self::network_services(&config, zebra_state::HistoryCapabilities::default())?;
         let is_regtest = config.network.network.is_regtest();
 
         let config = if is_regtest {
@@ -391,7 +394,7 @@ impl StartCmd {
         read_only_state_service.log_db_metrics();
 
         let state = ServiceBuilder::new()
-            .buffer(Self::state_buffer_bound())
+            .buffer(Self::state_buffer_bound(&config))
             .service(state_service);
 
         info!("initializing network");
@@ -983,9 +986,7 @@ impl StartCmd {
 
     /// Returns the bound for the state service buffer,
     /// based on the configurations of the services that use the state concurrently.
-    fn state_buffer_bound() -> usize {
-        let config = APPLICATION.config();
-
+    fn state_buffer_bound(config: &ZebradConfig) -> usize {
         // Ignore the checkpoint verify limit, because it is very large.
         //
         // TODO: do we also need to account for concurrent use across services?
@@ -1015,7 +1016,7 @@ impl Runnable for StartCmd {
             .take();
 
         rt.expect("runtime should not already be taken")
-            .run(self.start());
+            .run(self.start(APPLICATION.config()));
 
         info!("stopping zebrad");
     }
