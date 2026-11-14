@@ -1,0 +1,4 @@
+project: zebra-rpc
+kind: Changed
+body: Responses from `gettxout` serialize an unavailable creating-transaction version as `null` when its body is pruned, while retaining the unspent output fields ([#12088](https://github.com/ZcashFoundation/zebra/pull/12088)).
+time: 2026-11-13T01:55:19.90533201+01:00

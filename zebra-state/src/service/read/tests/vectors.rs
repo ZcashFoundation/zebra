@@ -9,7 +9,7 @@ use zebra_chain::{
     parameters::Network::*,
     serialization::ZcashDeserializeInto,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction,
+    transaction, transparent,
 };
 
 use zebra_test::{
@@ -18,15 +18,18 @@ use zebra_test::{
 };
 
 use crate::{
+    arbitrary::Prepare,
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     init_test_services, populated_state,
     response::MinedTx,
     service::{
-        finalized_state::{DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        finalized_state::{DiskWriteBatch, WriteDisk, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
         non_finalized_state::Chain,
-        read::{orchard_subtrees, sapling_subtrees},
+        read::{known_transaction, orchard_subtrees, sapling_subtrees, unspent_output},
     },
-    Config, ReadRequest, ReadResponse,
+    tests::setup::new_state_with_mainnet_genesis,
+    BlockReadError, CheckpointVerifiedBlock, Config, OutputLocation, ReadRequest, ReadResponse,
+    TransactionLocation,
 };
 
 /// Test that ReadStateService responds correctly when empty.
@@ -915,5 +918,221 @@ fn address_tx_ids_limit_spans_finalized_and_non_finalized_blocks() -> Result<()>
         assert_eq!(limited, all[..limit], "limit {limit}");
     }
 
+    Ok(())
+}
+
+/// Pruned bodies do not remove outputs or best-chain transaction membership.
+#[test]
+fn unspent_output_survives_pruning() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut non_finalized, _) = new_state_with_mainnet_genesis();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(1..=4)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    for block in &blocks[..3] {
+        finalized.commit_finalized_direct(
+            CheckpointVerifiedBlock::from(block.clone()).into(),
+            None,
+            "output test",
+        )?;
+    }
+    non_finalized.commit_new_chain(blocks[3].clone().prepare(), &finalized.db)?;
+    let chain = non_finalized.best_chain().unwrap();
+    let outpoint = transparent::OutPoint {
+        hash: blocks[0].transactions[0].hash(),
+        index: 0,
+    };
+    let output_index = usize::try_from(outpoint.index).unwrap();
+    let read = || unspent_output(Some(&chain), &finalized.db, outpoint);
+    let archived = read()?.unwrap();
+    assert_eq!(
+        archived.transaction_version,
+        Some(blocks[0].transactions[0].version())
+    );
+    assert_eq!(
+        archived.utxo.output,
+        blocks[0].transactions[0].outputs()[output_index]
+    );
+    assert!(archived.utxo.from_coinbase);
+    assert_eq!(archived.utxo.height, Height(1));
+    assert_eq!(archived.confirmations, 4);
+    assert_eq!(archived.best_chain_tip_hash, blocks[3].hash());
+
+    let mut batch = DiskWriteBatch::new();
+    batch.prepare_history_pruning(&finalized.db, Height(2))?;
+    finalized.db.write(batch)?;
+    let pruned = read()?.unwrap();
+    assert_eq!(pruned.transaction_version, None);
+    assert_eq!(
+        pruned,
+        crate::OutputWithMetadata {
+            transaction_version: None,
+            ..archived
+        }
+    );
+    assert!(known_transaction(
+        Some(&chain),
+        &finalized.db,
+        outpoint.hash
+    ));
+    assert!(known_transaction(
+        Some(&chain),
+        &finalized.db,
+        blocks[3].transactions[0].hash()
+    ));
+    assert!(!known_transaction(
+        None::<Arc<Chain>>,
+        &finalized.db,
+        blocks[3].transactions[0].hash(),
+    ));
+    assert!(!known_transaction(
+        Some(&chain),
+        &finalized.db,
+        transaction::Hash([0xff; 32])
+    ));
+    assert!(unspent_output(
+        Some(&chain),
+        &finalized.db,
+        transparent::OutPoint {
+            index: u32::MAX,
+            ..outpoint
+        }
+    )?
+    .is_none());
+    assert!(unspent_output(
+        Some(&chain),
+        &finalized.db,
+        transparent::OutPoint {
+            hash: transaction::Hash([0xff; 32]),
+            ..outpoint
+        }
+    )?
+    .is_none());
+
+    let mut spent_chain = chain.as_ref().clone();
+    #[cfg(feature = "indexer")]
+    let spending_transaction = transaction::Hash([0xee; 32]);
+    #[cfg(not(feature = "indexer"))]
+    let spending_transaction = ();
+    spent_chain
+        .spent_utxos
+        .insert(outpoint, spending_transaction);
+    assert!(unspent_output(Some(Arc::new(spent_chain)), &finalized.db, outpoint)?.is_none());
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &finalized.db.cf_handle("utxo_by_out_loc").unwrap(),
+        OutputLocation::from_usize(Height(1), 0, output_index),
+    );
+    finalized.db.write(batch)?;
+    assert!(read()?.is_none());
+    assert!(known_transaction(
+        Some(&chain),
+        &finalized.db,
+        outpoint.hash
+    ));
+
+    // A missing body within the retained suffix is corruption, not an unknown version.
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &finalized.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::from_usize(Height(3), 0),
+    );
+    finalized.db.write(batch)?;
+    let error = unspent_output(
+        Some(&chain),
+        &finalized.db,
+        transparent::OutPoint {
+            hash: blocks[2].transactions[0].hash(),
+            index: 0,
+        },
+    )
+    .expect_err("a missing retained transaction body must report corruption");
+    assert_eq!(
+        error.downcast_ref::<BlockReadError>(),
+        Some(&BlockReadError::CorruptBlock { height: Height(3) })
+    );
+    Ok(())
+}
+
+/// Finalizing past a cached chain must not pair newer outputs with its older tip.
+#[test]
+fn unspent_output_uses_finalized_tip_after_cached_chain() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut non_finalized, _) = new_state_with_mainnet_genesis();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(1..=4)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    non_finalized.commit_new_chain(blocks[0].clone().prepare(), &finalized.db)?;
+    for block in &blocks[1..3] {
+        non_finalized.commit_block(block.clone().prepare(), &finalized.db)?;
+    }
+    let chain = non_finalized.best_chain().unwrap();
+    for block in &blocks {
+        finalized.commit_finalized_direct(
+            CheckpointVerifiedBlock::from(block.clone()).into(),
+            None,
+            "output tip test",
+        )?;
+        let response = unspent_output(
+            Some(chain),
+            &finalized.db,
+            transparent::OutPoint {
+                hash: block.transactions[0].hash(),
+                index: 0,
+            },
+        )?
+        .unwrap();
+        let expected_tip = if block.coinbase_height().unwrap() < Height(3) {
+            &blocks[2]
+        } else {
+            block
+        };
+        assert_eq!(response.best_chain_tip_hash, expected_tip.hash());
+        assert_eq!(
+            response.confirmations,
+            1 + expected_tip.coinbase_height().unwrap().0 - block.coinbase_height().unwrap().0
+        );
+    }
+    Ok(())
+}
+
+/// Missing retained transaction bodies must report corruption, not an unknown version.
+#[test]
+fn unspent_output_rejects_corrupt_retained_body() -> Result<(), crate::BoxError> {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, _, _) = new_state_with_mainnet_genesis();
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .range(1..=2)
+        .map(|(_, bytes)| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+    for block in &blocks {
+        finalized.commit_finalized_direct(
+            CheckpointVerifiedBlock::from(block.clone()).into(),
+            None,
+            "output corruption test",
+        )?;
+    }
+
+    let mut batch = DiskWriteBatch::new();
+    batch.zs_delete(
+        &finalized.db.cf_handle("tx_by_loc").unwrap(),
+        TransactionLocation::from_usize(Height(2), 0),
+    );
+    finalized.db.write(batch)?;
+    let error = unspent_output(
+        None::<Arc<Chain>>,
+        &finalized.db,
+        transparent::OutPoint {
+            hash: blocks[1].transactions[0].hash(),
+            index: 0,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<BlockReadError>(),
+        Some(&BlockReadError::CorruptBlock { height: Height(2) })
+    );
     Ok(())
 }
