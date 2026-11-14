@@ -1,9 +1,12 @@
 //! Records this process's memory use, so operators can see a node approaching its memory limit
 //! before the kernel stops it.
 
-#[cfg(target_os = "linux")]
-use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::{
+    collections::HashMap,
+    path::{Component, Path, PathBuf},
+};
 
 #[cfg(target_os = "linux")]
 use crate::components::zcashd_compat::parse_self_cgroup_paths;
@@ -120,20 +123,38 @@ impl CgroupMount {
 }
 
 /// Returns the cgroup v2 mounts and the cgroup v1 `memory` mounts listed in
-/// `/proc/self/mountinfo`.
+/// `/proc/self/mountinfo` that no other mount hides.
 #[cfg(target_os = "linux")]
 fn cgroup_mounts(mountinfo: &str) -> (Vec<CgroupMount>, Vec<CgroupMount>) {
-    let mut v2 = Vec::new();
-    let mut v1_memory = Vec::new();
+    /// The cgroup hierarchy a mount shows, if any.
+    enum Hierarchy {
+        V2,
+        V1Memory,
+        Other,
+    }
 
+    struct Mount {
+        id: u64,
+        parent_id: u64,
+        hierarchy: Hierarchy,
+        cgroup: CgroupMount,
+    }
+
+    let mut mounts = Vec::new();
     for line in mountinfo.lines() {
         // Optional fields come before the ` - ` separator, so the mount fields are counted from
         // the start and the filesystem fields from the separator.
         let Some((mount, filesystem)) = line.split_once(" - ") else {
             continue;
         };
-        let mut mount = mount.split_whitespace().skip(3);
-        let (Some(root), Some(mount_point)) = (mount.next(), mount.next()) else {
+        let mut mount = mount.split_whitespace();
+        let (Some(id), Some(parent_id), Some(_device), Some(root), Some(mount_point)) = (
+            mount.next().and_then(|id| id.parse().ok()),
+            mount.next().and_then(|id| id.parse().ok()),
+            mount.next(),
+            mount.next(),
+            mount.next(),
+        ) else {
             continue;
         };
         let mut filesystem = filesystem.split_whitespace();
@@ -142,17 +163,67 @@ fn cgroup_mounts(mountinfo: &str) -> (Vec<CgroupMount>, Vec<CgroupMount>) {
         else {
             continue;
         };
-        let cgroup_mount = CgroupMount {
-            root: PathBuf::from(unescape_mountinfo(root)),
-            mount_point: PathBuf::from(unescape_mountinfo(mount_point)),
-        };
-
-        if fs_type == "cgroup2" {
-            v2.push(cgroup_mount);
+        let hierarchy = if fs_type == "cgroup2" {
+            Hierarchy::V2
         } else if fs_type == "cgroup"
             && super_options.is_some_and(|options| options.split(',').any(|o| o == "memory"))
         {
-            v1_memory.push(cgroup_mount);
+            Hierarchy::V1Memory
+        } else {
+            Hierarchy::Other
+        };
+
+        mounts.push(Mount {
+            id,
+            parent_id,
+            hierarchy,
+            cgroup: CgroupMount {
+                root: PathBuf::from(unescape_mountinfo(root)),
+                mount_point: PathBuf::from(unescape_mountinfo(mount_point)),
+            },
+        });
+    }
+
+    let parents: HashMap<u64, u64> = mounts
+        .iter()
+        .map(|mount| (mount.id, mount.parent_id))
+        .collect();
+    // Returns the mount that a lookup of `path` lands on, starting above the top of the mount
+    // chain `id` is on. Like the kernel, the lookup goes down one directory at a time, and at
+    // each one moves onto the last mount on that directory, repeatedly for stacked mounts. The
+    // walks are bounded by the number of mounts, in case of a parent cycle.
+    let lookup = |id: u64, path: &Path| {
+        let mut current = std::iter::successors(Some(id), |id| parents.get(id).copied())
+            .take(mounts.len() + 1)
+            .last()
+            .unwrap_or(id);
+        let mut directories: Vec<_> = path.ancestors().collect();
+        directories.reverse();
+        for directory in directories {
+            for _ in 0..mounts.len() {
+                let Some(above) = mounts.iter().rev().find(|mount| {
+                    mount.parent_id == current
+                        && mount.id != current
+                        && mount.cgroup.mount_point == directory
+                }) else {
+                    break;
+                };
+                current = above.id;
+            }
+        }
+        current
+    };
+    // A mount is hidden when another mount covers its mount point or a directory above it. Its
+    // paths would then lead into the other mount, and could read a different cgroup's limit.
+    let is_visible = |mount: &Mount| lookup(mount.id, &mount.cgroup.mount_point) == mount.id;
+
+    let mut v2 = Vec::new();
+    let mut v1_memory = Vec::new();
+    for mount in &mounts {
+        match mount.hierarchy {
+            Hierarchy::V2 if is_visible(mount) => v2.push(mount.cgroup.clone()),
+            Hierarchy::V1Memory if is_visible(mount) => v1_memory.push(mount.cgroup.clone()),
+            _ => {}
         }
     }
 
@@ -399,6 +470,57 @@ mod tests {
                 .get(path)
                 .cloned()),
             Some(2 * gib)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ignores_cgroup_mounts_hidden_by_other_mounts() {
+        let gib: u64 = 1024 * 1024 * 1024;
+        // Mount 50 shows `/tenant` on top of mount 25, which showed the whole hierarchy at the same
+        // place. Through mount 25, `/tenant` would map to `/sys/fs/cgroup/tenant`, which is now the
+        // `/tenant/tenant` cgroup with a sibling's limit.
+        let mountinfo = "\
+            25 22 0:22 / /sys/fs/cgroup rw shared:9 - cgroup2 cgroup2 rw\n\
+            50 25 0:22 /tenant /sys/fs/cgroup rw shared:9 - cgroup2 cgroup2 rw\n";
+        let files: std::collections::HashMap<_, _> = [
+            ("/sys/fs/cgroup/memory.max", "max\n".to_string()),
+            ("/sys/fs/cgroup/tenant/memory.max", format!("{}\n", gib)),
+            ("/sys/fs/cgroup/zebrad/memory.max", format!("{}\n", 3 * gib)),
+        ]
+        .into_iter()
+        .map(|(path, value)| (PathBuf::from(path), value))
+        .collect();
+
+        assert_eq!(
+            cgroup_mounts(mountinfo).0,
+            vec![CgroupMount {
+                root: PathBuf::from("/tenant"),
+                mount_point: PathBuf::from("/sys/fs/cgroup"),
+            }]
+        );
+        assert_eq!(
+            tightest_cgroup_limit("0::/tenant/zebrad\n", mountinfo, |path| files
+                .get(path)
+                .cloned()),
+            Some(3 * gib)
+        );
+
+        // A mount on a directory above a cgroup mount hides it too, unless the cgroup mount sits on
+        // it. Mount 70 covers `/sys/fs/cgroup` after mount 31 was mounted inside it, but mount 32
+        // was mounted on mount 70 and stays visible.
+        let mountinfo = "\
+            30 22 0:25 / /sys/fs/cgroup rw - tmpfs tmpfs rw\n\
+            31 30 0:27 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n\
+            70 30 0:40 / /sys/fs/cgroup rw - tmpfs tmpfs rw\n\
+            32 70 0:41 /docker /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n";
+
+        assert_eq!(
+            cgroup_mounts(mountinfo).1,
+            vec![CgroupMount {
+                root: PathBuf::from("/docker"),
+                mount_point: PathBuf::from("/sys/fs/cgroup/memory"),
+            }]
         );
     }
 
