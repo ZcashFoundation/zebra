@@ -51,12 +51,13 @@ if [[ "$breaking" == "true" ]]; then
 	requires_changelog=true
 fi
 
-# Reads one top-level scalar field from a fragment, as of the PR head.
+# Reads one top-level scalar field from a fragment at the requested revision.
 fragment_field() {
 	local path="$1"
 	local field="$2"
+	local revision="${3:-$head_revision}"
 
-	git show "${head_revision}:${path}" | awk -v field="$field" '
+	git show "${revision}:${path}" | awk -v field="$field" '
     index($0, field ": ") == 1 {
       value = substr($0, length(field) + 3)
       sub(/^[[:space:]]+/, "", value)
@@ -71,18 +72,27 @@ fragment_field() {
   '
 }
 
-# The fragments this PR adds or edits. Editing an existing fragment counts, the
-# same way rewording a bullet used to count.
+known_project() {
+	awk -v project="$1" '
+    /^projects:/ { projects = 1; next }
+    projects && /^[^[:space:]#]/ { exit }
+    projects && (($1 == "key:" && $2 == project) || ($2 == "key:" && $3 == project)) { found = 1 }
+    END { exit !found }
+  ' .changie.yaml
+}
+
+# Added and edited fragments both satisfy package coverage and need validation.
 fragment_paths=()
 while IFS= read -r -d '' path; do
 	case "$path" in
 	"$unreleased_directory"/*.yaml) fragment_paths+=("$path") ;;
 	esac
-done < <(git diff --name-only -z --diff-filter=AM "$base_revision" "$head_revision" -- "$unreleased_directory")
+done < <(git diff --no-renames --name-only -z --diff-filter=AM "$base_revision" "$head_revision" -- "$unreleased_directory")
 
 failed=false
 fragment_projects=()
 breaking_fragment_projects=()
+new_breaking_fragment=false
 
 for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
 	project="$(fragment_field "$path" project)"
@@ -97,11 +107,22 @@ for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
 	fi
 
 	# Catches a mistyped project before it reaches the release, where an unknown
-	# project silently keeps the entry out of every changelog. Kind keys live in
-	# the same file, but no kind key collides with a package name.
-	if ! grep -Eq "^[[:space:]]+key: ${project}\$" .changie.yaml; then
+	# project silently keeps the entry out of every changelog. Only project keys
+	# count, not kind keys from the same configuration.
+	if ! known_project "$project"; then
 		printf 'Unknown project in change fragment: %s declares %s\n' "$path" "$project" >&2
 		echo "::error title=Unknown fragment project::${path} declares project '${project}', which is not a project in .changie.yaml." >&2
+		failed=true
+		continue
+	fi
+
+	if ! awk -v kind="$kind" '
+    /^kinds:/ { kinds = 1; next }
+    kinds && /^[^[:space:]#]/ { exit }
+    kinds && $1 == "-" && ($2 == "key:" || $2 == "label:") && $3 == kind { found = 1 }
+    END { exit !found }
+  ' .changie.yaml; then
+		echo "::error title=Unknown fragment kind::${path} declares unknown kind '${kind}'." >&2
 		failed=true
 		continue
 	fi
@@ -117,15 +138,59 @@ for path in ${fragment_paths[@]+"${fragment_paths[@]}"}; do
 
 	if [[ "$kind" == "$breaking_kind" || "$kind" == "$network_upgrade_kind" ]]; then
 		breaking_fragment_projects+=("$project")
+		if [[ "$(fragment_field "$path" project "$base_revision" 2>/dev/null || true)" != "$project" ||
+			"$(fragment_field "$path" kind "$base_revision" 2>/dev/null || true)" != "$kind" ]]; then
+			new_breaking_fragment=true
+		fi
 	fi
 done
 
-# A break has to be declared in both places: the fragment puts it in the changelog, and
-# the title's `!` drives release-plz's major bump and the `api-diff` policy.
-if [[ "$breaking" != "true" && ${#breaking_fragment_projects[@]} -gt 0 ]]; then
+# New breaking declarations need a title marker; refining an existing project's
+# breaking entry does not declare another break. API analysis is separately advisory.
+if [[ "$breaking" != "true" && "$new_breaking_fragment" == "true" ]]; then
 	echo "Breaking fragment without a breaking PR title." >&2
 	echo "::error title=Undeclared breaking change::This PR adds a '${breaking_kind}' or '${network_upgrade_kind}' fragment, so its title needs a conventional commit break marker, for example 'feat!: ...'." >&2
 	failed=true
+fi
+
+# Every non-merge commit in the PR must opt in, with one native Git trailer and
+# a reviewable reason. Missing, duplicate or invalid declarations opt out.
+explicit_scope=true
+scoped_projects=
+commits="$(git rev-list --no-merges "${base_revision}..${head_revision}")"
+[[ -n "$commits" ]] || explicit_scope=false
+while IFS= read -r commit; do
+	[[ -n "$commit" ]] || continue
+	declaration_keys="$(git show -s --format='%(trailers:key=Changelog,keyonly)' "$commit")"
+	declaration="$(git show -s --format='%(trailers:key=Changelog,valueonly)' "$commit")"
+	if [[ "${declaration_keys,,}" != "changelog" || "$declaration" == *$'\n'* ||
+		! "$declaration" =~ ^([[:alnum:]-]+(,[[:alnum:]-]+)*)[[:space:]]+-[[:space:]]+[^[:space:]] ]]; then
+		explicit_scope=false
+		break
+	fi
+	project_list="${BASH_REMATCH[1]}"
+	printf 'Changelog request %s: %s\n' "$commit" "$declaration"
+	[[ "$project_list" != "none" ]] || continue
+	IFS=, read -r -a projects <<<"$project_list"
+	seen=,
+	for project in "${projects[@]}"; do
+		if ! known_project "$project" || [[ "$seen" == *",$project,"* ]]; then
+			explicit_scope=false
+			break
+		fi
+		seen+="$project,"
+		[[ ",$scoped_projects," == *",$project,"* ]] || scoped_projects+="${scoped_projects:+,}$project"
+	done
+	[[ "$explicit_scope" == "true" ]] || break
+done <<<"$commits"
+
+scoped=false
+if [[ "$explicit_scope" == "true" && -n "$scoped_projects" ]]; then
+	scoped=true
+	requires_changelog=true
+elif [[ "$explicit_scope" == "true" && "$declared_type" != "feat" &&
+	"$breaking" != "true" && "$new_breaking_fragment" != "true" ]]; then
+	requires_changelog=false
 fi
 
 has_fragment_for_project() {
@@ -207,14 +272,19 @@ fi
 
 zebrad_checked=false
 package_changed_in_pr=false
+scoped_breaking=false
 package_metadata="$(
-	cargo metadata --no-deps --format-version 1 |
-		jq -r '
+	if [[ "$scoped" == "true" ]]; then
+		printf '%s\n' "${scoped_projects//,/$'\n'}"
+	else
+		cargo metadata --no-deps --format-version 1 |
+			jq -r '
       .packages[]
       | select(.publish != [])
       | [.name, (.manifest_path | sub("/Cargo.toml$"; ""))]
       | @tsv
     '
+	fi
 )"
 
 while IFS=$'\t' read -r package_name package_directory; do
@@ -224,11 +294,14 @@ while IFS=$'\t' read -r package_name package_directory; do
 
 	package_path="${package_directory#"${repository_root}/"}"
 
-	if [[ "$package_path" == "$package_directory" ]] || ! package_changed "$package_path"; then
+	if [[ "$scoped" != "true" ]] && { [[ "$package_path" == "$package_directory" ]] || ! package_changed "$package_path"; }; then
 		continue
 	fi
 
 	package_changed_in_pr=true
+	for project in ${breaking_fragment_projects[@]+"${breaking_fragment_projects[@]}"}; do
+		[[ "$project" != "$package_name" ]] || scoped_breaking=true
+	done
 
 	# Changie project keys are the package names, so a changed package maps
 	# straight onto the `-j` value its fragment must carry.
@@ -252,7 +325,7 @@ while IFS= read -r -d '' path; do
 	esac
 done < <(git diff --name-only -z "$base_revision" "$head_revision")
 
-if [[ "$root_lock_changed" == "true" && "$root_manifest_changed" != "true" && "$zebrad_checked" != "true" ]]; then
+if [[ "$scoped" != "true" && "$root_lock_changed" == "true" && "$root_manifest_changed" != "true" && "$zebrad_checked" != "true" ]]; then
 	base_graph="$(node_dependency_graph "$base_revision")"
 	head_graph="$(node_dependency_graph "$head_revision")"
 	if [[ "$base_graph" != "$head_graph" ]]; then
@@ -260,7 +333,7 @@ if [[ "$root_lock_changed" == "true" && "$root_manifest_changed" != "true" && "$
 	fi
 fi
 
-if [[ "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
+if [[ "$scoped" != "true" && "$root_manifest_changed" == "true" && "$zebrad_checked" != "true" ]]; then
 	if ! has_fragment_for_project zebrad; then
 		echo "Root Cargo.toml or Cargo.lock changed without a zebrad change fragment." >&2
 		echo "::error title=Missing root changelog entry::Root Cargo.toml or Cargo.lock changes need a zebrad change fragment: run 'changie new -j zebrad'." >&2
@@ -272,7 +345,8 @@ fi
 
 # A break marker means at least one changed package breaks, not every one: the
 # other packages keep their own kinds, so changie only bumps the major where it applies.
-if [[ "$breaking" == "true" && "$package_changed_in_pr" == "true" && ${#breaking_fragment_projects[@]} -eq 0 ]]; then
+if [[ "$breaking" == "true" && "$package_changed_in_pr" == "true" &&
+	( ${#breaking_fragment_projects[@]} -eq 0 || ( "$scoped" == "true" && "$scoped_breaking" != "true" ) ) ]]; then
 	echo "Breaking PR title without a breaking change fragment." >&2
 	echo "::error title=Missing breaking change fragment::A breaking PR needs a '${breaking_kind}' fragment for the package that breaks: run 'changie new -j <package> -k ${breaking_kind}'." >&2
 	failed=true
