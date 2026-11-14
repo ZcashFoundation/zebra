@@ -321,3 +321,75 @@ fn forks_evicted_by_finalizing_are_reported_and_published() {
     assert!(state_receiver.has_changed().unwrap());
     assert!(!state_receiver.borrow().any_chain_contains(&evicted));
 }
+
+/// Finalizing re-inserts side chains one at a time, so a fork can be evicted before a later
+/// fork that shares its side-branch ancestor is back. That ancestor must not be reported.
+#[test]
+fn finalizing_does_not_report_ancestors_of_retained_forks() {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, genesis) = new_state_with_mainnet_genesis();
+    finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    let mut best = vec![genesis.block.make_fake_child().set_work(10)];
+    state
+        .commit_new_chain(best[0].clone().prepare(), &finalized.db)
+        .unwrap();
+    let min_blocks = usize::try_from(crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT)
+        .expect("the minimum fits in a usize");
+    while best.len() < min_blocks + 2 {
+        let tip = best.last().unwrap().make_fake_child().set_work(10);
+        state
+            .commit_block(tip.clone().prepare(), &finalized.db)
+            .unwrap();
+        best.push(tip);
+    }
+
+    // Side chains are re-inserted from the most work down: `high` first, then `middle`, which
+    // evicts `high`, then `low`, which shares `shared` with `high` and evicts `middle`.
+    let shared = best[2]
+        .make_fake_child()
+        .set_block_commitment([1; 32])
+        .set_work(1);
+    let high = shared
+        .make_fake_child()
+        .set_block_commitment([2; 32])
+        .set_work(5);
+    let low = shared
+        .make_fake_child()
+        .set_block_commitment([3; 32])
+        .set_work(1);
+    let middle = best[2]
+        .make_fake_child()
+        .set_block_commitment([4; 32])
+        .set_work(3);
+    for block in [&shared, &high, &low, &middle] {
+        state
+            .commit_block(block.clone().prepare(), &finalized.db)
+            .unwrap();
+    }
+    assert_eq!(state.chain_count(), 4);
+    assert!(state.take_evicted_block_hashes().is_empty());
+
+    state.set_max_index_entries(Some(1));
+    let (mut tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, _state_receiver) = watch::channel(state.clone());
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    finalize_root_blocks_and_forget_evicted(
+        &mut finalized,
+        &mut state,
+        &mut None,
+        &rejected_sender,
+        &mut tip_sender,
+        &state_sender,
+        None,
+    );
+
+    assert!(state.any_chain_contains(&shared.hash()));
+    assert!(state.any_chain_contains(&low.hash()));
+    let mut rejected = std::collections::HashSet::new();
+    while let Ok(hash) = rejected_receiver.try_recv() {
+        assert!(rejected.insert(hash), "each evicted block is reported once");
+    }
+    assert_eq!(rejected, [high.hash(), middle.hash()].into());
+}

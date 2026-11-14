@@ -377,7 +377,11 @@ impl NonFinalizedState {
     /// The network can still extend those blocks, so the state service must be able to download
     /// and commit them again (#11133).
     pub(crate) fn take_evicted_block_hashes(&mut self) -> Vec<block::Hash> {
-        mem::take(&mut self.evicted_block_hashes)
+        let mut evicted = mem::take(&mut self.evicted_block_hashes);
+        // `finalize()` re-inserts chains one at a time, so an eviction there can record
+        // blocks that a chain re-inserted later still holds.
+        evicted.retain(|hash| !self.any_chain_contains(hash));
+        evicted
     }
 
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
