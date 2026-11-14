@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Enabled parallel decoding of public RedPallas points during Orchard batch signature verification.
+time: 2026-11-07T18:48:02.058137131+01:00
