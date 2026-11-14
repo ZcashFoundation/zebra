@@ -575,6 +575,11 @@ where
         }
     }
 
+    /// Subscribe to the live peer endpoints, including peers serving requests.
+    pub(super) fn connected_peers(&self) -> watch::Receiver<super::AdvertPeers> {
+        self.block_advert_senders.subscribe()
+    }
+
     /// Check background task handles to make sure they're still running.
     ///
     /// Never returns `Ok`.
