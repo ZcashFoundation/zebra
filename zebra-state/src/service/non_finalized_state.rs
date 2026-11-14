@@ -365,6 +365,12 @@ impl NonFinalizedState {
         self.update_metrics_bars();
     }
 
+    /// Sets the maximum [`Self::index_entry_count`] of all chains.
+    #[cfg(test)]
+    pub(crate) fn set_max_index_entries(&mut self, max_index_entries: Option<usize>) {
+        self.max_index_entries = max_index_entries;
+    }
+
     /// Returns the hashes of blocks that were dropped from the non-finalized state because every
     /// chain containing them was evicted by the fork limits, and forgets them.
     ///

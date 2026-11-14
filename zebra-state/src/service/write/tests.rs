@@ -260,3 +260,64 @@ fn evicted_blocks_are_reported_as_rejected() {
         "blocks are reported once"
     );
 }
+
+/// Finalizing re-inserts the remaining chains under the fork limits, so it can evict forks. Those
+/// blocks are reported like rejected blocks, and the non-finalized state without them is
+/// published, before the next block is committed.
+#[test]
+fn forks_evicted_by_finalizing_are_reported_and_published() {
+    let _init_guard = zebra_test::init();
+    let (mut finalized, mut state, genesis) = new_state_with_mainnet_genesis();
+    finalized.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    let mut best = vec![genesis.block.make_fake_child().set_work(10)];
+    state
+        .commit_new_chain(best[0].clone().prepare(), &finalized.db)
+        .unwrap();
+    let min_blocks = usize::try_from(crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT)
+        .expect("the minimum fits in a usize");
+    while best.len() < min_blocks + 2 {
+        let tip = best.last().unwrap().make_fake_child().set_work(10);
+        state
+            .commit_block(tip.clone().prepare(), &finalized.db)
+            .unwrap();
+        best.push(tip);
+    }
+    let forks: Vec<_> = [1, 2]
+        .map(|i| best[2].make_fake_child().set_block_commitment([i; 32]))
+        .into_iter()
+        .collect();
+    for fork in &forks {
+        state
+            .commit_block(fork.clone().prepare(), &finalized.db)
+            .unwrap();
+    }
+    assert_eq!(state.chain_count(), 3);
+    assert!(state.take_evicted_block_hashes().is_empty());
+
+    state.set_max_index_entries(Some(1));
+    let (mut tip_sender, _latest, _change) = ChainTipSender::new(None, &Network::Mainnet);
+    let (state_sender, state_receiver) = watch::channel(state.clone());
+    let (rejected_sender, mut rejected_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+    finalize_root_blocks_and_forget_evicted(
+        &mut finalized,
+        &mut state,
+        &mut None,
+        &rejected_sender,
+        &mut tip_sender,
+        &state_sender,
+        None,
+    );
+
+    assert!(finalized.db.finalized_tip_height() > Some(Height(0)));
+    let evicted = rejected_receiver
+        .try_recv()
+        .expect("finalizing evicted one fork");
+    assert!(forks.iter().any(|fork| fork.hash() == evicted));
+    assert!(!state.any_chain_contains(&evicted));
+    assert!(rejected_receiver.try_recv().is_err());
+
+    assert!(state_receiver.has_changed().unwrap());
+    assert!(!state_receiver.borrow().any_chain_contains(&evicted));
+}

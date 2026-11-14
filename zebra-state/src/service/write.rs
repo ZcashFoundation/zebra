@@ -95,13 +95,47 @@ fn finalize_root_blocks(
 
 /// Sends the hashes of blocks evicted from the non-finalized state on `non_finalized_rejected_sender`,
 /// so the state service accepts them again if the network extends their chain.
+///
+/// Returns `true` if any blocks were evicted.
 fn forget_evicted_blocks(
     non_finalized_state: &mut NonFinalizedState,
     non_finalized_rejected_sender: &UnboundedSender<block::Hash>,
-) {
-    for hash in non_finalized_state.take_evicted_block_hashes() {
+) -> bool {
+    let evicted = non_finalized_state.take_evicted_block_hashes();
+    for &hash in &evicted {
         // If the receiver was dropped, the state service is shutting down.
         let _ = non_finalized_rejected_sender.send(hash);
+    }
+
+    !evicted.is_empty()
+}
+
+/// Finalizes root blocks after a commit, then reports and publishes any forks that finalizing
+/// evicted, because [`NonFinalizedState::finalize`] re-inserts the remaining chains under the
+/// fork limits.
+fn finalize_root_blocks_and_forget_evicted(
+    finalized_state: &mut FinalizedState,
+    non_finalized_state: &mut NonFinalizedState,
+    prev_finalized_note_commitment_trees: &mut Option<NoteCommitmentTrees>,
+    non_finalized_rejected_sender: &UnboundedSender<block::Hash>,
+    chain_tip_sender: &mut ChainTipSender,
+    non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
+    backup_dir_path: Option<&Path>,
+) {
+    finalize_root_blocks(
+        finalized_state,
+        non_finalized_state,
+        prev_finalized_note_commitment_trees,
+    );
+
+    if forget_evicted_blocks(non_finalized_state, non_finalized_rejected_sender) {
+        update_latest_chain_channels(
+            non_finalized_state,
+            &finalized_state.db,
+            chain_tip_sender,
+            non_finalized_state_sender,
+            backup_dir_path,
+        );
     }
 }
 
@@ -528,10 +562,14 @@ impl WriteBlockWorkerTask {
             // Update the caller with the result.
             let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
-            finalize_root_blocks(
+            finalize_root_blocks_and_forget_evicted(
                 finalized_state,
                 non_finalized_state,
                 &mut prev_finalized_note_commitment_trees,
+                non_finalized_rejected_sender,
+                chain_tip_sender,
+                non_finalized_state_sender,
+                backup_dir_path.as_deref(),
             );
 
             // Update the metrics if semantic and contextual validation passes
