@@ -230,10 +230,13 @@ while IFS=$'\t' read -r package_name package_directory; do
 
 	package_changed_in_pr=true
 
-	# Changie project keys are the package names, so a changed package maps
-	# straight onto the `-j` value its fragment must carry.
+	# Most packages have one project; zebrad has separate operator and technical
+	# audiences, so either project can document a directly changed package.
 	if [[ "$package_name" == "zebrad" ]]; then
 		zebrad_checked=true
+	fi
+	if [[ "$package_name" == "zebrad" ]] && has_fragment_for_project zebrad-api; then
+		continue
 	fi
 
 	if ! has_fragment_for_project "$package_name"; then

@@ -85,6 +85,9 @@ projects:
     - label: zebrad
       key: zebrad
       changelog: CHANGELOG.md
+    - label: zebrad Rust APIs
+      key: zebrad-api
+      changelog: zebrad/CHANGELOG.md
     - label: zebra-chain
       key: zebra-chain
       changelog: zebra-chain/CHANGELOG.md
@@ -298,6 +301,60 @@ expect_title "chore: release" "$case"
 expect_ready "$case"
 reset_fixture
 
+case="technical-only changes wait without scheduling a package release"
+fragment zebrad-api breaking 1
+apply_plan zebrad@7.0.0
+expect_version zebrad 6.4.1 "$case"
+expect_unchanged CHANGELOG.md "$case"
+expect_line .changes/unreleased/zebrad-api-breaking-1.yaml 'project: zebrad-api' "$case"
+expect_title "chore: release" "$case"
+expect_summary 'No package has unreleased change fragments.'
+reset_fixture
+
+case="technical notes wait when only an unrelated package releases"
+fragment zebrad-api breaking 1
+fragment zebra-chain Fixed 1
+apply_plan zebra-chain@13.0.1 zebrad@6.4.2
+expect_version zebrad 6.4.1 "$case"
+expect_line .changes/unreleased/zebrad-api-breaking-1.yaml 'project: zebrad-api' "$case"
+[[ ! -d "${fixture}/.changes/zebrad-api" ]] || fail "$case: technical history was invented"
+expect_ready "$case"
+reset_fixture
+
+case="technical notes mirror zebrad without changing its operator version or notes"
+fragment zebrad Fixed 1
+fragment zebrad-api breaking 2
+fragment zebrad-api Added 3
+apply_plan zebrad@7.0.0
+expect_version zebrad 6.4.2 "$case"
+expect_line .changes/zebrad-api/v6.4.2.md '### Breaking Changes' "$case"
+expect_line .changes/zebrad-api/v6.4.2.md '- An entry for zebrad-api.' "$case"
+expect_summary '- `zebrad`: 6.4.1 → 6.4.2'
+! grep -qF -- 'An entry for zebrad-api.' "${fixture}/CHANGELOG.md" ||
+  fail "$case: technical notes leaked into operator notes"
+expect_ready "$case"
+expect_rerun_is_a_no_op "$case"
+
+# Readiness checks both the technical version and fragment consumption.
+write_file zebrad/CHANGELOG.md '# Changelog'
+git -C "$fixture" add --all
+git -C "$fixture" commit --quiet --message 'chore: omit technical version'
+if (cd "$fixture" && .github/scripts/check-release-readiness.sh base HEAD > "${temporary_root}/readiness" 2>&1); then
+  fail "$case: missing technical version passed readiness"
+fi
+grep -qF 'Incomplete technical changelog' "${temporary_root}/readiness" ||
+  fail "$case: expected a technical changelog failure"
+git -C "$fixture" restore --source HEAD^ -- zebrad/CHANGELOG.md
+git -C "$fixture" restore --source base -- .changes/unreleased/zebrad-api-breaking-2.yaml
+git -C "$fixture" add --all
+git -C "$fixture" commit --quiet --message 'chore: leave technical fragment pending'
+if (cd "$fixture" && .github/scripts/check-release-readiness.sh base HEAD > "${temporary_root}/readiness" 2>&1); then
+  fail "$case: unconsumed technical fragment passed readiness"
+fi
+grep -qF 'zebrad-api is released, but' "${temporary_root}/readiness" ||
+  fail "$case: expected an unconsumed technical fragment failure"
+reset_fixture
+
 case="a release-plz prerelease of zebrad is replaced by the planned release"
 base_manifests 7.0.0-rc.0
 (cd "$fixture" && cargo update --workspace --quiet --offline)
@@ -319,6 +376,7 @@ reset_fixture
 
 case="a maintainer's prerelease of the planned version is applied with its changelog"
 fragment zebrad network-upgrade 1
+fragment zebrad-api breaking 1
 apply_plan zebrad@7.0.0-rc.0
 sed -i 's/^zebrad\t7\.0\.0$/zebrad\t7.0.0-rc.1/' "$plan"
 title="$(cd "$fixture" && .github/scripts/apply-release-plan.sh base "$plan" 2> "${temporary_root}/log")" ||
@@ -329,6 +387,8 @@ expect_version zebrad 7.0.0-rc.1 "$case"
 expect_locked zebrad 7.0.0-rc.1 "$case"
 [[ -e "${fixture}/.changes/zebrad/v7.0.0-rc.1.md" && ! -e "${fixture}/.changes/zebrad/v7.0.0.md" ]] ||
   fail "$case: expected zebrad to be batched as 7.0.0-rc.1 only"
+[[ -e "${fixture}/.changes/zebrad-api/v7.0.0-rc.1.md" && ! -e "${fixture}/.changes/zebrad-api/v7.0.0.md" ]] ||
+  fail "$case: expected technical notes at the actual prerelease version only"
 expect_title "chore: release v7.0.0-rc.1" "$case"
 expect_ready "$case"
 reset_fixture
