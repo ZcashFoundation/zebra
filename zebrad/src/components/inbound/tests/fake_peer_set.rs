@@ -62,7 +62,7 @@ use InventoryResponse::*;
 const MAX_PEER_SET_REQUEST_DELAY: Duration = Duration::from_millis(500);
 
 #[tokio::test(flavor = "multi_thread")]
-async fn inbound_propagates_incomplete_block_body_errors() {
+async fn inbound_pruned_blocks_are_missing_without_hiding_corruption() {
     use zebra_state::BlockReadError;
 
     let _init_guard = zebra_test::init();
@@ -87,6 +87,12 @@ async fn inbound_propagates_incomplete_block_body_errors() {
             ),
             (
                 Ok(zebra_state::Response::Block(None)),
+                Ok(Response::Blocks(vec![Missing(hash)])),
+            ),
+            (
+                Err(BoxError::from(BlockReadError::BlockBodyUnavailable {
+                    height,
+                })),
                 Ok(Response::Blocks(vec![Missing(hash)])),
             ),
             (
@@ -401,6 +407,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1143,6 +1150,7 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1398,6 +1406,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
