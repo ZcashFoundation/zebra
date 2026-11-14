@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Added
+body: '`config::Config::persistent_peers` (also exposed as `Config::persistent_peers`): maintains operator-selected outbound peers.'
+time: 2026-11-14T07:29:02.891428291+01:00

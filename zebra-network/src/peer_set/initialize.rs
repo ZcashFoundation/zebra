@@ -58,6 +58,8 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+mod persistent;
+
 mod recent_by_ip;
 
 /// A successful outbound peer connection attempt or inbound connection handshake.
@@ -163,6 +165,9 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
+    config.validate_persistent_peers().expect(
+        "persistent peer configuration must leave ordinary slots and use host:port targets",
+    );
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
     let (
@@ -208,8 +213,10 @@ where
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
         use crate::protocol::external::types::PeerServices;
+        let mut handshake_config = config.clone();
+        handshake_config.listen_addr = listen_addr;
         let hs = peer::Handshake::builder()
-            .with_config(config.clone())
+            .with_config(handshake_config)
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
@@ -224,6 +231,11 @@ where
             hs_timeout.layer(hs.clone()),
             hs_timeout.layer(peer::Connector::new(hs)),
         )
+    };
+    let outbound_connector = if config.persistent_peers.is_empty() {
+        tower::util::Either::A(outbound_connector)
+    } else {
+        tower::util::Either::B(persistent::paced_connector(outbound_connector))
     };
 
     // Create an mpsc channel for peer changes,
@@ -261,13 +273,14 @@ where
     );
     // Also route queued peer set requests as soon as a peer that might serve them is ready.
     let block_advertiser = peer_set.block_advertiser();
+    let connected_peers = peer_set.connected_peers();
     let (mut peer_set, poll_peer_set_guard) = peer_set.into_buffer(constants::PEERSET_BUFFER_SIZE);
     peer_set.extend_tasks([
         address_book_updater_guard.abort_handle(),
         misbehavior_guard.abort_handle(),
     ]);
 
-    // Connect peerset_tx to the 3 peer sources:
+    // Connect peerset_tx to the ordinary and persistent peer sources:
     //
     // 1. Incoming peer connections, via a listener.
     let listen_fut = accept_inbound_connections(
@@ -276,11 +289,32 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
-        bans_receiver,
+        bans_receiver.clone(),
         block_gossip_peer_ips,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
     peer_set.extend_tasks([listen_guard.abort_handle()]);
+
+    // Persistent targets have reserved slots and never wait for ordinary peer demand or DNS seeds.
+    let persistent_guard = (!config.persistent_peers.is_empty()).then(|| {
+        let guard =
+            tokio::spawn(
+                persistent::maintain(
+                    config.clone(),
+                    outbound_connector.clone(),
+                    peerset_tx.clone(),
+                    address_book_updater.clone(),
+                    bans_receiver,
+                    connected_peers,
+                    |host: String| async move {
+                        Config::resolve_host_once(&host).await.unwrap_or_default()
+                    },
+                )
+                .in_current_span(),
+            );
+        peer_set.extend_tasks([guard.abort_handle()]);
+        guard
+    });
 
     // 2. Initial peers, specified in the config and cached on disk.
     let initial_peers_fut = add_initial_peers(
@@ -319,6 +353,7 @@ where
     // Compute remaining connections to open.
     let demand_count = config
         .peerset_initial_target_size
+        .min(config.ordinary_outbound_connection_limit())
         .saturating_sub(active_outbound_connections.update_count());
 
     for _ in 0..demand_count {
@@ -346,15 +381,15 @@ where
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
     peer_set.extend_tasks([peer_cache_updater_guard.abort_handle()]);
 
-    handle_tx
-        .send(vec![
-            listen_guard,
-            crawl_guard,
-            address_book_updater_guard,
-            peer_cache_updater_guard,
-            poll_peer_set_guard,
-        ])
-        .unwrap();
+    let mut background_guards = vec![
+        listen_guard,
+        crawl_guard,
+        address_book_updater_guard,
+        peer_cache_updater_guard,
+        poll_peer_set_guard,
+    ];
+    background_guards.extend(persistent_guard);
+    handle_tx.send(background_guards).unwrap();
 
     (peer_set, address_book, misbehavior_tx, block_advertiser)
 }
@@ -386,7 +421,7 @@ where
     let mut handshake_error_total: usize = 0;
 
     let mut active_outbound_connections = ActiveConnectionCounter::new_counter_with(
-        config.peerset_outbound_connection_limit(),
+        config.ordinary_outbound_connection_limit(),
         "Outbound Connections",
     );
 
@@ -511,8 +546,7 @@ where
     Ok(active_outbound_connections)
 }
 
-/// Limit the number of `initial_peers` addresses entries to the configured
-/// `peerset_initial_target_size`.
+/// Limit initial peers to `peerset_initial_target_size` and the ordinary outbound slot budget.
 ///
 /// Returns randomly chosen entries from the provided set of addresses,
 /// in a random order.
@@ -522,14 +556,17 @@ async fn limit_initial_peers(
     config: &Config,
     address_book_service: &AddressBookService,
 ) -> HashSet<PeerSocketAddr> {
+    let target_size = config
+        .peerset_initial_target_size
+        .min(config.ordinary_outbound_connection_limit());
     let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
 
     let all_peers_count = all_peers.len();
-    if all_peers_count > config.peerset_initial_target_size {
+    if all_peers_count > target_size {
         info!(
             "limiting the initial peers list from {} to {}",
-            all_peers_count, config.peerset_initial_target_size,
+            all_peers_count, target_size,
         );
     }
 
@@ -585,14 +622,12 @@ async fn limit_initial_peers(
     let mut initial_peers: HashSet<PeerSocketAddr> = HashSet::new();
     for better_peers in preferred_peers.values() {
         let mut better_peers = better_peers.clone();
-        let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
-            &mut rand::rng(),
-            config.peerset_initial_target_size - initial_peers.len(),
-        );
+        let (chosen_peers, _unused_peers) =
+            better_peers.partial_shuffle(&mut rand::rng(), target_size - initial_peers.len());
 
         initial_peers.extend(chosen_peers.iter());
 
-        if initial_peers.len() >= config.peerset_initial_target_size {
+        if initial_peers.len() >= target_size {
             break;
         }
     }
@@ -994,7 +1029,7 @@ enum CrawlerAction {
 ///
 /// On every crawl timer tick, also queue a dial attempt for each spare outbound
 /// connection slot that has a candidate ready to dial, so the peer set keeps
-/// growing until it reaches `config.peerset_outbound_connection_limit()` or
+/// growing until it reaches `config.ordinary_outbound_connection_limit()` or
 /// runs out of ready candidates.
 ///
 /// If a handshake fails, restore the unused demand signal by sending it to
@@ -1118,7 +1153,7 @@ where
             //
             // Demand is potentially unlimited, so it must go last in a biased select!.
             next_demand = demand_rx.next() => next_demand.ok_or("demand stream closed, is Zebra shutting down?".into()).map(|MorePeers|{
-                if active_outbound_connections.update_count() >= config.peerset_outbound_connection_limit() {
+                if active_outbound_connections.update_count() >= config.ordinary_outbound_connection_limit() {
                     // Too many open outbound connections or pending handshakes already
                     DemandDrop
                 } else {
@@ -1197,7 +1232,7 @@ where
                 let address_book_service = address_book_service.clone();
                 let crawl_demand_tx = demand_tx.clone();
                 let spare_capacity = config
-                    .peerset_outbound_connection_limit()
+                    .ordinary_outbound_connection_limit()
                     .saturating_sub(active_outbound_connections.update_count());
 
                 handshakes.spawn(
@@ -1260,7 +1295,7 @@ where
                     let address_book_service = address_book_service.clone();
                     let demand_tx = demand_tx.clone();
                     // There are no outbound connections, so every outbound slot is spare.
-                    let spare_capacity = config.peerset_outbound_connection_limit();
+                    let spare_capacity = config.ordinary_outbound_connection_limit();
 
                     handshakes.spawn(
                         async move {

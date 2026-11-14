@@ -48,9 +48,10 @@ resolver (usually port 53).
 If Zebra runs in Docker, publish the P2P port with `-p 8233:8233` (Mainnet) or
 `-p 18233:18233` (Testnet) so other peers can connect to it. See the
 [P2P section of the Docker guide](./docker.md#p2p-networking) for details. If
-the node sits behind a firewall or NAT, open the P2P port and consider setting
-[`external_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.external_addr)
-to your public IP so peers can discover it.
+the node sits behind a firewall or NAT, open the P2P port. Zebra can learn its
+public IP from outbound peers, but this does not establish port forwarding.
+Set [`external_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.external_addr)
+explicitly if the public address or port differs from the discovered IP and listening port.
 
 Zebra makes outbound connections to peers on any port. But `zcashd` prefers
 peers on the default ports, so that it can't be used for DDoS attacks on other

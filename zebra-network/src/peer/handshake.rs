@@ -50,6 +50,8 @@ use crate::{
     BoxError, Config, PeerSocketAddr, VersionMessage,
 };
 
+mod external_addr;
+
 #[cfg(test)]
 mod tests;
 
@@ -78,6 +80,7 @@ where
     minimum_peer_version: MinimumPeerVersion<C>,
     bans_receiver: tokio::sync::watch::Receiver<crate::BanList>,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
+    external_addrs: Arc<futures::lock::Mutex<external_addr::ExternalAddrs>>,
 
     parent_span: Span,
 }
@@ -119,6 +122,7 @@ where
             minimum_peer_version: self.minimum_peer_version.clone(),
             bans_receiver: self.bans_receiver.clone(),
             nonces: self.nonces.clone(),
+            external_addrs: self.external_addrs.clone(),
             parent_span: self.parent_span.clone(),
         }
     }
@@ -548,6 +552,9 @@ where
                 .bans_receiver
                 .unwrap_or_else(|| tokio::sync::watch::channel(crate::BanList::default()).1),
             nonces,
+            external_addrs: Arc::new(futures::lock::Mutex::new(
+                external_addr::ExternalAddrs::default(),
+            )),
             parent_span: Span::current(),
         })
     }
@@ -706,7 +713,6 @@ where
         services: our_services,
         timestamp,
         address_recv: AddrInVersion::new(their_addr, PeerServices::NODE_NETWORK),
-        // TODO: detect external address (#1893)
         address_from: AddrInVersion::new(our_listen_addr, our_services),
         nonce: local_nonce,
         user_agent: user_agent.clone(),
@@ -969,7 +975,10 @@ where
         let inbound_service = self.inbound_service.clone();
         let address_book_updater = self.address_book_updater.clone();
         let inv_collector = self.inv_collector.clone();
-        let config = self.config.clone();
+        let mut config = self.config.clone();
+        let listener = config.listen_addr;
+        let external = config.external_addr;
+        let external_addrs = self.external_addrs.clone();
         let user_agent = self.user_agent.clone();
         let our_services = self.our_services;
         let relay = self.relay;
@@ -988,6 +997,27 @@ where
 
             // Start timing the handshake for metrics
             let handshake_start = Instant::now();
+
+            match connected_addr {
+                OutboundDirect { addr } | InboundDirect { addr } => {
+                    let addresses =
+                        external_addrs
+                            .lock()
+                            .await
+                            .addresses(listener, external, Instant::now());
+                    config.external_addr = addresses
+                        .iter()
+                        .flatten()
+                        .find(|address| address.is_ipv4() == addr.is_ipv4())
+                        .or_else(|| addresses.iter().flatten().next())
+                        .copied();
+                }
+                // Proxy and isolated connections must not reveal our public listener.
+                OutboundProxy { .. } | InboundProxy { .. } | Isolated => {
+                    config.external_addr = None;
+                    config.listen_addr = get_unspecified_ipv4_addr(config.network.clone());
+                }
+            }
 
             let mut peer_conn = Framed::new(
                 data_stream,
@@ -1077,6 +1107,35 @@ where
             let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(connection_info.negotiated_version);
             bare_codec.reconfigure_full_body_len();
+
+            if matches!(connected_addr, OutboundDirect { .. } | InboundDirect { .. }) {
+                let addresses = {
+                    let mut discovered = external_addrs.lock().await;
+                    if let OutboundDirect { addr } = connected_addr {
+                        discovered.observe(
+                            addr.ip(),
+                            connection_info.remote.address_recv.addr().ip(),
+                            Instant::now(),
+                        );
+                    }
+                    discovered.addresses(listener, external, Instant::now())
+                };
+                let addresses: Vec<_> = addresses
+                    .into_iter()
+                    .flatten()
+                    .filter(|addr| external_addr::is_public(addr.ip()) && addr.port() != 0)
+                    .map(|addr| {
+                        MetaAddr::new_gossiped_meta_addr(
+                            addr.into(),
+                            our_services,
+                            DateTime32::now(),
+                        )
+                    })
+                    .collect();
+                if !addresses.is_empty() {
+                    peer_conn.send(Message::Addr(addresses)).await?;
+                }
+            }
 
             debug!("constructing client, spawning server");
 

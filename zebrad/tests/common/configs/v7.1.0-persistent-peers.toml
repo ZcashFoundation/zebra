@@ -1,0 +1,9 @@
+[network]
+listen_addr = "127.0.0.1:0"
+initial_mainnet_peers = []
+initial_testnet_peers = []
+persistent_peers = ["127.0.0.1:8233"]
+cache_dir = false
+
+[state]
+ephemeral = true

@@ -34,6 +34,34 @@ in the [ZebradConfig documentation][config-options].
 [config-options]: https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
 [config-locations]: https://docs.rs/dirs/latest/dirs/fn.preference_dir.html
 
+### Maintaining Connections to Selected Peers
+
+Configure persistent peers to keep a connection to an edge node or another operator-selected peer:
+
+```toml
+[network]
+persistent_peers = ["edge.example.net:8233", "10.0.0.2:8233"]
+```
+
+Unlike `initial_mainnet_peers` and `initial_testnet_peers`, these targets reserve outbound slots
+and are retried after connection failures or disconnections, even when ordinary peers are available.
+Hostnames are resolved again on retries so replacement pods can use new IP addresses.
+Peer bans, protocol checks, and per-IP connection limits still apply.
+Leave at least one outbound slot for ordinary peers; increase `peerset_initial_target_size` if
+more persistent targets are needed. Regtest permits only localhost targets.
+
+This is not a connect-only mode: Zebra still discovers and connects to ordinary peers.
+Use firewall or network policies to restrict a critical node's network access.
+The `addnode` RPC remains regtest-only; this configuration does not change its commands.
+
+### Advertising an Inbound Address
+
+An explicit `network.external_addr` takes precedence over automatic discovery.
+Otherwise, Zebra uses a public listening address or learns a public IP from agreeing outbound peers
+and advertises it with the listening port.
+Discovery does not open a firewall, create a NAT mapping, or verify inbound reachability.
+Set `external_addr` explicitly if your public port differs from the listening port.
+
 ### Configuring Progress Bars
 
 Configure `tracing.progress_bar` in your `zebrad.toml` to show key metrics in

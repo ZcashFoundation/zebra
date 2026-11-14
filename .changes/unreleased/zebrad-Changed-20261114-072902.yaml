@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Discover and advertise public listening IPs from agreeing outbound peers when no external or public listening address is configured. Configure `network.external_addr` for a different public address or port.
+time: 2026-11-14T07:29:02.901188471+01:00
