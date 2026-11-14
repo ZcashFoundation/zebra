@@ -186,8 +186,12 @@ fn unescape_mountinfo(field: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-/// Returns the paths of `file_name` in the cgroup at `membership` and in each of its ancestors
-/// that the mount with the deepest matching root shows.
+/// Returns the paths of `file_name` in the cgroup at `membership` and in each of its ancestors,
+/// through every mount that shows them.
+///
+/// Mounts can overlap: a mount of a subtree shows the process's cgroup but not the ancestors above
+/// the subtree, which a broader mount of the same hierarchy may still show. So this collects the
+/// paths from every mount whose root contains the cgroup.
 ///
 /// A membership path that leaves the hierarchy (`..`, seen when the cgroup is outside this cgroup
 /// namespace) only checks the mount points.
@@ -204,20 +208,18 @@ fn limit_files(mounts: &[CgroupMount], membership: Option<&str>, file_name: &str
             .collect();
     }
 
-    let Some((mount, relative_path)) = mounts
+    mounts
         .iter()
         .filter_map(|mount| Some((mount, membership.strip_prefix(&mount.root).ok()?)))
-        .max_by_key(|(mount, _)| mount.root.components().count())
-    else {
-        return Vec::new();
-    };
-
-    mount
-        .mount_point
-        .join(relative_path)
-        .ancestors()
-        .take_while(|dir| dir.starts_with(&mount.mount_point))
-        .map(|dir| dir.join(file_name))
+        .flat_map(|(mount, relative_path)| {
+            mount
+                .mount_point
+                .join(relative_path)
+                .ancestors()
+                .take_while(|dir| dir.starts_with(&mount.mount_point))
+                .map(|dir| dir.join(file_name))
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 
@@ -344,6 +346,59 @@ mod tests {
                 .get(path)
                 .cloned()),
             None
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn uses_ancestor_limits_from_a_broader_overlapping_mount() {
+        let gib: u64 = 1024 * 1024 * 1024;
+        // The whole hierarchy is at `/sys/fs/cgroup`, and `/tenant/service` is also at
+        // `/run/service-cgroup`. Only the broader mount shows the limit on `/tenant`.
+        let mountinfo = "\
+            25 22 0:22 / /sys/fs/cgroup rw shared:9 - cgroup2 cgroup2 rw\n\
+            40 22 0:22 /tenant/service /run/service-cgroup rw shared:9 - cgroup2 cgroup2 rw\n";
+        let files: std::collections::HashMap<_, _> = [
+            ("/sys/fs/cgroup/memory.max", "max\n".to_string()),
+            ("/sys/fs/cgroup/tenant/memory.max", format!("{}\n", 2 * gib)),
+            (
+                "/sys/fs/cgroup/tenant/service/memory.max",
+                "max\n".to_string(),
+            ),
+            (
+                "/sys/fs/cgroup/tenant/service/zebrad/memory.max",
+                "max\n".to_string(),
+            ),
+            ("/run/service-cgroup/memory.max", "max\n".to_string()),
+            ("/run/service-cgroup/zebrad/memory.max", "max\n".to_string()),
+        ]
+        .into_iter()
+        .map(|(path, value)| (PathBuf::from(path), value))
+        .collect();
+
+        assert_eq!(
+            tightest_cgroup_limit("0::/tenant/service/zebrad\n", mountinfo, |path| files
+                .get(path)
+                .cloned()),
+            Some(2 * gib)
+        );
+
+        // The same applies to cgroup v1 `memory` mounts.
+        let mountinfo = "\
+            31 22 0:27 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n\
+            41 22 0:27 /tenant/service /run/service-memory rw - cgroup cgroup rw,memory\n";
+        let files: std::collections::HashMap<_, _> = [(
+            PathBuf::from("/sys/fs/cgroup/memory/tenant/memory.limit_in_bytes"),
+            format!("{}\n", 2 * gib),
+        )]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            tightest_cgroup_limit("4:memory:/tenant/service/zebrad\n", mountinfo, |path| files
+                .get(path)
+                .cloned()),
+            Some(2 * gib)
         );
     }
 
