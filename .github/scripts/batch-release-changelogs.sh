@@ -140,12 +140,19 @@ while IFS=$'\t' read -r package version; do
     continue
   fi
 
-  # Changie project keys are the package names.
+  # Release plans contain Cargo packages, not the mirrored zebrad-api project.
   if ! grep -Eq "^[[:space:]]+key: ${package}\$" .changie.yaml; then
     printf 'Releasing %s, which is not a project in .changie.yaml\n' "$package" >&2
     echo "::error title=Missing changie project::Add a project with key '${package}' to .changie.yaml, otherwise its changelog cannot be generated." >&2
     failed=true
     continue
+  fi
+
+  # Technical notes follow the actual package version, including prereleases.
+  # No fragments means no technical version section or dependency placeholder.
+  if [[ "$package" == "zebrad" && ! -f ".changes/zebrad-api/v${version}.md" ]] &&
+    has_pending_fragment zebrad-api; then
+    changie batch "v${version}" --project zebrad-api
   fi
 
   if [[ -f ".changes/${package}/v${version}.md" ]]; then

@@ -116,6 +116,9 @@ projects:
     - label: zebrad
       key: zebrad
       changelog: CHANGELOG.md
+    - label: zebrad Rust APIs
+      key: zebrad-api
+      changelog: zebrad/CHANGELOG.md
     - label: zebra-example
       key: zebra-example
       changelog: zebra-example/CHANGELOG.md
@@ -197,6 +200,29 @@ commit_fixture network-upgrade-outside-zebrad
 expect_failure "network upgrade outside zebrad" true feat true
 
 remove_file .changes/unreleased/zebra-example-network-upgrade.yaml
+
+# A zebrad library change needs no dummy operator entry.
+write_file zebrad/src/lib.rs 'pub fn technical_api() {}'
+fragment zebrad-api-added.yaml zebrad-api Added
+commit_fixture technical-api
+expect_success "technical zebrad API with only its own fragment" true feat false
+
+write_file zebrad/src/lib.rs 'pub fn technical_api(_argument: u8) {}'
+fragment zebrad-api-breaking.yaml zebrad-api breaking
+commit_fixture technical-api-break
+expect_success "technical signature break with a breaking title" true feat true
+expect_failure "technical signature break without a breaking title" true feat false
+
+write_file zebrad/src/lib.rs 'pub fn technical_api(_argument: u16) {}'
+fragment zebrad-api-network-upgrade.yaml zebrad-api network-upgrade
+commit_fixture technical-network-upgrade
+expect_failure "technical project cannot declare an operator network upgrade" true feat true
+remove_file .changes/unreleased/zebrad-api-network-upgrade.yaml
+
+write_file zebra-example/src/lib.rs '// Another library changed.'
+fragment zebrad-api-other.yaml zebrad-api Added
+commit_fixture technical-wrong-package
+expect_failure "technical zebrad fragment does not cover another package" true feat false
 
 # Malformed fragments are rejected before they can reach a release.
 write_file zebra-example/src/lib.rs '// Malformed fragment.'

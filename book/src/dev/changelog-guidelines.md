@@ -1,11 +1,12 @@
 # Changelog Guidelines for Zebra
 
-Zebra has two types of changelogs with different audiences:
+Zebra's changelogs separate operator and Rust developer audiences:
 
-| Changelog | Audience | Location |
+| Changie project key | Audience | Location |
 | --- | --- | --- |
-| `zebrad` (binary) | Node operators | `CHANGELOG.md` (root) |
-| Crates (libraries) | Rust developers | `<crate>/CHANGELOG.md` |
+| `zebrad` | Node operators | `CHANGELOG.md` (root) |
+| `zebrad-api` (label: `zebrad Rust APIs`) | Rust developers using `zebrad` | `zebrad/CHANGELOG.md` |
+| Other crate names | Rust developers | `<crate>/CHANGELOG.md` |
 
 This document covers guidelines common to both, then specific guidance for each.
 
@@ -21,6 +22,9 @@ Instead, add one change fragment per affected project:
 ```sh
 changie new -j zebrad -k Added -b "New \`--check-fees\` flag ([#11251](link))."
 
+# Technical zebrad behavior or a public Rust API, not an operator change:
+changie new -j zebrad-api -k Changed -b "..."
+
 # A change that affects several crates takes one -j per crate, and writes one
 # fragment per crate with the same body.
 changie new -j zebra-chain -j zebra-state -k breaking -b "Renamed ..."
@@ -28,7 +32,7 @@ changie new -j zebra-chain -j zebra-state -k breaking -b "Renamed ..."
 
 Kinds are `breaking` (rendered as `Breaking Changes`), `Added`, `Changed`,
 `Deprecated`, `Removed`, `Fixed` and `Security`; `-j` takes a project key, which
-is `zebrad` or a crate directory name. A release that activates a network upgrade
+is `zebrad`, `zebrad-api`, or another crate's name. A release that activates a network upgrade
 also takes one `zebrad` fragment of kind `network-upgrade` (rendered as `Network
 Upgrade`). It is the only kind that gives `zebrad` a new major version, only
 `zebrad` may use it, and like `breaking` it needs a `!` in the PR title. Running `changie new` with no flags
@@ -41,16 +45,26 @@ them. Create fragments with `changie new`: a fragment written by hand needs a
 valid project and kind, and a body in single quotes must double any apostrophe
 it contains.
 
-At release time, releasing a project turns its fragments into a version file and
-regenerates the changelogs:
+At release time, the release workflow batches fragments into the exact package
+versions from `.github/scripts/plan-release-versions.sh`, then regenerates the
+changelogs. For example, on a Release PR with `zebra-state` planned at `14.0.0`:
 
 ```sh
-changie batch auto -j zebra-state   # writes .changes/zebra-state/v14.0.0.md
-changie merge                       # regenerates every changelog from .changes/
+changie batch v14.0.0 -j zebra-state # writes .changes/zebra-state/v14.0.0.md
+changie merge                      # regenerates every changelog from .changes/
 ```
 
 `changie latest -j zebra-state` prints the release tag (`zebra-state-v13.0.0`);
 for zebrad the `zebrad-` prefix has to be stripped, since its tags are `v6.3.0`.
+`zebrad-api` is a changelog project, not a Cargo package or separate release
+stream. Its fragments are batched only when `zebrad` releases, at that exact
+version (including a prerelease suffix); they do not select a version or trigger
+an independent release. Technical-only fragments wait for that release. A
+release with no technical fragments gets no technical version section.
+Its history starts with the first such batch: do not copy operator history or
+create a baseline version. `changie latest -j zebrad-api` is not a release tag
+and has no version before that first batch.
+
 Because the version files under `.changes/` are the source of truth, fixing a
 typo in an already released entry means editing the version file and re-running
 `changie merge`.
@@ -85,7 +99,7 @@ These apply to all Zebra changelogs regardless of audience.
 
 ### One entry per distinct change
 
-Each distinct user-visible change gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, except a breaking crate addition (see [Section priority](#section-priority)), and do not group multiple PRs in one entry.
+Each distinct change visible to its changelog's audience gets one bullet entry (one `-` item, which may wrap across lines). A PR that makes several independent changes gets one entry for each. Do not split a single change across multiple entries, except a breaking crate addition (see [Section priority](#section-priority)), and do not group multiple PRs in one entry.
 
 Verification-only files and documentation do not need fragments. A lockfile-only
 change needs an operator entry only when it changes the node's production
@@ -216,8 +230,8 @@ A change is breaking if upgrading `zebrad` could cause existing setups to fail:
 
 | Type | Why exclude |
 | --- | --- |
-| Library API changes | Put in crate CHANGELOG |
-| Internal refactors | No operator-visible effect |
+| Library API changes | Put in the affected crate changelog (`zebrad-api` for `zebrad`) |
+| Internal refactors | No operator-visible effect; technical behavior changes in `zebrad` go in `zebrad-api` |
 | CI/workflow changes | No runtime impact |
 | Test changes | No runtime impact |
 | Dependency bumps | Unless they carry a security fix. This row is about **this** file only — see [Dependency updates](#dependency-updates) for when a crate changelog needs an entry |
@@ -361,9 +375,23 @@ Minimize technical details in the public changelog. Link to the security advisor
 
 ## Part 3: Crate Changelogs (Library Consumers)
 
-Files: `zebra-chain/CHANGELOG.md`, `zebra-consensus/CHANGELOG.md`, and so on.
+Files: `zebrad/CHANGELOG.md` (`zebrad-api`), `zebra-chain/CHANGELOG.md`, `zebra-consensus/CHANGELOG.md`, and so on.
 
 Audience: Rust developers building on Zebra crates (Zaino, Zallet, other wallets and tools). These are technical users who read Rust code.
+
+`zebrad` publishes a library as well as a binary. Route changes to its actual
+public Rust APIs and technical behavior here using `-j zebrad-api`, even when
+operators see no difference. Pure refactors without a behavior or API change
+still need no entry. Use `breaking` for real library-consumer breaks, including
+signature changes and removals; breaking additions also need `Added` as described
+in [Section priority](#section-priority). Document operator impact separately
+with `-j zebrad` only when there is one, not with a dummy operator bullet.
+
+The technical changelog does not add an API stability guarantee: Zebra's Rust
+APIs remain [unstable and unsupported](release-process.md#deprecation).
+`zebrad-api` follows the actual `zebrad` package version, not an independent
+SemVer calculation; a technical `breaking` fragment does not force a new
+operator major version or change the existing operator version policy.
 
 ### What is breaking for library consumers?
 
@@ -403,9 +431,10 @@ public API**. Two semver-incompatible versions of a crate do not unify, so
 consumers have to move with the bump, even though none of this crate's own
 signatures changed.
 
-That lockstep is breaking, so the fragment kind is `breaking` and the release
-bumps the major version. Name the dependency, its new version, and where it
-surfaces:
+That lockstep is breaking, so the fragment kind is `breaking` and, for crates
+other than `zebrad`, the release bumps the major version. `zebrad-api` instead
+mirrors `zebrad` as described above. Name the dependency, its new version, and
+where it surfaces:
 
 ```sh
 changie new -j zebra-rpc -k breaking \
@@ -417,7 +446,7 @@ can notice it — new behavior reaching them through a re-exported type, say —
 and then the kind is `Changed`.
 
 A dependency used only internally, or only as a dev-dependency, needs no entry:
-consumers never see it. The zebrad changelog is the other way round — it
+consumers never see it. The root operator changelog is the other way round — it
 excludes dependency bumps entirely unless they carry a security fix, because
 operators do not compile against these crates.
 
