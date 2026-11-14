@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Block transaction verification no longer passes through an intermediate dispatch worker.
+time: 2026-11-09T00:57:18.805935561+01:00
