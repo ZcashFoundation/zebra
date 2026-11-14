@@ -80,6 +80,11 @@ impl ZebraDb {
     pub fn history_capabilities(&self) -> Result<HistoryCapabilities, StateInitError> {
         self.db.history_capabilities()
     }
+
+    /// Reclaims deleted transaction bodies below `below` on the pruning worker.
+    pub(crate) fn compact_pruned_bodies(&self, below: Height) {
+        self.db.compact_pruned_bodies(below);
+    }
 }
 
 impl DiskWriteBatch {
@@ -94,27 +99,24 @@ impl DiskWriteBatch {
         &mut self,
         db: &ZebraDb,
         lowest_retained_height: Height,
+        history: HistoryCapabilities,
+        ready: bool,
+        tip: Option<Height>,
         witness: &mut PruningWitness,
     ) -> Result<Option<Height>, BoxError> {
         if db.db.db_kind() != crate::constants::PRUNED_STATE_DATABASE_KIND {
             return Err("body deletion requires the state-pruned database kind".into());
         }
-        if !db.ready_for_pruning() {
+        if !ready {
             return Err(
                 "history-dependent migrations and checks must finish before pruning".into(),
             );
         }
-        let previous = db
-            .history_capabilities()?
-            .lowest_retained_height
-            .max(Height(1));
+        let previous = history.lowest_retained_height.max(Height(1));
         if lowest_retained_height <= previous || lowest_retained_height > MAX_ON_DISK_HEIGHT {
             return Err("retained-body floor must advance past a non-genesis body".into());
         }
-        if db
-            .finalized_tip_height()
-            .is_none_or(|tip| lowest_retained_height > tip)
-        {
+        if tip.is_none_or(|tip| lowest_retained_height > tip) {
             return Err("retained-body floor must not exceed the finalized tip".into());
         }
         let Some(witness) = witness.update(db)? else {
