@@ -1,0 +1,4 @@
+project: zebra-chain
+kind: Added
+body: Added level-wise batch appends for Orchard and Ironwood note commitment trees, preserving sequential frontiers and completed subtrees. The Merkle hash tables cover all 52 message words without a build-time environment override ([#11846](https://github.com/ZcashFoundation/zebra/pull/11846)).
+time: 2026-11-07T23:12:38.11481224+01:00

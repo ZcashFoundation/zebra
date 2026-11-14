@@ -846,7 +846,7 @@ impl StartCmd {
                 state_checkpoint_verify_result = &mut state_checkpoint_verify_handle_fused => {
                     state_checkpoint_verify_result
                         .unwrap_or_else(|_| panic!(
-                            "unexpected panic checking previous state followed the best chain"));
+                            "unexpected panic in checkpoint validation or Orchard tree precomputation"));
 
                     exit_when_task_finishes = false;
                     Ok(())

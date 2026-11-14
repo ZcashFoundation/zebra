@@ -5145,8 +5145,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 [[package]]
 name = "sinsemilla"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72744738b764bb3bb7bb5dcf71b62d19c2de8a09f850a7388f6088f244037299"
+source = "git+https://github.com/zcash/sinsemilla?rev=d17214e2a336d71071adfef4a7c453b57877ac27#d17214e2a336d71071adfef4a7c453b57877ac27"
 dependencies = [
  "group",
  "pasta_curves",
@@ -5390,7 +5389,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7251,6 +7250,7 @@ dependencies = [
  "rayon",
  "sapling-crypto",
  "serde",
+ "sinsemilla",
  "spandoc",
  "thiserror 2.0.18",
  "tokio",
