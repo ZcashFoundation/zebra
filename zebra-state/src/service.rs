@@ -927,8 +927,8 @@ impl StateService {
         queued_height >= self.full_verifier_utxo_lookahead
     }
 
-    /// Sends all queued blocks whose parents have recently arrived starting from `new_parent`
-    /// in breadth-first ordering to the block write task which will attempt to validate and commit them
+    /// Sends queued blocks starting from `new_parent` in parent-before-child order
+    /// to the block write task for validation and commit.
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
     fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
         use tokio::sync::mpsc::error::SendError;
