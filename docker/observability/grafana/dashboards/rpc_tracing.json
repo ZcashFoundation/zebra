@@ -184,7 +184,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1m])) / sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))",
+          "expr": "(sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1m])) or 0 * sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m]))) / (sum by (rpc_method) (rate(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1m])) > 0)",
           "legendFormat": "{{rpc_method}}",
           "refId": "A"
         }
@@ -482,7 +482,7 @@
             "type": "prometheus",
             "uid": "zebra-prometheus"
           },
-          "expr": "sum(increase(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1h]))",
+          "expr": "sum(increase(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\", status_code=\"STATUS_CODE_ERROR\"}[1h])) or 0 * sum(increase(traces_span_metrics_calls_total{service=\"zebra\", span_name=\"rpc_request\"}[1h]))",
           "legendFormat": "Errors",
           "refId": "A"
         }
