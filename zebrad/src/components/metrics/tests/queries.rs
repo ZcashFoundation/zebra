@@ -50,9 +50,17 @@ const SPAN_METRIC_LABELS: &[&str] = &[
     "service",
 ];
 
-/// Labels that Prometheus adds to every series: the scrape target labels, the metric name, and
-/// the bucket and quantile labels of histograms and summaries.
-const PROMETHEUS_LABELS: &[&str] = &["instance", "job", "__name__", "le", "quantile"];
+/// Labels that Prometheus adds to every series it scrapes.
+///
+/// `__name__` isn't one of them, so any query that uses it is rejected, including a selector
+/// that matches series by name instead of naming them, whose series the checks couldn't tell.
+const PROMETHEUS_LABELS: &[&str] = &["instance", "job"];
+
+/// The label of the bucket series of a Prometheus histogram.
+const BUCKET_LABEL: &str = "le";
+
+/// The label of the quantile series of a Prometheus summary.
+const QUANTILE_LABEL: &str = "quantile";
 
 /// PromQL keywords that look like metric names.
 const PROMQL_KEYWORDS: &[&str] = &[
@@ -194,7 +202,8 @@ fn observability_queries() -> Vec<Query> {
 
 /// The labels of every series that the observability stack can query.
 struct SeriesLabels {
-    /// The labels of each series, by series name.
+    /// The labels of each series, by series name, including the bucket and quantile labels of
+    /// the series that have them.
     series: BTreeMap<String, BTreeSet<String>>,
     /// The labels that every series has.
     common: BTreeSet<String>,
@@ -207,14 +216,27 @@ impl SeriesLabels {
         let mut series = BTreeMap::new();
         for (name, entry) in &catalog.0 {
             let labels: BTreeSet<String> = entry.labels.iter().map(ToString::to_string).collect();
-            for name in entry.prometheus(name).1 {
-                series.insert(name, labels.clone());
+            let (metric_type, names) = entry.prometheus(name);
+            for (index, name) in names.into_iter().enumerate() {
+                // The first series of a histogram is its buckets, and of a summary its quantiles.
+                let added = match (metric_type, index) {
+                    ("histogram", 0) => Some(BUCKET_LABEL),
+                    ("summary", 0) => Some(QUANTILE_LABEL),
+                    _ => None,
+                };
+                let labels = labels.iter().cloned().chain(added.map(str::to_owned));
+                series.insert(name, labels.collect());
             }
         }
         for (name, labels) in OTHER_SERIES {
+            let added = name.ends_with("_bucket").then_some(BUCKET_LABEL);
             series.insert(
                 name.to_string(),
-                labels.iter().map(ToString::to_string).collect(),
+                labels
+                    .iter()
+                    .chain(&added)
+                    .map(ToString::to_string)
+                    .collect(),
             );
         }
 
@@ -236,21 +258,41 @@ impl SeriesLabels {
     /// Returns the labels that `query` and its Grafana `legend` use but the series they apply to
     /// don't have.
     ///
-    /// A label matcher applies to the series it selects. Grouping clauses, `label_values`
-    /// labels, and legend placeholders apply to every series in the query.
+    /// A label matcher applies to the series it selects. An `on` label must be a label of every
+    /// series in the query, which is stricter than PromQL when the `on` clause is part of a larger
+    /// expression. Other grouping clauses, `label_values` labels, and legend placeholders need a
+    /// label of some series in the query.
+    ///
+    /// The checks use the labels of the selected series, not the labels left after an
+    /// aggregation, so they can accept a label that an aggregation removed.
     fn unknown_labels(&self, query: &str, legend: Option<&str>) -> BTreeSet<String> {
-        let labels_of = |series: &str| self.series.get(series).into_iter().flatten();
-        let query_labels: BTreeSet<&String> = series_names(query)
+        let query_series: Vec<Option<&BTreeSet<String>>> = series_names(query)
             .iter()
-            .flat_map(|series| labels_of(series))
+            .map(|series| self.series.get(series))
             .collect();
+        let some_series_has = |label: &String| {
+            query_series
+                .iter()
+                .flatten()
+                .any(|labels| labels.contains(label))
+        };
+        let every_series_has = |label: &String| {
+            !query_series.is_empty()
+                && query_series
+                    .iter()
+                    .all(|labels| labels.is_some_and(|labels| labels.contains(label)))
+        };
 
         label_uses(query, legend)
             .into_iter()
-            .filter(|(series, label)| {
-                let known = match series.as_deref().and_then(|series| self.series.get(series)) {
-                    Some(labels) => labels.contains(label),
-                    None => query_labels.contains(label),
+            .filter(|(scope, label)| {
+                let known = match scope {
+                    LabelScope::Selector(series) => self
+                        .series
+                        .get(series)
+                        .is_some_and(|labels| labels.contains(label)),
+                    LabelScope::AnySeries => some_series_has(label),
+                    LabelScope::EverySeries => every_series_has(label),
                 };
                 !known && !self.common.contains(label)
             })
@@ -415,10 +457,21 @@ fn variables_regex() -> Regex {
     Regex::new(r"\$\{[^}]*\}|\$\w+").expect("valid regex")
 }
 
-/// Matches PromQL grouping and vector matching clauses, capturing their label lists.
+/// Matches PromQL grouping and vector matching clauses, capturing their keyword and label list.
 fn groupings_regex() -> Regex {
-    Regex::new(r"\b(?:by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)")
+    Regex::new(r"\b(by|without|on|ignoring|group_left|group_right)\s*\(([^)]*)\)")
         .expect("valid regex")
+}
+
+/// The series that a label used in a query must be a label of.
+#[derive(Debug, PartialEq)]
+enum LabelScope {
+    /// The series a label matcher selects.
+    Selector(String),
+    /// Some series in the query.
+    AnySeries,
+    /// Every series in the query.
+    EverySeries,
 }
 
 /// Returns the series names that the PromQL expression `query` selects.
@@ -451,10 +504,9 @@ fn series_names(query: &str) -> BTreeSet<String> {
 
 /// Returns the labels that the PromQL expression `query` and its Grafana `legend` use.
 ///
-/// Each label comes with the series name of the selector it matches, or `None` when it applies to
-/// every series in the query: in a grouping or vector matching clause, a `label_values` query, or
-/// a `{{label}}` legend placeholder.
-fn label_uses(query: &str, legend: Option<&str>) -> Vec<(Option<String>, String)> {
+/// Each label comes with the series it must be a label of. A label matcher without a series name
+/// before it, such as `{__name__="x"}`, needs a label of every series in the query.
+fn label_uses(query: &str, legend: Option<&str>) -> Vec<(LabelScope, String)> {
     let selectors = Regex::new(r"([a-zA-Z_:][a-zA-Z0-9_:]*)?\s*\{([^}]*)\}").expect("valid regex");
     let matcher = Regex::new(r"([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=~|!~|!=|=)").expect("valid regex");
     let placeholders = Regex::new(r"\{\{\s*([^{}\s]+)\s*\}\}").expect("valid regex");
@@ -463,29 +515,36 @@ fn label_uses(query: &str, legend: Option<&str>) -> Vec<(Option<String>, String)
 
     let label_values = label_values_regex();
     for captures in label_values.captures_iter(query) {
-        uses.push((None, captures[2].to_owned()));
+        uses.push((LabelScope::AnySeries, captures[2].to_owned()));
     }
     let query = label_values.replace_all(query, "$1");
     let query = strings_regex().replace_all(&query, "\"\"");
     let query = variables_regex().replace_all(&query, "");
 
     for captures in selectors.captures_iter(&query) {
-        let series = captures.get(1).map(|series| series.as_str().to_owned());
         for label in matcher.captures_iter(&captures[2]) {
-            uses.push((series.clone(), label[1].to_owned()));
+            let scope = match captures.get(1) {
+                Some(series) => LabelScope::Selector(series.as_str().to_owned()),
+                None => LabelScope::EverySeries,
+            };
+            uses.push((scope, label[1].to_owned()));
         }
     }
 
     for captures in groupings_regex().captures_iter(&query) {
-        for label in captures[1].split(',').map(str::trim) {
+        for label in captures[2].split(',').map(str::trim) {
             if !label.is_empty() {
-                uses.push((None, label.to_owned()));
+                let scope = match &captures[1] {
+                    "on" => LabelScope::EverySeries,
+                    _ => LabelScope::AnySeries,
+                };
+                uses.push((scope, label.to_owned()));
             }
         }
     }
 
     for captures in placeholders.captures_iter(legend.unwrap_or_default()) {
-        uses.push((None, captures[1].to_owned()));
+        uses.push((LabelScope::AnySeries, captures[1].to_owned()));
     }
 
     uses
@@ -495,7 +554,13 @@ fn label_uses(query: &str, legend: Option<&str>) -> Vec<(Option<String>, String)
 fn test_labels() -> SeriesLabels {
     let series = [
         ("rpc_requests_total", &["method"][..]),
-        ("rpc_request_duration_seconds_bucket", &["method"]),
+        (
+            "rpc_request_duration_seconds_bucket",
+            &["method", BUCKET_LABEL],
+        ),
+        ("rpc_request_duration_seconds_sum", &["method"]),
+        ("rpc_active_requests", &[]),
+        ("state_commit_seconds", &[QUANTILE_LABEL]),
         ("sync_block_error_count", &["kind"]),
         ("zcash_net_peers", &[]),
     ]
@@ -528,10 +593,22 @@ fn accepts_labels_of_the_queried_series() {
     );
     assert_eq!(
         unknown(
-            "sum(rate(rpc_requests_total[5m])) / on (method) group_left (kind) sync_block_error_count",
+            "sum by (method) (rate(rpc_request_duration_seconds_sum[5m])) / on (method) group_left (le) rpc_request_duration_seconds_bucket",
             None,
         ),
         BTreeSet::new(),
+    );
+    assert_eq!(
+        unknown(r#"state_commit_seconds{quantile="0.99"}"#, None),
+        BTreeSet::new(),
+    );
+    assert_eq!(
+        unknown(
+            "rpc_requests_total / ignoring (kind) sync_block_error_count",
+            None
+        ),
+        BTreeSet::new(),
+        "an ignoring clause only needs a label of some series",
     );
     assert_eq!(
         unknown("label_values(zcash_net_peers, job)", None),
@@ -562,8 +639,8 @@ fn rejects_unknown_labels_wherever_they_are_used() {
         "sum without (nope) (rpc_requests_total)",
         "rpc_requests_total / on (nope) sync_block_error_count",
         "rpc_requests_total / ignoring (nope) sync_block_error_count",
-        "rpc_requests_total * on (method) group_left (nope) sync_block_error_count",
-        "rpc_requests_total * on (method) group_right (nope) sync_block_error_count",
+        "rpc_requests_total * on (method) group_left (nope) rpc_request_duration_seconds_sum",
+        "rpc_requests_total * on (method) group_right (nope) rpc_request_duration_seconds_sum",
         "label_values(zcash_net_peers, nope)",
         r#"label_values(rpc_requests_total{job="zebra", method="getinfo"}, nope)"#,
         "label_values(nope)",
@@ -587,6 +664,45 @@ fn rejects_unknown_labels_wherever_they_are_used() {
         BTreeSet::from(["kind".to_owned()]),
         "a label matcher only accepts the labels of the series it selects",
     );
+
+    for (query, label, reason) in [
+        (
+            r#"rpc_request_duration_seconds_bucket{quantile="0.99"}"#,
+            QUANTILE_LABEL,
+            "only summaries have quantiles",
+        ),
+        (
+            r#"rpc_active_requests{le="1"}"#,
+            BUCKET_LABEL,
+            "only histogram buckets have bounds",
+        ),
+        (
+            r#"rpc_request_duration_seconds_sum{le="1"}"#,
+            BUCKET_LABEL,
+            "a histogram's sum has no bounds",
+        ),
+        (
+            "rpc_requests_total / on (method) sync_block_error_count",
+            "method",
+            "an on clause needs a label of both operands",
+        ),
+        (
+            r#"{__name__="missing_total"}"#,
+            "__name__",
+            "a selector that matches series by name hides which series it queries",
+        ),
+        (
+            r#"rpc_requests_total{__name__=~".+"}"#,
+            "__name__",
+            "a selector can't match other series by name",
+        ),
+    ] {
+        assert_eq!(
+            known.unknown_labels(query, None),
+            BTreeSet::from([label.to_owned()]),
+            "{reason}: {query}",
+        );
+    }
 }
 
 #[test]
