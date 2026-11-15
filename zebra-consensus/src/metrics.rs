@@ -26,7 +26,10 @@ pub const LABELS: &[(&str, &[&str])] = &[
     ("zebra.consensus.cache.size", &["verifier"]),
 ];
 
-/// The counters of signatures and proofs that failed verification.
+/// The counters of signatures and shielded bundles in batches that failed verification.
+///
+/// A failed batch counts every item in it, before each item is verified on its own, so a counted
+/// item can still be valid.
 ///
 /// They are only recorded when a verification fails, and `rate()` can't see the first increase of
 /// a series that didn't exist before, so [`register_failure_counters`] registers them at zero.
@@ -104,47 +107,47 @@ pub fn describe() {
     describe_counter!(
         "signatures.ed25519.invalid",
         Unit::Count,
-        "Ed25519 signatures that failed verification."
+        "Ed25519 signatures in batches that failed verification, including valid ones that pass when verified on their own."
     );
     describe_counter!(
         "signatures.redjubjub.validated",
         Unit::Count,
-        "RedJubjub signatures that passed batch verification."
+        "RedJubjub signatures that passed batch verification. zebrad verifies these signatures with their Sapling bundles, so it leaves this at zero."
     );
     describe_counter!(
         "signatures.redjubjub.invalid",
         Unit::Count,
-        "RedJubjub signatures that failed verification."
+        "RedJubjub signatures in batches that failed verification, including valid ones that pass when verified on their own. zebrad verifies these signatures with their Sapling bundles, so it leaves this at zero."
     );
     describe_counter!(
         "signatures.redpallas.validated",
         Unit::Count,
-        "RedPallas signatures that passed batch verification."
+        "RedPallas signatures that passed batch verification. zebrad verifies these signatures with their Orchard bundles, so it leaves this at zero."
     );
     describe_counter!(
         "signatures.redpallas.invalid",
         Unit::Count,
-        "RedPallas signatures that failed verification."
+        "RedPallas signatures in batches that failed verification, including valid ones that pass when verified on their own. zebrad verifies these signatures with their Orchard bundles, so it leaves this at zero."
     );
     describe_counter!(
         "proofs.halo2.verified",
         Unit::Count,
-        "Halo2 proofs that passed batch verification."
+        "Orchard bundles whose Halo2 proofs and signatures passed batch verification."
     );
     describe_counter!(
         "proofs.halo2.invalid",
         Unit::Count,
-        "Halo2 proofs that failed verification."
+        "Orchard bundles in batches that failed verification, including valid ones that pass when verified on their own."
     );
     describe_counter!(
         "proofs.sapling.verified",
         Unit::Count,
-        "Sapling Groth16 proofs that passed batch verification."
+        "Sapling bundles whose Groth16 proofs and signatures passed batch verification."
     );
     describe_counter!(
         "proofs.sapling.invalid",
         Unit::Count,
-        "Sapling Groth16 proofs that failed verification."
+        "Sapling bundles in batches that failed verification, including valid ones that pass when verified on their own."
     );
 
     // Verification caches

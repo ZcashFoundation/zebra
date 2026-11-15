@@ -110,7 +110,7 @@
         {
           "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Sapling proofs",
+          "legendFormat": "Sapling bundles",
           "refId": "D",
           "datasource": {
             "type": "prometheus",
@@ -120,7 +120,7 @@
         {
           "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Halo2 proofs",
+          "legendFormat": "Orchard bundles",
           "refId": "E",
           "datasource": {
             "type": "prometheus",
@@ -132,7 +132,8 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Verification Failures - $job",
+      "description": "Signatures and shielded bundles in batches that failed verification. A failed batch counts every item in it, then each item is verified on its own, so some counted items are valid.",
+      "title": "Batch Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -261,7 +262,7 @@
         {
           "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Sapling proofs",
+          "legendFormat": "Sapling bundles",
           "refId": "D",
           "datasource": {
             "type": "prometheus",
@@ -271,7 +272,7 @@
         {
           "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Halo2 proofs",
+          "legendFormat": "Orchard bundles",
           "refId": "E",
           "datasource": {
             "type": "prometheus",
@@ -283,7 +284,8 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Verification Failures - $job",
+      "description": "Signatures and shielded bundles in batches that failed verification. A failed batch counts every item in it, then each item is verified on its own, so some counted items are valid.",
+      "title": "Batch Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -412,7 +414,7 @@
         {
           "expr": "rate(proofs_sapling_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Sapling proofs",
+          "legendFormat": "Sapling bundles",
           "refId": "D",
           "datasource": {
             "type": "prometheus",
@@ -422,7 +424,7 @@
         {
           "expr": "rate(proofs_halo2_invalid{job=\"$job\"}[5m])",
           "interval": "",
-          "legendFormat": "Halo2 proofs",
+          "legendFormat": "Orchard bundles",
           "refId": "E",
           "datasource": {
             "type": "prometheus",
@@ -434,7 +436,8 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Verification Failures - $job",
+      "description": "Signatures and shielded bundles in batches that failed verification. A failed batch counts every item in it, then each item is verified on its own, so some counted items are valid.",
+      "title": "Batch Verification Failures - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,

@@ -719,7 +719,7 @@
       "name": "proofs.halo2.invalid",
       "kind": "counter",
       "unit": "count",
-      "description": "Halo2 proofs that failed verification.",
+      "description": "Orchard bundles in batches that failed verification, including valid ones that pass when verified on their own.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -732,7 +732,7 @@
       "name": "proofs.halo2.verified",
       "kind": "counter",
       "unit": "count",
-      "description": "Halo2 proofs that passed batch verification.",
+      "description": "Orchard bundles whose Halo2 proofs and signatures passed batch verification.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -745,7 +745,7 @@
       "name": "proofs.sapling.invalid",
       "kind": "counter",
       "unit": "count",
-      "description": "Sapling Groth16 proofs that failed verification.",
+      "description": "Sapling bundles in batches that failed verification, including valid ones that pass when verified on their own.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -758,7 +758,7 @@
       "name": "proofs.sapling.verified",
       "kind": "counter",
       "unit": "count",
-      "description": "Sapling Groth16 proofs that passed batch verification.",
+      "description": "Sapling bundles whose Groth16 proofs and signatures passed batch verification.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -848,7 +848,7 @@
       "name": "signatures.ed25519.invalid",
       "kind": "counter",
       "unit": "count",
-      "description": "Ed25519 signatures that failed verification.",
+      "description": "Ed25519 signatures in batches that failed verification, including valid ones that pass when verified on their own.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -874,7 +874,7 @@
       "name": "signatures.redjubjub.invalid",
       "kind": "counter",
       "unit": "count",
-      "description": "RedJubjub signatures that failed verification.",
+      "description": "RedJubjub signatures in batches that failed verification, including valid ones that pass when verified on their own. zebrad verifies these signatures with their Sapling bundles, so it leaves this at zero.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -887,7 +887,7 @@
       "name": "signatures.redjubjub.validated",
       "kind": "counter",
       "unit": "count",
-      "description": "RedJubjub signatures that passed batch verification.",
+      "description": "RedJubjub signatures that passed batch verification. zebrad verifies these signatures with their Sapling bundles, so it leaves this at zero.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -900,7 +900,7 @@
       "name": "signatures.redpallas.invalid",
       "kind": "counter",
       "unit": "count",
-      "description": "RedPallas signatures that failed verification.",
+      "description": "RedPallas signatures in batches that failed verification, including valid ones that pass when verified on their own. zebrad verifies these signatures with their Orchard bundles, so it leaves this at zero.",
       "labels": [],
       "prometheus": {
         "type": "counter",
@@ -913,7 +913,7 @@
       "name": "signatures.redpallas.validated",
       "kind": "counter",
       "unit": "count",
-      "description": "RedPallas signatures that passed batch verification.",
+      "description": "RedPallas signatures that passed batch verification. zebrad verifies these signatures with their Orchard bundles, so it leaves this at zero.",
       "labels": [],
       "prometheus": {
         "type": "counter",
