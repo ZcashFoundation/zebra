@@ -86,6 +86,7 @@ proptest-derive = { workspace = true, optional = true }
 zebra-chain = { path = "../zebra-chain", version = "15.0.0", features = ["async-error"] }
 
 [dev-dependencies]
+criterion = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
 tempfile = { workspace = true }
@@ -95,6 +96,10 @@ toml = { workspace = true }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
+
+[[bench]]
+name = "address_book"
+harness = false
 
 [lints]
 workspace = true
