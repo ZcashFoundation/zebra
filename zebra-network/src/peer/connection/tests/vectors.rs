@@ -233,6 +233,20 @@ fn connection_state_gauges_follow_the_active_recorder() {
     assert_eq!(second.state("AwaitingRequest"), 2.0);
 }
 
+/// A recorder that replaces an earlier one in the same storage counts states in itself.
+#[test]
+fn connection_state_gauges_follow_a_recorder_replaced_in_place() {
+    let label = StateLabel::new(StateName::AwaitingRequest, None);
+    let mut recorder = ConnectionMetricsRecorder::default();
+
+    metrics::with_local_recorder(&recorder, || label.increment());
+    assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+
+    recorder = ConnectionMetricsRecorder::default();
+    metrics::with_local_recorder(&recorder, || label.increment());
+    assert_eq!(recorder.state("AwaitingRequest"), 1.0);
+}
+
 /// A state counted before any recorder is installed is counted once a recorder is active.
 #[test]
 fn connection_state_gauges_start_recording_after_a_recorder_is_installed() {

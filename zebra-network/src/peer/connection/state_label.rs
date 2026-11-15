@@ -1,12 +1,12 @@
 //! Allocation-free labels for the aggregate connection state gauge.
 //!
 //! Connections update their state label for every peer message, so labels are small `Copy` keys
-//! built from `&'static str` parts, and the gauge handle for each distinct label is registered
-//! once per thread and recorder.
+//! built from `&'static str` parts, and the metric key for each distinct label is built once per
+//! thread.
 
 use std::{cell::RefCell, collections::HashMap, fmt};
 
-use metrics::Gauge;
+use metrics::{Gauge, Key, Label, Level, Metadata};
 
 use crate::peer::PeerError;
 
@@ -36,46 +36,28 @@ impl StateLabel {
         self.with_gauge(|gauge| gauge.decrement(1.0));
     }
 
-    /// Runs `update` on the gauge for this label.
+    /// Runs `update` on the gauge for this label in the active recorder.
     ///
-    /// Handles are cached per thread, so the label text is only built the first time a thread
-    /// sees it under the active recorder. A handle stays bound to the recorder that registered
-    /// it, so the cache is cleared whenever the active recorder changes, for example when the
-    /// global recorder is installed after connections start, or a local recorder scope begins
-    /// or ends.
+    /// The metric key is built once per thread and label, so updates don't format the label. The
+    /// gauge is registered with the active recorder on every update, because a cached handle
+    /// stays bound to the recorder that registered it, and a replaced recorder can't be detected.
     fn with_gauge(self, update: impl FnOnce(&Gauge)) {
         thread_local! {
-            static GAUGES: RefCell<GaugeCache> = RefCell::new(GaugeCache {
-                recorder: std::ptr::null(),
-                gauges: HashMap::new(),
-            });
+            static KEYS: RefCell<HashMap<StateLabel, Key>> = RefCell::new(HashMap::new());
         }
 
-        // Only the address is compared, as an identity for the recorder; it is never
-        // dereferenced. A recorder dropped and replaced by another at the same address is not
-        // detected, which only happens with short-lived local recorders, not the global one.
-        let recorder = metrics::with_recorder(|recorder| std::ptr::from_ref(recorder).cast::<()>());
+        static METADATA: Metadata<'static> =
+            Metadata::new(module_path!(), Level::INFO, Some(module_path!()));
 
-        GAUGES.with_borrow_mut(|cache| {
-            if cache.recorder != recorder {
-                cache.gauges.clear();
-                cache.recorder = recorder;
-            }
-
-            let gauge = cache
-                .gauges
-                .entry(self)
-                .or_insert_with(|| metrics::gauge!(STATE_GAUGE, "command" => self.to_string()));
-            update(gauge);
+        KEYS.with_borrow_mut(|keys| {
+            let key = keys.entry(self).or_insert_with(|| {
+                Key::from_parts(STATE_GAUGE, vec![Label::new("command", self.to_string())])
+            });
+            update(&metrics::with_recorder(|recorder| {
+                recorder.register_gauge(key, &METADATA)
+            }));
         });
     }
-}
-
-/// The gauge handles registered with one recorder on this thread.
-struct GaugeCache {
-    /// The address of the recorder that registered `gauges`.
-    recorder: *const (),
-    gauges: HashMap<StateLabel, Gauge>,
 }
 
 impl fmt::Display for StateLabel {
