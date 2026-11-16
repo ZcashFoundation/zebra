@@ -39,11 +39,83 @@ use crate::{
         StateService,
     },
     tests::setup::{partial_nu5_chain_strategy, transaction_v4_from_coinbase},
-    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, Request, Response,
-    SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitBlockError, Config, ReadRequest, ReadResponse,
+    Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 const LAST_BLOCK_HEIGHT: u32 = 10;
+
+/// Dropping every state handle must release the database without shutting down the runtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropped_state_releases_persistent_database() {
+    let _init_guard = zebra_test::init();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let cache = tempfile::tempdir().expect("the temporary cache directory can be created");
+        let config = Config {
+            cache_dir: cache.path().to_path_buf(),
+            ..Config::default()
+        };
+        for _ in 0..8 {
+            let (state, read_state, _, _) =
+                crate::init(config.clone(), &Network::Mainnet, Height::MAX, 0).await;
+            tokio::task::yield_now().await;
+            drop(state);
+            let response = read_state.clone().oneshot(ReadRequest::Tip).await.unwrap();
+            assert!(matches!(response, ReadResponse::Tip(None)));
+            drop(read_state);
+        }
+    })
+    .await
+    .expect("state shutdown and reopening should finish within the timeout");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn metrics_exporter_panic_preserves_existing_unwind() {
+    let _init_guard = zebra_test::init();
+    struct ExporterPanic;
+    struct OuterPanic;
+
+    for already_unwinding in [false, true] {
+        let (mut state, read_state, _, _) = StateService::new(
+            Config {
+                ephemeral: true,
+                ..Config::default()
+            },
+            &Network::Mainnet,
+            Height::MAX,
+            0,
+        )
+        .await;
+        let (shutdown_sender, metrics_thread) = state
+            .metrics_exporter
+            .take()
+            .expect("state initialization starts the metrics exporter");
+        drop(shutdown_sender);
+        metrics_thread
+            .join()
+            .expect("the initialized exporter exits after its shutdown sender is dropped");
+
+        let (shutdown_sender, _shutdown_receiver) = std::sync::mpsc::channel();
+        state.metrics_exporter = Some((
+            shutdown_sender,
+            std::thread::spawn(|| std::panic::panic_any(ExporterPanic)),
+        ));
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            if already_unwinding {
+                std::panic::panic_any(OuterPanic);
+            }
+            drop(state);
+        }))
+        .expect_err("the originating panic must propagate");
+
+        if already_unwinding {
+            assert!(panic.is::<OuterPanic>());
+        } else {
+            assert!(panic.is::<ExporterPanic>());
+        }
+        drop(read_state);
+    }
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn state_propagates_incomplete_block_body_errors() {
