@@ -184,7 +184,7 @@ Peer addresses and full user agents remain available in logs and peer metadata.
 Metric labels use bounded values:
 
 - `mempool.failed.verify.tasks.total` `reason`: `in_state`, `state_error`,
-  `download_failed`, `cancelled`, `invalid`, or `timeout`.
+  `download_failed`, `cancelled`, `invalid`, `non_standard`, or `timeout`.
 - `zebra.net.in.errors` `error`: `io`, `parse`, `utf8_error`,
   `try_from_slice_error`, `try_from_int_error`, `from_hex_error`, `amount`,
   `bad_transaction_balance`, `script`, `opcode`, or `num`.
