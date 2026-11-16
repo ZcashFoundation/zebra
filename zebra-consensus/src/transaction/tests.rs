@@ -46,6 +46,10 @@ use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerif
 #[cfg(test)]
 mod prop;
 #[cfg(test)]
+mod sigops;
+#[cfg(test)]
+mod state_before_crypto;
+#[cfg(test)]
 mod transparent_scripts;
 
 /// Returns the timeout duration for tests, extended when running under coverage
@@ -5786,7 +5790,7 @@ fn cacheable_mainnet_orchard_transaction() -> Transaction {
                 && !tx.has_sapling_shielded_data()
                 && !tx.lock_time_is_time()
                 && tx
-                    .value_balance(&HashMap::new())
+                    .value_balance(&HashMap::<_, transparent::Utxo>::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
                     .is_some_and(|fee| fee >= zip317::conventional_fee(tx))
@@ -6035,7 +6039,7 @@ fn cacheable_mainnet_sapling_transaction() -> (NetworkUpgrade, Transaction) {
                 && tx.inputs().is_empty()
                 && !tx.lock_time_is_time()
                 && tx
-                    .value_balance(&HashMap::new())
+                    .value_balance(&HashMap::<_, transparent::Utxo>::new())
                     .ok()
                     .and_then(|balance| balance.remaining_transaction_value().ok())
                     .is_some_and(|fee| fee >= zip317::conventional_fee(tx))

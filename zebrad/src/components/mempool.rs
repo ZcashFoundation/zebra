@@ -99,10 +99,15 @@ fn adjusted_mempool_misbehavior_score(
     verification_height: Height,
     network: &Network,
 ) -> u32 {
-    let is_grace_mismatch = matches!(error, TransactionError::WrongConsensusBranchId)
-        && transaction_upgrade.is_some_and(|transaction_upgrade| {
-            is_in_branch_id_grace_period(transaction_upgrade, verification_height, network)
-        });
+    let is_grace_mismatch =
+        match (error, transaction_upgrade) {
+            (TransactionError::WrongConsensusBranchId, Some(_)) => true,
+            // V4 and older transactions commit to the branch ID only in their signatures, so one
+            // signed for an adjacent upgrade fails its scripts instead. zcashd checks the previous
+            // branch ID explicitly; Zebra doesn't, so it forgives any script failure in the window.
+            (TransactionError::Script(_), None) => true,
+            _ => false,
+        } && is_in_branch_id_grace_period(transaction_upgrade, verification_height, network);
 
     // Lock times are checked against our own tip, so a peer whose tip is ahead can honestly
     // relay a transaction we reject.
@@ -121,8 +126,9 @@ fn adjusted_mempool_misbehavior_score(
 
 /// Returns `true` if `transaction_upgrade` activates immediately before or after the upgrade
 /// current at `height` on `network`, and `height` is within the grace window of that boundary.
+/// `None` matches either adjacent upgrade.
 fn is_in_branch_id_grace_period(
-    transaction_upgrade: NetworkUpgrade,
+    transaction_upgrade: Option<NetworkUpgrade>,
     height: Height,
     network: &Network,
 ) -> bool {
@@ -132,17 +138,18 @@ fn is_in_branch_id_grace_period(
     };
     let grace_blocks =
         BRANCH_ID_GRACE_PERIOD.num_seconds() / current.target_spacing().num_seconds();
+    let matches = |upgrade| transaction_upgrade.is_none_or(|tx_upgrade| tx_upgrade == upgrade);
 
     let previous = activations.range(..current_height).next_back();
     let next = activations
         .range((Bound::Excluded(height), Bound::Unbounded))
         .next();
 
-    previous.is_some_and(|(_, &previous)| {
-        previous == transaction_upgrade && height - current_height < grace_blocks
-    }) || next.is_some_and(|(&next_height, &next)| {
-        next == transaction_upgrade && next_height - height <= grace_blocks
-    })
+    previous
+        .is_some_and(|(_, &previous)| matches(previous) && height - current_height < grace_blocks)
+        || next.is_some_and(|(&next_height, &next)| {
+            matches(next) && next_height - height <= grace_blocks
+        })
 }
 
 /// The state of the mempool.
@@ -421,11 +428,18 @@ impl Mempool {
     fn enable_at_tip(&mut self, tip_action: &TipAction) {
         let (last_seen_tip_hash, _) = tip_action.best_tip_hash_and_height();
 
-        let tx_downloads = Box::pin(TxDownloads::new(
-            Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
-            Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
-            self.state.clone(),
-        ));
+        let tx_downloads = Box::pin(
+            TxDownloads::new(
+                Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
+                Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                self.state.clone(),
+            )
+            .with_max_datacarrier_bytes(
+                self.config
+                    .max_datacarrier_bytes
+                    .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
+            ),
+        );
         self.active_state = ActiveState::Enabled {
             storage: storage::Storage::new(&self.config),
             tx_downloads,

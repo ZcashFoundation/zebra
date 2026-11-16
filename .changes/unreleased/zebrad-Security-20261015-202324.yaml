@@ -1,0 +1,8 @@
+project: zebrad
+kind: Security
+body: >-
+  Keep a sync round going when a peer's reply to a sync discovery request includes blocks Zebra
+  already has, and skip downloading those blocks
+  ([GHSA-vw2c-5w35-x5q6](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-vw2c-5w35-x5q6)).
+  Thanks to @AnticsDecoded for reporting the issue.
+time: 2026-10-15T20:23:24.066929576Z

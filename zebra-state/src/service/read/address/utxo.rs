@@ -34,6 +34,7 @@ use crate::{
 ///
 /// The genesis coinbase transactions are ignored by a consensus rule,
 /// so they are not included in any address indexes.
+#[cfg(test)]
 pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Height::MAX;
 
 /// A convenience wrapper that efficiently stores unspent transparent outputs,
@@ -161,8 +162,13 @@ where
         );
 
         // Apply the non-finalized UTXO changes.
-        let chain_utxo_changes =
-            chain_transparent_utxo_changes(chain.as_ref(), &addresses, finalized_tip_range);
+        let chain_utxo_changes = chain_transparent_utxo_changes(
+            chain.as_ref(),
+            &addresses,
+            finalized_tip_range,
+            &query_height_range,
+            max_entries,
+        );
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
@@ -183,7 +189,7 @@ where
                     max_entries,
                 );
 
-                let tx_ids = lookup_tx_ids_for_utxos(chain.as_ref(), db, &addresses, &utxos);
+                let tx_ids = lookup_tx_ids_for_utxos(chain.as_ref(), db, &utxos);
 
                 debug!(
                     full_utxo_count = ?utxos.len(),
@@ -270,6 +276,9 @@ fn finalized_address_utxos(
 /// `finalized_tip_range`. Also returns the height of the last block in which
 /// the changes were located, or None if the state is empty.
 ///
+/// Only returns the created UTXOs in `query_height_range` that the chain doesn't spend,
+/// at most `max_entries` of them. See [`Chain::partial_transparent_utxo_changes`] for details.
+///
 /// If the addresses do not exist in the non-finalized `chain`, returns an empty
 /// list.
 //
@@ -278,6 +287,8 @@ fn chain_transparent_utxo_changes<C>(
     chain: Option<C>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip_range: Option<RangeInclusive<Height>>,
+    query_height_range: &RangeInclusive<Height>,
+    max_entries: Option<usize>,
 ) -> Result<
     (
         BTreeMap<OutputLocation, transparent::Output>,
@@ -427,7 +438,8 @@ where
             );
         }
     }
-    let (created, spent) = chain.partial_transparent_utxo_changes(addresses);
+    let (created, spent) =
+        chain.partial_transparent_utxo_changes(addresses, query_height_range, max_entries);
     Ok((created, spent, Some(non_finalized_tip)))
 }
 
@@ -486,7 +498,6 @@ fn apply_utxo_changes(
 fn lookup_tx_ids_for_utxos<C>(
     chain: Option<C>,
     db: &ZebraDb,
-    addresses: &HashSet<transparent::Address>,
     utxos: &BTreeMap<OutputLocation, transparent::Output>,
 ) -> BTreeMap<TransactionLocation, transaction::Hash>
 where
@@ -498,25 +509,22 @@ where
         .map(|output_location| output_location.transaction_location())
         .collect();
 
-    let chain_tx_ids = chain
-        .as_ref()
-        .map(|chain| {
-            chain
-                .as_ref()
-                .partial_transparent_tx_ids(addresses, ADDRESS_HEIGHTS_FULL_RANGE)
-        })
-        .unwrap_or_default();
-
-    // First try the in-memory chain, then the disk database
+    // First try the in-memory chain, then the disk database.
+    //
+    // Look up each location, rather than all the addresses' chain transactions, so the work
+    // done here is bounded by the number of UTXOs.
     transaction_locations
         .iter()
         .map(|tx_loc| {
             (
                 *tx_loc,
-                chain_tx_ids.get(tx_loc).cloned().unwrap_or_else(|| {
-                    db.transaction_hash(*tx_loc)
-                        .expect("unexpected inconsistent UTXO indexes")
-                }),
+                chain
+                    .as_ref()
+                    .and_then(|chain| chain.as_ref().transaction_hash_by_loc(*tx_loc).copied())
+                    .unwrap_or_else(|| {
+                        db.transaction_hash(*tx_loc)
+                            .expect("unexpected inconsistent UTXO indexes")
+                    }),
             )
         })
         .collect()

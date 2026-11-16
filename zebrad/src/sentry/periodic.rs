@@ -25,6 +25,7 @@ const COUNTERS: &[&str] = &[
     "sync.block.error.count",
     "sync.verified.block.count",
     "gossip.verified.block.count",
+    "state.memory.fork.evicted.count",
 ];
 
 /// The gauges sent to Sentry, as their latest value at each [`flush`], with their units.
@@ -35,6 +36,17 @@ const GAUGES: &[(&str, Option<Unit>)] = &[
     (
         "zebra.state.rocksdb.total_disk_size_bytes",
         Some(Unit::Byte),
+    ),
+    ("process.memory.rss_bytes", Some(Unit::Byte)),
+    ("process.memory.rss_fraction", Some(Unit::Ratio)),
+    ("state.memory.chain.count", None),
+    ("state.memory.best.chain.length", None),
+    ("state.memory.index.entries", None),
+    ("state.memory.best.chain.index.entries", None),
+    ("state.memory.backup.restored.block.count", None),
+    (
+        "state.memory.backup.restore.duration_seconds",
+        Some(Unit::Second),
     ),
 ];
 

@@ -1,0 +1,7 @@
+project: zebrad
+kind: Security
+body: >-
+  The health endpoint serves one request per connection, closes connections that don't send their
+  request headers within 5 seconds, and keeps at most 32 connections open, so slow or idle clients
+  can't use up its connections.
+time: 2026-10-24T15:19:42.150222558+02:00

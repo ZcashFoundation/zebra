@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Time out stalled block-verifier readiness so downloaded blocks cannot remain pending indefinitely between sync rounds.
+time: 2026-11-04T06:09:01.630401623+01:00

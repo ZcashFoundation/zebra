@@ -1,0 +1,8 @@
+project: zebra-state
+kind: Security
+body: >-
+  `ReadRequest::UtxosByAddresses` and `ReadRequest::TransactionIdsByAddresses` now collect at most
+  `max_entries` non-finalized UTXOs and transaction IDs, instead of copying all the recent UTXOs
+  and transactions of the requested addresses on every request
+  ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).
+time: 2026-10-22T12:00:01.000000000+00:00

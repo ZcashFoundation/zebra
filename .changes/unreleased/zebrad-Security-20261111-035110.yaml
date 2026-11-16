@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Reject mempool transactions with more than 4,000 signature operations before verifying their scripts. Previously, a peer could keep the verification thread pool busy with transactions that Zebra verified in full before rejecting them as non-standard ([GHSA-423j-2vj4-j5x4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-423j-2vj4-j5x4)). Thanks to @janneh2000 for reporting the issue.
+time: 2026-11-11T03:51:10.535222716+01:00

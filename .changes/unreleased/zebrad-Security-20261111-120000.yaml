@@ -1,0 +1,9 @@
+project: zebrad
+kind: Security
+body: >-
+  Fix an initial sync halt where a peer could send forged blocks during the switch from checkpoint
+  sync to full validation, so later blocks were never committed. Zebra now rejects those blocks
+  and bans the peer that sent them
+  ([GHSA-m44m-9r8r-r64j](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m44m-9r8r-r64j)).
+  Thanks to @unusualbyte for reporting the issue.
+time: 2026-11-11T12:00:00.000000000-03:00

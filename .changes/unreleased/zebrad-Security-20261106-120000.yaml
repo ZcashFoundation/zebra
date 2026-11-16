@@ -1,0 +1,10 @@
+project: zebrad
+kind: Security
+body: >-
+  Ban peers that serve a requested block whose transactions don't match its header, such as a
+  block with a rewritten coinbase height, and request the block again from another peer, so a peer
+  can't stall initial sync by making Zebra drop a block it still needs
+  ([GHSA-g9rc-89v4-hhvf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g9rc-89v4-hhvf),
+  [GHSA-hvw5-x88g-2q8w](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hvw5-x88g-2q8w)).
+  Thanks to @x15-eth and @SphereDonout for reporting these issues.
+time: 2026-11-06T12:00:00.000000000+00:00

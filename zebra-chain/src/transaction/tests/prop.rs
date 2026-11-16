@@ -48,6 +48,29 @@ fn assert_transaction_roundtrip(tx: Transaction) -> Result<(), TestCaseError> {
 }
 
 proptest! {
+    /// Borrowed plain and ordered lookups preserve the old output-map accounting and errors.
+    #[test]
+    fn borrowed_value_balances_match_owned_outputs(
+        tx in any::<Transaction>(),
+        value in any::<Amount<NonNegative>>(),
+    ) {
+        let output = transparent::Output::new(value, transparent::Script::new(&[0; 1024]));
+        let outputs: std::collections::HashMap<_, _> =
+            tx.spent_outpoints().map(|outpoint| (outpoint, output.clone())).collect();
+        let plain: std::collections::HashMap<_, _> = outputs.iter().map(|(outpoint, output)| {
+            (*outpoint, transparent::Utxo::new(output.clone(), block::Height(1), false))
+        }).collect();
+        let ordered: std::collections::HashMap<_, _> = plain.iter().map(|(outpoint, utxo)| {
+            (*outpoint, transparent::OrderedUtxo::from_utxo(utxo.clone(), 0))
+        }).collect();
+        let expected = tx.transparent_value_balance_from_outputs(&outputs).and_then(|transparent| {
+            transparent + tx.sprout_value_balance()? + tx.sapling_value_balance()
+                + tx.orchard_value_balance() + tx.ironwood_value_balance()
+        });
+        prop_assert_eq!(tx.value_balance(&plain), expected.clone());
+        prop_assert_eq!(tx.value_balance(&ordered), expected);
+    }
+
     #[test]
     fn transaction_roundtrip(tx in any::<Transaction>()) {
         let _init_guard = zebra_test::init();

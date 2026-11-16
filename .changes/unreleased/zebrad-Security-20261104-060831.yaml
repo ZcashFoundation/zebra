@@ -1,0 +1,10 @@
+project: zebrad
+kind: Security
+body: >-
+  Keep unrelated block verification running when a peer serves an invalid block or a download
+  fails, and retry blocks whose bodies fail validation. A sync round where the chain tip doesn't
+  advance for 8 minutes now backs off without cancelling downloads. It counts under the
+  `sync_step_timeout` reason of `sync.restart.count` and logs `no chain progress before the sync
+  deadline` at INFO, not the WARN for a failed sync round. Tip progress during a pending request
+  restarts the 8 minutes.
+time: 2026-11-04T06:08:31.433655531+01:00

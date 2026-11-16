@@ -110,7 +110,7 @@ async fn recover_busy_source(immediate_misses: usize) {
 
     let fast_peers: Vec<_> = (1..=immediate_misses).collect();
     for _ in 0..immediate_misses {
-        let (_, request) = peers.next_request_from(&fast_peers).await;
+        let (peer, request) = peers.next_request_from(&fast_peers).await;
         assert_eq!(
             request.request(),
             &zn::Request::BlockDownload {
@@ -118,6 +118,7 @@ async fn recover_busy_source(immediate_misses: usize) {
                 advertiser: None,
             },
         );
+        peers.notfound(peer, hash);
         request.respond(Err(missing(hash)));
     }
 

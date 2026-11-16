@@ -1,0 +1,6 @@
+project: zebrad
+kind: Security
+body: >-
+  Limit the memory a peer's block request can use: Zebra keeps at most 16 distinct block hashes
+  from it before handling the request.
+time: 2026-10-28T09:39:23.329626942-05:00

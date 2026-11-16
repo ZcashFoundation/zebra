@@ -1,0 +1,7 @@
+project: zebra-state
+kind: Security
+body: >-
+  When the state receives a block it already queued under the same hash, it keeps each block body
+  with the request that sent it, so each caller gets the result of its own body
+  ([GHSA-7jvw-68q7-xfh4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-7jvw-68q7-xfh4)).
+time: 2026-11-04T04:01:28.368933503+01:00

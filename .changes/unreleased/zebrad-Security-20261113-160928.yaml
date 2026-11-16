@@ -1,0 +1,10 @@
+project: zebrad
+kind: Security
+body: >-
+  Fix a denial of service where blocks with many transparent outputs made every non-finalized
+  fork, and every finalized block, copy the created-output and address indexes of the whole
+  non-finalized window, so a node ran out of memory and was killed again on every restart. Chain
+  forks now share each block's outputs and address changes instead of copying them
+  ([GHSA-j8gf-c4rj-6jv5](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-j8gf-c4rj-6jv5)).
+  Thanks to Foundry Digital for reporting the issue.
+time: 2026-11-13T16:09:28.566391071Z

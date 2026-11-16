@@ -1,0 +1,11 @@
+project: zebrad
+kind: Security
+body: >-
+  Limit the memory of blocks waiting for checkpoint verification and of blocks waiting for their
+  parent blocks, including blocks kept alive after their requests were cancelled or their commits
+  failed. The syncer requests a block dropped from a full queue again without cancelling other
+  downloads, and restarts the round if those downloads run out of retries. The
+  `sync.block.error.count` metric counts these errors with the `queue_full` kind
+  ([GHSA-8qxv-5f2c-452c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8qxv-5f2c-452c)).
+  Thanks to @Maakai123, @DanielDerefaka, and @SphereDonout for reporting the issue.
+time: 2026-11-11T04:15:51.548407427+01:00

@@ -3,7 +3,7 @@
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     mem,
     path::{Path, PathBuf},
     sync::Arc,
@@ -20,8 +20,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
-        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS,
+        MAX_BLOCK_REORG_HEIGHT, MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS,
+        MAX_NON_FINALIZED_CHAIN_FORKS_TEST_NETWORKS, MAX_NON_FINALIZED_INDEX_ENTRIES,
+        MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS, MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
     },
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
@@ -70,6 +71,13 @@ pub struct NonFinalizedState {
     /// The configured Zcash network.
     pub network: Network,
 
+    /// The maximum [`Self::index_entry_count`] of all chains, if any.
+    max_index_entries: Option<usize>,
+
+    /// Blocks that were only in evicted chains, and haven't been taken by
+    /// [`Self::take_evicted_block_hashes`] yet.
+    evicted_block_hashes: Vec<block::Hash>,
+
     // Diagnostics
     //
     /// Configures the non-finalized state to count metrics.
@@ -110,6 +118,9 @@ impl Clone for NonFinalizedState {
         Self {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
+            max_index_entries: self.max_index_entries,
+            // Only the write task reports evicted blocks.
+            evicted_block_hashes: Vec::new(),
             invalidated_blocks: self.invalidated_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
@@ -127,6 +138,12 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
+            max_index_entries: Some(if network.is_a_test_network() {
+                MAX_NON_FINALIZED_INDEX_ENTRIES_TEST_NETWORKS
+            } else {
+                MAX_NON_FINALIZED_INDEX_ENTRIES
+            }),
+            evicted_block_hashes: Vec::new(),
             invalidated_blocks: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
@@ -206,7 +223,13 @@ impl NonFinalizedState {
                     .expect("failed to create non-finalized state backup directory");
 
                 if should_restore_backup {
-                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                    let mut restored =
+                        backup::restore_backup(self, &backup_dir_path, &finalized_state);
+                    // The state service's sent hashes are built from the restored chains, so
+                    // blocks evicted while restoring were never sent. A notice for one of them
+                    // would remove a later re-delivery of that block from the sent hashes.
+                    restored.take_evicted_block_hashes();
+                    restored
                 } else {
                     self
                 }
@@ -271,7 +294,7 @@ impl NonFinalizedState {
     }
 
     /// Insert `chain` into `self.chain_set`, apply `chain_filter` to the chains,
-    /// then limit the number of tracked chains.
+    /// then limit the number of tracked chains and the size of their indexes.
     fn insert_with<F>(&mut self, chain: Arc<Chain>, chain_filter: F)
     where
         F: FnOnce(&mut BTreeSet<Arc<Chain>>),
@@ -285,11 +308,19 @@ impl NonFinalizedState {
         } else {
             MAX_NON_FINALIZED_CHAIN_FORKS
         };
-        while self.chain_set.len() > max_forks {
+        loop {
+            let index_entries = self.index_entry_count();
+            let over_index_limit = self
+                .max_index_entries
+                .is_some_and(|max_index_entries| index_entries > max_index_entries);
+            if self.chain_set.len() <= max_forks && !over_index_limit {
+                break;
+            }
+
             // Keep the inserted chain and the best chain, so late forks can grow. Evict the
             // lowest-work chain, and on a work tie the one whose tip was received first.
             let best_chain = self.chain_set.last().cloned();
-            let evicted = self
+            let Some(evicted) = self
                 .chain_set
                 .iter()
                 .filter(|c| **c != chain && Some(*c) != best_chain.as_ref())
@@ -300,14 +331,35 @@ impl NonFinalizedState {
                         .then_with(|| received_time(a).cmp(&received_time(b)))
                         .then_with(|| a.cmp(b))
                 })
-                .expect("the fork limit allows more than two chains")
-                .clone();
+                .cloned()
+            else {
+                // The fork limit allows more than two chains, so only the index limit can
+                // leave just the best and inserted chains.
+                break;
+            };
 
             self.chain_set.remove(&evicted);
+            if self.should_count_metrics() {
+                metrics::counter!("state.memory.fork.evicted.count").increment(1);
+            }
+
+            // Chains contain all their non-finalized ancestors, so once a block is in another
+            // chain, so are all the blocks below it.
+            let evicted_blocks = evicted
+                .blocks
+                .values()
+                .rev()
+                .map(|block| block.hash)
+                .take_while(|hash| !self.any_chain_contains(hash))
+                .collect::<Vec<_>>();
+            self.evicted_block_hashes.extend(evicted_blocks);
+
             tracing::warn!(
                 tip = ?evicted.non_finalized_tip_hash(),
                 height = ?evicted.non_finalized_tip_height(),
                 max_forks,
+                index_entries,
+                max_index_entries = ?self.max_index_entries,
                 "the fork limit evicted a chain: if the node stops advancing, restart it"
             );
         }
@@ -315,9 +367,43 @@ impl NonFinalizedState {
         self.update_metrics_bars();
     }
 
+    /// Sets the maximum [`Self::index_entry_count`] of all chains.
+    #[cfg(test)]
+    pub(crate) fn set_max_index_entries(&mut self, max_index_entries: Option<usize>) {
+        self.max_index_entries = max_index_entries;
+    }
+
+    /// Returns the hashes of blocks that were dropped from the non-finalized state because every
+    /// chain containing them was evicted by the fork limits, and forgets them.
+    ///
+    /// The network can still extend those blocks, so the state service must be able to download
+    /// and commit them again (#11133).
+    pub(crate) fn take_evicted_block_hashes(&mut self) -> Vec<block::Hash> {
+        let mut evicted = mem::take(&mut self.evicted_block_hashes);
+        // `finalize()` re-inserts chains one at a time, so an eviction there can record
+        // blocks that a chain re-inserted later still holds.
+        evicted.retain(|hash| !self.any_chain_contains(hash));
+        evicted
+    }
+
     /// Insert `chain` into `self.chain_set`, then limit the number of tracked chains.
     fn insert(&mut self, chain: Arc<Chain>) {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
+    }
+
+    /// Returns `true` if the best chain's root block should be finalized: when the best chain is
+    /// longer than the reorg limit, or when the chains pass the index entry limit and the best
+    /// chain is longer than [`MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT`].
+    pub(crate) fn should_finalize_root(&self) -> bool {
+        let Some(best_chain_len) = self.best_chain_len() else {
+            return false;
+        };
+
+        best_chain_len > MAX_BLOCK_REORG_HEIGHT
+            || (best_chain_len > MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT
+                && self
+                    .max_index_entries
+                    .is_some_and(|max_index_entries| self.index_entry_count() > max_index_entries))
     }
 
     /// Finalize the lowest height block in the non-finalized portion of the best
@@ -343,6 +429,9 @@ impl NonFinalizedState {
         // also obtain its associated treestate.
         let (best_chain_root, root_treestate) = mut_best_chain.pop_root();
 
+        // Side chains rebuild their maps from the best chain's, so they keep sharing them.
+        let shared_best_chain = best_chain.clone();
+
         // add best_chain back to `self.chain_set`
         if !best_chain.is_empty() {
             self.insert(best_chain);
@@ -364,8 +453,20 @@ impl NonFinalizedState {
             let mut_side_chain = Arc::make_mut(&mut side_chain);
 
             // remove the first block from `chain`
+            //
+            // Popping the root separately from the best chain stops sharing its map paths.
+            mut_side_chain.detach_index_entries_at(best_chain_root.height);
             let (side_chain_root, _treestate) = mut_side_chain.pop_root();
             assert_eq!(side_chain_root.hash, best_chain_root.hash);
+
+            // Rebuilding costs about the entries the chains don't share, so wait until the chain
+            // has removed that many separately since its last rebuild.
+            if mut_side_chain
+                .divergent_index_entries(&shared_best_chain)
+                .is_some_and(|divergent| mut_side_chain.index_removals_since_rebuild >= divergent)
+            {
+                mut_side_chain.share_indexes_with(&shared_best_chain);
+            }
 
             // add the chain back to `self.chain_set`
             if !side_chain.is_empty() {
@@ -380,7 +481,7 @@ impl NonFinalizedState {
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizableBlock::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(Arc::unwrap_or_clone(best_chain_root), root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -430,7 +531,11 @@ impl NonFinalizedState {
             }
 
             self.chain_set.remove(&chain);
-            chain.blocks.values().cloned().collect()
+            chain
+                .blocks
+                .values()
+                .map(|block| block.as_ref().clone())
+                .collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
                 .invalidate_block(block_hash)
@@ -438,7 +543,7 @@ impl NonFinalizedState {
 
             // Add the new chain fork or updated chain to the set of recent chains, and
             // remove the chain containing the hash of the block from chain set
-            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+            self.insert_with(Arc::new(new_chain), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
 
@@ -620,7 +725,7 @@ impl NonFinalizedState {
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &new_chain.unspent_utxos(),
+            &new_chain,
             &new_chain.spent_utxos,
             finalized_state,
         )?;
@@ -762,9 +867,24 @@ impl NonFinalizedState {
             .map(|chain| chain.non_finalized_root_height())
     }
 
+    /// Returns the index entries in all chains, counting the entries of blocks that chains share
+    /// once, and the entries that chains have stopped sharing.
+    pub(crate) fn index_entry_count(&self) -> usize {
+        let mut seen_blocks = HashSet::new();
+        let mut entries = 0;
+        for chain in &self.chain_set {
+            entries += chain.detached_index_entry_count();
+            for block in chain.blocks.values() {
+                if seen_blocks.insert(Arc::as_ptr(block)) {
+                    entries += chain.block_index_entry_count(block);
+                }
+            }
+        }
+        entries
+    }
+
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
-    #[allow(dead_code)]
     pub fn any_chain_contains(&self, hash: &block::Hash) -> bool {
         self.chain_set
             .iter()
@@ -992,6 +1112,12 @@ impl NonFinalizedState {
         metrics::gauge!("state.memory.chain.count").set(self.chain_set.len() as f64);
         metrics::gauge!("state.memory.best.chain.length",)
             .set(self.best_chain_len().unwrap_or_default() as f64);
+        // Index entry counts are far below the integers f64 represents exactly.
+        metrics::gauge!("state.memory.index.entries").set(self.index_entry_count() as f64);
+        metrics::gauge!("state.memory.best.chain.index.entries").set(
+            self.best_chain()
+                .map_or(0, |chain| chain.index_entry_count()) as f64,
+        );
 
         if let Some(best_chain) = self.best_chain() {
             let value_pools = best_chain.chain_value_pools;

@@ -61,7 +61,11 @@ use crate::components::{
     sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
 };
 
-use super::MempoolError;
+use super::{
+    config::DEFAULT_MAX_DATACARRIER_BYTES,
+    storage::{check_standard_outputs, NonStandardTransactionError},
+    MempoolError,
+};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -145,6 +149,9 @@ pub enum TransactionDownloadVerifyError {
         /// The candidate block height used for mempool consensus verification.
         verification_height: Height,
     },
+
+    #[error("transaction is non-standard: {0}")]
+    NonStandard(NonStandardTransactionError),
 }
 
 impl TransactionDownloadVerifyError {
@@ -156,6 +163,7 @@ impl TransactionDownloadVerifyError {
             Self::DownloadFailed(_) => "download_failed",
             Self::Cancelled => "cancelled",
             Self::Invalid { .. } => "invalid",
+            Self::NonStandard(_) => "non_standard",
         }
     }
 }
@@ -185,6 +193,9 @@ where
 
     /// A service that manages cached blockchain state.
     state: ZS,
+
+    /// The maximum OP_RETURN script size for the standard output checks.
+    max_datacarrier_bytes: u32,
 
     // Internal downloads state
     /// A list of pending transaction download and verify tasks.
@@ -342,10 +353,17 @@ where
             network,
             verifier,
             state,
+            max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_per_peer: HashMap::new(),
         }
+    }
+
+    /// Sets the maximum OP_RETURN script size used by the standard output checks.
+    pub fn with_max_datacarrier_bytes(mut self, max_datacarrier_bytes: u32) -> Self {
+        self.max_datacarrier_bytes = max_datacarrier_bytes;
+        self
     }
 
     /// Queue a transaction for download (if needed) and verification.
@@ -417,6 +435,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+        let max_datacarrier_bytes = self.max_datacarrier_bytes;
         let pushed_advertiser_addr = source.map(PeerSocketAddr::from);
 
         let gossiped_tx_req = gossiped_tx.clone();
@@ -478,6 +497,10 @@ where
             };
 
             trace!(?txid, "got tx");
+
+            // Reject non-standard outputs before verifying scripts and proofs, like zcashd.
+            check_standard_outputs(&tx.transaction, max_datacarrier_bytes)
+                .map_err(TransactionDownloadVerifyError::NonStandard)?;
 
             let transaction_upgrade = tx.transaction.network_upgrade();
             let result = verifier
