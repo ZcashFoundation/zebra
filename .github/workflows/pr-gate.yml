@@ -148,7 +148,7 @@ jobs:
       # A declared break only has to analyse cleanly; an undeclared one must not break the API.
       - name: Diff the public API and dependencies
         id: zc
-        uses: ZcashFoundation/zc@b6140120caa4414571f0cf62d4d82cdec73344a8 # v0.8.1
+        uses: ZcashFoundation/zc@9ec9a33bda1b550b8d44cc2a90c4d51307bc89fe
         with:
           baseline: ${{ steps.baseline.outputs.rev }}
           fail-on: ${{ needs.changes.outputs.breaking == 'true' && 'error' || 'api-breaking' }}
@@ -194,7 +194,7 @@ jobs:
         # Comparing the commit with itself builds each crate once. Warming only has to populate
         # the cache, so it never fails the job.
         continue-on-error: true
-        uses: ZcashFoundation/zc@b6140120caa4414571f0cf62d4d82cdec73344a8 # v0.8.1
+        uses: ZcashFoundation/zc@9ec9a33bda1b550b8d44cc2a90c4d51307bc89fe
         with:
           baseline: ${{ github.sha }}
           head: ${{ github.sha }}
@@ -262,7 +262,7 @@ jobs:
           key: ${{ env.ZC_CACHE_KEY_PREFIX }}-${{ steps.baseline.outputs.rev }}
       - name: Diff the public API and dependencies since the last release
         id: zc
-        uses: ZcashFoundation/zc@b6140120caa4414571f0cf62d4d82cdec73344a8 # v0.8.1
+        uses: ZcashFoundation/zc@9ec9a33bda1b550b8d44cc2a90c4d51307bc89fe
         with:
           baseline: ${{ steps.baseline.outputs.tag }}
           fail-on: none

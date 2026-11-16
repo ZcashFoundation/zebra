@@ -1,0 +1,4 @@
+project: zebrad
+kind: Changed
+body: Use compatible published cryptographic verification dependencies without temporary proof-verifier pins ([#12210](https://github.com/ZcashFoundation/zebra/pull/12210)).
+time: 2026-11-15T19:03:36.919023786+01:00

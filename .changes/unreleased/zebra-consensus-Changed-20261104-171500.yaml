@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Changed
+body: Use published groth16 0.2.2, bls12_381 0.9.2, pairing 0.24.2 and halo2_proofs 0.4.1 for proof verification ([#12210](https://github.com/ZcashFoundation/zebra/pull/12210)).
+time: 2026-11-04T17:15:00.000000000+01:00
