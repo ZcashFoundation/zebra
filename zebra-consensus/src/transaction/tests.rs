@@ -46,6 +46,8 @@ use super::{check, BlockRequest, BlockTxVerifier, MempoolRequest, MempoolTxVerif
 #[cfg(test)]
 mod prop;
 #[cfg(test)]
+mod sigops;
+#[cfg(test)]
 mod transparent_scripts;
 
 /// Returns the timeout duration for tests, extended when running under coverage
