@@ -12,8 +12,8 @@ use std::{
 
 use color_eyre::eyre::{eyre, Report};
 use futures::{
-    stream::{FuturesUnordered, StreamExt},
-    FutureExt,
+    future::{self, FutureExt as _},
+    stream::{self, FuturesUnordered, StreamExt as _, TryStreamExt as _},
 };
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
@@ -69,6 +69,9 @@ fn is_not_found(error: &dyn std::error::Error) -> bool {
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
+
+/// Limits concurrent discovery membership checks against the shared state service.
+const KNOWN_BLOCK_CHECK_CONCURRENCY: usize = 16;
 
 /// Controls how many times we will retry each block download.
 ///
@@ -919,6 +922,7 @@ where
         }
 
         let mut download_set = IndexSet::new();
+        let mut response_candidates = Vec::with_capacity(FANOUT);
         while let Some(res) = requests.next().await {
             match res
                 .unwrap_or_else(|e @ JoinError { .. }| {
@@ -966,23 +970,8 @@ where
                             expected_next: end[1],
                         };
 
-                        // Make sure we get the same tips, regardless of the
-                        // order of peer responses
-                        if !download_set.contains(&new_tip.expected_next) {
-                            debug!(
-                                ?new_tip,
-                                "adding new prospective tip, and removing existing tips in the \
-                                new block hash list",
-                            );
-                            self.prospective_tips
-                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                            self.prospective_tips.insert(new_tip);
-                        } else {
-                            debug!(
-                                ?new_tip,
-                                "discarding prospective tip: already in download set"
-                            );
-                        }
+                        // Preserve original candidates until state filtering decides eligibility.
+                        response_candidates.push((new_tip, unknown_hashes.to_vec()));
                     } else {
                         debug!("downloading response that extends only one block");
                     }
@@ -1004,15 +993,55 @@ where
             }
         }
 
-        debug!(?self.prospective_tips);
+        // Filter after deduplication without discarding other peers' useful work.
+        let state = self.state.clone();
+        let download_set = stream::iter(download_set)
+            .map(move |hash| {
+                let state = state.clone();
 
-        // Check that the new tips we got are actually unknown.
-        for hash in &download_set {
-            debug!(?hash, "checking if state contains hash");
-            if self.state_contains(*hash).await? {
-                return Err(eyre!("queued download of hash behind our chain tip"));
+                async move {
+                    let response = state
+                        .oneshot(zs::Request::KnownBlock(hash))
+                        .await
+                        .map_err(|error| eyre!(error))?;
+                    let zs::Response::KnownBlock(location) = response else {
+                        unreachable!("wrong response to known block request");
+                    };
+
+                    // As in `state_contains`, queued blocks still need their parents downloaded.
+                    let is_known =
+                        location.is_some_and(|location| location != zs::KnownBlock::Queue);
+
+                    Ok::<_, Report>((!is_known).then_some(hash))
+                }
+            })
+            // Keep discovery order when splitting immediate and deferred downloads.
+            .buffered(KNOWN_BLOCK_CHECK_CONCURRENCY)
+            .try_filter_map(future::ok)
+            .try_collect::<IndexSet<_>>()
+            .await?;
+
+        // Only eligible responses may supersede another response's candidate.
+        // The download set also contains useful work from ineligible responses,
+        // so it must not be used to suppress an eligible tip during merging.
+        let mut eligible_response_hashes = HashSet::new();
+        for (response_tip, response_hashes) in response_candidates {
+            // Check the original pair before merging; filtering must not manufacture adjacency.
+            if !download_set.contains(&response_tip.tip)
+                || !download_set.contains(&response_tip.expected_next)
+            {
+                continue;
             }
+
+            if !eligible_response_hashes.contains(&response_tip.expected_next) {
+                self.prospective_tips
+                    .retain(|tip| !response_hashes.contains(&tip.expected_next));
+                self.prospective_tips.insert(response_tip);
+            }
+            eligible_response_hashes.extend(response_hashes);
         }
+
+        debug!(?self.prospective_tips);
 
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
@@ -1696,9 +1725,9 @@ where
     /// Blocks that are only queued in the state, waiting for their parent, are treated as not
     /// present. A sync restart cancels in-flight downloads, so the parent of a queued block may
     /// never arrive unless the syncer downloads it again along with its queued children. If the
-    /// syncer skipped queued blocks, `obtain_tips` would reject every download set that contains
-    /// them, and the sync would stall until Zebra restarts. Re-submitting a queued block is
-    /// harmless: the block verifier rejects it as a duplicate, which doesn't restart the sync.
+    /// syncer skipped queued blocks, discovery could lose the continuation needed to recover
+    /// their missing parents. Re-submitting a queued block is harmless: the block verifier rejects
+    /// it as a duplicate, which doesn't restart the sync.
     pub(crate) async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
         match self
             .state
