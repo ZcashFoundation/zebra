@@ -531,7 +531,6 @@ impl Chain {
 
     /// Returns the [`transaction::Hash`] for the transaction at [`TransactionLocation`],
     /// if it exists in this chain.
-    #[allow(dead_code)]
     pub fn transaction_hash_by_loc(
         &self,
         tx_loc: TransactionLocation,
@@ -1869,7 +1868,10 @@ impl Chain {
         )
     }
 
-    /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.
+    /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain:
+    /// - the UTXOs created by this chain in `query_height_range` that it doesn't spend,
+    ///   at most `max_entries` of them, the first in chain order, and
+    /// - the outputs this chain spends.
     ///
     /// If the UTXOs don't change for any of the addresses, returns empty lists.
     ///
@@ -1882,23 +1884,43 @@ impl Chain {
     ///
     /// Specifically, a block in the partial chain must be a child block of the finalized tip.
     /// (But the child block does not have to be the partial chain root.)
+    ///
+    /// Combining these UTXOs with finalized UTXOs, removing the spent outputs, and keeping the
+    /// first `max_entries` gives the same result as using all the created UTXOs: the unspent
+    /// UTXOs this method leaves out are all after the ones it returns.
     pub fn partial_transparent_utxo_changes(
         &self,
         addresses: &HashSet<transparent::Address>,
+        query_height_range: &RangeInclusive<Height>,
+        max_entries: Option<usize>,
     ) -> (
         BTreeMap<OutputLocation, transparent::Output>,
         BTreeSet<OutputLocation>,
     ) {
-        let created_utxos = self
-            .transparent_transfers(addresses, ..)
-            .flat_map(|transfers| transfers.created())
-            .map(|(out_loc, utxo)| (*out_loc, utxo.utxo.output.clone()))
-            .collect();
-
-        let spent_utxos = self
+        let spent_utxos: BTreeSet<OutputLocation> = self
             .transparent_transfers(addresses, ..)
             .flat_map(|transfers| transfers.spent())
             .copied()
+            .collect();
+
+        // `BTreeMap::range` panics on a range that ends before it starts.
+        if query_height_range.is_empty() {
+            return (BTreeMap::new(), spent_utxos);
+        }
+
+        // Only keep the outputs that can be in the result, so the memory used by this query is
+        // bounded by `max_entries`, not by the number of outputs the addresses received.
+        let mut created_utxos = BTreeMap::new();
+        for transfers in self.transparent_transfers(addresses, query_height_range.clone()) {
+            for (out_loc, utxo) in transfers.created() {
+                if !spent_utxos.contains(out_loc) {
+                    insert_within_limit(&mut created_utxos, *out_loc, utxo, max_entries);
+                }
+            }
+        }
+        let created_utxos = created_utxos
+            .into_iter()
+            .map(|(out_loc, utxo)| (out_loc, utxo.utxo.output.clone()))
             .collect();
 
         (created_utxos, spent_utxos)
@@ -1918,7 +1940,8 @@ impl Chain {
     }
 
     /// Returns the [`transaction::Hash`]es used by `addresses` to receive or spend funds,
-    /// in the non-finalized chain, filtered using the `query_height_range`.
+    /// in the non-finalized chain, filtered using the `query_height_range`,
+    /// at most `max_entries` of them, the first in chain order.
     ///
     /// If none of the addresses receive or spend funds in this partial chain, returns an empty list.
     ///
@@ -1940,16 +1963,23 @@ impl Chain {
         &self,
         addresses: &HashSet<transparent::Address>,
         query_height_range: RangeInclusive<Height>,
+        max_entries: Option<usize>,
     ) -> BTreeMap<TransactionLocation, transaction::Hash> {
         // `BTreeMap::range` panics on a range that ends before it starts.
         if query_height_range.is_empty() {
             return BTreeMap::new();
         }
 
-        self.transparent_transfers(addresses, query_height_range)
-            .flat_map(|transfers| transfers.transactions())
-            .copied()
-            .collect()
+        // Keep the result bounded by `max_entries`, not by the number of transactions the
+        // addresses have in this chain.
+        let mut tx_ids = BTreeMap::new();
+        for transfers in self.transparent_transfers(addresses, query_height_range) {
+            for (tx_loc, tx_hash) in transfers.transactions() {
+                insert_within_limit(&mut tx_ids, *tx_loc, *tx_hash, max_entries);
+            }
+        }
+
+        tx_ids
     }
 
     /// Update the chain tip with the `contextually_valid` block,
@@ -2183,6 +2213,21 @@ where
     assert_eq!(&rebased, own, "rebuilt maps keep their contents");
 
     rebased
+}
+
+/// Inserts `key` and `value` into `map`, then removes its last entry if it has more than
+/// `limit` entries.
+fn insert_within_limit<K: Ord, V>(
+    map: &mut BTreeMap<K, V>,
+    key: K,
+    value: V,
+    limit: Option<usize>,
+) {
+    map.insert(key, value);
+
+    if limit.is_some_and(|limit| map.len() > limit) {
+        map.pop_last();
+    }
 }
 
 impl Deref for Chain {

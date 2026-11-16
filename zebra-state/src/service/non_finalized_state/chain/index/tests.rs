@@ -143,16 +143,23 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
                 expected.received
             ),
         );
+        // The chain leaves out the outputs it creates and then spends.
+        let unspent_created = expected
+            .created
+            .iter()
+            .filter(|(location, _output)| !expected.spent.contains(location))
+            .map(|(location, output)| (*location, output.clone()))
+            .collect();
         assert_eq!(
-            chain.partial_transparent_utxo_changes(&address),
-            (expected.created.clone(), expected.spent.clone()),
+            chain.partial_transparent_utxo_changes(&address, &all_heights, None),
+            (unspent_created, expected.spent.clone()),
         );
         assert_eq!(
             chain.partial_transparent_spent_utxo_count(&address),
             expected.spent.len()
         );
         assert_eq!(
-            chain.partial_transparent_tx_ids(&address, all_heights.clone()),
+            chain.partial_transparent_tx_ids(&address, all_heights.clone(), None),
             expected.tx_ids,
         );
         all_balance += expected.balance;
@@ -186,17 +193,17 @@ pub(in crate::service::non_finalized_state) fn assert_legacy_indexes(chain: &Cha
         chain.partial_transparent_balance_change_from(&all_addresses, Height(0)),
     );
     assert_eq!(
-        chain.partial_transparent_utxo_changes(&superset),
-        chain.partial_transparent_utxo_changes(&all_addresses),
+        chain.partial_transparent_utxo_changes(&superset, &all_heights, None),
+        chain.partial_transparent_utxo_changes(&all_addresses, &all_heights, None),
     );
     assert_eq!(
-        chain.partial_transparent_tx_ids(&superset, all_heights.clone()),
-        chain.partial_transparent_tx_ids(&all_addresses, all_heights.clone()),
+        chain.partial_transparent_tx_ids(&superset, all_heights.clone(), None),
+        chain.partial_transparent_tx_ids(&all_addresses, all_heights.clone(), None),
     );
     #[allow(clippy::reversed_empty_ranges)]
     let inverted = Height(1)..=Height(0);
     assert!(chain
-        .partial_transparent_tx_ids(&superset, inverted)
+        .partial_transparent_tx_ids(&superset, inverted, None)
         .is_empty());
 
     // Every block has address changes, and they share outputs with the block, not copy them.
