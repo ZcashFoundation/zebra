@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Added
+body: Added `SemanticallyVerifiedBlock::retained_bytes()`, which estimates the memory a block keeps alive, and `CommitBlockError::OrphanQueueFull` with its `new_orphan_queue_full()` constructor, which the state returns for blocks it drops from a full queue.
+time: 2026-11-11T04:15:51.536500256+01:00

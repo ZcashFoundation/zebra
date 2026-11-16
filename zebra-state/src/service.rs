@@ -939,6 +939,9 @@ impl StateService {
                 .prune_by_height(finalized_tip_height);
         }
 
+        // Limit the queue after sending the blocks that are ready, so it can't fail them.
+        self.non_finalized_state_queued_blocks.prune_overflow();
+
         rsp_rx
     }
 

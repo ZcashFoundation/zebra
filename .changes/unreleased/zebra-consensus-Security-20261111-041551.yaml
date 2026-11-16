@@ -1,0 +1,4 @@
+project: zebra-consensus
+kind: Security
+body: Limit queued checkpoint bodies to about 4 GB of estimated memory. A separate retained-owner count covers queued bodies, running commits, cancellation, and failure recovery, allowing four candidates per configured checkpoint gap or 2,000 bodies, whichever is greater. These are not aggregate-byte or process-RSS limits. When full, admission preserves blocks linked to the next checkpoint and returns unscored `VerifyCheckpointError::QueuedLimit` errors for displaced or rejected requests.
+time: 2026-11-11T04:15:51.544556263+01:00

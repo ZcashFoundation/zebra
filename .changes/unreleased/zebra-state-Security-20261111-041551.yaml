@@ -1,0 +1,4 @@
+project: zebra-state
+kind: Security
+body: Limit the queue of blocks waiting for their parent blocks to 1,000 blocks and 320 MiB of estimated memory, failing childless blocks whose callers stopped waiting first, then the highest queued blocks, with `CommitBlockError::OrphanQueueFull` when it is full.
+time: 2026-11-11T04:15:51.540539596+01:00

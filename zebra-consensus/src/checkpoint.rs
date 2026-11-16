@@ -12,12 +12,20 @@
 //!
 //! Verification starts at the first checkpoint, which is the genesis
 //! block for the configured network.
+//!
+//! Admission also counts accepted commit owners until completion, including cancelled requests
+//! and failure recovery. The count allows four candidates per configured checkpoint gap or
+//! 2,000 bodies (two default sync batches), whichever is greater. Only queued bodies have the
+//! additional byte limit; these bounds are not process-RSS caps.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     ops::{Bound, Bound::*},
     pin::Pin,
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -61,24 +69,31 @@ pub use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOI
 struct QueuedBlock {
     /// The block, with additional precalculated data.
     block: CheckpointVerifiedBlock,
+    /// The block's estimated memory use, which counts towards [`MAX_QUEUED_BYTES`].
+    bytes: usize,
     /// The transmitting end of the oneshot channel for this block's result.
     tx: oneshot::Sender<Result<Verified, VerifyCheckpointError>>,
+    /// Counts this body through queueing, state commit, and failure recovery.
+    retained: RetainedBlockPermit,
 }
 
-/// The unverified block, with a receiver for the [`QueuedBlock`]'s result.
+/// A lifetime reservation shared by queued blocks and accepted commit tasks.
 #[derive(Debug)]
-struct RequestBlock {
-    /// The block, with additional precalculated data.
-    block: CheckpointVerifiedBlock,
-    /// The receiving end of the oneshot channel for this block's result.
-    rx: oneshot::Receiver<Result<Verified, VerifyCheckpointError>>,
+struct RetainedBlockPermit(Arc<AtomicUsize>);
+
+impl Drop for RetainedBlockPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 /// A checkpoint verified block, ready to be committed to the state.
 #[derive(Debug)]
 struct Verified {
-    /// The hash of the block.
-    hash: block::Hash,
+    /// The block, with additional precalculated data.
+    block: CheckpointVerifiedBlock,
+    /// Keeps accepted work counted until commit or recovery finishes.
+    retained: RetainedBlockPermit,
 
     /// The verifier's reset epoch when the block was verified.
     epoch: u64,
@@ -129,10 +144,15 @@ type QueuedBlockList = Vec<QueuedBlock>;
 ///   retries, but use a bit more CPU when verifying,
 /// - avoiding a memory DoS: if we queue fewer blocks, we use less memory.
 ///
-/// Memory usage is controlled by the sync service, because it controls block
-/// downloads. When the verifier services process blocks, they reduce memory
-/// usage by committing blocks to the disk state. (Or dropping invalid blocks.)
+/// The verifier also limits the memory used by the queued blocks at all heights.
 pub const MAX_QUEUED_BLOCKS_PER_HEIGHT: usize = 4;
+
+/// The maximum estimated memory used by the blocks queued for checkpoint verification, in bytes.
+///
+/// This fits 2,000 full-size blocks, twice the syncer's default checkpoint lookahead, so it only
+/// limits syncing when a large lookahead is configured or peers send blocks Zebra can't use yet.
+// The block size limit fits in usize on every supported platform.
+const MAX_QUEUED_BYTES: usize = 2_000 * block::MAX_BLOCK_BYTES as usize;
 
 /// Convert a tip into its hash and matching progress.
 fn progress_from_tip(
@@ -186,6 +206,18 @@ where
     /// The first checkpoint does not have any ancestors, so it only verifies the
     /// genesis block.
     queued: BTreeMap<block::Height, QueuedBlockList>,
+
+    /// Bodies and commit owners retained across all checkpoint ranges.
+    retained_blocks: Arc<AtomicUsize>,
+    /// Four candidates per configured maximum gap, or two default sync batches.
+    retained_block_limit: usize,
+
+    /// The estimated memory used by the blocks in `queued`, which is at most `max_queued_bytes`
+    /// after each new block is queued.
+    queued_bytes: usize,
+
+    /// The limit for `queued_bytes`, which is [`MAX_QUEUED_BYTES`] outside tests.
+    max_queued_bytes: usize,
 
     /// The current progress of this verifier.
     verifier_progress: Progress<block::Height>,
@@ -312,6 +344,20 @@ where
             progress_from_tip(&checkpoint_list, initial_tip);
 
         let (sender, receiver) = mpsc::channel();
+        let mut previous_height = 0;
+        let maximum_gap = checkpoint_list
+            .iter()
+            .map(|(height, _)| {
+                let gap = height.0 - previous_height;
+                previous_height = height.0;
+                usize::try_from(gap).expect("block heights fit in usize")
+            })
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let retained_block_limit = maximum_gap
+            .saturating_mul(MAX_QUEUED_BLOCKS_PER_HEIGHT)
+            .max(2_000);
 
         #[cfg(feature = "progress-bar")]
         let queued_blocks_bar = howudoin::new_root().label("Checkpoint Queue Height");
@@ -326,6 +372,10 @@ where
             initial_tip_hash,
             state_service,
             queued: BTreeMap::new(),
+            retained_blocks: Arc::new(AtomicUsize::new(0)),
+            retained_block_limit,
+            queued_bytes: 0,
+            max_queued_bytes: MAX_QUEUED_BYTES,
             verifier_progress,
             reset_receiver: receiver,
             reset_sender: sender,
@@ -415,6 +465,21 @@ where
         let (initial_tip_hash, verifier_progress) = progress_from_tip(&self.checkpoint_list, tip);
         self.initial_tip_hash = initial_tip_hash;
         self.verifier_progress = verifier_progress;
+
+        // Recovery can cover queued blocks that are already in state.
+        while let Some((&height, _)) = self.queued.first_key_value() {
+            if self.check_height(height).is_ok() {
+                break;
+            }
+            let (_, blocks) = self.queued.pop_first().expect("the first entry exists");
+            for block in blocks {
+                self.queued_bytes -= block.bytes;
+                let error = self
+                    .check_height(height)
+                    .expect_err("this height is already in state");
+                let _ = block.tx.send(Err(error));
+            }
+        }
 
         self.verified_checkpoint_diagnostics(verifier_progress.height());
     }
@@ -687,16 +752,18 @@ where
 
     /// Queue `block` for verification.
     ///
-    /// On success, returns a [`RequestBlock`] containing the block,
-    /// precalculated request data, and the queued result receiver.
+    /// On success, returns the receiver for the block's verification result.
     ///
     /// Verification will finish when the chain to the next checkpoint is
     /// complete, and the caller will be notified via the channel.
     ///
-    /// If the block does not pass basic validity checks,
+    /// If the block does not pass basic validity checks, or there is no room for it in the queue,
     /// returns an error immediately.
-    #[allow(clippy::unwrap_in_result)]
-    fn queue_block(&mut self, block: Arc<Block>) -> Result<RequestBlock, VerifyCheckpointError> {
+    fn queue_block(
+        &mut self,
+        block: Arc<Block>,
+    ) -> Result<oneshot::Receiver<Result<Verified, VerifyCheckpointError>>, VerifyCheckpointError>
+    {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
@@ -704,12 +771,19 @@ where
         let block = self.check_block(block)?;
         let height = block.height;
         let hash = block.hash;
+        let bytes = block.retained_bytes();
 
+        self.make_room(height, hash, bytes, 1)?;
+
+        // Admission is serialized through &mut self; commit owners can only decrease the count.
+        self.retained_blocks.fetch_add(1, Ordering::Relaxed);
         let new_qblock = QueuedBlock {
-            block: block.clone(),
+            block,
+            bytes,
             tx,
+            retained: RetainedBlockPermit(self.retained_blocks.clone()),
         };
-        let req_block = RequestBlock { block, rx };
+        self.queued_bytes += bytes;
 
         // Since we're using Arc<Block>, each entry is a single pointer to the
         // Arc. But there are a lot of QueuedBlockLists in the queue, so we keep
@@ -721,30 +795,22 @@ where
 
         // Replace older requests with newer ones.
         // The newer block is ok, the older block is an error.
-        for qb in qblocks.iter_mut() {
-            if qb.block.hash == hash {
-                let e = VerifyCheckpointError::NewerRequest { height, hash };
-                tracing::trace!(?e, "failing older of duplicate requests");
+        if let Some(qb) = qblocks.iter_mut().find(|qb| qb.block.hash == hash) {
+            let e = VerifyCheckpointError::NewerRequest { height, hash };
+            tracing::trace!(?e, "failing older of duplicate requests");
 
-                // ## Security
-                //
-                // Replace the entire queued block.
-                //
-                // We don't check the authorizing data hash until checkpoint blocks reach the state.
-                // So signatures, proofs, or scripts could be different,
-                // even if the block hash is the same.
+            // ## Security
+            //
+            // Replace the entire queued block.
+            //
+            // We don't check the authorizing data hash until checkpoint blocks reach the state.
+            // So signatures, proofs, or scripts could be different,
+            // even if the block hash is the same.
 
-                let old = std::mem::replace(qb, new_qblock);
-                let _ = old.tx.send(Err(e));
-                return Ok(req_block);
-            }
-        }
-
-        // Memory DoS resistance: limit the queued blocks at each height
-        if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
-            let e = VerifyCheckpointError::QueuedLimit;
-            tracing::warn!(?e);
-            return Err(e);
+            let old = std::mem::replace(qb, new_qblock);
+            self.queued_bytes -= old.bytes;
+            let _ = old.tx.send(Err(e));
+            return Ok(rx);
         }
 
         // Add the block to the list of queued blocks at this height
@@ -754,12 +820,152 @@ where
 
         self.queued_block_diagnostics(height, hash);
 
-        Ok(req_block)
+        Ok(rx)
+    }
+
+    /// Returns the heights and hashes of the queued blocks that are linked to the next checkpoint
+    /// by their previous block hashes, and the block that is missing from that chain, if any.
+    ///
+    /// The linked blocks are the only queued blocks that are known to be in the checkpointed
+    /// chain. A block hash doesn't cover a V5 coinbase height, so a copy of a linked block at
+    /// another height isn't linked.
+    fn checkpoint_chain(
+        &self,
+    ) -> (
+        HashSet<(block::Height, block::Hash)>,
+        Option<(block::Height, block::Hash)>,
+    ) {
+        let mut linked = HashSet::new();
+
+        let next_checkpoint = self
+            .current_start_bound()
+            .and_then(|start| self.checkpoint_list.min_height_in_range((start, Unbounded)));
+        let Some(mut height) = next_checkpoint else {
+            return (linked, None);
+        };
+        let mut hash = self
+            .checkpoint_list
+            .hash(height)
+            .expect("every checkpoint height must have a hash");
+
+        while self.check_height(height).is_ok() {
+            let Some(qblock) = self
+                .queued
+                .get(&height)
+                .and_then(|qblocks| qblocks.iter().find(|qb| qb.block.hash == hash))
+            else {
+                return (linked, Some((height, hash)));
+            };
+
+            linked.insert((height, hash));
+            hash = qblock.block.block.header.previous_block_hash;
+            let Ok(previous_height) = height.previous() else {
+                break;
+            };
+            height = previous_height;
+        }
+
+        (linked, None)
+    }
+
+    /// Makes room in the queue for a block at `height` with `hash`, which uses `bytes`, by failing
+    /// other queued blocks with [`VerifyCheckpointError::QueuedLimit`].
+    ///
+    /// Never fails the blocks linked to the next checkpoint, because they are known to be in the
+    /// checkpointed chain. The block that chain needs next can replace any other block, including
+    /// one at a full height. Other blocks can only replace blocks above them, because lower
+    /// blocks are verified first. Same-height/hash replacements credit the old body's charge.
+    ///
+    /// Recovered children already own a reservation, so `additional_blocks` is zero for them.
+    /// Returns an error without failing any blocks if it can't make enough room.
+    #[allow(clippy::unwrap_in_result)]
+    fn make_room(
+        &mut self,
+        height: block::Height,
+        hash: block::Hash,
+        bytes: usize,
+        additional_blocks: usize,
+    ) -> Result<(), VerifyCheckpointError> {
+        let qblocks = self.queued.get(&height);
+        let replaced = qblocks.and_then(|qblocks| qblocks.iter().find(|qb| qb.block.hash == hash));
+        let additional = bytes.saturating_sub(replaced.map_or(0, |qb| qb.bytes));
+        let height_full = replaced.is_none()
+            && qblocks.is_some_and(|qblocks| qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT);
+        let mut excess = self
+            .queued_bytes
+            .saturating_add(additional)
+            .saturating_sub(self.max_queued_bytes);
+        let mut excess_blocks = self
+            .retained_blocks
+            .load(Ordering::Relaxed)
+            .saturating_add(additional_blocks.saturating_sub(usize::from(replaced.is_some())))
+            .saturating_sub(self.retained_block_limit);
+        if !height_full && excess == 0 && excess_blocks == 0 {
+            return Ok(());
+        }
+        let (linked, needed) = self.checkpoint_chain();
+        let is_needed = needed == Some((height, hash));
+        if height_full && !is_needed {
+            return Err(VerifyCheckpointError::QueuedLimit);
+        }
+
+        let mut failed = Vec::new();
+
+        // The chain doesn't link any of the blocks at the height it needs next.
+        let full_slot = height_full.then(|| (height, self.queued[&height].len() - 1));
+        if let Some((_, index)) = full_slot {
+            excess = excess.saturating_sub(self.queued[&height][index].bytes);
+            excess_blocks = excess_blocks.saturating_sub(1);
+        }
+        failed.extend(full_slot);
+
+        // Fail the highest blocks first, because they are verified last.
+        'heights: for (&queued_height, qblocks) in self.queued.iter().rev() {
+            if queued_height <= height && !is_needed {
+                break;
+            }
+
+            for (index, qblock) in qblocks.iter().enumerate().rev() {
+                if excess == 0 && excess_blocks == 0 {
+                    break 'heights;
+                }
+
+                if Some((queued_height, index)) != full_slot
+                    && !linked.contains(&(queued_height, qblock.block.hash))
+                {
+                    excess = excess.saturating_sub(qblock.bytes);
+                    excess_blocks = excess_blocks.saturating_sub(1);
+                    failed.push((queued_height, index));
+                }
+            }
+        }
+
+        if excess > 0 || excess_blocks > 0 {
+            return Err(VerifyCheckpointError::QueuedLimit);
+        }
+
+        // The blocks at each height are failed in decreasing index order, so removing one doesn't
+        // move the others.
+        for (queued_height, index) in failed {
+            let qblocks = self
+                .queued
+                .get_mut(&queued_height)
+                .expect("failed blocks are queued");
+            let qblock = qblocks.swap_remove(index);
+            if qblocks.is_empty() {
+                self.queued.remove(&queued_height);
+            }
+
+            self.queued_bytes -= qblock.bytes;
+            let _ = qblock.tx.send(Err(VerifyCheckpointError::QueuedLimit));
+        }
+
+        Ok(())
     }
 
     /// Queue `child` again, after the state failed it without checking it.
     ///
-    /// It has already passed [`Self::check_block`], so only its height is checked again.
+    /// It has already passed [`Self::check_block`], so only its height and queue limits are checked.
     fn requeue_child(&mut self, child: QueuedBlock) {
         let (height, hash) = (child.block.height, child.block.hash);
         if let Err(e) = self.check_height(height) {
@@ -767,22 +973,27 @@ where
             return;
         }
 
-        let qblocks = self
-            .queued
-            .entry(height)
-            .or_insert_with(|| QueuedBlockList::with_capacity(1));
-
         // Prefer a copy that a caller has already submitted again.
-        if qblocks.iter().any(|qb| qb.block.hash == hash) {
+        if self
+            .queued
+            .get(&height)
+            .is_some_and(|qblocks| qblocks.iter().any(|qb| qb.block.hash == hash))
+        {
             let _ = child
                 .tx
                 .send(Err(VerifyCheckpointError::NewerRequest { height, hash }));
-        } else if qblocks.len() >= MAX_QUEUED_BLOCKS_PER_HEIGHT {
-            let _ = child.tx.send(Err(VerifyCheckpointError::QueuedLimit));
-        } else {
-            qblocks.push(child);
-            self.queued_block_diagnostics(height, hash);
+            return;
         }
+        if let Err(error) = self.make_room(height, hash, child.bytes, 0) {
+            let _ = child.tx.send(Err(error));
+            return;
+        }
+        self.queued_bytes += child.bytes;
+        self.queued
+            .entry(height)
+            .or_insert_with(|| QueuedBlockList::with_capacity(1))
+            .push(child);
+        self.queued_block_diagnostics(height, hash);
     }
 
     /// During checkpoint range processing, process all the blocks at `height`.
@@ -833,6 +1044,7 @@ where
             } else {
                 tracing::info!(?height, ?qblock.block.hash, ?expected_hash,
                                "Side chain hash at height in CheckpointVerifier");
+                self.queued_bytes -= qblock.bytes;
                 let _ = qblock
                     .tx
                     .send(Err(VerifyCheckpointError::UnexpectedSideChain {
@@ -971,9 +1183,11 @@ where
         // All the blocks we've kept are valid, so let's verify them
         // in height order.
         for qblock in rev_valid_blocks.drain(..).rev() {
+            self.queued_bytes -= qblock.bytes;
             let (sent, next_sent) = oneshot::channel();
             let verified = Verified {
-                hash: qblock.block.hash,
+                block: qblock.block,
+                retained: qblock.retained,
                 epoch: self.epoch,
                 previous_sent: self.previous_block_sent.replace(next_sent),
                 sent,
@@ -1037,6 +1251,7 @@ where
                 .remove(&key)
                 .expect("each entry is only removed once");
             for qblock in qblocks.drain(..) {
+                self.queued_bytes -= qblock.bytes;
                 // Sending can fail, but there's nothing we can do about it.
                 let _ = qblock.tx.send(Err(VerifyCheckpointError::Dropped));
             }
@@ -1093,7 +1308,7 @@ pub enum VerifyCheckpointError {
     SubsidyError(#[from] SubsidyError),
     #[error("invalid amount: {0}")]
     AmountError(#[from] amount::Error),
-    #[error("too many queued blocks at this height")]
+    #[error("checkpoint retained-owner, queue memory, or per-height capacity is full")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
     UnexpectedSideChain {
@@ -1256,8 +1471,8 @@ where
         // `Finished`. Don't reject them before it checks them: a peer can rewrite the coinbase
         // height of the block it was asked for to route it here, and `Finished` would drop that
         // block without showing that its body was forged (GHSA-g9rc-89v4-hhvf).
-        let req_block = match self.queue_block(block) {
-            Ok(req_block) => req_block,
+        let mut rx = match self.queue_block(block) {
+            Ok(rx) => rx,
             Err(e) => return async { Err(e) }.boxed(),
         };
 
@@ -1300,19 +1515,19 @@ where
         let state_service = self.state_service.clone();
         let reset_sender = self.reset_sender.clone();
         let commit_checkpoint_verified = tokio::spawn(async move {
-            let mut req_block = req_block;
             loop {
                 let Verified {
-                    hash,
+                    mut block,
+                    retained,
                     epoch,
                     previous_sent,
                     sent,
-                } = req_block
-                    .rx
+                } = rx
                     .await
                     // The verifier can drop a block it got back from a failed commit
                     // while it is being dropped.
                     .unwrap_or(Err(VerifyCheckpointError::Dropped))?;
+                let hash = block.hash;
 
                 // Send blocks to the state in the order they were verified.
                 if let Some(previous_sent) = previous_sent {
@@ -1321,9 +1536,9 @@ where
 
                 // Keep a copy of the block in case the state fails it without checking it.
                 // Its new outputs are only rebuilt if that happens.
-                let new_outputs = std::mem::take(&mut req_block.block.new_outputs);
-                let mut child = req_block.block.clone();
-                req_block.block.new_outputs = new_outputs;
+                let new_outputs = std::mem::take(&mut block.new_outputs);
+                let mut child = block.clone();
+                block.new_outputs = new_outputs;
 
                 let mut commit_state_service = state_service.clone();
                 let result = async move {
@@ -1332,7 +1547,7 @@ where
                         .ready()
                         .await
                         .map_err(VerifyCheckpointError::CommitCheckpointVerified)?
-                        .call(zs::Request::CommitCheckpointVerifiedBlock(req_block.block));
+                        .call(zs::Request::CommitCheckpointVerifiedBlock(block));
 
                     // The state service got this block first, so the next block can be sent.
                     let _ = sent.send(());
@@ -1388,17 +1603,19 @@ where
                             &child.block,
                             &child.transaction_hashes,
                         );
-                        let (tx, rx) = oneshot::channel();
+                        let (tx, child_rx) = oneshot::channel();
                         let failure = CommitFailure {
                             epoch,
                             tip,
                             child: Some(QueuedBlock {
-                                block: child.clone(),
+                                bytes: child.retained_bytes(),
+                                block: child,
                                 tx,
+                                retained,
                             }),
                         };
                         if reset_sender.send(failure).is_ok() {
-                            req_block = RequestBlock { block: child, rx };
+                            rx = child_rx;
                             continue;
                         }
                     } else {
