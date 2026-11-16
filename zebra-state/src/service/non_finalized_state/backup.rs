@@ -11,6 +11,7 @@ use hex::ToHex;
 use zebra_chain::{
     amount::Amount,
     block::{self, Block, Height},
+    common::atomic_write,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
@@ -209,17 +210,26 @@ fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock)
     let backup_block_file_path = backup_dir_path.join(backup_block_file_name);
     let non_finalized_block_backup: NonFinalizedBlockBackup = block.into();
 
-    if let Err(err) = std::fs::write(
+    // The temporary file name is not a block hash, so a temporary file left behind by a crash
+    // is deleted the next time the backup directory is listed.
+    match atomic_write(
         backup_block_file_path,
-        non_finalized_block_backup.as_bytes(),
+        &non_finalized_block_backup.as_bytes(),
     ) {
-        tracing::warn!(?err, "failed to write non-finalized state backup block");
+        Ok(Ok(_)) => {}
+        Ok(Err(err)) => {
+            tracing::warn!(?err, "failed to persist non-finalized state backup block");
+        }
+        Err(err) => tracing::warn!(?err, "failed to write non-finalized state backup block"),
     }
 }
 
 /// Reads blocks from the provided non-finalized state backup directory path.
 ///
 /// Returns any blocks that are valid and not present in the finalized state.
+///
+/// Deletes any backup files that can't be parsed into a block. The backup task only writes
+/// blocks that are missing from the backup directory, so it would never replace them.
 fn read_non_finalized_blocks_from_backup<'a>(
     backup_dir_path: &Path,
     finalized_state: &'a ZebraDb,
@@ -228,14 +238,15 @@ fn read_non_finalized_blocks_from_backup<'a>(
         // It's okay to leave the file here, the backup task will delete it as long as
         // the block is not added to the non-finalized state.
         .filter(|&(block_hash, _)| !finalized_state.contains_hash(block_hash))
-        .filter_map(|(block_hash, file_path)| match std::fs::read(file_path) {
-            Ok(block_bytes) => Some((block_hash, block_bytes)),
-            Err(err) => {
-                tracing::warn!(?err, "failed to open non-finalized state backup block file");
-                None
-            }
-        })
-        .filter_map(|(expected_block_hash, backup_block_file_contents)| {
+        .filter_map(|(expected_block_hash, file_path)| {
+            let backup_block_file_contents = match std::fs::read(&file_path) {
+                Ok(block_bytes) => block_bytes,
+                Err(err) => {
+                    tracing::warn!(?err, "failed to open non-finalized state backup block file");
+                    return None;
+                }
+            };
+
             match NonFinalizedBlockBackup::from_bytes(backup_block_file_contents) {
                 Ok(NonFinalizedBlockBackup {
                     block,
@@ -249,23 +260,30 @@ fn read_non_finalized_blocks_from_backup<'a>(
                             "wrong block hash in file name"
                         );
                     }
-                    Some(block)
+                    return Some(block);
                 }
                 Ok(block) => {
                     tracing::warn!(
                         ?block,
-                        "invalid non-finalized backup block, missing coinbase height"
+                        "invalid non-finalized backup block, missing coinbase height, \
+                         attempting to delete file"
                     );
-                    None
                 }
                 Err(err) => {
                     tracing::warn!(
                         ?err,
-                        "failed to deserialize non-finalized backup data into block"
+                        ?expected_block_hash,
+                        "failed to deserialize non-finalized backup data into block, \
+                         attempting to delete file"
                     );
-                    None
                 }
             }
+
+            if let Err(delete_error) = std::fs::remove_file(&file_path) {
+                tracing::warn!(?delete_error, "failed to delete backup block file");
+            }
+
+            None
         })
 }
 

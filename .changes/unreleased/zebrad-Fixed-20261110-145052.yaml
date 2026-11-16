@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: Fixed restarts that skipped most non-finalized blocks saved in the backup directory and downloaded them again. A backup file cut short by a crash or VM reset stopped the restore at that block on every restart until the block was finalized. Zebra now writes backup files atomically and deletes unreadable ones at startup.
+time: 2026-11-10T14:50:52.839526447Z
