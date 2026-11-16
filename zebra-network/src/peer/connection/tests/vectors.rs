@@ -26,12 +26,15 @@ use tracing::Span;
 use zebra_chain::{
     block::{self, Block},
     serialization::{SerializationError, ZcashDeserializeInto},
-    transaction::UnminedTx,
+    transaction::{self, UnminedTx},
 };
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
-    constants::{MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, REQUEST_TIMEOUT},
+    constants::{
+        GETDATA_MAX_BLOCK_COUNT, MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY,
+        REQUEST_TIMEOUT,
+    },
     peer::{
         connection::{overload_drop_connection_probability, Connection, Handler, State},
         ClientRequest, ErrorSlot,
@@ -222,6 +225,108 @@ fn connection_state_commands_omit_serialization_details() {
             "logs retain error details",
         );
     }
+}
+
+/// Bound block requests before inbound dispatch without capping transactions or counting duplicates.
+#[tokio::test]
+async fn getdata_block_hashes_are_bounded_before_dispatch() {
+    let _init_guard = zebra_test::init();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let blocks: Vec<_> = (0u64..50_000)
+            .map(|index| {
+                let mut hash = [0; 32];
+                hash[..8].copy_from_slice(&index.to_le_bytes());
+                InventoryHash::Block(block::Hash(hash))
+            })
+            .collect();
+        let transactions: Vec<_> = (0..32)
+            .map(|index| InventoryHash::Tx(transaction::Hash([index; 32])))
+            .chain(std::iter::once(InventoryHash::Wtx(transaction::WtxId {
+                id: transaction::Hash([32; 32]),
+                auth_digest: transaction::AuthDigest([33; 32]),
+            })))
+            .collect();
+        let ignored = [
+            InventoryHash::Error,
+            InventoryHash::FilteredBlock(block::Hash([255; 32])),
+        ];
+        let mixed: Vec<_> = transactions
+            .iter()
+            .chain(&ignored)
+            .chain(&blocks[..32])
+            .copied()
+            .collect();
+        let duplicates: Vec<_> = std::iter::repeat_n(blocks[0], 32)
+            .chain(blocks[..GETDATA_MAX_BLOCK_COUNT].iter().copied())
+            .collect();
+
+        for items in [
+            blocks[..1].to_vec(),
+            blocks[..GETDATA_MAX_BLOCK_COUNT].to_vec(),
+            blocks[..=GETDATA_MAX_BLOCK_COUNT].to_vec(),
+            blocks,
+            duplicates,
+            mixed,
+            transactions,
+            ignored.to_vec(),
+            Vec::new(),
+        ] {
+            // The connection keeps the first distinct block hashes, in inventory order.
+            let mut expected_blocks = HashSet::new();
+            for hash in items.iter().filter_map(InventoryHash::block_hash) {
+                if expected_blocks.len() == GETDATA_MAX_BLOCK_COUNT {
+                    break;
+                }
+                expected_blocks.insert(hash);
+            }
+            let expected_transactions: HashSet<_> = items
+                .iter()
+                .filter_map(InventoryHash::unmined_tx_id)
+                .collect();
+            let (mut connection, _client_tx, mut inbound_service, _outbound, _error_slot) =
+                new_test_connection();
+            let message = Message::GetData(items);
+
+            if expected_blocks.is_empty() && expected_transactions.is_empty() {
+                assert_eq!(
+                    connection.handle_message_as_request(message.clone()).await,
+                    Some(message),
+                );
+                inbound_service.expect_no_requests().await;
+                continue;
+            }
+
+            let (_, unhandled) = tokio::join!(
+                async {
+                    let request = inbound_service.expect_request_that(|_| true).await;
+                    match request.request() {
+                        Request::BlocksByHash(hashes) => {
+                            assert!(
+                                !expected_blocks.is_empty(),
+                                "transactions stay transactions"
+                            );
+                            assert_eq!(
+                                hashes, &expected_blocks,
+                                "block requests must keep the first distinct hashes, bounded \
+                                 before dispatch",
+                            );
+                        }
+                        Request::TransactionsById(ids) => {
+                            assert!(expected_blocks.is_empty(), "blocks take priority");
+                            assert_eq!(ids, &expected_transactions);
+                        }
+                        request => panic!("unexpected inbound request: {request:?}"),
+                    }
+                    request.respond(Response::Nil);
+                },
+                connection.handle_message_as_request(message),
+            );
+            assert_eq!(unhandled, None);
+        }
+    })
+    .await
+    .expect("getdata dispatch finishes within the timeout");
 }
 
 /// Test that the connection run loop works as a future

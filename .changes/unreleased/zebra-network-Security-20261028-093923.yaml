@@ -1,0 +1,7 @@
+project: zebra-network
+kind: Security
+body: >-
+  Bound peer block-request copies to the first `constants::GETDATA_MAX_BLOCK_COUNT` distinct hashes
+  before inbound dispatch. Import the limit from `zebra_network::constants` instead of
+  `zebrad::components::inbound`.
+time: 2026-10-28T09:39:23.329626111-05:00

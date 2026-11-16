@@ -24,8 +24,9 @@ use zebra_chain::{
 
 use crate::{
     constants::{
-        self, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES, MAX_OVERLOAD_DROP_PROBABILITY,
-        MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL, PEER_ADDR_RESPONSE_LIMIT,
+        self, GETDATA_MAX_BLOCK_COUNT, MAX_ADDRS_IN_MESSAGE, MAX_FIND_BLOCKS_RESPONSE_HASHES,
+        MAX_OVERLOAD_DROP_PROBABILITY, MIN_OVERLOAD_DROP_PROBABILITY, OVERLOAD_PROTECTION_INTERVAL,
+        PEER_ADDR_RESPONSE_LIMIT,
     },
     meta_addr::MetaAddr,
     peer::{
@@ -1458,7 +1459,17 @@ where
                         .iter()
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
-                    Request::BlocksByHash(block_hashes(items).collect()).into()
+                    // Bound the set before cloning it for inbound dispatch. Duplicates do not
+                    // consume slots, matching the inbound service's distinct-hash limit.
+                    let mut hashes =
+                        HashSet::with_capacity(items.len().min(GETDATA_MAX_BLOCK_COUNT));
+                    for hash in block_hashes(items) {
+                        hashes.insert(hash);
+                        if hashes.len() == GETDATA_MAX_BLOCK_COUNT {
+                            break;
+                        }
+                    }
+                    Request::BlocksByHash(hashes).into()
                 }
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::TransactionsById(transaction_ids(items).collect()).into()
