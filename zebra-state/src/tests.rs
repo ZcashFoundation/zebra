@@ -126,3 +126,44 @@ fn configured_network_state_paths_are_isolated() {
         );
     }
 }
+
+#[test]
+fn pruning_retention_respects_network_minimums() {
+    use zebra_chain::parameters::{testnet, Magic, Network};
+
+    use crate::{constants::MAX_BLOCK_REORG_HEIGHT, Config, StateInitError};
+
+    let custom_testnet = testnet::Parameters::build()
+        .with_network_magic(Magic([0x42; 4]))
+        .unwrap()
+        .to_network()
+        .unwrap();
+    for (network, minimum) in [
+        (Network::Mainnet, 10_000),
+        (Network::new_default_testnet(), 10_000),
+        (custom_testnet, 10_000),
+        (
+            Network::new_regtest(Default::default()),
+            MAX_BLOCK_REORG_HEIGHT + 1,
+        ),
+    ] {
+        let mut config = Config::default();
+        assert_eq!(config.prune_blocks_older_than, None);
+        config.validate_pruning(&network).unwrap();
+
+        for configured in [0, 1, minimum - 1] {
+            config.prune_blocks_older_than = Some(configured);
+            assert!(matches!(
+                config.validate_pruning(&network),
+                Err(StateInitError::InvalidPruningRetention {
+                    configured: actual_configured,
+                    minimum: actual_minimum,
+                }) if actual_configured == configured && actual_minimum == minimum
+            ));
+        }
+        for configured in [minimum, minimum + 1, u32::MAX] {
+            config.prune_blocks_older_than = Some(configured);
+            config.validate_pruning(&network).unwrap();
+        }
+    }
+}

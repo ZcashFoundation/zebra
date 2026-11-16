@@ -144,6 +144,8 @@ struct WriteBlockWorkerTask {
     backup_dir_path: Option<PathBuf>,
     /// Peer-supplied note commitment tree roots for fast checkpoint sync.
     tree_roots_cache: Option<TreeRootsCache>,
+    /// Coalesces durable finalized-tip notifications for the pruning worker.
+    pruning_wake: Option<crossbeam_channel::Sender<()>>,
 }
 
 /// Finalized writer recovery, either a full commit failure or one replaceable body.
@@ -199,6 +201,7 @@ pub(super) struct BlockWriteSender {
 
 impl BlockWriteSender {
     /// Creates a new [`BlockWriteSender`] with the given receivers and states.
+    #[allow(clippy::too_many_arguments)]
     #[instrument(
         level = "debug",
         skip_all,
@@ -214,6 +217,7 @@ impl BlockWriteSender {
         should_use_finalized_block_write_sender: bool,
         backup_dir_path: Option<PathBuf>,
         tree_roots_cache: TreeRootsCache,
+        pruning_wake: Option<crossbeam_channel::Sender<()>>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<FinalizedWriteFeedback>,
@@ -259,6 +263,7 @@ impl BlockWriteSender {
                         non_finalized_state_sender,
                         backup_dir_path,
                         tree_roots_cache: Some(tree_roots_cache),
+                        pruning_wake,
                     }
                     .run()
                 })
@@ -293,6 +298,7 @@ enum CommitOutcome {
 ///
 /// If `next` is the block after it, fast checkpoint sync can commit the block with its verified
 /// tree roots, without updating its note commitment trees.
+#[allow(clippy::too_many_arguments)]
 fn commit_checkpoint_verified(
     mut ordered_block: QueuedCheckpointVerified,
     next: Option<&CheckpointVerifiedBlock>,
@@ -301,6 +307,7 @@ fn commit_checkpoint_verified(
     fast_tree_sync: &mut FastTreeSyncWriter,
     chain_tip_sender: &mut ChainTipSender,
     invalid_block_reset_sender: &UnboundedSender<FinalizedWriteFeedback>,
+    pruning_wake: Option<&crossbeam_channel::Sender<()>>,
 ) -> CommitOutcome {
     // Roots prove effects, not a V5 body's authorizing data. Recover a malformed current body
     // before consuming it, including the first fast block; keep the final commit-boundary check.
@@ -399,6 +406,9 @@ fn commit_checkpoint_verified(
             *prev_finalized_note_commitment_trees = Some(note_commitment_trees);
             fast_tree_sync.committed(height, frozen_sizes);
             chain_tip_sender.set_finalized_tip(tip_block);
+            if let Some(wake) = pruning_wake {
+                let _ = wake.try_send(());
+            }
             Ok(hash)
         }
         Err(error) => {
@@ -542,6 +552,7 @@ impl WriteBlockWorkerTask {
             non_finalized_state_sender,
             backup_dir_path,
             tree_roots_cache,
+            pruning_wake,
         } = &mut self;
 
         let mut prev_finalized_note_commitment_trees = None;
@@ -605,6 +616,7 @@ impl WriteBlockWorkerTask {
                     &mut fast_tree_sync,
                     chain_tip_sender,
                     invalid_block_reset_sender,
+                    pruning_wake.as_ref(),
                 ) {
                     CommitOutcome::Committed(Some(error)) => {
                         ordered_block = match replace_checkpoint_body(
@@ -638,6 +650,7 @@ impl WriteBlockWorkerTask {
                 &mut fast_tree_sync,
                 chain_tip_sender,
                 invalid_block_reset_sender,
+                pruning_wake.as_ref(),
             ) {
                 return;
             }
@@ -840,6 +853,9 @@ impl WriteBlockWorkerTask {
                             .expect(
                                 "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
                             ).1.into();
+                if let Some(wake) = pruning_wake {
+                    let _ = wake.try_send(());
+                }
             }
             metrics::histogram!(
                 "state.block_writer.phase.duration_seconds",

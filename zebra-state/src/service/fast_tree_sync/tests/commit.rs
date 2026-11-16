@@ -741,6 +741,7 @@ async fn valid_proof_recovers_only_the_forged_successor_through_state_routing() 
             true,
             None,
             cache,
+            None,
         );
         let read_service = ReadStateService::new(
             &finalized,

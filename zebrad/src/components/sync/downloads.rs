@@ -72,8 +72,10 @@ where
                         .clone()
                         .oneshot(zs::ReadRequest::BlockHeader(hash.into()))
                         .await?;
-                    let zs::ReadResponse::BlockHeader { height, .. } = response else {
-                        unreachable!("a block header request returns a block header");
+                    let zs::ReadResponse::BlockHeader(Some(zs::BlockHeader { height, .. })) =
+                        response
+                    else {
+                        unreachable!("a block with block info has a header");
                     };
                     return Ok(height);
                 }
@@ -855,10 +857,10 @@ where
                         )
                         .await
                         {
-                            Ok(Ok(zs::ReadResponse::BlockHeader {
+                            Ok(Ok(zs::ReadResponse::BlockHeader(Some(zs::BlockHeader {
                                 height: parent_height,
                                 ..
-                            })) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
+                            })))) if (parent_height + 1) != Some(block_height) => Some(advertiser_addr),
                             // Parent unknown, height consistent with it, or the lookup failed or
                             // timed out: there is no proof of misbehaviour, so the peer is not
                             // scored.

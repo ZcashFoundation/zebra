@@ -22,6 +22,12 @@ use zebra_chain::{
     serialization::Duration32,
 };
 
+/// Maximum block hashes admitted from one `getdata` request, before allocation and buffering.
+///
+/// Matches the zcashd request limit:
+/// <https://github.com/zcash/zcash/blob/829dd94f9d253bb705f9e194f13cb8ca8e545e1e/src/main.h#L108>
+pub const GETDATA_MAX_BLOCK_COUNT: usize = 16;
+
 /// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
 /// When it starts up, Zebra opens [`crate::Config::peerset_initial_target_size`]

@@ -139,7 +139,8 @@ impl ZebraDb {
 
     /// Returns the complete block, or `None` if its hash or height is unknown.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     pub fn block(
         &self,
         hash_or_height: HashOrHeight,
@@ -163,7 +164,8 @@ impl ZebraDb {
 
     /// Returns the complete block and its serialized size, or `None` for an unknown block.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     #[allow(clippy::unwrap_in_result)]
     pub fn block_and_size(
         &self,
@@ -257,8 +259,8 @@ impl ZebraDb {
             return Ok(None);
         };
         let incomplete = |error| {
-            // Secondary catch-up is not atomic across columns, so an incomplete view is not yet
-            // visible. The retained-body floor will later distinguish genuinely pruned bodies.
+            // Secondary catch-up is not atomic across columns, so inconsistent retained metadata
+            // is not yet visible. Missing bodies are classified separately using the actual floor.
             if self.db.is_read_only() {
                 Ok(None)
             } else {
@@ -322,7 +324,7 @@ impl ZebraDb {
         while let Some(key) = bodies.key().filter(|key| *key <= last.as_ref()) {
             let location = TransactionLocation::from_bytes(key);
             if location.index.as_usize() != count {
-                return incomplete(BlockReadError::BlockBodyUnavailable { height });
+                return self.missing_body_error(height).map_or(Ok(None), Err);
             }
             if count >= expected_count {
                 return incomplete(BlockReadError::CorruptBlock { height });
@@ -336,7 +338,7 @@ impl ZebraDb {
         }
         bodies.status().expect("unexpected database failure");
         if count != expected_count {
-            return incomplete(BlockReadError::BlockBodyUnavailable { height });
+            return self.missing_body_error(height).map_or(Ok(None), Err);
         }
 
         if self.db.is_read_only() {
@@ -371,6 +373,28 @@ impl ZebraDb {
         }
 
         Ok(Some((header, body)))
+    }
+
+    /// Classifies missing transaction bytes without treating a torn secondary view as pruned.
+    fn missing_body_error(&self, height: Height) -> Option<BlockReadError> {
+        match self.history_capabilities() {
+            Ok(history) if height > Height::MIN && height < history.lowest_retained_height => {
+                return Some(BlockReadError::BlockBodyUnavailable { height });
+            }
+            Err(crate::StateInitError::HistoryRead { source, .. })
+                if source.is::<rocksdb::Error>() =>
+            {
+                panic!("unexpected database failure: {source}");
+            }
+            _ => {}
+        }
+
+        // An invalid suffix cannot establish pruning.
+        if self.db.is_read_only() {
+            None
+        } else {
+            Some(BlockReadError::CorruptBlock { height })
+        }
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
@@ -444,7 +468,8 @@ impl ZebraDb {
 
     /// Returns the complete tip block, or `None` for an empty database.
     ///
-    /// Returns an error if primary data is incomplete. An incomplete secondary view returns `None`.
+    /// Returns an error for pruned bodies or incomplete primary data.
+    /// A torn secondary view returns `None`.
     pub fn tip_block(&self) -> Result<Option<Arc<Block>>, BlockReadError> {
         match self.tip() {
             Some((height, _)) => self.block(height.into()),
@@ -454,24 +479,57 @@ impl ZebraDb {
 
     // Read transaction methods
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
+    /// Returns a known transaction, its height, and its block time, or `None` for an unknown hash.
+    ///
+    /// Missing bytes below the retained-body floor return
+    /// [`BlockReadError::BlockBodyUnavailable`]. Missing retained bytes or metadata return
+    /// [`BlockReadError::CorruptBlock`] on a primary database and `None` on a torn secondary view.
     #[allow(clippy::unwrap_in_result)]
     pub fn transaction(
         &self,
         hash: transaction::Hash,
-    ) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)> {
+    ) -> Result<Option<(Arc<Transaction>, Height, DateTime<Utc>)>, BlockReadError> {
+        let Some(location) = self.transaction_location(hash) else {
+            return Ok(None);
+        };
+        let height = location.height;
+        let Some(header) = self.block_header(height.into()) else {
+            return if self.db.is_read_only() {
+                Ok(None)
+            } else {
+                Err(BlockReadError::CorruptBlock { height })
+            };
+        };
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        let Some(tx) = self.db.zs_get(&tx_by_loc, &location) else {
+            return self.missing_body_error(height).map_or(Ok(None), Err);
+        };
 
-        let transaction_location = self.transaction_location(hash)?;
+        Ok(Some((tx, height, header.time)))
+    }
 
-        let block_time = self
-            .block_header(transaction_location.height.into())
-            .map(|header| header.time);
+    /// Reads only the version header of a retained transaction body.
+    #[allow(clippy::unwrap_in_result)]
+    pub(crate) fn transaction_version(&self, hash: transaction::Hash) -> Option<u32> {
+        struct Version(u32);
+        impl FromDisk for Version {
+            fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+                let header = bytes.as_ref()[..4]
+                    .try_into()
+                    .expect("stored transaction headers contain four bytes");
+                // The high bit signals the Overwinter format, not the version number.
+                Self(u32::from_le_bytes(header) & 0x7fff_ffff)
+            }
+        }
 
+        let location = self.transaction_location(hash)?;
+        let transactions = self
+            .db
+            .cf_handle("tx_by_loc")
+            .expect("transaction column exists");
         self.db
-            .zs_get(&tx_by_loc, &transaction_location)
-            .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
+            .zs_get::<_, _, Version>(&transactions, &location)
+            .map(|version| version.0)
     }
 
     /// Returns the stored bytes of the [`Transaction`] with [`transaction::Hash`],

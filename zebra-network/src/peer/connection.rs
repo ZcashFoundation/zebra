@@ -1744,7 +1744,9 @@ where
                         .any(|item| matches!(item, InventoryHash::Block(_))) =>
                 {
                     // Serve stored block bytes, rather than deserializing and reserializing them.
-                    let hashes = block_hashes(items).collect();
+                    let hashes = block_hashes(items)
+                        .take(crate::constants::GETDATA_MAX_BLOCK_COUNT)
+                        .collect();
                     if self.connection_info.early_block_relay {
                         Request::EarlyRawBlocksByHash(hashes)
                     } else {

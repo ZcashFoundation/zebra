@@ -43,21 +43,21 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// A known finalized block cannot be read as a complete block.
+/// A known finalized block or transaction cannot be read completely.
 ///
-/// Unknown blocks and incomplete secondary views return `Ok(None)` instead. Missing primary bodies
-/// indicate corruption until historical body pruning is supported.
+/// Unknown objects and torn secondary views return `Ok(None)` instead. Missing non-genesis bodies
+/// below the actual retained-body floor are unavailable; missing retained data is corruption.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BlockReadError {
-    /// Some or all transaction rows are missing from a known block.
-    #[error("block body unavailable at height {height:?}: stored transactions are incomplete")]
+    /// Transaction bytes are missing from a known block below the retained-body floor.
+    #[error("block body unavailable at height {height:?}: pruned data")]
     BlockBodyUnavailable {
         /// The height of the known block.
         height: block::Height,
     },
 
-    /// The retained header or transaction-location index is inconsistent.
-    #[error("corrupt block metadata at height {height:?}")]
+    /// A retained body, header, or transaction-location index is inconsistent.
+    #[error("corrupt block data at height {height:?}")]
     CorruptBlock {
         /// The height of the known block.
         height: block::Height,
@@ -71,6 +71,38 @@ pub enum BlockReadError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum StateInitError {
+    /// An existing database path could not be inspected, read, or moved.
+    #[error("cannot access state database at {path:?}: {source}")]
+    DatabaseAccess {
+        /// The database path whose operation failed.
+        path: PathBuf,
+        /// The underlying filesystem, database, or format-version error.
+        source: BoxError,
+    },
+
+    /// Both archive and pruned directories exist for the current or previous major.
+    #[error(
+        "both archive and pruned state directories exist in this cache. \
+         Stop Zebra and select the intended database in a separate cache directory; \
+         Zebra will not choose, merge, or overwrite either database"
+    )]
+    ConflictingStateDirectories,
+
+    /// Existing archive state requires an explicit stopped-node move before pruning activation.
+    #[error(
+        "cannot enable pruning for archive state: first complete any normal format upgrades \
+         with pruning disabled. Stop Zebra and all direct primary/secondary database readers, \
+         keep an archive backup outside the cache, then move the complete current-format archive \
+         from {archive_path:?} to the absent {pruned_path:?} before enabling pruning. \
+         Never merge directories or overwrite an existing destination"
+    )]
+    PruningRequiresIsolatedState {
+        /// The current-format archive directory to move after a clean shutdown.
+        archive_path: PathBuf,
+        /// The isolated destination, which must not already exist.
+        pruned_path: PathBuf,
+    },
+
     /// A read-only state was requested, but the configured cache directory is
     /// missing or unreadable.
     ///
@@ -105,6 +137,16 @@ pub enum StateInitError {
         path: PathBuf,
     },
 
+    /// An older-major database cannot be reused read-only until its format transition completes.
+    #[error(
+        "cannot reuse read-only state at {path:?}: its format transition requires a writable Zebra \
+         start to complete before read-only reuse"
+    )]
+    ReadOnlyDatabaseNeedsUpgrade {
+        /// The older-major database that must finish its format transition.
+        path: PathBuf,
+    },
+
     /// A read-only state was requested together with an ephemeral database.
     ///
     /// A read-only secondary follows another process's primary database and must
@@ -116,6 +158,60 @@ pub enum StateInitError {
          delete it; set `ephemeral = false`, or do not request a read-only state"
     )]
     ReadOnlyEphemeralConflict,
+
+    /// The configured retention window is below the network's safe minimum.
+    #[error(
+        "invalid state.prune_blocks_older_than value {configured}: minimum is {minimum}. \
+         Omit this setting for archive operation"
+    )]
+    InvalidPruningRetention {
+        /// The requested number of retained finalized block bodies.
+        configured: u32,
+        /// The minimum number of retained finalized block bodies for this network.
+        minimum: u32,
+    },
+
+    /// A body prefix is unavailable, but pruning is disabled for this writable state.
+    #[error(
+        "cannot open pruned state at {path:?} with pruning disabled: bodies below \
+         {lowest_retained_height:?} are unavailable except genesis. \
+         Enable state.prune_blocks_older_than, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
+    )]
+    PrunedDatabase {
+        /// The database with unavailable historical bodies.
+        path: PathBuf,
+        /// The lowest height of the complete retained suffix.
+        lowest_retained_height: block::Height,
+    },
+
+    /// A pruned database cannot reconstruct indexes for a different build's spending-index mode.
+    #[error(
+        "cannot open pruned state at {path:?}: changing spending-index mode from \
+         indexer={disk_indexer} to indexer={running_indexer} requires unavailable block history. \
+         Use a build with the existing indexer mode, or restore an archive snapshot or fully resync \
+         in a separate cache directory"
+    )]
+    PrunedIndexModeMismatch {
+        /// The database whose spending-index layout cannot be converted.
+        path: PathBuf,
+        /// Whether the stored state includes spending indexes.
+        disk_indexer: bool,
+        /// Whether this build writes spending indexes.
+        running_indexer: bool,
+    },
+
+    /// Historical body availability could not be read or its retained suffix was invalid.
+    #[error(
+        "cannot read historical storage capabilities at {path:?}: {source}. \
+         Restore a valid snapshot or fully resync in a separate cache directory"
+    )]
+    HistoryRead {
+        /// The database whose historical body availability could not be determined.
+        path: PathBuf,
+        /// The storage error or invalid body-index invariant.
+        source: BoxError,
+    },
 }
 
 /// An error describing why a block could not be queued to be committed to the state.

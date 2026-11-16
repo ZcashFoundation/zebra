@@ -23,6 +23,7 @@ use crate::{
     address_book::AddressMetrics,
     address_book_peers::AddressBookPeers,
     meta_addr::{MetaAddr, MetaAddrChange},
+    types::PeerServices,
     AddressBook, BanList, BoxError, Config,
 };
 
@@ -60,8 +61,8 @@ pub enum AddressBookRequest {
     /// The address book handles duplicate addresses internally.
     ExtendGossiped(Vec<MetaAddrChange>),
 
-    /// Atomically choose the next reconnection candidate, and mark it as
-    /// [`AttemptPending`](crate::PeerAddrState::AttemptPending).
+    /// Atomically choose the next reconnection candidate, preferring peers that might serve
+    /// historic blocks, and mark it as [`AttemptPending`](crate::PeerAddrState::AttemptPending).
     ///
     /// Because the address book updater serves one request at a time,
     /// concurrent `NextReconnectPeer` requests never return the same peer.
@@ -229,10 +230,24 @@ impl AddressBookHandler {
             AddressBookRequest::NextReconnectPeer => {
                 // Choose the next candidate, and mark it as `AttemptPending`,
                 // in a single atomic request.
-                let next_peer = address_book
-                    .reconnection_peers(Instant::now(), Utc::now())
-                    .next()
-                    .map(|next_peer| MetaAddr::new_reconnect(next_peer.addr));
+                //
+                // Prefer candidates that might serve historic blocks, so non-serving peers only
+                // fill outbound slots that serving peers leave. Handshakes check actual services.
+                let might_serve = |peer: &MetaAddr| {
+                    peer.services()
+                        .is_none_or(|services| services.contains(PeerServices::NODE_NETWORK))
+                };
+                let next_peer = {
+                    let mut candidates =
+                        address_book.reconnection_peers(Instant::now(), Utc::now());
+                    match candidates.next() {
+                        Some(peer) if !might_serve(&peer) => {
+                            Some(candidates.find(might_serve).unwrap_or(peer))
+                        }
+                        next_peer => next_peer,
+                    }
+                }
+                .map(|next_peer| MetaAddr::new_reconnect(next_peer.addr));
                 let next_peer = next_peer.and_then(|change| address_book.update(change));
 
                 AddressBookResponse::NextReconnectPeer(next_peer)
@@ -306,6 +321,7 @@ impl AddressBookUpdater {
     ) {
         let address_book = AddressBook::new(
             local_listener,
+            config.local_services,
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),

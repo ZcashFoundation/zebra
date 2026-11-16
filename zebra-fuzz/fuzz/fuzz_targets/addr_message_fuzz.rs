@@ -214,15 +214,13 @@ fuzz_target!(|data: &[u8]| {
             // -----------------------------------------------------------
             // A-4: outbound-validity checks against both networks.
             //
-            // `address_is_valid_for_outbound` and
-            // `last_known_info_is_valid_for_outbound` are called from
-            // the address book before a connection attempt. Network
-            // input drives both directly. We test against Mainnet AND
+            // `address_is_valid_for_outbound` is called from the address
+            // book before a connection attempt. Network input drives it
+            // directly. We test against Mainnet AND
             // Testnet because the per-network port checks differ.
             // -----------------------------------------------------------
             let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
                 let _ = addr.address_is_valid_for_outbound(&Network::Mainnet);
-                let _ = addr.last_known_info_is_valid_for_outbound(&Network::Mainnet);
             }));
 
             // -----------------------------------------------------------
@@ -235,8 +233,7 @@ fuzz_target!(|data: &[u8]| {
             // should validate end-to-end with adversarial wire input.
             //
             // We test sanitize for both networks because the function
-            // first calls `last_known_info_is_valid_for_outbound`
-            // which is network-dependent, so coverage of the
+            // is network-dependent, so coverage of the
             // arithmetic path requires picking inputs that pass for
             // each.
             // -----------------------------------------------------------

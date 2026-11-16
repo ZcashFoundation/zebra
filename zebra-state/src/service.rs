@@ -84,6 +84,7 @@ pub(crate) mod fast_tree_sync;
 pub(crate) mod finalized_state;
 pub(crate) mod non_finalized_state;
 mod pending_utxos;
+mod pruning;
 mod queued_blocks;
 pub(crate) mod read;
 mod traits;
@@ -217,6 +218,9 @@ pub(crate) struct StateService {
     rejected_tree_roots: std::sync::mpsc::Receiver<std::net::SocketAddr>,
     pending_rejected_tree_roots: Option<std::net::SocketAddr>,
 
+    /// Owns the pruning worker, which must stop before the database shuts down.
+    pruning_task: Option<pruning::PruningTask>,
+
     // Metrics
     //
     /// A metric tracking the maximum height that's currently in `finalized_state_queued_blocks`
@@ -287,6 +291,9 @@ impl Drop for StateService {
     fn drop(&mut self) {
         // The state service owns the state, tasks, and channels,
         // so dropping it should shut down everything.
+        if let Some(task) = &mut self.pruning_task {
+            task.stop();
+        }
 
         // Close the channels (non-blocking)
         // This makes the block write thread exit the next time it checks the channels.
@@ -313,7 +320,6 @@ impl Drop for ReadStateService {
     fn drop(&mut self) {
         // The read state service shares the state,
         // so dropping it should check if we can shut down.
-
         // TODO: move this into a try_shutdown() method
         if let Some(block_write_task) = self.block_write_task.take() {
             if let Some(block_write_task_handle) = Arc::into_inner(block_write_task) {
@@ -392,12 +398,7 @@ impl StateService {
                     &network,
                     debug_skip_format_upgrades,
                     false,
-                )
-                .expect(
-                    "opening the read-write finalized state database failed; check that the \
-                     state cache directory is writable and not locked by another Zebra instance, \
-                     and that there is free disk space",
-                );
+                )?;
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -406,10 +407,11 @@ impl StateService {
                     .tip_block()
                     .expect("the finalized tip must have a complete stored body");
 
-                (finalized_state, finalized_tip, timer)
+                Ok((finalized_state, finalized_tip, timer))
             })
             .await
             .expect("failed to join blocking task")
+            .unwrap_or_else(|error: StateInitError| panic!("{error}"))
         };
 
         // # Correctness
@@ -485,6 +487,10 @@ impl StateService {
         );
         let (tree_roots_sender, wanted_tree_roots, rejected_tree_roots) =
             tree_roots_cache.channels();
+        let (pruning_wake, pruning_receiver) = config
+            .prune_blocks_older_than
+            .map(|_| crossbeam_channel::bounded(1))
+            .unzip();
         let (
             block_write_sender,
             invalid_block_write_reset_receiver,
@@ -498,6 +504,7 @@ impl StateService {
             should_use_finalized_block_write_sender,
             sync_backup_dir_path,
             tree_roots_cache,
+            pruning_wake,
         );
 
         let read_service = ReadStateService::new(
@@ -519,7 +526,7 @@ impl StateService {
                 .await
                 .expect("failed to join blocking task");
 
-        let state = Self {
+        let mut state = Self {
             network: network.clone(),
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
@@ -540,6 +547,7 @@ impl StateService {
             wanted_tree_roots,
             rejected_tree_roots,
             pending_rejected_tree_roots: None,
+            pruning_task: None,
             max_finalized_queue_height: f64::NAN,
         };
         timer.finish_desc("initializing state service");
@@ -568,10 +576,10 @@ impl StateService {
             ) {
                 let legacy_db_path = state.read_service.db.path().to_path_buf();
                 panic!(
-                    "Cached state contains a legacy chain.\n\
-                     An outdated Zebra version did not know about a recent network upgrade,\n\
-                     so it followed a legacy chain using outdated consensus branch rules.\n\
-                     Hint: Delete your database, and restart Zebra to do a full sync.\n\
+                    "Unable to prove the cached chain follows the configured consensus branch rules.\n\
+                     Required history may be unavailable, or an outdated Zebra version may have \
+                     followed a legacy chain.\n\
+                     Hint: Restore an archive snapshot or resync in a separate cache directory.\n\
                      Database path: {legacy_db_path:?}\n\
                      Error: {error:?}",
                 );
@@ -580,6 +588,14 @@ impl StateService {
 
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish_desc("legacy chain check");
+
+        if let (Some(retention), Some(wake)) = (config.prune_blocks_older_than, pruning_receiver) {
+            state.pruning_task = Some(pruning::PruningTask::spawn(
+                read_service.db.clone(),
+                retention,
+                wake,
+            ));
+        }
 
         // Spawn a background task to periodically export RocksDB metrics to Prometheus
         let db_for_metrics = read_service.db.clone();
@@ -1294,6 +1310,9 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+        if let Some(task) = &mut self.pruning_task {
+            task.check_for_panics();
+        }
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -1800,6 +1819,7 @@ impl Service<Request> for StateService {
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
             | Request::Transaction(_)
+            | Request::KnownTransaction(_)
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
@@ -1974,6 +1994,10 @@ impl Service<ReadRequest> for ReadStateService {
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.cached_size())),
 
+            ReadRequest::HistoryCapabilities => Ok(ReadResponse::HistoryCapabilities(
+                state.db.history_capabilities()?,
+            )),
+
             // Used by the StateService.
             ReadRequest::Tip => Ok(ReadResponse::Tip(read::tip(
                 state.latest_best_chain(),
@@ -2050,36 +2074,50 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();
 
-                let height = hash_or_height
-                    .height_or_else(|hash| {
-                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+                let Some(height) = hash_or_height.height_or_else(|hash| {
+                    read::find::height_by_hash(best_chain.clone(), &state.db, hash)
+                }) else {
+                    return Ok(ReadResponse::BlockHeader(None));
+                };
 
-                let hash = hash_or_height
-                    .hash_or_else(|height| {
-                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                    })
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+                let Some(hash) = hash_or_height.hash_or_else(|height| {
+                    read::find::hash_by_height(best_chain.clone(), &state.db, height)
+                }) else {
+                    return Ok(ReadResponse::BlockHeader(None));
+                };
+
+                let header = read::block_header(best_chain.as_ref(), &state.db, hash.into())
+                    .ok_or(crate::BlockReadError::CorruptBlock { height })?;
 
                 let next_height = height.next()?;
-                let next_block_hash =
-                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
+                let next_block_hash = best_chain
+                    .as_ref()
+                    .and_then(|chain| chain.block(next_height.into()))
+                    .filter(|next| next.block.header.previous_block_hash == hash)
+                    .map(|next| next.hash)
+                    .or_else(|| {
+                        state
+                            .db
+                            .block_header(next_height.into())
+                            .filter(|next| next.previous_block_hash == hash)
+                            .map(|next| next.hash())
+                    });
 
-                let header = read::block_header(best_chain, &state.db, height.into())
-                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                Ok(ReadResponse::BlockHeader {
+                Ok(ReadResponse::BlockHeader(Some(crate::BlockHeader {
                     header,
                     hash,
                     height,
                     next_block_hash,
-                })
+                })))
             }
 
             // For the get_raw_transaction RPC and the StateService.
             ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
-                read::mined_transaction(state.latest_best_chain(), &state.db, hash),
+                read::mined_transaction(state.latest_best_chain(), &state.db, hash)?,
+            )),
+
+            ReadRequest::KnownTransaction(hash) => Ok(ReadResponse::KnownTransaction(
+                read::known_transaction(state.latest_best_chain(), &state.db, hash),
             )),
 
             ReadRequest::AnyChainTransaction(hash) => {
@@ -2087,7 +2125,7 @@ impl Service<ReadRequest> for ReadStateService {
                     state.latest_non_finalized_state().chain_iter(),
                     &state.db,
                     hash,
-                )))
+                )?))
             }
 
             // Used by the get_raw_transaction (verbosity 0) RPC.
@@ -2147,7 +2185,7 @@ impl Service<ReadRequest> for ReadStateService {
                     known_blocks,
                     stop,
                     MAX_FIND_BLOCK_HASHES_RESULTS,
-                )))
+                )?))
             }
 
             // Used by the StateService.
@@ -2506,10 +2544,9 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by `gettxout` RPC method.
-            ReadRequest::IsTransparentOutputSpent(outpoint) => {
-                let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
-                Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
-            }
+            ReadRequest::UnspentOutput(outpoint) => Ok(ReadResponse::UnspentOutput(
+                read::unspent_output(state.latest_best_chain(), &state.db, outpoint)?,
+            )),
         };
 
         timed_span.spawn_blocking(move || {
@@ -2566,6 +2603,9 @@ pub async fn init(
 /// Returns a read-only state service,
 ///
 /// Each `network` has its own separate on-disk database.
+///
+/// If writable initialization would reuse the previous major database and its records need no
+/// migrations, reads that database in place. Never migrates, renames, or creates the primary cache.
 ///
 /// To share access to the state, clone the returned [`ReadStateService`].
 pub fn init_read_only(

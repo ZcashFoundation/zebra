@@ -292,6 +292,7 @@ async fn early_raw_block_requests_keep_early_bodies_revocable() -> Result<(), Bo
                 sync_downloads: Default::default(),
                 address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                     SocketAddr::from(([0, 0, 0, 0], 0)),
+                    PeerServices::NODE_NETWORK,
                     &network,
                     DEFAULT_MAX_CONNS_PER_IP,
                     Span::none(),
@@ -681,6 +682,7 @@ async fn push_transaction_routing_enforces_per_peer_source() -> Result<(), crate
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1440,6 +1442,7 @@ async fn setup(
     let state_config = StateConfig::ephemeral();
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -1722,6 +1725,7 @@ async fn setup_gossiped_block_misbehavior_with_state(
 
     let address_book = AddressBook::new(
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        PeerServices::NODE_NETWORK,
         &network,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
@@ -2438,6 +2442,7 @@ async fn compact_and_sync_share_committed_success_and_recover_owner() -> Result<
                     sync_downloads: sync.in_flight_hashes(),
                     address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                         "0.0.0.0:0".parse().unwrap(),
+                        PeerServices::NODE_NETWORK,
                         &Mainnet,
                         DEFAULT_MAX_CONNS_PER_IP,
                         Span::none(),
@@ -2671,6 +2676,7 @@ async fn compact_reconstruction_screening_and_authentication() -> Result<(), Box
             sync_downloads: Default::default(),
             address_book: Arc::new(std::sync::Mutex::new(AddressBook::new(
                 SocketAddr::from(([0, 0, 0, 0], 0)),
+                PeerServices::NODE_NETWORK,
                 &network,
                 DEFAULT_MAX_CONNS_PER_IP,
                 Span::none(),
