@@ -121,6 +121,11 @@ impl QueuedBlocks {
         self.by_parent.contains_key(&parent_hash)
     }
 
+    /// Returns the parent hashes of every queued block.
+    pub fn parent_hashes(&self) -> Vec<block::Hash> {
+        self.by_parent.keys().copied().collect()
+    }
+
     /// Returns `true` if there is a block with the provided hash present.
     #[instrument(skip(self), fields(%hash))]
     pub fn has(&self, hash: block::Hash) -> bool {

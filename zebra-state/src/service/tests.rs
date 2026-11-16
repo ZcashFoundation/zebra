@@ -940,3 +940,233 @@ fn rejected_checkpoint_range_can_be_downloaded_again() -> Result<()> {
 
     Ok(())
 }
+
+/// A semantically verified block that names a checkpoint verified block below the final
+/// checkpoint as its parent can't end checkpoint sync, whether it's queued after its parent is
+/// committed or before. The switch happens once the final checkpoint is committed.
+#[test]
+fn forged_child_does_not_end_checkpoint_sync() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=9)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+    let max_checkpoint_height = Height(8);
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        max_checkpoint_height,
+        0,
+    ));
+
+    let commit_checkpoint = |state: &mut StateService, height: usize| {
+        state
+            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(
+                blocks[height].clone(),
+            ))
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    };
+    // The real block above the final checkpoint, re-parented onto a lower checkpoint block.
+    let forged_child = |parent: usize| {
+        let mut block = Arc::unwrap_or_clone(blocks[9].clone());
+        Arc::make_mut(&mut block.header).previous_block_hash = blocks[parent].hash();
+        Arc::new(block).prepare()
+    };
+    let assert_forged_child_rejected = |error: crate::CommitSemanticallyVerifiedError| {
+        assert!(
+            matches!(
+                error.inner(),
+                CommitBlockError::ValidateContextError(error)
+                    if matches!(**error, ValidateContextError::NonSequentialFinalizedChild { .. })
+            ),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(error.inner().misbehavior_score(), 100);
+    };
+
+    for height in 0..=5 {
+        commit_checkpoint(&mut state, height);
+    }
+    assert!(!state.checkpoint_handoff_is_ready());
+
+    // A child of the committed tip is rejected before it's queued.
+    let rejected = state
+        .queue_and_commit_to_non_finalized_state(forged_child(5))
+        .try_recv()
+        .expect("forged child is answered before it's queued")
+        .expect_err("forged child is rejected");
+    assert_forged_child_rejected(rejected);
+    assert!(state.block_write_sender.finalized.is_some());
+
+    // A child of a checkpoint block that hasn't arrived yet is rejected when its parent is sent.
+    let mut queued_rx = state.queue_and_commit_to_non_finalized_state(forged_child(7));
+    assert!(state.block_write_sender.finalized.is_some());
+    commit_checkpoint(&mut state, 6);
+    commit_checkpoint(&mut state, 7);
+    let rejected = queued_rx
+        .try_recv()
+        .expect("forged child is answered when its parent is sent")
+        .expect_err("forged child is rejected");
+    assert_forged_child_rejected(rejected);
+    assert!(state.block_write_sender.finalized.is_some());
+
+    // The honest switch still happens at the final checkpoint.
+    commit_checkpoint(&mut state, 8);
+    assert!(state.checkpoint_handoff_is_ready());
+    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    assert!(state.block_write_sender.finalized.is_none());
+
+    Ok(())
+}
+
+/// A forged child queued while its checkpoint parent is in the write channel is rejected at the
+/// switch to full validation.
+#[test]
+fn forged_child_of_unwritten_parent_is_rejected_at_handoff() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=9)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        Height(8),
+        0,
+    ));
+
+    let commit_checkpoint = |state: &mut StateService, height: usize| {
+        state
+            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(
+                blocks[height].clone(),
+            ))
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    };
+
+    for height in 0..=5 {
+        commit_checkpoint(&mut state, height);
+    }
+
+    // Hold block 6 in a substitute write channel, so it's sent but not written.
+    let (held_tx, mut held_rx) = tokio::sync::mpsc::unbounded_channel();
+    let write_sender = state
+        .block_write_sender
+        .finalized
+        .replace(held_tx)
+        .expect("checkpoint sync is running");
+    let parent_rx =
+        state.queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[6].clone()));
+    let held_parent = held_rx.try_recv().expect("block 6 is sent");
+    assert_eq!(state.read_service.db.height(blocks[6].hash()), None);
+
+    let mut forged = Arc::unwrap_or_clone(blocks[9].clone());
+    Arc::make_mut(&mut forged.header).previous_block_hash = blocks[6].hash();
+    let mut forged_rx = state.queue_and_commit_to_non_finalized_state(Arc::new(forged).prepare());
+    assert!(matches!(
+        forged_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    // Write block 6, finish checkpoint sync, and switch with the honest block 9.
+    assert!(
+        write_sender.send(held_parent).is_ok(),
+        "write task is running"
+    );
+    state.block_write_sender.finalized = Some(write_sender);
+    parent_rx
+        .blocking_recv()
+        .expect("write task responds")
+        .expect("block 6 commits");
+    commit_checkpoint(&mut state, 7);
+    commit_checkpoint(&mut state, 8);
+    let _honest_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    assert!(state.block_write_sender.finalized.is_none());
+
+    let rejected = forged_rx
+        .try_recv()
+        .expect("forged child is answered at the switch")
+        .expect_err("forged child is rejected");
+    assert_eq!(rejected.inner().misbehavior_score(), 100);
+    assert!(!state
+        .non_finalized_state_queued_blocks
+        .has_queued_children(blocks[6].hash()));
+
+    Ok(())
+}
+
+/// An honest block queued before the final checkpoint commits isn't rejected, and commits after
+/// the switch to full validation.
+#[test]
+fn honest_child_queued_before_final_checkpoint_commits() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .range(0..=10)
+        .map(|(_height, bytes)| bytes.zcash_deserialize_into().map(Arc::new))
+        .collect::<Result<_, _>>()?;
+
+    let runtime = Runtime::new()?;
+    let (mut state, _, _, _) = runtime.block_on(StateService::new(
+        Config::ephemeral(),
+        &network,
+        Height(8),
+        0,
+    ));
+
+    for block in &blocks[..=7] {
+        state
+            .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(block.clone()))
+            .blocking_recv()
+            .expect("write task responds")
+            .expect("checkpoint verified block commits");
+    }
+
+    // The first block above the final checkpoint arrives before the final checkpoint.
+    let mut child_rx = state.queue_and_commit_to_non_finalized_state(blocks[9].clone().prepare());
+    assert!(matches!(
+        child_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    state
+        .queue_and_commit_to_finalized_state(CheckpointVerifiedBlock::from(blocks[8].clone()))
+        .blocking_recv()
+        .expect("write task responds")
+        .expect("final checkpoint commits");
+    assert!(matches!(
+        child_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    // The next block triggers the switch, and both commit.
+    let grandchild_rx = state.queue_and_commit_to_non_finalized_state(blocks[10].clone().prepare());
+    assert!(state.block_write_sender.finalized.is_none());
+    assert_eq!(
+        child_rx.blocking_recv().expect("child is answered")?,
+        blocks[9].hash()
+    );
+    assert_eq!(
+        grandchild_rx
+            .blocking_recv()
+            .expect("grandchild is answered")?,
+        blocks[10].hash()
+    );
+
+    Ok(())
+}
