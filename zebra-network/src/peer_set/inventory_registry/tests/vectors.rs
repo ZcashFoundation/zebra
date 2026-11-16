@@ -6,7 +6,7 @@ use zebra_chain::{block, serialization::AtLeastOne, transaction};
 
 use crate::{
     peer_set::inventory_registry::{
-        tests::new_inv_registry, InventoryMarker, InventoryStatus, MAX_INV_PER_MAP,
+        tests::new_inv_registry, InventoryMarker, InventoryStatus, RepeatRequests, MAX_INV_PER_MAP,
         MAX_PEERS_PER_INV,
     },
     protocol::external::InventoryHash,
@@ -336,40 +336,59 @@ async fn inv_registry_served_peers_ok() {
     assert_eq!(inv_registry.served_peers(test_hash).count(), 0);
 }
 
-/// Check that the answers to repeat requests are counted once per peer, and expire after two
-/// rotations.
+/// Check that repeat requests are counted for each group of peers, across both intervals, and
+/// expire after two rotations.
 #[tokio::test]
-async fn inv_registry_repeat_answer_count_ok() {
+async fn inv_registry_repeat_requests_ok() {
     let test_hash = InventoryHash::Block(block::Hash([0; 32]));
     let other_hash = InventoryHash::Block(block::Hash([1; 32]));
-    let test_peer = "1.1.1.1:1"
-        .parse()
-        .expect("unexpected invalid peer address");
-    let other_peer = "2.2.2.2:2"
-        .parse()
-        .expect("unexpected invalid peer address");
 
     let (mut inv_registry, _inv_stream_tx) = new_inv_registry();
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 0);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests::default()
+    );
 
-    inv_registry.register_repeat_answer(test_hash, test_peer);
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 1);
-    assert_eq!(inv_registry.repeat_answer_count(other_hash), 0);
+    inv_registry.register_repeat_request(test_hash, false);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 0,
+            other_peers: 1,
+        }
+    );
+    assert_eq!(
+        inv_registry.repeat_requests(other_hash),
+        RepeatRequests::default()
+    );
     assert_eq!(inv_registry.served_peers(test_hash).count(), 0);
 
-    // The same peer in both intervals is counted once.
+    // Requests in both intervals are added up.
     inv_registry.rotate();
-    inv_registry.register_repeat_answer(test_hash, test_peer);
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 1);
-
-    inv_registry.register_repeat_answer(test_hash, other_peer);
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 2);
+    inv_registry.register_repeat_request(test_hash, true);
+    inv_registry.register_repeat_request(test_hash, false);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 1,
+            other_peers: 2,
+        }
+    );
 
     inv_registry.rotate();
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 2);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests {
+            advertisers: 1,
+            other_peers: 1,
+        }
+    );
 
     inv_registry.rotate();
-    assert_eq!(inv_registry.repeat_answer_count(test_hash), 0);
+    assert_eq!(
+        inv_registry.repeat_requests(test_hash),
+        RepeatRequests::default()
+    );
 }
 
 /// Check that failed peers are recorded, aren't cleared by advertisements, and expire after two

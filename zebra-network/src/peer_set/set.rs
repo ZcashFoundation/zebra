@@ -250,22 +250,17 @@ enum InvOutcome {
     /// The peer failed to return the block.
     Failed,
 
-    /// The peer answered a repeat request for the block with `notfound`.
-    NotFound,
-
     /// The peer returned a block, after it was chosen because the block was advertised, or in a
     /// repeat request for the block.
     Served,
 }
 
-/// The peer and connection that got a block request, the block, how the request ended, and
-/// whether it was a repeat request.
+/// The peer and connection that got a block request, the block, and how the request ended.
 type InvOutcomeEvent = (
     PeerSocketAddr,
     Arc<ConnectionInfo>,
     InventoryHash,
     InvOutcome,
-    bool,
 );
 
 /// Empty replies are valid when the locator reaches the remote tip. Neither a local wall-clock
@@ -320,9 +315,9 @@ where
     /// Producer clones handed to each tracked request's response wrapper.
     stall_event_tx: tokio_mpsc::UnboundedSender<StallEvent>,
 
-    /// Receives completed block request errors, advertised blocks that peers returned, and the
-    /// answers to repeat block requests, from response futures and records them in the
-    /// [`InventoryRegistry`]. Caller cancellation is not evidence of a peer failure.
+    /// Receives completed block request errors, and blocks that peers returned after they were
+    /// chosen for an advertisement or in a repeat request, from response futures and records them
+    /// in the [`InventoryRegistry`]. Caller cancellation is not evidence of a peer failure.
     ///
     /// Each routed block request sends at most one outcome, so the channel is limited by the
     /// number of block requests in flight.
@@ -1127,8 +1122,8 @@ where
         }
     }
 
-    /// Records block requests that peers failed to answer, advertised blocks that peers returned,
-    /// and the answers to repeat block requests, in the inventory registry.
+    /// Records block requests that peers failed to answer, and blocks that peers returned after
+    /// they were chosen for an advertisement or in a repeat request, in the inventory registry.
     ///
     /// Peers declare their own services, and request timeouts don't mark inventory as missing. So
     /// otherwise a peer that falsely claims to serve blocks, and withholds them, could get every
@@ -1140,7 +1135,7 @@ where
     /// `poll_ready()` calls this before a request is routed. So if a caller rejects a block and
     /// asks for it again, that request is always routed after the block is recorded as served.
     fn drain_inv_failures(&mut self, cx: &mut Context<'_>) {
-        while let Poll::Ready(Some((peer, connection_info, hash, outcome, is_repeat))) =
+        while let Poll::Ready(Some((peer, connection_info, hash, outcome))) =
             self.inv_failure_rx.poll_recv(cx)
         {
             match outcome {
@@ -1149,18 +1144,11 @@ where
                         self.inventory_registry.register_failed(hash, peer);
                     }
                 }
-                // The connection handler already marked the block as missing from this peer.
-                InvOutcome::NotFound => {}
                 // The record is about the block, so keep it even if the peer was disconnected,
                 // for example because the caller rejected the block and got the peer banned.
                 InvOutcome::Served => {
                     self.inventory_registry.register_served(hash, peer);
                 }
-            }
-
-            // This record is about the block too.
-            if is_repeat {
-                self.inventory_registry.register_repeat_answer(hash, peer);
             }
         }
     }
@@ -1516,6 +1504,8 @@ where
     /// A block that a peer already returned because it was advertised is being asked for again,
     /// so the peers that returned it are skipped like failed peers. The other peers that
     /// advertised it take turns with the peers that didn't, starting with the peers that didn't.
+    /// If the group whose turn it is has no ready peer, the other group gets the request, and
+    /// the next turn goes back to the group that missed out.
     ///
     /// Uses P2C to choose the least loaded peer in each list.
     fn select_inv_route(&self, request: &Request, hash: InventoryHash) -> InvRoute<D::Key> {
@@ -1553,11 +1543,14 @@ where
         // advertisers take turns to be asked first. The caller only retries a few times, so the
         // first turn goes to the peers that didn't advertise the block: the first request went
         // to an advertiser.
-        let ask_other_peers_first = is_repeat
-            && self
-                .inventory_registry
-                .repeat_answer_count(hash)
-                .is_multiple_of(2);
+        //
+        // Each group's turn depends on how many repeat requests were sent to it. So concurrent
+        // repeat requests go to both groups, and a group that had no ready peer on its turn gets
+        // the next one.
+        let ask_other_peers_first = is_repeat && {
+            let repeats = self.inventory_registry.repeat_requests(hash);
+            repeats.other_peers <= repeats.advertisers
+        };
 
         let has_failed = |addr: &PeerSocketAddr| {
             failed_peer_list.contains(addr) || served_peer_list.contains(addr)
@@ -1724,7 +1717,7 @@ where
     ///
     /// If a block request fails, reports the failure to the peer set. If `advertised` is true,
     /// the peer was chosen because it advertised the block, so a returned block is reported too.
-    /// Every answer to a repeat request is reported, see [`Self::select_inv_route()`].
+    /// A repeat request is counted when it is sent, see [`Self::select_inv_route()`].
     fn call_inv_peer(
         &mut self,
         key: D::Key,
@@ -1744,6 +1737,10 @@ where
             .connection_info()
             .clone();
         let is_repeat = self.inventory_registry.served_peers(hash).next().is_some();
+        if is_repeat {
+            self.inventory_registry
+                .register_repeat_request(hash, advertised);
+        }
         let fut = self.call_ready_peer(key, req);
 
         let failure_tx = self.inv_failure_tx.clone();
@@ -1754,13 +1751,9 @@ where
                     let missing = error
                         .downcast_ref::<SharedPeerError>()
                         .is_some_and(|error| error.inner_debug().contains("NotFoundResponse"));
-                    if !missing {
-                        // Only a completed peer error, including its response timeout, is failure
-                        // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
-                        Some(InvOutcome::Failed)
-                    } else {
-                        is_repeat.then_some(InvOutcome::NotFound)
-                    }
+                    // Only a completed peer error, including its response timeout, is failure
+                    // evidence. Dropping a caller, losing hedge or sync reset remains neutral.
+                    (!missing).then_some(InvOutcome::Failed)
                 }
                 Ok(Response::Blocks(blocks))
                     if (advertised || is_repeat)
@@ -1772,7 +1765,7 @@ where
             };
             // Security: send this before the caller gets the block, see `drain_inv_failures()`.
             if let Some(outcome) = outcome {
-                let _ = failure_tx.send((key, connection_info, hash, outcome, is_repeat));
+                let _ = failure_tx.send((key, connection_info, hash, outcome));
             }
             result
         }

@@ -9,7 +9,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::REQUEST_TIMEOUT,
     peer::{Connection, ErrorSlot},
-    peer_set::ActiveConnectionCounter,
+    peer_set::{inventory_registry::RepeatRequests, ActiveConnectionCounter},
     protocol::{external::Message, internal::InventoryResponse},
 };
 
@@ -658,8 +658,11 @@ async fn repeat_request_for_served_advertised_block_asks_another_peer_first() {
              is recorded",
         );
         assert_eq!(
-            peer_set.inventory_registry.repeat_answer_count(inventory),
-            1
+            peer_set.inventory_registry.repeat_requests(inventory),
+            RepeatRequests {
+                advertisers: 0,
+                other_peers: 1,
+            },
         );
 
         // If the block is requested once more, it is the turn of the advertisers that haven't
@@ -698,8 +701,8 @@ async fn repeat_request_for_served_advertised_block_asks_another_peer_first() {
             0,
         );
         assert_eq!(
-            peer_set.inventory_registry.repeat_answer_count(inventory),
-            0
+            peer_set.inventory_registry.repeat_requests(inventory),
+            RepeatRequests::default(),
         );
     }
 }
@@ -871,4 +874,210 @@ async fn served_block_without_advertisement_keeps_advertiser_preference() {
         .call(request.clone());
     assert_eq!(received_request(&mut handles[0]), None);
     finish_download(&mut handles[1], request, response, download).await;
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: repeat requests that are in flight at the same time
+/// take turns too, so one of them reaches an honest advertiser.
+///
+/// The syncer's hedged request, or the inbound downloader and the syncer, can send two repeat
+/// requests before either is answered. If the turn only moved when a request was answered, both
+/// requests would go to the peers that didn't advertise the block, and their answers would leave
+/// the turn where it was.
+#[tokio::test(start_paused = true)]
+async fn concurrent_repeats_still_reach_an_honest_advertiser() {
+    let _init_guard = zebra_test::init();
+
+    // Peer 0 advertises the block and forges it, peers 1..=3 are honest advertisers, and peers
+    // 4..=7 don't advertise the block or answer.
+    let honest_advertisers = 1..=3;
+    let services = vec![PeerServices::NODE_NETWORK; 8];
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&services);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+
+    // The forging peer advertises the block and gets the first request.
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    peer_set.ready().await.expect("the peers are ready");
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    finish_download(&mut handles[0], request.clone(), response.clone(), download).await;
+    peer_set.ready().await.expect("the peers are ready");
+
+    // The honest peers advertise the same block.
+    for advertiser in &addrs[honest_advertisers.clone()] {
+        send_inventory(
+            &mut guard,
+            InventoryStatus::new_available(inventory, *advertiser),
+        );
+        peer_set.ready().await.expect("the peers are ready");
+    }
+
+    // Two repeat requests are sent before either is answered.
+    let first = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let second = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let mut recipients = Vec::new();
+    for (index, handle) in handles.iter_mut().enumerate() {
+        if let Some(client_request) = handle.try_to_receive_outbound_client_request().request() {
+            let answer = if honest_advertisers.contains(&index) {
+                Ok(response.clone())
+            } else {
+                Err(PeerError::ConnectionReceiveTimeout.into())
+            };
+            let _ = client_request.tx.send(answer);
+            recipients.push(index);
+        }
+    }
+    let _ = first.await;
+    let _ = second.await;
+
+    assert_eq!(recipients.len(), 2, "both repeat requests were sent");
+    assert!(
+        recipients
+            .iter()
+            .any(|recipient| honest_advertisers.contains(recipient)),
+        "the concurrent repeat requests went to peers {recipients:?}, but none of them is an \
+         honest advertiser",
+    );
+    assert!(
+        recipients.iter().any(|recipient| *recipient > 3),
+        "the concurrent repeat requests went to peers {recipients:?}, but none of them is a peer \
+         that didn't advertise the block",
+    );
+}
+
+/// Regression test for GHSA-g9rc-89v4-hhvf: if the peers whose turn it is to get a repeat request
+/// are all busy, the other group gets the request, and the next turn goes back to the group that
+/// missed out.
+#[tokio::test(start_paused = true)]
+async fn repeat_turn_returns_to_the_group_that_had_no_ready_peer() {
+    let _init_guard = zebra_test::init();
+
+    // Peer 0 advertises the block and forges it, peers 1 and 2 also advertise it, and peer 3
+    // doesn't.
+    const OTHER_PEER: usize = 3;
+    let services = vec![PeerServices::NODE_NETWORK; 4];
+    let (mut peer_set, mut guard, addrs, mut handles, _best_tip) =
+        peer_set_with_services(&services);
+    let (_, inventory, response) = block_download();
+    let InventoryHash::Block(hash) = inventory else {
+        unreachable!("the helper constructs block inventory");
+    };
+    let request = Request::BlockDownload {
+        hash,
+        advertiser: None,
+    };
+
+    // The forging peer advertises the block and gets the first request.
+    send_inventory(
+        &mut guard,
+        InventoryStatus::new_available(inventory, addrs[0]),
+    );
+    peer_set.ready().await.expect("the peers are ready");
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    finish_download(&mut handles[0], request.clone(), response.clone(), download).await;
+    peer_set.ready().await.expect("the peers are ready");
+
+    for advertiser in &addrs[1..OTHER_PEER] {
+        send_inventory(
+            &mut guard,
+            InventoryStatus::new_available(inventory, *advertiser),
+        );
+        peer_set.ready().await.expect("the peers are ready");
+    }
+
+    // The peer that didn't advertise the block is busy with other blocks.
+    let mut busy = Vec::new();
+    for byte in [7, 9] {
+        send_inventory(
+            &mut guard,
+            InventoryStatus::new_available(
+                InventoryHash::Block(block::Hash([byte; 32])),
+                addrs[OTHER_PEER],
+            ),
+        );
+        busy.push(
+            peer_set
+                .ready()
+                .await
+                .expect("the peers are ready")
+                .call(block_request(byte)),
+        );
+    }
+    peer_set.ready().await.expect("the advertisers are ready");
+    assert!(peer_set.cancel_handles.contains_key(&addrs[OTHER_PEER]));
+
+    // It is that peer's turn, but it is busy, so an advertiser gets the repeat request.
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let first_repeat_peer = answer_request(
+        &mut handles,
+        Err(PeerError::ConnectionReceiveTimeout.into()),
+    )
+    .expect("a peer received the first repeat request");
+    assert!(
+        (1..OTHER_PEER).contains(&first_repeat_peer),
+        "an advertiser must get the repeat request when no other peer is ready, but peer \
+         {first_repeat_peer} got it",
+    );
+    let _ = download.await;
+
+    // The other peer becomes ready again.
+    for _ in 0..busy.len() {
+        let other_request = handles[OTHER_PEER]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("the busy peer got the other block requests");
+        let _ = other_request
+            .tx
+            .send(Err(PeerError::ConnectionReceiveTimeout.into()));
+    }
+    for other_download in busy {
+        let _ = other_download.await;
+    }
+    peer_set.ready().await.expect("the peers are ready");
+
+    // The peer that missed its turn gets the next repeat request, before the other advertiser.
+    let download = peer_set
+        .ready()
+        .await
+        .expect("the peers are ready")
+        .call(request.clone());
+    let second_repeat_peer = answer_request(
+        &mut handles,
+        Err(PeerError::ConnectionReceiveTimeout.into()),
+    )
+    .expect("a peer received the second repeat request");
+    assert_eq!(
+        second_repeat_peer, OTHER_PEER,
+        "the group that had no ready peer must get the next repeat request",
+    );
+    let _ = download.await;
 }

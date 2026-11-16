@@ -3,7 +3,6 @@
 //! [RFC]: https://zebra.zfnd.org/dev/rfcs/0003-inventory-tracking.html
 
 use std::{
-    collections::HashSet,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -84,6 +83,17 @@ pub type InventoryChange = InventoryStatus<(AtLeastOne<InventoryHash>, PeerSocke
 /// An internal marker used in inventory status hash maps.
 type InventoryMarker = InventoryStatus<()>;
 
+/// The number of repeat requests for a block that were sent to each group of peers, see
+/// [`InventoryRegistry::repeat_requests()`].
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct RepeatRequests {
+    /// Requests sent to peers that advertised the block.
+    pub advertisers: usize,
+
+    /// Requests sent to peers that didn't advertise the block.
+    pub other_peers: usize,
+}
+
 /// An Inventory Registry for tracking recent inventory advertisements and missing inventory.
 ///
 /// For more details please refer to the [RFC].
@@ -132,15 +142,14 @@ pub struct InventoryRegistry {
     /// Map tracking the peers that returned an advertised block in the previous interval period.
     served_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
 
-    /// Map tracking the peers that answered a repeat request for a block in the current interval
-    /// period, see [`InventoryRegistry::repeat_answer_count()`].
+    /// Map tracking the repeat requests sent for a block in the current interval period, see
+    /// [`InventoryRegistry::repeat_requests()`].
     ///
     /// This map is limited like `failed_current`.
-    repeat_current: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+    repeat_current: IndexMap<InventoryHash, RepeatRequests>,
 
-    /// Map tracking the peers that answered a repeat request for a block in the previous interval
-    /// period.
-    repeat_prev: IndexMap<InventoryHash, IndexSet<PeerSocketAddr>>,
+    /// Map tracking the repeat requests sent for a block in the previous interval period.
+    repeat_prev: IndexMap<InventoryHash, RepeatRequests>,
 
     /// Stream of incoming inventory statuses to register.
     inv_stream: Pin<
@@ -327,34 +336,53 @@ impl InventoryRegistry {
         Self::register_peer(&mut self.served_current, hash, peer);
     }
 
-    /// Returns the number of peers that recently answered a repeat request for `hash`, with a
-    /// block, a `notfound`, or an error.
+    /// Returns how many repeat requests for `hash` were recently sent to the peers that
+    /// advertised it, and to the peers that didn't.
     ///
     /// # Security
     ///
     /// The peers that advertised `hash` and the peers that didn't take turns to get the repeat
-    /// requests for it, and this count decides whose turn it is. A peer that forges blocks can
+    /// requests for it, and these counts decide whose turn it is. A peer that forges blocks can
     /// advertise them from several addresses, and it can also connect from addresses that don't
     /// advertise them and don't answer. So if either group got every repeat request, that group
     /// could keep them all from the honest peers.
     ///
-    /// Only an answer to a request counts, so a peer can't change the turn without using up one
-    /// of the caller's requests.
-    pub fn repeat_answer_count(&self, hash: InventoryHash) -> usize {
-        self.repeat_current
-            .get(&hash)
-            .into_iter()
-            .chain(self.repeat_prev.get(&hash))
-            .flatten()
-            .collect::<HashSet<_>>()
-            .len()
+    /// Requests are counted when they are sent, not when they are answered. So several repeat
+    /// requests in flight at the same time take turns too, and a peer can't change the turn by
+    /// delaying its answer.
+    pub fn repeat_requests(&self, hash: InventoryHash) -> RepeatRequests {
+        let current = self.repeat_current.get(&hash).copied().unwrap_or_default();
+        let prev = self.repeat_prev.get(&hash).copied().unwrap_or_default();
+
+        RepeatRequests {
+            advertisers: current.advertisers.saturating_add(prev.advertisers),
+            other_peers: current.other_peers.saturating_add(prev.other_peers),
+        }
     }
 
-    /// Records that `peer` answered a repeat request for `hash`.
+    /// Records that a repeat request for `hash` was sent to a peer that advertised it, if
+    /// `advertised` is true, or to a peer that didn't.
     ///
     /// These records expire after the registry rotates twice, like inventory statuses.
-    pub fn register_repeat_answer(&mut self, hash: InventoryHash, peer: PeerSocketAddr) {
-        Self::register_peer(&mut self.repeat_current, hash, peer);
+    pub fn register_repeat_request(&mut self, hash: InventoryHash, advertised: bool) {
+        if let Some(index) = self.repeat_current.get_index_of(&hash) {
+            self.repeat_current
+                .move_index(index, self.repeat_current.len() - 1);
+        }
+        let requests = self.repeat_current.entry(hash).or_default();
+        if advertised {
+            requests.advertisers = requests.advertisers.saturating_add(1);
+        } else {
+            requests.other_peers = requests.other_peers.saturating_add(1);
+        }
+
+        // # Security
+        //
+        // Limit the number of stored hashes, removing the oldest entries, like `register_peer()`.
+        if self.repeat_current.len() > MAX_INV_PER_MAP {
+            // Performance: `MAX_INV_PER_MAP` is small, so O(n) performance is acceptable.
+            self.repeat_current.shift_remove_index(0);
+        }
     }
 
     /// Adds `peer` to the peers for `hash` in `map`, as the newest entry.
