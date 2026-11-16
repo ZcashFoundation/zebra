@@ -1,8 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  Unsolicited transactions from peers no longer interrupt block and transaction downloads, and
-  Zebra only treats a peer as missing a block or transaction when the peer says so. A request for
-  an exact transaction also matches its authorizing data, so a peer that serves a differently
-  signed copy is treated as not having it.
-time: 2026-11-04T03:50:49.219226253+01:00

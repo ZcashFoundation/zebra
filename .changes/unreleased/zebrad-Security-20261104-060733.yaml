@@ -1,6 +1,0 @@
-project: zebrad
-kind: Security
-body: >-
-  Release completed block downloads between sync rounds, and retry missing ancestors a limited
-  number of times, including in rounds with no new tips or only one advertised hash.
-time: 2026-11-04T06:07:33.281166349+01:00

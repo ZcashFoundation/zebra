@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Changed
-body: Remove unused dependencies and restrict test-only dependencies to development builds.
-time: 2026-11-07T01:26:16.539484372+01:00

@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: breaking
-body: 'New `TransactionError::NonStandardSigops` variant: exhaustive matches on `TransactionError` need to handle it.'
-time: 2026-11-11T03:51:10.522558595+01:00

@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Changed
-body: The state service stops holding a copy of a sent block's transparent outputs once the block is committed, and doesn't copy the outputs of blocks restored from the non-finalized backup.
-time: 2026-11-13T07:32:08.750256013Z

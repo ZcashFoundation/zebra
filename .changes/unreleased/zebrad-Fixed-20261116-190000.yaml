@@ -1,5 +1,0 @@
-project: zebrad
-kind: Fixed
-body: >-
-  Improved how the non-finalized state tracks blocks from chain forks it no longer keeps.
-time: 2026-11-16T19:00:00.000000000+00:00

@@ -1,8 +1,0 @@
-project: zebra-state
-kind: Security
-body: >-
-  Reject queued non-finalized blocks that aren't at the next height after their finalized parent,
-  with `ValidateContextError::NonSequentialFinalizedChild`, and switch from checkpoint commits to
-  full validation only once the final checkpoint is written
-  ([GHSA-m44m-9r8r-r64j](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-m44m-9r8r-r64j)).
-time: 2026-11-11T12:00:00.000000000-03:00

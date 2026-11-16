@@ -1,9 +1,0 @@
-project: zebra-consensus
-kind: Security
-body: >-
-  `MempoolTxVerifier` now checks nullifiers and anchors against the best chain tip before it
-  queues proof and signature verification, so a transaction rejected by that check no longer
-  reaches the batch verifiers, and an error that doesn't score can no longer return while an
-  invalid proof from the same transaction is still being verified
-  ([GHSA-2wx4-g5cf-32pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2wx4-g5cf-32pf)).
-time: 2026-10-21T22:53:17.865879052+02:00

@@ -1,7 +1,0 @@
-project: zebrad
-kind: Security
-body: >-
-  Prevent forged queued blocks from causing honest replacement peers to be penalized
-  ([GHSA-7jvw-68q7-xfh4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-7jvw-68q7-xfh4)).
-  Thanks to @x15-eth for reporting the issue.
-time: 2026-11-04T04:01:28.372871038+01:00

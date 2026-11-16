@@ -1,4 +1,0 @@
-project: zebra-network
-kind: Fixed
-body: 'Peer misbehaviour scores are no longer dropped when several arrive while the batched scores are being written to the address book ([#10601](https://github.com/ZcashFoundation/zebra/issues/10601)).'
-time: 2026-10-19T12:00:00.000000000Z

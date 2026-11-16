@@ -5830,7 +5830,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -5852,7 +5852,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.43"
+version = "0.2.44"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -7387,7 +7387,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "13.0.1"
+version = "14.0.0"
 dependencies = [
  "jsonrpsee-types",
  "reqwest 0.12.28",
@@ -7465,7 +7465,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "14.0.1"
+version = "15.0.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7559,7 +7559,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "10.0.5"
+version = "11.0.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -7579,7 +7579,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "8.0.0"
+version = "7.1.0"
 dependencies = [
  "abscissa_core",
  "bytes",
