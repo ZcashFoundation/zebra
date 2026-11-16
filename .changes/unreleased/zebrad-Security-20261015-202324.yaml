@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Avoid restarting synchronization when tip discovery returns already-known blocks, while skipping redundant downloads ([GHSA-7jj3-cj39-8pw8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-7jj3-cj39-8pw8)).
+time: 2026-10-15T20:23:24.066929576Z
