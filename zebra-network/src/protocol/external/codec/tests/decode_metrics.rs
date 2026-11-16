@@ -138,3 +138,50 @@ async fn block_decode_records_wait_and_duration() {
         "failed decodes record no duration"
     );
 }
+
+/// A block with enough transactions for the parallel decoder decodes to the same message, and
+/// records both histograms. The decoder starts at the reader's position, and stops reading at
+/// the end of the block.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn large_blocks_decode_in_the_rayon_pool() {
+    let _guard = zebra_test::init();
+    let recorder = DecodeRecorder::default();
+    let _recorder = metrics::set_default_local_recorder(&recorder);
+    let mut codec = codec();
+
+    let block_bytes = zebra_chain::block::tests::generate::many_transaction_v4_block(200);
+    let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+    assert_eq!(block.transactions.len(), 200);
+    let message = Message::Block(block);
+
+    for _ in 0..2 {
+        assert_eq!(
+            codec.decode(&mut encoded(message.clone())).unwrap(),
+            Some(message.clone())
+        );
+    }
+    assert_eq!(recorder.wait.count(), 2);
+    assert_eq!(recorder.duration.count(), 2);
+
+    for before in [0, 5] {
+        let mut body = vec![0xff; before];
+        body.extend_from_slice(&block_bytes);
+        body.extend_from_slice(&[0; 3]);
+        let body = BytesMut::from(body.as_slice());
+        let mut reader = Cursor::new(&body);
+        reader.set_position(u64::try_from(before).unwrap());
+
+        assert_eq!(codec.read_block(&mut reader).unwrap(), message);
+        assert_eq!(
+            reader.position(),
+            u64::try_from(before + block_bytes.len()).unwrap(),
+            "the reader is left at the end of the block",
+        );
+    }
+
+    // A reader that is already at the end of its bytes has no block to decode.
+    let body = BytesMut::from(block_bytes.as_slice());
+    let mut reader = Cursor::new(&body);
+    reader.set_position(u64::MAX);
+    assert!(codec.read_block(&mut reader).is_err());
+}

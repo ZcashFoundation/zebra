@@ -1,0 +1,4 @@
+project: zebrad
+kind: Fixed
+body: 'Decode the messages a peer sends after a message that Zebra ignores, such as one with an unknown command, without waiting for the peer to send more data.'
+time: 2026-11-16T12:00:00.000000000Z
