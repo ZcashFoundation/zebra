@@ -1837,6 +1837,46 @@ async fn backup_restore_discards_eviction_notices() -> Result<()> {
     Ok(())
 }
 
+/// Restoring a backup that is over the index entry limit, such as one written before Mainnet had
+/// the limit, stops at the first block that the block write task would finalize, instead of
+/// rebuilding every backed up block in memory.
+#[test]
+fn backup_restore_stops_at_the_index_entry_limit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let min_blocks = crate::constants::MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let (mut state, finalized_state) = new_invalidate_test_state(&network);
+    state.max_index_entries = None;
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    let mut tip = block1;
+    while state.best_chain_len() < Some(min_blocks + 20) {
+        tip = tip.make_fake_child();
+        state.commit_block(tip.clone().prepare(), &finalized_state)?;
+    }
+
+    let backup_dir = tempfile::tempdir()?;
+    state.write_to_backup(backup_dir.path());
+
+    let mut limited = NonFinalizedState::new(&network);
+    limited.max_index_entries = Some(1);
+    let restored =
+        super::super::backup::restore_backup(limited, backup_dir.path(), &finalized_state.db);
+    assert_eq!(Some(min_blocks + 1), restored.best_chain_len());
+    assert!(restored.should_finalize_root());
+
+    // A backup within the limits is restored whole.
+    let restored = super::super::backup::restore_backup(
+        NonFinalizedState::new(&network),
+        backup_dir.path(),
+        &finalized_state.db,
+    );
+    assert_eq!(Some(min_blocks + 20), restored.best_chain_len());
+
+    Ok(())
+}
+
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/11133.
 ///
 /// Test networks keep more equal-work sibling forks than Mainnet before evicting any.

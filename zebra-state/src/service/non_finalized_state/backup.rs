@@ -44,8 +44,20 @@ pub(super) fn restore_backup(
         store.entry(block.height).or_default().push(block);
     }
 
-    for (height, blocks) in store {
+    'restore: for (height, blocks) in store {
         for block in blocks {
+            // Restoring can't finalize blocks, so a backup that is over the limits, such as one
+            // written before the index entry limit, would be rebuilt in memory whole. The block
+            // write task finalizes the restored blocks, and the rest are downloaded again.
+            if non_finalized_state.should_finalize_root() {
+                tracing::warn!(
+                    ?height,
+                    "the non-finalized backup is over the non-finalized state limits: \
+                     not restoring its remaining blocks"
+                );
+                break 'restore;
+            }
+
             #[cfg(test)]
             let commit_result = if non_finalized_state
                 .any_chain_contains(&block.block.header.previous_block_hash)
