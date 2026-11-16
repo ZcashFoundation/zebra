@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: Bound block downloads by the remaining sync lookahead capacity, reserving space for retries and the final checkpoint. Block hashes from different peers are interleaved, so one peer's response can't fill the download batch.
-time: 2026-11-04T06:08:02.167629168+01:00

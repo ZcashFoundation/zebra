@@ -1,6 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  This release is supported for 24 days instead of 8 weeks, so it stops around 10 December 2026,
-  near block 3,607,648, and warns from about 3 December. Upgrade to the next release before then.
-time: 2026-11-16T19:00:00.000000000Z

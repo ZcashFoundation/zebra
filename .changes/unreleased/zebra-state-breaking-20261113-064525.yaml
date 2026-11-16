@@ -1,4 +1,0 @@
-project: zebra-state
-kind: breaking
-body: Removed `Chain::partial_transparent_indexes` and the `TransparentTransfers` type with its `is_empty`, `balance`, `received`, `tx_ids`, `created_utxos`, and `spent_utxos` methods. Non-finalized address changes are now stored per block; use `Chain::partial_transparent_balance_change`, `partial_transparent_utxo_changes`, `partial_transparent_spent_utxo_count`, or `partial_transparent_tx_ids` instead.
-time: 2026-11-13T06:45:25.349385074Z

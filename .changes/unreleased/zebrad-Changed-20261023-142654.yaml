@@ -1,6 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  Stop sending requests to a peer that was banned, or made obsolete by a network upgrade, after
-  Zebra selected it, including while waiting for its connection to become writable.
-time: 2026-10-23T14:26:54.023700112+02:00

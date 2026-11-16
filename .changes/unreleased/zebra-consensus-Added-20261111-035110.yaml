@@ -1,4 +1,0 @@
-project: zebra-consensus
-kind: Added
-body: Added `error::TransactionError::NonStandardSigops { sigops }` and `transaction::check::MAX_STANDARD_TX_SIGOPS`.
-time: 2026-11-11T03:51:10.526403092+01:00

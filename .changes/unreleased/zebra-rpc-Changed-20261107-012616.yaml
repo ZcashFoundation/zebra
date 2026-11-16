@@ -1,4 +1,0 @@
-project: zebra-rpc
-kind: Changed
-body: Stop enabling unused dependency features.
-time: 2026-11-07T01:26:16.546658771+01:00

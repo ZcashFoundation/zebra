@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: Generate matching NU5 coinbase expiry heights in partial test chains.
-time: 2026-11-06T12:00:00.000000000+00:00

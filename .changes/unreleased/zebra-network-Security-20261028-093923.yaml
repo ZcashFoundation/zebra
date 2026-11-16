@@ -1,6 +1,0 @@
-project: zebra-network
-kind: Security
-body: >-
-  Inbound block requests keep at most the first `constants::GETDATA_MAX_BLOCK_COUNT` distinct
-  block hashes before they are dispatched. The limit is now public in `zebra_network::constants`.
-time: 2026-10-28T09:39:23.329626111-05:00

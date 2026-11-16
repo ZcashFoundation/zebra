@@ -1,8 +1,0 @@
-project: zebrad
-kind: Changed
-body: >-
-  `zebrad` now stops at config load when a configured network upgrade height has no consensus
-  branch ID in this build, instead of panicking at that upgrade's activation block. This only
-  affects custom Testnet and Regtest configs
-  ([#11482](https://github.com/ZcashFoundation/zebra/issues/11482)).
-time: 2026-10-30T12:00:00.000000+05:30

@@ -1,4 +1,0 @@
-project: zebra-state
-kind: Security
-body: '`ReadRequest::AddressBalance` no longer copies the whole non-finalized chain to skip the blocks that are also in the finalized state. It now reads the balance changes of the requested addresses above the finalized tip from the shared chain, so concurrent requests can no longer run the node out of memory when a recent block has many transparent outputs ([GHSA-hj54-2mfv-4xg8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hj54-2mfv-4xg8)).'
-time: 2026-10-22T12:00:00.000000000+00:00

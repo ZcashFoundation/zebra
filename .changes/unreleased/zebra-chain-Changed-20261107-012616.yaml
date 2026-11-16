@@ -1,4 +1,0 @@
-project: zebra-chain
-kind: Changed
-body: Reduce direct build dependencies by using standard-library assertions and ceiling division.
-time: 2026-11-07T01:26:16.535849568+01:00

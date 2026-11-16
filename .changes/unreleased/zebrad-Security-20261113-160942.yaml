@@ -1,4 +1,0 @@
-project: zebrad
-kind: Security
-body: Chain forks in the non-finalized state share their transaction, spend, and nullifier indexes instead of copying them, so blocks with many transactions or spends no longer multiply memory use by the number of forks ([GHSA-j8gf-c4rj-6jv5](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-j8gf-c4rj-6jv5)).
-time: 2026-11-13T16:09:42.679862702Z

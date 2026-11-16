@@ -1,8 +1,0 @@
-project: zebra-network
-kind: Security
-body: >-
-  Send a misbehavior report that bans a peer to the address book right away, instead of at the
-  next batch flush, so requests stop going to that peer before it can serve more invalid data.
-  Each peer address still gets at most one early ban per flush interval
-  ([GHSA-g9rc-89v4-hhvf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-g9rc-89v4-hhvf)).
-time: 2026-11-10T12:00:00.000000000+00:00
