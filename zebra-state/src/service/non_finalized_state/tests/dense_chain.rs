@@ -186,11 +186,14 @@ fn dense_single_chain_memory_stays_within_limit() -> Result<()> {
     assert_eq!(1, state.chain_count());
     let kept = state.best_chain_len().expect("the chain was committed");
     assert!(
-        kept == blocks + 1
-            || (kept >= MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT
-                && state.index_entry_count()
-                    <= MAX_NON_FINALIZED_INDEX_ENTRIES + usize::try_from(2 * DENSE_BLOCK_OUTPUTS)?),
-        "the chain keeps every block until the index entry limit: kept {kept} of {blocks}"
+        kept == blocks + 1 || kept >= MIN_NON_FINALIZED_BLOCKS_OVER_INDEX_LIMIT,
+        "finalizing early keeps the minimum number of blocks: kept {kept} of {blocks}"
+    );
+    assert!(
+        state.index_entry_count()
+            <= MAX_NON_FINALIZED_INDEX_ENTRIES + usize::try_from(2 * DENSE_BLOCK_OUTPUTS)?,
+        "the chain stays near the index entry limit: {} entries in {kept} blocks",
+        state.index_entry_count()
     );
 
     let Some(peak) = peak_resident_bytes() else {
