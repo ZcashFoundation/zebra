@@ -1,0 +1,4 @@
+project: zebra-network
+kind: Security
+body: Stop preferring the peers that advertised a block once one of them has returned it and the block is requested again. A repeat request means the returned block was rejected, so the peers that returned it are now only asked as a last resort, and the other peers that advertised it take turns with the peers that didn't. A few peers that advertise the same block can't take every retry for it.
+time: 2026-11-11T12:00:00.000000000+00:00
