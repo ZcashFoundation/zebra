@@ -45,6 +45,12 @@ mod tests;
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
 
+/// The number of messages in a row that one [`Decoder::decode`] call ignores.
+///
+/// The messages behind them in the buffer are decoded when the peer sends more bytes. Peers
+/// don't send this many ignored messages in a row in normal operation.
+pub(super) const MAX_IGNORED_MESSAGES_PER_DECODE: usize = 1024;
+
 /// The maximum body length allowed before the handshake completes.
 ///
 /// Version messages are ~344 bytes max (including a 256-byte user agent);
@@ -410,12 +416,46 @@ impl fmt::Debug for DecodeState {
     }
 }
 
+/// The result of decoding the next message in a buffer.
+enum Decoded {
+    /// A message.
+    Message(Message),
+
+    /// A message that Zebra ignores, which has been consumed from the buffer.
+    Ignored,
+
+    /// The buffer doesn't hold the whole message yet.
+    Incomplete,
+}
+
 impl Decoder for Codec {
     type Item = Message;
     type Error = Error;
 
-    #[allow(clippy::unwrap_in_result)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        // The reader only calls this again once the peer has sent more bytes, so after an ignored
+        // message, decode the messages behind it that are already in the buffer. Each message
+        // consumes at least a header, so this ends when the buffer runs out.
+        //
+        // An ignored message can be as small as its header, so a full buffer can hold tens of
+        // thousands of them. This stops after `MAX_IGNORED_MESSAGES_PER_DECODE` of them, so the
+        // connection's task goes back to the reader, where it can yield to other tasks.
+        for _ in 0..MAX_IGNORED_MESSAGES_PER_DECODE {
+            match self.decode_message(src)? {
+                Decoded::Message(message) => return Ok(Some(message)),
+                Decoded::Ignored => {}
+                Decoded::Incomplete => return Ok(None),
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+impl Codec {
+    /// Decodes the next message in `src`, if `src` holds all of it.
+    #[allow(clippy::unwrap_in_result)]
+    fn decode_message(&mut self, src: &mut BytesMut) -> Result<Decoded, Error> {
         use Error::Parse;
         match self.state {
             DecodeState::Head => {
@@ -423,7 +463,7 @@ impl Decoder for Codec {
                 if src.len() < HEADER_LEN {
                     trace!(?self.state, "src buffer does not have an entire header, waiting");
                     // Signal that decoding requires more data.
-                    return Ok(None);
+                    return Ok(Decoded::Incomplete);
                 }
 
                 // Now that we know that src contains a header, split off the header section.
@@ -472,7 +512,7 @@ impl Decoder for Codec {
                 };
 
                 // Now that the state is updated, recurse to attempt body decoding.
-                self.decode(src)
+                self.decode_message(src)
             }
             DecodeState::Body {
                 body_len,
@@ -498,7 +538,7 @@ impl Decoder for Codec {
                     }
 
                     trace!(?self.state, len = src.len(), "src buffer does not have an entire body, waiting");
-                    return Ok(None);
+                    return Ok(Decoded::Incomplete);
                 }
 
                 // Now that we know we have the full body, split off the body,
@@ -525,7 +565,7 @@ impl Decoder for Codec {
                     _ => true,
                 };
                 if self.early_block_relay && !expected {
-                    return Ok(None);
+                    return Ok(Decoded::Ignored);
                 }
 
                 if checksum != sha256d::Checksum::from(&body[..]) {
@@ -591,10 +631,9 @@ impl Decoder for Codec {
                         // Since we can't verify their source, Zebra needs to ignore unexpected messages,
                         // because closing the connection could cause a denial of service or eclipse attack.
                         debug!(?command, %command_string, "unknown message command from peer");
-                        return Ok(None);
+                        return Ok(Decoded::Ignored);
                     }
                 }
-                // We need Ok(Some(msg)) to signal that we're done decoding.
                 // This is also convenient for tracing the parse result.
                 .map(|msg| {
                     // bitcoin allows extra data at the end of most messages,
@@ -608,7 +647,7 @@ impl Decoder for Codec {
                         // upgrade message formats
                         debug!(?extra_bytes, %msg, "extra data after decoding message");
                     }
-                    Some(msg)
+                    Decoded::Message(msg)
                 })
             }
         }
@@ -774,11 +813,50 @@ impl Codec {
         Ok(Message::GetAddr)
     }
 
-    fn read_block<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
+    /// Decodes the block at the reader's position as a job in the Rayon thread pool, parsing and
+    /// hashing a large block's transactions in parallel, and moves the reader past the block.
+    #[allow(clippy::unwrap_in_result)]
+    fn read_block(&self, body_reader: &mut Cursor<&BytesMut>) -> Result<Message, Error> {
         let decode_start = Instant::now();
-        let (result, wait) = Self::deserialize_block_spawning(reader);
+        let body: &BytesMut = body_reader.get_ref();
+        // A position past the end of the body leaves no bytes to decode.
+        let position = usize::try_from(body_reader.position())
+            .map_or(body.len(), |position| position.min(body.len()));
+        let mut unread = &body[position..];
+        let mut result = None;
+        let mut wait = Duration::ZERO;
+
+        // Correctness: decoding is CPU-intensive, so it runs as a job in the Rayon pool. The
+        // other blocks wait as message bytes, however many connections receive one.
+        //
+        // A worker that waits for the tasks of a parallel decode can start another queued
+        // decode. The decoder only decodes one block at a time in parallel, for peers and RPCs
+        // together, and decodes the others serially, as they are without the parallel decoder.
+        // Each worker then has at most one serial decode in progress, and the pool has at most
+        // one block more than its threads. The decoder checks for another parallel decode inside
+        // this job, so a block that waits for a worker doesn't keep others from the parallel
+        // decoder.
+        //
+        // Since we use `block_in_place()`, other futures running on the connection task will be
+        // blocked: https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
+        let wait_start = Instant::now();
+        tokio::task::block_in_place(|| {
+            rayon::in_place_scope_fifo(|s| {
+                s.spawn_fifo(|_s| {
+                    wait = wait_start.elapsed();
+                    result = Some(Block::zcash_deserialize_parallel(&mut unread))
+                })
+            })
+        });
         metrics::histogram!("zebra.net.block.decode.wait_seconds").record(wait.as_secs_f64());
-        let message = Message::Block(result?.into());
+        let block = result.expect("scope has already finished")?;
+
+        // The decoder reads from the message bytes, so tell the reader how far it got.
+        let read = body.len() - unread.len();
+        body_reader
+            .set_position(u64::try_from(read).expect("a message is smaller than 2^64 bytes"));
+
+        let message = Message::Block(block.into());
         metrics::histogram!("zebra.net.block.decode.duration_seconds")
             .record(decode_start.elapsed().as_secs_f64());
         Ok(message)
@@ -920,36 +998,5 @@ impl Codec {
         });
 
         result.expect("scope has already finished")
-    }
-
-    /// Given the reader, deserialize the block in the rayon thread pool.
-    ///
-    /// Also returns how long the parse waited for a rayon thread to start it.
-    #[allow(clippy::unwrap_in_result)]
-    fn deserialize_block_spawning<R: Read + std::marker::Send>(
-        reader: R,
-    ) -> (Result<Block, Error>, Duration) {
-        let mut result = None;
-        let mut wait = Duration::ZERO;
-
-        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // Since we use `block_in_place()`, other futures running on the connection task will be blocked:
-        // https://docs.rs/tokio/latest/tokio/task/fn.block_in_place.html
-        //
-        // We can't use `spawn_blocking()` because:
-        // - The `reader` has a lifetime (but we could replace it with a `Vec` of message data)
-        // - There is no way to check the blocking task's future for panics
-        let wait_start = Instant::now();
-        tokio::task::block_in_place(|| {
-            rayon::in_place_scope_fifo(|s| {
-                s.spawn_fifo(|_s| {
-                    wait = wait_start.elapsed();
-                    result = Some(Block::zcash_deserialize(reader))
-                })
-            })
-        });
-
-        (result.expect("scope has already finished"), wait)
     }
 }

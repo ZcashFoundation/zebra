@@ -942,3 +942,97 @@ fn multi_chunk_block_delivery_round_trips() {
         "message decoded from chunked delivery should match the original"
     );
 }
+
+/// Messages that Zebra ignores don't hold up the messages behind them. The reader only decodes
+/// again when the peer sends more bytes, so a message that is already buffered must be decoded
+/// in the same call, unless more messages than the limit are ignored before it.
+#[tokio::test]
+async fn messages_after_ignored_messages_are_decoded() {
+    use tokio::io::AsyncWriteExt;
+    use tokio_util::codec::FramedRead;
+
+    let _init_guard = zebra_test::init();
+
+    // An empty message with a command that Zebra doesn't know.
+    let mut ignored = Vec::new();
+    ignored.extend_from_slice(&Network::Mainnet.magic().0);
+    ignored.extend_from_slice(b"notacommand\0");
+    ignored.extend_from_slice(&0u32.to_le_bytes());
+    ignored.extend_from_slice(&sha256d::Checksum::from(&[][..]).0);
+
+    let ping = Message::Ping(Nonce(7));
+    let mut ping_bytes = BytesMut::new();
+    Codec::builder()
+        .finish()
+        .encode(ping.clone(), &mut ping_bytes)
+        .expect("encoding a ping succeeds");
+
+    // One call decodes the message behind the ignored ones.
+    let mut bytes = BytesMut::from(ignored.repeat(3).as_slice());
+    bytes.extend_from_slice(&ping_bytes);
+    let mut codec = Codec::builder().finish();
+    assert_eq!(
+        codec.decode(&mut bytes).expect("the bytes are valid"),
+        Some(ping.clone())
+    );
+    assert!(bytes.is_empty());
+
+    // With compact block relay, a compact message that the connection isn't waiting for is
+    // ignored in the same way.
+    let mut unexpected = Vec::new();
+    unexpected.extend_from_slice(&Network::Mainnet.magic().0);
+    unexpected.extend_from_slice(b"blocktxn\0\0\0\0");
+    unexpected.extend_from_slice(&0u32.to_le_bytes());
+    unexpected.extend_from_slice(&sha256d::Checksum::from(&[][..]).0);
+
+    let mut bytes = BytesMut::from(unexpected.as_slice());
+    bytes.extend_from_slice(&ping_bytes);
+    let mut codec = Codec::builder().finish();
+    codec.reconfigure_early_block_relay(true);
+    assert_eq!(
+        codec.decode(&mut bytes).expect("the bytes are valid"),
+        Some(ping.clone())
+    );
+    assert!(bytes.is_empty());
+
+    // One call ignores a limited number of messages, and the next call goes on from there.
+    let limit = MAX_IGNORED_MESSAGES_PER_DECODE;
+    for (ignored_count, first) in [(limit - 1, Some(ping.clone())), (limit, None)] {
+        let mut bytes = BytesMut::from(ignored.repeat(ignored_count).as_slice());
+        bytes.extend_from_slice(&ping_bytes);
+        let mut codec = Codec::builder().finish();
+
+        assert_eq!(
+            codec.decode(&mut bytes).expect("the bytes are valid"),
+            first
+        );
+        if first.is_none() {
+            assert_eq!(bytes, ping_bytes, "the ping is still in the buffer");
+            assert_eq!(
+                codec.decode(&mut bytes).expect("the bytes are valid"),
+                Some(ping.clone())
+            );
+        }
+        assert!(bytes.is_empty());
+    }
+
+    // A peer that sends ignored messages and then a ping, and then waits, gets the ping decoded
+    // without sending anything else.
+    let flood = ignored.repeat(limit - 1);
+    let (mut writer, reader) = tokio::io::duplex(flood.len() + ping_bytes.len());
+    let mut messages = FramedRead::new(reader, Codec::builder().finish());
+    writer.write_all(&flood).await.expect("the pipe is open");
+    writer
+        .write_all(&ping_bytes)
+        .await
+        .expect("the pipe is open");
+
+    let message = tokio::time::timeout(std::time::Duration::from_secs(5), messages.next())
+        .await
+        .expect("the ping is decoded from the bytes already received")
+        .expect("the connection is open")
+        .expect("the bytes are valid");
+    assert_eq!(message, ping);
+
+    drop(writer);
+}
