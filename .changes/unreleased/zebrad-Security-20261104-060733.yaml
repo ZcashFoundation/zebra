@@ -1,0 +1,4 @@
+project: zebrad
+kind: Security
+body: Release completed block downloads between sync rounds and retry missing ancestors a bounded number of times, including rounds with empty tips or only a single advertised hash. Retry dispatch shares the round's existing no-progress deadline, retaining undispatched hashes when the round backs off.
+time: 2026-11-04T06:07:33.281166349+01:00

@@ -21,7 +21,8 @@ pub enum RestartReason {
     ObtainTipsError,
     /// Extending tips failed.
     ExtendTipsError,
-    /// A sync step took longer than the block verify timeout, which usually indicates a hang.
+    /// The state tip did not advance for the block verify timeout during a sync round, so the
+    /// syncer backs off without cancelling pending downloads.
     SyncStepTimeout,
     /// A block download or verification failed with an error that restarts the sync.
     BlockError,
@@ -71,8 +72,8 @@ impl SyncDiagnostics {
 /// queued.
 ///
 /// The downloader and the progress task share it, because a finished task stays in the downloader
-/// until the syncer reads its result, which can be several sync rounds later for a node at the
-/// tip, and the syncer only republishes its state during a round.
+/// until the syncer reads its result, which can be the next sync round for a node at the tip,
+/// and the syncer only republishes its state during a round.
 #[derive(Clone, Debug, Default)]
 pub struct InFlightBlocks(Arc<Mutex<BTreeMap<(Instant, [u8; 32]), AbortHandle>>>);
 

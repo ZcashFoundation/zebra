@@ -4,7 +4,7 @@
 
 use std::{
     cmp::max,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     pin::Pin,
     task::Poll,
     time::Duration,
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinError,
-    time::{sleep, timeout},
+    time::{sleep, sleep_until, timeout, Instant},
 };
 use tower::{
     builder::ServiceBuilder, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout, Service,
@@ -32,7 +32,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::{
-    error::TransactionError, RouterError, VerifyBlockError, VerifyCheckpointError,
+    error::TransactionError, BlockError, RouterError, VerifyBlockError, VerifyCheckpointError,
 };
 use zebra_network as zn;
 use zebra_state as zs;
@@ -67,6 +67,24 @@ pub use status::SyncStatus;
 fn is_not_found(error: &dyn std::error::Error) -> bool {
     // TODO: improve this by checking the type (#2908).
     format!("{error:?}").contains("NotFound")
+}
+
+/// Orders tip response hashes round-robin across responses, so each peer's next hash is admitted
+/// before any peer's later hashes when the lookahead limit caps the batch.
+///
+/// Duplicates are removed after interleaving, so one response can't bury another peer's next hash
+/// deep in its own list.
+fn interleave_peer_hashes(
+    download_set: &mut IndexSet<block::Hash>,
+    mut responses: VecDeque<impl Iterator<Item = block::Hash>>,
+) {
+    download_set.clear();
+    while let Some(mut hashes) = responses.pop_front() {
+        if let Some(hash) = hashes.next() {
+            download_set.insert(hash);
+            responses.push_back(hashes);
+        }
+    }
 }
 
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
@@ -116,9 +134,8 @@ const MIN_UTXO_RACE_DROPS_BEFORE_RESTART: usize = 4;
 /// [`super::inbound::downloads::MAX_INBOUND_CONCURRENCY`] and #1880 for details.
 /// So we want to keep the lookahead limit reasonably small.
 ///
-/// Once these malicious blocks start failing validation, the syncer will cancel all
-/// the pending download and verify tasks, drop all the blocks, and start a new
-/// ObtainTips with a new set of peers.
+/// Invalid blocks are dropped without cancelling unrelated downloads. The lookahead limit bounds
+/// retained tasks, and verification timeouts release blocks whose ancestors never arrive.
 pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
@@ -455,6 +472,7 @@ where
 }
 
 /// A sync round that ended early, and why.
+#[derive(Debug)]
 struct RestartError {
     reason: RestartReason,
     /// The block error kind, for [`RestartReason::BlockError`].
@@ -638,6 +656,8 @@ where
             if result.is_err() {
                 self.count_finished_block_errors();
                 self.downloads.cancel_all();
+                self.reobtain_hashes.clear();
+                self.block_reobtain_retries.clear();
             }
 
             self.update_metrics();
@@ -650,7 +670,7 @@ where
             let state_tip = self.latest_chain_tip.best_tip_height();
             let made_progress = state_tip > start_tip;
             let (reason, kind, error) = match result {
-                Ok(()) => (RestartReason::ExhaustedTips, None, None),
+                Ok(reason) => (reason, None, None),
                 Err(restart) => (
                     restart.reason,
                     restart.kind,
@@ -708,20 +728,28 @@ where
     /// blocks.
     ///
     /// Returns `Ok` if it was able to synchronize as much of the chain as it could, and then ran
-    /// out of prospective tips. This happens when synchronization finishes or if Zebra ended up
-    /// following a fork. Either way, Zebra should attempt to obtain some more tips.
+    /// out of prospective tips or made no chain progress within [`BLOCK_VERIFY_TIMEOUT`].
+    /// Either way, Zebra should attempt to obtain some more tips after the restart delay,
+    /// without cancelling unrelated downloads.
     ///
-    /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
-    /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
-    /// long time. (These usually indicate hangs.)
+    /// Returns `Err` if an unrecoverable service error or a timeout obtaining initial tips
+    /// requires resetting the synchronization.
     #[instrument(skip(self))]
-    async fn try_to_sync(&mut self) -> Result<(), RestartError> {
+    async fn try_to_sync(&mut self) -> Result<RestartReason, RestartError> {
         self.prospective_tips = HashSet::new();
-
-        self.reobtain_hashes.clear();
-        self.block_reobtain_retries.clear();
         self.utxo_race_drops = 0;
         self.downloads.take_cancelled_network_wait();
+
+        // Reap the previous round even if the new tips never enter `try_to_sync_once`.
+        // Unfinished downloads can still make progress while we obtain fresh tips.
+        while let Poll::Ready(Some(response)) = futures::poll!(self.downloads.next()) {
+            self.handle_block_response(response)
+                .map_err(Self::block_restart_error)?;
+        }
+        // Preserve retry budgets for retained downloads, but discard terminal failures.
+        self.block_reobtain_retries.retain(|hash, _| {
+            self.downloads.is_queued(hash) || self.reobtain_hashes.contains(hash)
+        });
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -738,21 +766,44 @@ where
         };
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = match timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
-                .await
-            {
-                Ok(extra_hashes) => extra_hashes?,
-                Err(elapsed) => {
-                    return Err(self.stage_timeout_error(RestartReason::SyncStepTimeout, elapsed));
+        let mut chain_tip = self.latest_chain_tip.clone();
+        let mut last_height = chain_tip.best_tip_height();
+        let mut progress_deadline = Instant::now() + BLOCK_VERIFY_TIMEOUT;
+        while !self.prospective_tips.is_empty()
+            || !extra_hashes.is_empty()
+            || !self.reobtain_hashes.is_empty()
+        {
+            let result = {
+                let step = self.try_to_sync_once(extra_hashes);
+                tokio::pin!(step);
+                loop {
+                    tokio::select! {
+                        biased;
+                        Ok(()) = chain_tip.best_tip_changed() => {
+                            let height = chain_tip.best_tip_height();
+                            if height > last_height {
+                                last_height = height;
+                                progress_deadline = Instant::now() + BLOCK_VERIFY_TIMEOUT;
+                            }
+                        }
+                        result = &mut step => break Some(result),
+                        _ = sleep_until(progress_deadline) => break None,
+                    }
                 }
             };
+            match result {
+                Some(result) => extra_hashes = result?,
+                None => {
+                    self.count_cancelled_network_wait();
+                    info!("no chain progress before the sync deadline, backing off");
+                    return Ok(RestartReason::SyncStepTimeout);
+                }
+            }
         }
 
         info!("exhausted prospective tip set");
 
-        Ok(())
+        Ok(RestartReason::ExhaustedTips)
     }
 
     /// Tries to synchronize the chain once, using the existing `extra_hashes`.
@@ -784,15 +835,16 @@ where
         //
         // To avoid a deadlock or long waits for blocks to expire, we ignore the download
         // lookahead limit when there are only a small number of blocks waiting.
-        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                && self.past_lookahead_limit_receiver.cloned_watch_data())
+        while !self.downloads.is_empty()
+            && (self.downloads.in_flight() >= self.lookahead_limit()
+                || (self.downloads.in_flight() >= self.lookahead_limit() / 2
+                    && self.past_lookahead_limit_receiver.cloned_watch_data()))
         {
             trace!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "waiting for pending blocks",
             );
@@ -814,7 +866,7 @@ where
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "requesting more blocks",
             );
@@ -827,7 +879,7 @@ where
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
                 extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                lookahead_limit = self.lookahead_limit(),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "extending tips",
             );
@@ -856,11 +908,9 @@ where
             return;
         }
 
-        let mut hashes = std::mem::take(&mut self.reobtain_hashes).into_iter();
-        for hash in hashes.by_ref() {
-            // The block was removed from the in-flight set when its download
-            // failed, so this re-queues it. A residual duplicate/queue error is
-            // benign — it means the block is already being handled.
+        while let Some(hash) = self.reobtain_hashes.first().copied() {
+            // Keep the hash queued across the await: the progress deadline can cancel dispatch.
+            // A duplicate means the block is already being handled.
             if let Err(error) = self.queue_block(hash).await {
                 trace!(?hash, ?error, "re-download of missing block not queued");
                 // Any other error means the network failed or wasn't ready before the download
@@ -870,12 +920,11 @@ where
                     error,
                     BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
                 ) {
-                    self.reobtain_hashes.insert(hash);
                     break;
                 }
             }
+            self.reobtain_hashes.shift_remove(&hash);
         }
-        self.reobtain_hashes.extend(hashes);
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -925,6 +974,7 @@ where
 
         let mut download_set = IndexSet::new();
         let mut response_candidates = Vec::with_capacity(FANOUT);
+        let mut peer_hashes = VecDeque::new();
         while let Some(res) = requests.next().await {
             match res
                 .unwrap_or_else(|e @ JoinError { .. }| {
@@ -943,7 +993,6 @@ where
                 Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
-                    let hashes = hashes.as_slice();
                     if hashes.is_empty() {
                         continue;
                     }
@@ -978,9 +1027,6 @@ where
                         debug!("downloading response that extends only one block");
                     }
 
-                    // security: the first response determines our download order
-                    //
-                    // TODO: can we make the download order independent of response order?
                     let prev_download_len = download_set.len();
                     download_set.extend(unknown_hashes);
                     let new_download_len = download_set.len();
@@ -988,12 +1034,17 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+                    let known_hashes = hashes.len() - unknown_hashes.len();
+                    peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
                 Err(e) => debug!(?e),
             }
         }
+
+        // Interleave before filtering so rebuilding the set cannot restore committed hashes.
+        interleave_peer_hashes(&mut download_set, peer_hashes);
 
         // Filter after deduplication without discarding other peers' useful work.
         let state = self.state.clone();
@@ -1068,6 +1119,7 @@ where
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
+        let mut peer_hashes = VecDeque::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
         for tip in tips {
             debug!(?tip, "asking peers to extend chain tip");
@@ -1168,9 +1220,6 @@ where
                             debug!("downloading response that extends only one block");
                         }
 
-                        // security: the first response determines our download order
-                        //
-                        // TODO: can we make the download order independent of response order?
                         let prev_download_len = download_set.len();
                         download_set.extend(unknown_hashes);
                         let new_download_len = download_set.len();
@@ -1178,6 +1227,8 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+                        let known_hashes = hashes.len() - unknown_hashes.len();
+                        peer_hashes.push_back(hashes.into_iter().skip(known_hashes));
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -1194,6 +1245,7 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
+        interleave_peer_hashes(&mut download_set, peer_hashes);
         let response = self.request_blocks(download_set).await;
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
@@ -1278,7 +1330,7 @@ where
         &mut self,
         mut hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
-        let lookahead_limit = self.lookahead_limit(hashes.len());
+        let lookahead_limit = self.lookahead_limit();
 
         debug!(
             hashes.len = hashes.len(),
@@ -1286,8 +1338,12 @@ where
             "requesting blocks",
         );
 
-        let extra_hashes = if hashes.len() > lookahead_limit {
-            hashes.split_off(lookahead_limit)
+        // Missing blocks keep their slots until their bounded retries can be queued.
+        let capacity = lookahead_limit
+            .saturating_sub(self.downloads.in_flight())
+            .saturating_sub(self.reobtain_hashes.len());
+        let extra_hashes = if hashes.len() > capacity {
+            hashes.split_off(capacity)
         } else {
             IndexSet::new()
         };
@@ -1309,9 +1365,9 @@ where
         Ok(extra_hashes)
     }
 
-    /// The configured lookahead limit, based on the currently verified height,
-    /// and the number of hashes we haven't queued yet.
-    fn lookahead_limit(&self, new_hashes: usize) -> usize {
+    /// The configured lookahead limit, including room to finish the final checkpoint before
+    /// switching to full verification.
+    fn lookahead_limit(&self) -> usize {
         let max_checkpoint_height: usize = self
             .max_checkpoint_height
             .0
@@ -1329,10 +1385,12 @@ where
 
         if verified_height >= max_checkpoint_height {
             self.full_verify_concurrency_limit
-        } else if (verified_height + new_hashes) >= max_checkpoint_height {
-            // If we're just about to start full verification, allow enough for the remaining checkpoint,
-            // and also enough for a separate full verification lookahead.
-            let checkpoint_hashes = verified_height + new_hashes - max_checkpoint_height;
+        } else if max_checkpoint_height - verified_height
+            <= self.checkpoint_verify_concurrency_limit
+        {
+            // Pending checkpoint blocks cannot finish until the whole range arrives. Reserve
+            // its remaining distance, not just the portion present in the latest hash batch.
+            let checkpoint_hashes = max_checkpoint_height - verified_height;
 
             self.full_verify_concurrency_limit + checkpoint_hashes
         } else {
@@ -1438,8 +1496,9 @@ where
         // A hash the syncer still needs, whose download did not produce a usable block, is
         // otherwise dropped here and only rediscovered by a later sync round. Re-queue it for the
         // next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`:
-        // - `DownloadFailed`/`NotFound`: no peer delivered the block, which wedges the checkpoint
-        //   frontier until the verify timeout (#5709).
+        // - `DownloadFailed`: no peer delivered the block, which wedges the checkpoint
+        //   frontier until the verify timeout (#5709). This includes `NotFound`, and other
+        //   download failures, which no longer restart the sync.
         // - `DownloadTimedOut`: no peer delivered the block within the download round. One hedged
         //   request can already have failed with `NotFound` while its sibling was still waiting.
         // - `BehindTipHeightLimit`: the body was not a usable block for this hash, so the hash is
@@ -1448,6 +1507,8 @@ where
         //   only applies misbehavior reports in batches.
         // - UTXO races (#11168): the block was never rejected, and the state parks its
         //   children until it arrives, so re-request it instead of waiting for a tip walk.
+        // - Other body validation failures, including bad Merkle roots and transaction proofs:
+        //   a different body can still satisfy the same header, so retry the hash before giving up.
         // - `Invalid` with a mismatched authorizing data commitment: the block itself is fine, only
         //   the served body was forged, so the hash is still valid and still wanted. The ban for
         //   the serving peer is sent to the address book right away, but the first re-request can
@@ -1464,14 +1525,9 @@ where
         //   so the same applies.
         // - `Invalid` because a verifier queue was full: the block might be valid. Re-request it
         //   a bounded number of times, then restart to rediscover it instead of silently stalling.
-        // Other consensus failures (`Invalid`/`ValidationRequestError`) are deliberately
-        // excluded — re-downloading a block the network already rejected is pointless.
+        // Header and unrelated contextual failures are excluded: changing the body cannot fix them.
         let reobtain_hash = match &response {
-            Err(BlockDownloadVerifyError::DownloadFailed { error, hash })
-                if is_not_found(error.as_ref()) =>
-            {
-                Some(*hash)
-            }
+            Err(BlockDownloadVerifyError::DownloadFailed { hash, .. }) => Some(*hash),
             Err(BlockDownloadVerifyError::DownloadTimedOut { hash }) => Some(*hash),
             Err(BlockDownloadVerifyError::BehindTipHeightLimit { hash, .. }) => Some(*hash),
             Err(BlockDownloadVerifyError::BodyHeaderMismatch { hash, .. }) => Some(*hash),
@@ -1483,7 +1539,8 @@ where
             Err(BlockDownloadVerifyError::Invalid { error, hash, .. })
                 if error.is_auth_commitment_mismatch()
                     || error.is_descendant_of_auth_commitment_mismatch()
-                    || error.is_body_header_mismatch() =>
+                    || error.is_body_header_mismatch()
+                    || Self::is_block_body_error(error) =>
             {
                 Some(*hash)
             }
@@ -1785,6 +1842,93 @@ where
         });
     }
 
+    /// Returns true for failures specific to the block, rather than verifier, state, or shutdown
+    /// failures.
+    fn is_block_validation_error(error: &RouterError) -> bool {
+        let invalid_commit = |error: &zs::CommitBlockError| {
+            let zs::CommitBlockError::ValidateContextError(error) = error else {
+                return false;
+            };
+            let mut error = error.as_ref();
+            while let zs::ValidateContextError::AncestorRejected { source, .. } = error {
+                error = source.as_ref();
+            }
+            !matches!(
+                error,
+                zs::ValidateContextError::NotReadyToBeCommitted { .. }
+                    | zs::ValidateContextError::NoteCommitmentTreeError(_)
+                    | zs::ValidateContextError::HistoryTreeError(_)
+            )
+        };
+        let error = match error {
+            RouterError::Block { source } => source.as_ref(),
+            RouterError::Checkpoint { source } => match source.as_ref() {
+                VerifyCheckpointError::VerifyBlock(error) => error,
+                VerifyCheckpointError::CoinbaseHeight { .. }
+                | VerifyCheckpointError::UnexpectedSideChain { .. }
+                // Competing blocks at one height, or a block at or below the final checkpoint
+                // after it has been verified.
+                | VerifyCheckpointError::QueuedLimit
+                | VerifyCheckpointError::Finished => return true,
+                VerifyCheckpointError::CommitCheckpointVerified(error) => {
+                    return error
+                        .downcast_ref::<zs::CommitCheckpointVerifiedError>()
+                        .is_some_and(|error| invalid_commit(error.inner()));
+                }
+                _ => return false,
+            },
+        };
+        match error {
+            VerifyBlockError::Block {
+                source: BlockError::Other(_),
+            } => false,
+            // `Other` is the Orchard-disable rejection on the block path; its input-alignment
+            // error is mempool-only.
+            VerifyBlockError::Block {
+                source: BlockError::Transaction(error),
+            }
+            | VerifyBlockError::Transaction(error) => !matches!(
+                error,
+                TransactionError::InternalDowncastError(_)
+                    | TransactionError::CoinbaseConstruction(_)
+                    | TransactionError::ValidateMempoolLockTimeError(_)
+                    | TransactionError::ValidateContextError(_)
+            ),
+            VerifyBlockError::Block { .. }
+            | VerifyBlockError::Equihash { .. }
+            | VerifyBlockError::Time(_)
+            | VerifyBlockError::Subsidy(_) => true,
+            VerifyBlockError::Commit(error) => invalid_commit(error),
+            _ => false,
+        }
+    }
+
+    /// Returns true for body validation failures that do not invalidate the requested header hash.
+    fn is_block_body_error(error: &RouterError) -> bool {
+        if !Self::is_block_validation_error(error) {
+            return false;
+        }
+        let error = match error {
+            RouterError::Block { source } => source.as_ref(),
+            RouterError::Checkpoint { source } => match source.as_ref() {
+                VerifyCheckpointError::VerifyBlock(error) => error,
+                VerifyCheckpointError::CoinbaseHeight { .. } => return true,
+                _ => return false,
+            },
+        };
+        match error {
+            VerifyBlockError::Block { source } => !matches!(
+                source,
+                BlockError::AlreadyInChain(..)
+                    | BlockError::InvalidDifficulty(..)
+                    | BlockError::TargetDifficultyLimit(..)
+                    | BlockError::DifficultyFilter(..)
+            ),
+            VerifyBlockError::Transaction(_) | VerifyBlockError::Subsidy(_) => true,
+            _ => false,
+        }
+    }
+
     /// Return if the sync should be restarted based on the given error
     /// from the block downloader and verifier stream.
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
@@ -1904,6 +2048,20 @@ where
             // invalid block; the 8-minute tower timeout stays in the catch-all (#5709).
             e if Self::is_post_checkpoint_verify_timeout(e) => {
                 debug!(error = ?e, "initial fully verified block timed out waiting for its parent's outputs, re-requesting, continuing");
+                false
+            }
+
+            // A failed block does not imply that unrelated pending blocks are invalid, so keep
+            // their progress. Header and unrelated contextual failures are dropped; body
+            // failures and failed downloads are re-requested a bounded number of times.
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if Self::is_block_validation_error(error) =>
+            {
+                debug!(error = ?e, "block validation failed, continuing sync");
+                false
+            }
+            BlockDownloadVerifyError::DownloadFailed { .. } => {
+                debug!(error = ?e, "dropping failed block and continuing sync");
                 false
             }
 

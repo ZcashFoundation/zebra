@@ -32,7 +32,7 @@ use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
-    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT,
+    diagnostics::InFlightBlocks, BLOCK_DOWNLOAD_ROUND_TIMEOUT, BLOCK_VERIFY_TIMEOUT,
     FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT, FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT,
 };
 
@@ -99,7 +99,7 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
     },
 
-    #[error("permanent readiness error from the verifier service: {error:?}")]
+    #[error("readiness error from the verifier service: {error:?}")]
     VerifierServiceError {
         #[source]
         error: BoxError,
@@ -403,7 +403,7 @@ where
         &mut self,
         hash: block::Hash,
     ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_handles.contains_key(&hash) {
+        if self.is_queued(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
@@ -665,8 +665,8 @@ where
                     });
                 }
 
-                // Wait for the verifier service to be ready.
-                let readiness = verifier.ready();
+                // Bound readiness separately: the verifier's request timeout starts at `call`.
+                let readiness = timeout(BLOCK_VERIFY_TIMEOUT, verifier.ready());
                 // Prefer the cancel handle if both are ready.
                 let verifier = tokio::select! {
                     biased;
@@ -675,7 +675,8 @@ where
                         metrics::counter!("sync.cancelled.verify.ready.count").increment(1);
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
                     }
-                    verifier = readiness => verifier,
+                    verifier = readiness => verifier
+                        .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error: error.into() })?,
                 };
 
                 // Verify the block.
@@ -781,6 +782,11 @@ where
         std::mem::take(&mut self.awaiting_network_capacity)
     }
 
+    /// Returns true while a hash is queued, including completed tasks whose results are unread.
+    pub fn is_queued(&self, hash: &block::Hash) -> bool {
+        self.cancel_handles.contains_key(hash)
+    }
+
     /// Get the number of currently in-flight download and verify tasks.
     pub fn in_flight(&mut self) -> usize {
         self.pending.len()
@@ -792,7 +798,6 @@ where
     }
 
     /// Returns true if there are no in-flight download and verify tasks.
-    #[allow(dead_code)]
     pub fn is_empty(&mut self) -> bool {
         self.pending.is_empty()
     }
